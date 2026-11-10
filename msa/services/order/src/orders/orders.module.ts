@@ -1,3 +1,5 @@
+import { AdminParcelDraftsController } from './admin-parcel-drafts.controller';
+import { AdminParcelDraftsService } from './admin-parcel-drafts.service';
 import { ParcelDraftsController } from './parcel-draft-reads.controller';
 import { ParcelDraftReadsService } from './parcel-draft-reads.service';
 import { ParcelDraftReadsRepository } from './parcel-draft-reads.repository';
@@ -21,6 +23,7 @@ import { OrderReadController } from './order-read.controller';
 @Module({
   imports: [DatabaseModule],
   controllers: [
+    AdminParcelDraftsController,
     ParcelDraftsController,
     CallReadReferencesController,
     CallEventOrderScopeController,
@@ -32,6 +35,7 @@ import { OrderReadController } from './order-read.controller';
     OrderReadController,
   ],
   providers: [
+    AdminParcelDraftsService,
     ParcelDraftReadsService,
     ParcelDraftReadsRepository,
     ParcelDraftMigrationService,

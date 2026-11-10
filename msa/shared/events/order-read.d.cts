@@ -33,3 +33,5 @@ export function validateAdminOrderRead(event:unknown,source:AdminOrderReadEvent[
 export function requestAdminOrderRead(url:string,token:string,event:AdminOrderReadEvent):Promise<AdminOrderReadResult>;
 
 export function requestDraftRead(url:string,token:string,event:import('./parcel-drafts.cjs').DraftReadEvent):Promise<unknown>;
+
+export function requestDraftDeletion(url:string,token:string,event:import('./parcel-drafts.cjs').DraftDeletionEvent):Promise<import('./parcel-drafts.cjs').DraftDeletionResult>;

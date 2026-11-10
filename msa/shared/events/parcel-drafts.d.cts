@@ -31,3 +31,11 @@ export function validateDraftReadCallQuery(event:unknown):asserts event is Event
 export function validateDraftReadCall(value:unknown,callSessionSeq:number):asserts value is DraftReadCall;
 export function requestDraftReadCall(url:string,token:string,callSessionSeq:number,readScopeId:string,source?:'order'|'customer'):Promise<DraftReadCall>;
 export function validateDraftReadResult(value:unknown,command:DraftReadCommand):void;
+
+export interface DraftDeletionEvent extends Event {
+ source:'order'|'consultation';eventType:'ParcelDraftDeletionRequested';
+ payload:{command:{id:number;adminId:number;requestId:string};orderAddress?:string|null;phase?:'hint'|'delete';callFinalized?:boolean|null;consultationAddress?:string|null};
+}
+export type DraftDeletionResult={callSessionSeq:number|null}|null|true;
+export function validateDraftDeletion(event:unknown,source:DraftDeletionEvent['source']):asserts event is DraftDeletionEvent;
+export function validateDraftDeletionResult(value:unknown,event:DraftDeletionEvent):asserts value is DraftDeletionResult;

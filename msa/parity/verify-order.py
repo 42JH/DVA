@@ -44,6 +44,12 @@ def main():
         if code != '0':
             raise RuntimeError(name+' exited with '+code)
 
+    def wait_app(side, port, name=None):
+        path = '/health' if side == 'monolith' else '/'+side+'/health'
+        url = json.dumps('http://127.0.0.1:'+str(port)+path)
+        script = "(async()=>{const end=Date.now()+30000;while(Date.now()<end){try{if((await fetch("+url+",{signal:AbortSignal.timeout(1000)})).ok)return;}catch{}await new Promise(r=>setTimeout(r,100));}throw Error('application startup unavailable')})().catch(error=>{console.error(error.message);process.exit(1)})"
+        run('docker', 'exec', name or RUN+'-'+side+'-app', 'node', '-e', script, label=side+'-app-ready')
+
     password, token = uuid.uuid4().hex, uuid.uuid4().hex
     def start_app(side, port, payment_reads=False):
         name = RUN+'-'+side+('-payment-read-app' if payment_reads else '-app')
@@ -58,9 +64,7 @@ def main():
                '-e', 'CUSTOMER_URL=http://customer-app:3001', '-e', 'CONSULTATION_URL=http://consultation-app:3004',
                '-e', 'DELIVERY_URL=http://delivery-app:3003', '-e', 'ORDER_URL=http://order-app:3002', '-e', 'CUSTOMER_AUTH_TOKEN='+password, '-e', 'CONSULTATION_AUTH_TOKEN='+token)
         run('docker', 'start', name, label=side+('-payment-read-start' if payment_reads else '-app-start'))
-        if side == 'consultation':
-            # Order restores legacy call bindings through consultation during bootstrap.
-            run('docker', 'exec', name, 'node', '-e', "(async()=>{for(let i=0;i<100;i++){try{if((await fetch('http://127.0.0.1:3004/consultation/health')).ok)return;}catch{}await new Promise(r=>setTimeout(r,100));}throw Error('consultation startup unavailable')})().catch(()=>process.exit(1))", label='consultation-app-ready')
+        wait_app(side, port, name)
 
     try:
         images = {}
@@ -127,6 +131,7 @@ def main():
         for side in ('monolith', 'order'):
             run('docker', 'stop', '--time=5', RUN+'-'+side+'-payment-read-app', label=side+'-payment-read-finish')
             run('docker', 'start', RUN+'-'+side+'-app', label=side+'-production-restart')
+            wait_app(side, 3000 if side == 'monolith' else 3002)
         for suite in ['order-deletion-parity', 'order-deletion-recovery', 'order-cancellation-parity', 'order-cancellation-recovery', 'parcel-draft-compatibility']:
             name = RUN+'-'+suite
             create(name, images['order-checks'], '-e', 'NODE_ENV=test', '-e', 'PGPASSWORD='+password, '-e', 'PGDATABASE=dva_webhook_test',

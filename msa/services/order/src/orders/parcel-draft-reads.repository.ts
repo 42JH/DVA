@@ -57,14 +57,28 @@ export class ParcelDraftReadsRepository {
     };
   }
 
-  async draft(client: PoolClient, id: number, readCalls: ReadCalls) {
+  async draft(client: PoolClient, id: number, readCalls: ReadCalls, update = false) {
     const ids = await availableDraftIds(client, 'd.draft_seq=$1', [id], readCalls);
-    return (
+    const row = (
       await client.query<ParcelDraftRow>(
-        `SELECT ${columns} FROM order_parcel_drafts d WHERE d.draft_seq=$1 AND ${availableDraftSql(2)}`,
+        `SELECT ${columns} FROM order_parcel_drafts d WHERE d.draft_seq=$1 AND ${availableDraftSql(2)}` +
+          (update ? ' FOR UPDATE OF d' : ''),
         [id, ids],
       )
     ).rows[0];
+    if (update && row) {
+      const current = await availableDraftIds(client, 'd.draft_seq=$1', [id], readCalls, true);
+      if (
+        !(
+          await client.query(
+            `SELECT 1 FROM order_parcel_drafts d WHERE d.draft_seq=$1 AND ${availableDraftSql(2, true)}`,
+            [id, current],
+          )
+        ).rowCount
+      )
+        return undefined;
+    }
+    return row;
   }
   async list(
     client: PoolClient,

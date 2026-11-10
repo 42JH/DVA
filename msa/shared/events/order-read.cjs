@@ -87,6 +87,7 @@ function adminPage(value,limit) {
 async function requestOrderRead(url,token,event){return requestRead(url,token,event,'order');}
 async function requestAdminOrderRead(url,token,event){validateAdminOrderRead(event,event.source);return requestRead(url,token,event,'admin');}
 async function requestDraftRead(url,token,event){require('./parcel-drafts.cjs').validateDraftRead(event,event.source);return requestRead(url,token,event,'draft');}
+async function requestDraftDeletion(url,token,event){require('./parcel-drafts.cjs').validateDraftDeletion(event,event.source);return requestRead(url,token,event,'draft-delete');}
 async function requestRead(url, token, event, mode) {
   const admin=mode==='admin';
   if (typeof token !== 'string' || !/^[\x21-\x7e]{32,256}$/.test(token)) throw new Error('Invalid read credentials');
@@ -111,7 +112,7 @@ async function requestRead(url, token, event, mode) {
   if (response.status !== 200) {
     const error = result?.error;
     if ([400, 403, 404, 409, 500, 503].includes(response.status) && keys(error, 'code,details,message') &&
-        ['INVALID_REQUEST', 'FORBIDDEN', 'NOT_FOUND', 'INVALID_STATE', 'INTERNAL_ERROR', 'DEPENDENCY_UNAVAILABLE'].includes(error.code) &&
+        ['INVALID_REQUEST', 'FORBIDDEN', 'NOT_FOUND', 'INVALID_STATE', 'INTERNAL_ERROR', 'DEPENDENCY_UNAVAILABLE',...(mode==='draft-delete'?['REQUEST_IN_PROGRESS']:[])].includes(error.code) &&
         typeof error.message === 'string' && Array.isArray(error.details) && error.details.every(detail =>
           keys(detail, 'field,reason') && typeof detail.field === 'string' && typeof detail.reason === 'string'))
       throw new OrderReadError(response.status, error);
@@ -120,6 +121,7 @@ async function requestRead(url, token, event, mode) {
   if (!keys(result, 'eventId,payload,status') || result.eventId !== event.eventId || result.status !== 'processed')
     throw new Error('Invalid read acknowledgement');
   const value = result.payload;
+  if(mode==='draft-delete'){require('./parcel-drafts.cjs').validateDraftDeletionResult(value,event);return value;}
   if(mode==='draft'){require('./parcel-drafts.cjs').validateDraftReadResult(value,event.payload.command);return value;}
   if (admin ? !adminPage(value,event.payload.query.limit) : event.payload.command.operation === 'OrderDetailRead'
     ? !detail(value,event.payload.command.id)
@@ -132,4 +134,4 @@ async function requestRead(url, token, event, mode) {
     throw new Error('Invalid order read result');
   return value;
 }
-module.exports = { validateOrderRead, requestOrderRead, OrderReadError, ORDER_STATUSES, validateAdminOrderRead, requestAdminOrderRead, requestDraftRead };
+module.exports = { validateOrderRead, requestOrderRead, OrderReadError, ORDER_STATUSES, validateAdminOrderRead, requestAdminOrderRead, requestDraftRead, requestDraftDeletion };

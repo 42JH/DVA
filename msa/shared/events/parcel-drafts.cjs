@@ -171,3 +171,18 @@ function validateDraftReadResult(value,command) {
     throw new Error('Invalid parcel draft read result');
 }
 Object.assign(module.exports,{DRAFT_STATUSES,validateDraftRead,validateDraftReadCallQuery,validateDraftReadCall,requestDraftReadCall,validateDraftReadResult});
+
+function validateDraftDeletion(event,source) {
+  validateEvent(event);require('./read-scope.cjs').validateReadScope(event.eventId);
+  const p=event.payload,c=p.command;
+  if(!['order','consultation'].includes(source)||event.source!==source||event.eventType!=='ParcelDraftDeletionRequested'||
+    !keys(c,'adminId,id,requestId')||!id(c.id)||!id(c.adminId)||typeof c.requestId!=='string'||!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(c.requestId)||
+    (source==='order'?!keys(p,'command,orderAddress')||!(p.orderAddress===null||require('./call-event-reference.cjs').privateAddress(p.orderAddress)):
+      !keys(p,'callFinalized,command,consultationAddress,phase')||!['hint','delete'].includes(p.phase)||!(p.callFinalized===null||typeof p.callFinalized==='boolean')||p.phase==='hint'&&p.callFinalized!==null||!(p.consultationAddress===null||require('./call-event-reference.cjs').privateAddress(p.consultationAddress))))throw new Error('Invalid parcel draft deletion');
+}
+function validateDraftDeletionResult(value,event) {
+  if(event.source==='consultation'&&event.payload.phase==='hint'){
+    if(value!==null&&(!keys(value,'callSessionSeq')||!(value.callSessionSeq===null||id(value.callSessionSeq))))throw new Error('Invalid draft deletion hint');
+  }else if(value!==true)throw new Error('Invalid draft deletion result');
+}
+Object.assign(module.exports,{validateDraftDeletion,validateDraftDeletionResult});

@@ -10,8 +10,9 @@ export const transientDraft =
   "(d.status='INCOMPLETE' OR(d.source_draft_seq IS NOT NULL AND d.status IN('READY','EDITING')))";
 export const availableDraftSql = (
   parameter: number,
-) => `d.deleted_at IS NULL AND d.retention_started_at>transaction_timestamp()-interval '5 years'
- AND(NOT${transientDraft} OR(d.retention_started_at>transaction_timestamp()-interval '24 hours' AND d.draft_seq=ANY($${parameter}::int[])))`;
+  live = false,
+) => `d.deleted_at IS NULL AND d.retention_started_at>${live ? 'clock_timestamp()' : 'transaction_timestamp()'}-interval '5 years'
+ AND(NOT${transientDraft} OR(d.retention_started_at>${live ? 'clock_timestamp()' : 'transaction_timestamp()'}-interval '24 hours' AND d.draft_seq=ANY($${parameter}::int[])))`;
 
 export async function incompleteDraftIds(
   client: PoolClient,
@@ -48,7 +49,9 @@ export async function availableDraftIds(
   where: string,
   values: unknown[],
   readCalls: ReadCalls,
+  live = false,
 ): Promise<number[]> {
+  const clock = live ? 'clock_timestamp()' : 'transaction_timestamp()';
   const ids: number[] = [];
   let cursor = 0;
   for (;;) {
@@ -61,7 +64,7 @@ export async function availableDraftIds(
       `SELECT d.draft_seq,d.customer_seq,d.caller_phone_number,COALESCE(d.call_session_seq,source.call_session_seq) AS call_session_seq
        FROM order_parcel_drafts d LEFT JOIN order_parcel_drafts source ON source.draft_seq=d.source_draft_seq
        WHERE d.draft_seq>$${values.length + 1} AND d.deleted_at IS NULL AND ${transientDraft}
-        AND d.retention_started_at>transaction_timestamp()-interval '5 years' AND d.retention_started_at>transaction_timestamp()-interval '24 hours'
+        AND d.retention_started_at>${clock}-interval '5 years' AND d.retention_started_at>${clock}-interval '24 hours'
         AND(${where}) ORDER BY d.draft_seq LIMIT 250`,
       [...values, cursor],
     );

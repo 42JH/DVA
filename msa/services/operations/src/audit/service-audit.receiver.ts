@@ -119,6 +119,7 @@ function auditInput(
         ? [
             'BILLING_MONTH_INITIALIZED',
             'ORDER_DELETED',
+            'PARCEL_DRAFT_DELETED',
             'ORDER_CANCELLED',
             'ORDER_PARCEL_CANCELLED',
             'ORDER_AMOUNT_CHANGED',
@@ -130,9 +131,11 @@ function auditInput(
         ? audit.targetType ===
           (billingInitialization
             ? 'ORGANIZATION'
-            : audit.action === 'ORDER_PARCEL_CANCELLED' && payload.result === 'SUCCESS'
-              ? 'ORDER_PARCEL'
-              : 'ORDER')
+            : audit.action === 'PARCEL_DRAFT_DELETED'
+              ? 'ORDER_PARCEL_DRAFT'
+              : audit.action === 'ORDER_PARCEL_CANCELLED' && payload.result === 'SUCCESS'
+                ? 'ORDER_PARCEL'
+                : 'ORDER')
         : audit.targetType ===
           ([
             'UNANSWERED_QUESTION_RECORDED',
@@ -194,7 +197,7 @@ function auditInput(
         (payload.result === 'SUCCESS' &&
           (!(billingInitialization
             ? audit.actorType === 'SYSTEM'
-            : audit.action === 'ORDER_DELETED'
+            : ['ORDER_DELETED', 'PARCEL_DRAFT_DELETED'].includes(audit.action as string)
               ? audit.actorType === 'ADMIN'
               : ['ADMIN', 'AI'].includes(audit.actorType as string)) ||
             audit.targetId === null)))) ||

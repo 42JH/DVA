@@ -9,7 +9,8 @@ import {
 } from '@nestjs/common';
 import { ApiExcludeController } from '@nestjs/swagger';
 import { validateOrderRead, validateAdminOrderRead } from '@dva/events/order-read.cjs';
-import { validateDraftRead } from '@dva/events/parcel-drafts.cjs';
+import { AdminParcelDraftsService } from './admin-parcel-drafts.service';
+import { validateDraftRead, validateDraftDeletion } from '@dva/events/parcel-drafts.cjs';
 import { ApiException } from '../common/errors/api.exception';
 import { ParcelDraftReadsService } from './parcel-draft-reads.service';
 import { OrdersService } from './orders.service';
@@ -21,7 +22,30 @@ export class OrderReadController {
   constructor(
     private readonly orders: OrdersService,
     private readonly drafts: ParcelDraftReadsService,
+    private readonly adminDrafts: AdminParcelDraftsService,
   ) {}
+  @Post('parcel-draft-delete')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  async draftDelete(@Body() event: unknown) {
+    try {
+      validateDraftDeletion(event, 'consultation');
+    } catch {
+      throw new HttpException({ error: 'INVALID_DRAFT_DELETION' }, 422);
+    }
+    try {
+      const payload = await this.adminDrafts.execute(event);
+      return { eventId: event.eventId, status: 'processed', payload };
+    } catch (error) {
+      if (error instanceof ApiException)
+        throw new HttpException({ error: error.getResponse() }, error.getStatus());
+      if (error instanceof HttpException) throw error;
+      throw new HttpException(
+        { error: { code: 'INTERNAL_ERROR', message: '서버 오류가 발생했습니다.', details: [] } },
+        500,
+      );
+    }
+  }
   @Post('parcel-draft-read')
   @HttpCode(200)
   @Header('Cache-Control', 'no-store')

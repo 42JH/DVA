@@ -17,6 +17,7 @@ import {
 import { PoolClient } from 'pg';
 import {
   ReadScopes,
+  readCallbackUrl,
   retryReadSnapshot,
   validateReadScope,
 } from '@dva/events/read-scope.cjs';
@@ -30,6 +31,7 @@ import {
   validateOrderRead,
   requestOrderRead,
   requestDraftRead,
+  requestDraftDeletion,
   OrderReadError,
   type OrderReadEvent,
 } from '@dva/events/order-read.cjs';
@@ -37,6 +39,7 @@ import {
   validateParcelDraftCommand,
   type DraftCallReferences,
   validateDraftRead,
+  validateDraftDeletion,
   validateDraftReadCallQuery,
   type DraftReadCall,
 } from '@dva/events/parcel-drafts.cjs';
@@ -49,6 +52,98 @@ import { DatabaseService } from '../database/database.service';
 @Controller('internal')
 export class OrderReadScopeController {
   private readonly draftCallIds = new Map<string, number | null>();
+
+  @Post('parcel-draft-delete')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  async draftDelete(@Body() event: unknown) {
+    try {
+      validateDraftDeletion(event, 'order');
+    } catch {
+      throw new HttpException({ error: 'INVALID_DRAFT_DELETION' }, 422);
+    }
+    try {
+      return await this.database.transaction(async (client) => {
+        await client.query("SET LOCAL lock_timeout='2s'");
+        return this.reads.run(event.eventId, client, async () => {
+          const url = readCallbackUrl(
+            this.config.get('ORDER_URL', { infer: true }),
+            '/internal/parcel-draft-delete',
+            event.payload.orderAddress ?? null,
+          );
+          const token = this.config.get('CUSTOMER_AUTH_TOKEN', { infer: true });
+          const base = {
+            eventId: event.eventId,
+            source: 'consultation' as const,
+            eventType: 'ParcelDraftDeletionRequested' as const,
+            payload: {
+              command: event.payload.command,
+              consultationAddress:
+                this.config.get('MSA_INSTANCE_IP', { infer: true }) ?? null,
+            },
+          };
+          const hint = await requestDraftDeletion(url, token, {
+            ...base,
+            payload: { ...base.payload, phase: 'hint', callFinalized: null },
+          });
+          if (hint === true) throw new Error('Invalid draft deletion hint');
+          if (hint === null)
+            throw new ApiException(
+              404,
+              'NOT_FOUND',
+              '배송 초안을 찾을 수 없습니다.',
+            );
+          const call =
+            hint.callSessionSeq === null
+              ? undefined
+              : (
+                  await client.query<{ finalized: boolean }>(
+                    "SELECT order_finalized_at IS NOT NULL AS finalized FROM call_sessions WHERE call_session_seq=$1 AND deleted_at IS NULL AND incoming_at>statement_timestamp()-interval '5 years' FOR UPDATE",
+                    [hint.callSessionSeq],
+                  )
+                ).rows[0];
+          const payload = await requestDraftDeletion(url, token, {
+            ...base,
+            payload: {
+              ...base.payload,
+              phase: 'delete',
+              callFinalized: call?.finalized ?? null,
+            },
+          });
+          return { eventId: event.eventId, status: 'processed', payload };
+        });
+      });
+    } catch (error: unknown) {
+      if (error instanceof OrderReadError)
+        throw new HttpException({ error: error.error }, error.status);
+      if (
+        error &&
+        typeof error === 'object' &&
+        'code' in error &&
+        error.code === '55P03'
+      )
+        throw new HttpException(
+          {
+            error: new ApiException(
+              409,
+              'REQUEST_IN_PROGRESS',
+              '다른 작업의 완료 대기 시간을 초과했습니다. 잠시 후 재시도해 주세요.',
+            ).getResponse(),
+          },
+          409,
+        );
+      if (error instanceof ApiException)
+        throw new HttpException(
+          { error: error.getResponse() },
+          error.getStatus(),
+        );
+      throw new ApiException(
+        503,
+        'DEPENDENCY_UNAVAILABLE',
+        '서비스를 일시적으로 사용할 수 없습니다.',
+      );
+    }
+  }
 
   @Post('parcel-draft-read')
   @HttpCode(200)
@@ -244,35 +339,27 @@ export class OrderReadScopeController {
     }
     const query = event.payload;
     const work = async (client: PoolClient) => {
-      const started = 'COALESCE(incoming_at,started_at,registered_at)';
-      const completed =
-        'ended_at IS NOT NULL AND order_finalized_at IS NOT NULL';
-      const calls = (
-        await client.query<DraftCallReferences['calls'][number]>(
-          `SELECT call_session_seq,to_jsonb(${started})#>>'{}' AS started_at FROM call_sessions WHERE call_session_seq=ANY($1::int[]) ORDER BY call_session_seq`,
-          [query.callIds],
-        )
-      ).rows;
-      const customers = (
-        await client.query<DraftCallReferences['customers'][number]>(
-          `SELECT DISTINCT ON(customer_seq) customer_seq,call_session_seq,to_jsonb(${started})#>>'{}' AS started_at FROM call_sessions
-          WHERE customer_seq=ANY($1::int[]) AND ${completed} AND ${started} IS NOT NULL ORDER BY customer_seq,${started} DESC,call_session_seq DESC`,
-          [query.customerIds],
-        )
-      ).rows;
+      const started = 'COALESCE(incoming_at,started_at,registered_at)',
+        completed = 'ended_at IS NOT NULL AND order_finalized_at IS NOT NULL';
       const phoneFilter = query.phoneHashes.length
-        ? "(caller_phone_number=ANY($1::text[]) OR encode(sha256(convert_to(caller_phone_number,'UTF8')),'hex')=ANY($2::text[]))"
-        : 'caller_phone_number=ANY($1::text[])';
-      const phones = (
-        await client.query<DraftCallReferences['phones'][number]>(
-          `SELECT DISTINCT ON(caller_phone_number) caller_phone_number,call_session_seq,to_jsonb(${started})#>>'{}' AS started_at FROM call_sessions
-          WHERE ${phoneFilter} AND ${completed} AND ${started} IS NOT NULL ORDER BY caller_phone_number,${started} DESC,call_session_seq DESC`,
-          query.phoneHashes.length
-            ? [query.phones, query.phoneHashes]
-            : [query.phones],
+        ? "(caller_phone_number=ANY($3::text[]) OR encode(sha256(convert_to(caller_phone_number,'UTF8')),'hex')=ANY($4::text[]))"
+        : 'caller_phone_number=ANY($3::text[])';
+      return (
+        await client.query<{ payload: DraftCallReferences }>(
+          `SELECT jsonb_build_object(
+          'calls',COALESCE((SELECT jsonb_agg(c ORDER BY call_session_seq) FROM(SELECT call_session_seq,to_jsonb(${started})#>>'{}' AS started_at FROM call_sessions WHERE call_session_seq=ANY($1::int[])) c),'[]'::jsonb),
+          'customers',COALESCE((SELECT jsonb_agg(c ORDER BY customer_seq) FROM(SELECT DISTINCT ON(customer_seq) customer_seq,call_session_seq,to_jsonb(${started})#>>'{}' AS started_at FROM call_sessions
+            WHERE customer_seq=ANY($2::int[]) AND ${completed} AND ${started} IS NOT NULL ORDER BY customer_seq,${started} DESC,call_session_seq DESC) c),'[]'::jsonb),
+          'phones',COALESCE((SELECT jsonb_agg(c ORDER BY caller_phone_number) FROM(SELECT DISTINCT ON(caller_phone_number) caller_phone_number,call_session_seq,to_jsonb(${started})#>>'{}' AS started_at FROM call_sessions
+            WHERE ${phoneFilter} AND ${completed} AND ${started} IS NOT NULL ORDER BY caller_phone_number,${started} DESC,call_session_seq DESC) c),'[]'::jsonb)) AS payload`,
+          [
+            query.callIds,
+            query.customerIds,
+            query.phones,
+            ...(query.phoneHashes.length ? [query.phoneHashes] : []),
+          ],
         )
-      ).rows;
-      return { calls, customers, phones };
+      ).rows[0].payload;
     };
     const payload =
       scopeId === undefined

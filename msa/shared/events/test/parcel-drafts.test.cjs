@@ -130,3 +130,39 @@ test('draft read scopes preserve anonymous and stored-customer context without l
     const before=seen;await assert.rejects(requestDraftReadCall('http://consultation/private',token,1,'invalid'));await assert.rejects(requestDraftRead('http://user:pass@consultation/private',token,input));assert.equal(seen,before);
   } finally {global.fetch=oldFetch;}
 });
+
+
+test('draft deletion binds owner, actor, scope and phase and preserves source lock errors',async()=>{
+  const {validateDraftDeletion,validateDraftDeletionResult}=require('../parcel-drafts.cjs');
+  const {requestDraftDeletion,OrderReadError}=require('../order-read.cjs');
+  const root={eventId:randomUUID(),source:'order',eventType:'ParcelDraftDeletionRequested',payload:{command:{id:1,adminId:2,requestId:randomUUID()},orderAddress:null}};
+  const hint={...root,source:'consultation',payload:{command:root.payload.command,phase:'hint',callFinalized:null,consultationAddress:'10.1.2.3'}};
+  const deletion={...hint,payload:{...hint.payload,phase:'delete',callFinalized:false}};
+  for(const event of [root,hint,deletion])validateDraftDeletion(event,event.source);
+  for(const bad of [{...root,source:'customer'},{...root,eventId:'invalid'},
+    {...root,payload:{...root.payload,orderAddress:'127.0.0.1'}},
+    {...root,payload:{...root.payload,command:{...root.payload.command,adminId:null}}},
+    {...root,payload:{...root.payload,command:{...root.payload.command,id:'1'}}},
+    {...root,payload:{...root.payload,command:{...root.payload.command,sql:'DELETE'}}},
+    {...hint,payload:{...hint.payload,callFinalized:true}},
+    {...deletion,payload:{...deletion.payload,phase:'commit'}},
+    {...deletion,payload:{...deletion.payload,callFinalized:'false'}}])assert.throws(()=>validateDraftDeletion(bad,bad.source));
+  validateDraftDeletionResult(null,hint);validateDraftDeletionResult({callSessionSeq:null},hint);
+  validateDraftDeletionResult({callSessionSeq:1},hint);validateDraftDeletionResult(true,deletion);validateDraftDeletionResult(true,root);
+  for(const value of [true,{callSessionSeq:0},{callSessionSeq:1,finalized:true}])assert.throws(()=>validateDraftDeletionResult(value,hint));
+  for(const value of [null,false,{},'true'])assert.throws(()=>validateDraftDeletionResult(value,deletion));
+  const oldFetch=global.fetch;let mode='hint',calls=0;
+  global.fetch=async(url,options)=>{
+    calls++;const request=JSON.parse(options.body);
+    assert.equal(options.headers.Authorization,'Bearer '+token);
+    if(mode==='lock')return Response.json({error:{code:'REQUEST_IN_PROGRESS',message:'source lock timeout',details:[]}},{status:409});
+    return Response.json({eventId:mode==='wrong'?randomUUID():request.eventId,status:'processed',payload:mode==='hint'?{callSessionSeq:3}:mode==='invalid'?false:true});
+  };
+  try {
+    assert.deepEqual(await requestDraftDeletion('http://order/private',token,hint),{callSessionSeq:3});
+    mode='delete';assert.equal(await requestDraftDeletion('http://consultation/private',token,root),true);
+    for(mode of ['wrong','invalid'])await assert.rejects(requestDraftDeletion('http://order/private',token,deletion));
+    mode='lock';await assert.rejects(requestDraftDeletion('http://order/private',token,deletion),error=>error instanceof OrderReadError&&error.status===409&&error.error.code==='REQUEST_IN_PROGRESS');
+    const before=calls;await assert.rejects(requestDraftDeletion('http://user:pass@order/private',token,deletion));assert.equal(calls,before);
+  } finally {global.fetch=oldFetch;}
+});
