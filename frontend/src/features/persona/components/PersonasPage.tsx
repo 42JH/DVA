@@ -33,11 +33,11 @@ export function PersonasPage() {
           원래대로 돌아갑니다.
         </p>
       )}
-      {vm.error || vm.isLoading || !vm.prompt || !vm.editTarget ? (
+      {vm.error || vm.isLoading || vm.personas.length === 0 ? (
         <p className="flex flex-1 items-center justify-center py-16 text-center text-[14px] text-ops-sub">
           {vm.error ?? (vm.isLoading ? '불러오는 중…' : '상담가가 없습니다.')}
         </p>
-      ) : vm.editing ? (
+      ) : vm.editing && vm.editTarget ? (
         // 수정 — 기존 편집기 그대로 (저장 안 한 내용 확인 · 음성 세부 조절 포함)
         <div className="flex min-h-0 flex-1 flex-col px-6 py-4">
           <PromptEditor target={vm.editTarget} onDone={vm.finishEdit} />
@@ -48,7 +48,16 @@ export function PersonasPage() {
             aria-label="시스템 프롬프트"
             className="flex min-w-0 flex-1 flex-col gap-3 px-6 py-4"
           >
-            {vm.compare ? <Compare vm={vm} /> : <Prompt vm={vm} />}
+            {/* 오른쪽 카드는 그대로 두고 가운데만 로딩 */}
+            {vm.promptLoading || !vm.prompt ? (
+              <p className="flex flex-1 items-center justify-center text-[14px] text-ops-sub">
+                불러오는 중…
+              </p>
+            ) : vm.compare ? (
+              <Compare vm={vm} />
+            ) : (
+              <Prompt vm={vm} />
+            )}
           </section>
           <Personas vm={vm} />
         </div>
@@ -90,7 +99,7 @@ function Personas({ vm }: { vm: Vm }) {
   )
 }
 
-// 와이어프레임 11/10: 이름 · 태그 → 음성 · 적용 버전 → (고른 카드만) 히스토리 드롭다운 + [시험 통화] [적용] → [통화에 사용하기]
+// 와이어프레임 11/10: 이름(가운데 헤더 버전 글씨 크기) · 태그 → 음성 · 적용 버전 → (고른 카드만) 히스토리 드롭다운 → 그 아래 [시험 통화] [적용] → [통화에 사용하기]
 function PersonaCard({ p, vm }: { p: PersonaItem; vm: Vm }) {
   const h = p.history
   return (
@@ -103,7 +112,7 @@ function PersonaCard({ p, vm }: { p: PersonaItem; vm: Vm }) {
         className="w-full text-left"
       >
         <span className="flex flex-wrap items-center gap-2">
-          <span className={`text-[18px] font-bold ${p.selected ? 'text-ops-route' : ''}`}>
+          <span className={`text-[15px] font-bold ${p.selected ? 'text-ops-route' : ''}`}>
             {p.name}
           </span>
           {p.inUse && <Badge tone="done">통화에 사용 중</Badge>}
@@ -117,26 +126,26 @@ function PersonaCard({ p, vm }: { p: PersonaItem; vm: Vm }) {
         <span className="block text-[13px] text-ops-sub">{p.versionLine}</span>
       </button>
       {h && (
-        <div className="mt-3 flex items-end gap-2">
-          <div className="min-w-0 flex-1">
-            <SelectField
-              label="히스토리"
-              value={h.value}
-              onChange={vm.selectVersion}
-              options={h.options}
-            />
-          </div>
-          <Btn onClick={vm.startTestCall}>시험 통화</Btn>
-          {h.canApply && (
-            <Btn
-              kind="primary"
-              disabled={!h.canApplyNow}
-              title={h.canApplyNow ? undefined : '시험 통화를 끝낸 버전만 적용할 수 있습니다'}
-              onClick={vm.askApply}
-            >
-              적용
-            </Btn>
-          )}
+        <div className="mt-3 flex flex-col gap-2">
+          <SelectField
+            label="히스토리"
+            value={h.value}
+            onChange={vm.selectVersion}
+            options={h.options}
+          />
+          <span className="flex gap-2">
+            <Btn onClick={vm.startTestCall}>시험 통화</Btn>
+            {h.canApply && (
+              <Btn
+                kind="primary"
+                disabled={!h.canApplyNow}
+                title={h.canApplyNow ? undefined : '시험 통화를 끝낸 버전만 적용할 수 있습니다'}
+                onClick={vm.askApply}
+              >
+                적용
+              </Btn>
+            )}
+          </span>
         </div>
       )}
       {p.canUse && (

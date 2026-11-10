@@ -246,7 +246,9 @@ export function usePersonaPage() {
 
   return {
     demo: PERSONA_DEMO, // 시연 모드 — 저장 · 적용이 실서버에 안 감
-    isLoading: personas.isPending || (persona !== null && versions.isPending),
+    isLoading: personas.isPending, // 처음 들어올 때만 화면 전체
+    // 상담가를 바꿀 때 버전을 받는 동안은 가운데만 — 오른쪽 카드가 다시 그려지면 스크롤이 맨 위로 감 (11/10)
+    promptLoading: persona !== null && versions.isPending,
     error: personas.error || versions.error ? '불러오지 못했습니다. 다시 시도해 주세요.' : null,
 
     prompt:
