@@ -194,13 +194,20 @@ def match_places(places: list[Place], name: str | None, place: str | None, detai
     return [p for s, p in scored if s == best]
 
 
+def region_of(p: Place) -> str:
+    """후보를 구별해 부르는 지역: 시·군·구 + 동("구미시 인동"). 동은 법정동(geo), 없으면 도로명."""
+    region = [w for w in words(p.address) if _is_region(w) and w not in SIDO_WORDS]
+    dong = p.geo.dong_name if p.geo and p.geo.dong_name else next((w for w in words(p.address) if w[-1] in "로길"), "")
+    return " ".join(region[-1:] + [dong]).strip()
+
+
 def pin_labels(pins: list[Place]) -> list[str]:
-    """후보끼리 다른 값으로 부른다(상세주소 → 주소 → 이름 순). 다이어그램의 {층수}·{상세주소}."""
+    """후보끼리 다른 값으로 부른다. 이름 + 지역(시·군·구 동)으로 먼저, 같으면 상세주소까지(업무 규칙: 주소록의
+    상세주소는 먼저 읽어 주지 않는다 — 구별에 필요할 때만). 그래도 같으면 호출자가 번호를 붙인다."""
     if any(isinstance(p, CompanyPlace) for p in pins):
         return [p.label() if isinstance(p, CompanyPlace) else f"{p.name} {p.address} {p.address_detail}".strip()
                 for p in pins]
-    for part in ("address_detail", "address", "name"):
-        values = [getattr(p, part) for p in pins]
-        if all(values) and len(set(values)) == len(values):
-            return values
-    return [f"{p.name} {p.address} {p.address_detail}".strip() for p in pins]
+    labels = [f"{p.name} {region_of(p)}".strip() for p in pins]
+    if len(set(labels)) == len(labels):
+        return labels
+    return [f"{label} {p.address_detail}".strip() for label, p in zip(labels, pins)]
