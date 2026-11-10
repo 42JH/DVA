@@ -73,14 +73,10 @@ kind = "format"
 terms = ["쇼핑백", "비닐봉지", "스티로폼", "박스 없이", "포장 없이"]
 guidance = "서류와 소형·중형·대형 박스로 접수합니다. 지원하는 규격으로 포장할 수 있는지 확인해 주세요."
 
-# 기존 전화번호 허용 범위를 유지한다. 한글 숫자/+82 정규화 뒤 적용한다.
+# BE 업무 연락처 계약(backend/docs/mobile-phone-integration.md, 2026-11-05): 숫자만 정확히 11자리. 유선·대표번호는 BE가 400.
+# 한글 숫자/+82 정규화 뒤 적용한다. 0으로 시작해야 한다(STT가 앞자리를 바꾼 11자리 "101…"을 막는다).
 [phone]
-mobile_prefix = "010"
-mobile_digits = 11
-domestic_min_digits = 9
-domestic_max_digits = 11
-service_prefixes = ["15", "16", "18"]
-service_digits = 8
+digits = 11
 
 # --- 필드 목록. 이름은 Business State·BE 매핑과 같다(backend_client/order.py) ---
 # kind: free = Backend가 strict 도구 인자로 추출(Live가 위임) · choice = Decision 질문 · auto = 서버가 채움(묻지 않음)

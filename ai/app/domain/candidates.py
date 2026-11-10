@@ -1,5 +1,6 @@
 """후보 보관과 선택 반영(Decision pick → 서버 상태). 모델에는 이름표만 준다(delegation.md §2)."""
 
+from app.domain.rules import normalize_phone
 from app.domain.state import CandidateSet, ConversationState, Place, Source
 from app.domain.store import open_for_edit
 
@@ -24,7 +25,13 @@ def apply_pick(state: ConversationState, label: str) -> bool:
     if c.kind == "destination":
         place: Place = item
         for part in ROLE_FIELDS:
-            state.record(f"receiver_{part}", getattr(place, part), place.source or Source.PIN)
+            value = getattr(place, part)
+            if part == "phone":
+                # 주소록·이전 주문에는 11자리 계약 전 번호가 남아 있다(핀 0112344155 → 초안 PATCH 400). 맞지 않으면 다시 묻게 둔다
+                value = normalize_phone(value or "")
+                if value is None:
+                    continue
+            state.record(f"receiver_{part}", value, place.source or Source.PIN)
         state.current.receiver_geo = place.geo
     else:
         state.selected_order = item
