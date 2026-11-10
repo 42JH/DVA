@@ -47,7 +47,7 @@ def main():
     def wait_app(side, port, name=None):
         path = '/health' if side == 'monolith' else '/'+side+'/health'
         url = json.dumps('http://127.0.0.1:'+str(port)+path)
-        script = "(async()=>{const end=Date.now()+30000;while(Date.now()<end){try{if((await fetch("+url+",{signal:AbortSignal.timeout(1000)})).ok)return;}catch{}await new Promise(r=>setTimeout(r,100));}throw Error('application startup unavailable')})().catch(error=>{console.error(error.message);process.exit(1)})"
+        script = "(async()=>{const end=Date.now()+30000;let attempts=0;while(Date.now()<end){attempts++;try{if((await fetch("+url+",{signal:AbortSignal.timeout(1000)})).ok){console.log(JSON.stringify({ready:true,attempts}));return;}}catch{}await new Promise(r=>setTimeout(r,100));}throw Error('application startup unavailable after '+attempts+' probes')})().catch(error=>{console.error(error.message);process.exit(1)})"
         run('docker', 'exec', name or RUN+'-'+side+'-app', 'node', '-e', script, label=side+'-app-ready')
 
     password, token = uuid.uuid4().hex, uuid.uuid4().hex
@@ -163,6 +163,7 @@ def main():
                    '-e', 'CUSTOMER_URL=http://customer-app:3001', '-e', 'CONSULTATION_URL=http://consultation-app:3004',
                    '-e', 'DELIVERY_URL=http://delivery-app:3003', '-e', 'CUSTOMER_AUTH_TOKEN='+password)
             run('docker', 'start', name, label=side+'-billing-controlled-start')
+            wait_app(side, 3000 if side == 'monolith' else 3002, name)
         runtime = LOGS/'billing-monolith-runtime'
         runtime.mkdir(exist_ok=True)
         run('docker', 'cp', RUN+'-monolith-app:/app/dist/.', str(runtime), label='billing-source-runtime')
@@ -178,6 +179,7 @@ def main():
         for side in ('monolith', 'order'):
             run('docker', 'stop', '--time=5', RUN+'-'+side+'-billing-app', label=side+'-billing-controlled-finish')
             run('docker', 'start', RUN+'-'+side+'-app', label=side+'-billing-production-restart')
+            wait_app(side, 3000 if side == 'monolith' else 3002)
         name = RUN+'-billing-scheduler'
         create(name, images['order-checks'], '-e', 'PGPASSWORD='+password, '-e', 'PGDATABASE=dva_webhook_test',
                command=('node', '--test', 'test/billing-months-scheduler.test.cjs'))
@@ -190,6 +192,7 @@ def main():
         run('docker', 'cp', str(ROOT/'msa/parity/billing-months-outage.test.cjs'), name+':/app/service/test/billing-months-outage.test.cjs', label='billing-outage-copy')
         complete(name)
         run('docker', 'start', RUN+'-consultation-app', label='draft-deletion-consultation-restart')
+        wait_app('consultation', 3004)
         run('docker', 'exec', RUN+'-consultation-app', 'node', '-e', "(async()=>{for(let i=0;i<100;i++){try{if((await fetch('http://127.0.0.1:3004/consultation/health')).ok)return;}catch{}await new Promise(r=>setTimeout(r,100));}throw Error('consultation startup unavailable')})().catch(()=>process.exit(1))", label='draft-deletion-consultation-ready')
         name = RUN+'-draft-deletion-outage'
         create(name, images['order-checks'], '-e', 'PGPASSWORD='+password, '-e', 'PGDATABASE=dva_webhook_test',
