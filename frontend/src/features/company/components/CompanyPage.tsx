@@ -10,6 +10,7 @@ import { useScrollable } from '@/shared/lib/useScrollable'
 import { Pagination } from '@/shared/ui/Pagination'
 import { usePageSize } from '@/shared/lib/paging'
 import { MemberCsvModal, MemberFormModal } from './CompanyModals'
+import { CompanyBilling } from './CompanyBilling'
 import { Confirm } from '@/shared/ui/Modal'
 
 export function CompanyPage() {
@@ -53,6 +54,7 @@ export function CompanyPage() {
               </span>
             ))}
           </div>
+          <CompanyBilling id={id} />
           <div
             ref={box}
             data-scrollable={scrollable || undefined}
