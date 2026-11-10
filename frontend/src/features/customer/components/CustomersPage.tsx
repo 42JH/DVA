@@ -68,12 +68,9 @@ export function CustomersPage() {
                         vm.warm(r.seq)
                         if (vm.open && !on) vm.pick(r.seq)
                       }}
-                      className={`h-11 cursor-pointer outline-none focus-visible:bg-ops-route-soft ${on ? 'bg-ops-route-soft shadow-[inset_3px_0_0_var(--color-ops-route)]' : ''} ${r.withdrawn ? 'text-ops-faint' : ''}`}
+                      className={`h-11 cursor-pointer outline-none focus-visible:bg-ops-route-soft ${on ? 'bg-ops-route-soft shadow-[inset_3px_0_0_var(--color-ops-route)]' : ''}`}
                     >
-                      <td className="truncate font-medium">
-                        {r.name}
-                        {r.withdrawn && <span className="ml-1.5 text-[12px]">(탈퇴)</span>}
-                      </td>
+                      <td className="truncate font-medium">{r.name}</td>
                       <td className="text-[13px] whitespace-nowrap tabular-nums">{r.phone}</td>
                       <td className="text-[13px]" title={r.company}>
                         {r.kind}
@@ -145,7 +142,7 @@ function CustomerPanel({ seq, onClose }: { seq: number; onClose: () => void }) {
         {!v.c ? (
           <p className="py-10 text-center text-[14px] text-ops-sub">{v.error ?? '불러오는 중…'}</p>
         ) : v.editing && v.dto ? (
-          <CustomerEditForm before={v.dto} onDone={v.stopEdit} />
+          <CustomerEditForm before={v.dto} onDone={v.stopEdit} onWithdrawn={onClose} />
         ) : (
           <>
             <p className="text-[20px] font-bold">{v.c.name}</p>
