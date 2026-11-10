@@ -10,7 +10,8 @@ import re
 from app.domain.state import ConversationState
 from app.policy.model import Policy
 
-READY_RECEIPT = re.compile(r"(?:네,?)?택배가접수(?:됐|되었)습니다(?:,?더보내실택배가(?:있으세요|있으신가요))?")
+READY_RECEIPT = re.compile(r"(?:네,?)?(?:이대로|그대로|그렇게)?택배가접수(?:됐|되었)습니다"
+                           r"(?:,?더보내실택배가(?:있으세요|있으신가요))?")
 
 
 def _holds(state: ConversationState, condition: str) -> bool:

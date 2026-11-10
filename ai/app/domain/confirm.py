@@ -26,6 +26,7 @@ class Utterance:
 
 
 QUESTION_END = re.compile(r"(\?|까요|나요|세요|시죠|죠|습니까|십니까|가요|래요|을까|맞아요|맞으세요|맞습니까)[\s.?!…~]*$")
+PARCEL_READBACK_START = re.compile(r"(?:네[,，.]?)?접수내용(?:을)?확인(?:을)?부탁드")
 
 
 def asks(text: str) -> bool:
@@ -34,7 +35,7 @@ def asks(text: str) -> bool:
 
 @dataclass(frozen=True)
 class ConfirmAnswer:
-    choice: str                        # yes · no · change · not_answer
+    choice: str                        # yes · no · change · proceed · not_answer
     probabilities: dict[str, float]
 
 
@@ -98,13 +99,19 @@ def check_gate(state: ConversationState, policy: Policy, pending_id: str, answer
     if p is None or p.id != pending_id or p.done or (
             latest_applied_utterance is not None and customer.utterance_id < latest_applied_utterance):
         return GateResult(False, "DECISION_STALE")                                    # G1
-    yes, change = answer.probabilities.get("yes", 0.0), answer.probabilities.get("change", 0.0)
-    if answer.choice != "yes" or yes < policy.confirm.yes_min or change >= policy.confirm.change_max:
+    confidence = answer.probabilities.get(answer.choice, 0.0)
+    change = answer.probabilities.get("change", 0.0)
+    if answer.choice not in ("yes", "proceed") or confidence < policy.confirm.yes_min or change >= policy.confirm.change_max:
         return GateResult(False, "CONFIRM_UNCLEAR")                                   # G4
-    tol = policy.confirm.answer_after_readback_tolerance_ms
-    if prev_ai is None or prev_ai.t_start < p.issued_t or customer.start_ms < prev_ai.end_ms - tol \
-            or (prev_ai.text and not asks(prev_ai.text)):  # 확인 질문까지 듣지 않은 답(되읽기 도중 끼어든 "네")
+    if prev_ai is None or prev_ai.t_start < p.issued_t:
         return GateResult(False, "CONFIRM_BEFORE_READBACK_END")                       # G3
+    if answer.choice == "proceed":
+        # 명시적인 접수 지시는 이번 택배의 되읽기가 시작된 뒤에만 중간 확정에 쓴다.
+        if p.kind != "parcel" or not PARCEL_READBACK_START.match("".join(prev_ai.text.split())):
+            return GateResult(False, "CONFIRM_BEFORE_READBACK_END")
+    elif customer.start_ms < prev_ai.end_ms - policy.confirm.answer_after_readback_tolerance_ms \
+            or (prev_ai.text and not asks(prev_ai.text)):
+        return GateResult(False, "CONFIRM_BEFORE_READBACK_END")
     if not _same_snapshot(state, policy, p):
         return GateResult(False, "CONFIRM_SNAPSHOT_CHANGED")                          # G2
     return GateResult(True)

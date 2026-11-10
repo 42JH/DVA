@@ -293,12 +293,12 @@ class CallService:
     def begin_closing(self, s: CallSession, reason: str, after_speech: bool = False,
                       remind: Callable[[], Awaitable[None]] | None = None) -> None:
         """CLOSING: AI 발화 끝 뒤 closing_quiet_ms(최소 1초) 조용하면 끊는다. 이미 끝나는 중이면 무시.
-        after_speech: 마무리 인사를 요청한 경우 — 요청 뒤 AI가 한 번 말하기 시작한 다음부터 조용함을 센다.
-        remind: 인사를 요청했는데 말하지 않으면 1번 다시 요청한다."""
+        after_speech: 요청 뒤 정해진 마무리 인사 전체가 전사될 때까지 기다린다.
+        remind: 인사가 없으면 1번 다시 요청한다."""
         if s.phase in ENDED or s.phase not in (Phase.ACTIVE, Phase.ATTACHING):
             return
         s.close_reason = reason
-        s.closing_requested_t = time.time() if after_speech else 0.0
+        s.closing_requested_t = (s.closing_requested_t or time.time()) if after_speech else 0.0
         self._phase(s, Phase.CLOSING)
         s.cancel_timer("silence")
         s.cancel_timer("expire")
@@ -307,12 +307,12 @@ class CallService:
     async def _close_when_quiet(self, s: CallSession, remind=None) -> None:
         deadline = time.monotonic() + self.d.cfg.closing_max_sec
         quiet = self.d.cfg.closing_quiet_ms / 1000
-        if s.closing_requested_t and not await self._spoke_after_request(s, deadline):
+        if s.closing_requested_t and not await self._greeted_after_request(s, deadline):
             if remind is not None:
                 s.note("마무리", "인사 없음 → 다시 요청")
                 s.closing_requested_t = time.time()
                 await remind()
-            if remind is None or not await self._spoke_after_request(s, deadline):
+            if remind is None or not await self._greeted_after_request(s, deadline):
                 s.note("마무리", "인사 없이 끊음")
         # 상한에 걸려도 마지막 발화 뒤 quiet(최소 1초)는 지킨다(말이 계속 이어지면 5초 더까지만)
         while time.monotonic() < deadline + 5.0 and time.time() - s.last_output_t < quiet:
@@ -323,13 +323,20 @@ class CallService:
                 s.timing("마무리 오디오 끝 추정−전사 수신", (est - s.last_output_t) * 1000)
         await self._quiet(hangup_quietly(self.d.client, s.call_id), "hangup")
 
-    @staticmethod
-    async def _spoke_after_request(s: CallSession, deadline: float) -> bool:
-        """마무리 인사 요청 뒤 4초 안에(상한 안에서) AI가 말하기 시작했는지."""
+    async def _greeted_after_request(self, s: CallSession, deadline: float) -> bool:
+        """말을 시작했는지가 아니라 감사와 끝인사가 전사됐는지 확인한다."""
         speak_by = min(deadline, time.monotonic() + 4.0)
-        while time.monotonic() < speak_by and s.last_output_t <= s.closing_requested_t:
+        quiet = self.d.cfg.closing_quiet_ms / 1000
+        while True:
+            text = "".join(row["text"] for row in s.transcript
+                           if row["speaker"] == "agent" and row["t"] >= s.closing_requested_t)
+            if "감사합니다좋은하루보내세요" in re.sub(r"[\W_]", "", text):
+                return True
+            # 인사가 이미 나오고 있으면 전사 도중에 재요청하지 않는다. 전체 종료 상한은 지킨다.
+            if time.monotonic() >= deadline or (time.monotonic() >= speak_by
+                    and time.time() - s.last_output_t >= quiet):
+                return False
             await asyncio.sleep(0.1)
-        return s.last_output_t > s.closing_requested_t
 
     async def on_call_ended(self, ev) -> None:
         """PBX 종료 웹훅(call-lifecycle.md §5). 같은 번호로 다시 건 통화는 끊지 않게 ended_at 전에 시작한 통화만."""
