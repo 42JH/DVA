@@ -1037,3 +1037,11 @@
 - 최신 `develop-ai`(178 확인 흐름·181 자동 핀 확인 포함) 위에 다시 쌓음. 165(confirm_area)는 버림. 178의 `readback_id`와 명확한 접수 요청 처리는 유지.
 - 미결정: 발송 주소가 고객 정보로, 받는 곳 주소가 핀으로 채워져 `record_fields`를 거치지 않으면 confirm_route가 나가지 않는다(되읽기에서는 동 이름이 나온다).
 - 테스트: `uv run pytest -q` → 737 passed.
+
+## 2026-11-10 — 주소록 후보를 고른 뒤 받는 곳이 비는 문제
+
+- 운영 통화에서 받는 분 성함으로 핀 3건이 제시됐고 고객이 지역 이름으로 하나를 골랐다. Decision pick은 확률 0.56·confidence 0.45로 하한 0.6에 걸렸고, Live 모델이 같은 선택을 `find_destination(name, place)`로 넘겼지만 서버는 1건으로 좁혀진 후보를 다시 needs_choice로 제시만 했다. 모델은 서술형으로 "확인했습니다" 하고 넘어가 pick이 성립할 질문이 없었고, address 단계에서 받는 곳 주소를 다시 요구하다 고객이 끊었다(NO_ORDER).
+- `find_destination`: 이미 제시한 destination 후보 집합 안에서 정확히 1건으로 좁혀지면 `apply_pick`으로 바로 기록하고 `ok`/`DEST_PICKED`로 돌려준다. 제시된 후보가 없을 때의 1건은 지금처럼 확인을 거친다.
+- `offer_destination`: 후보 1건 결과에 "질문으로 확인한다" guidance를 붙인다(`record_fields` 경로의 guidance는 그대로).
+- Decision pick 하한·비교값(confidence → p(choice))은 이 커밋에서 바꾸지 않는다. 11-08 이후 통화 69건의 pick 판단 83건 중 후보 선택 11건, 하한 미달 2건(p 0.56·0.65), 오적용 0건. 별도 작업(그림자 측정 2단계)에서 pick 전용 설정값으로 다룬다.
+- 참고: `find_destination`의 ok 결과는 `record_fields`와 달리 즉시 intake 동기화를 하지 않는다(기존 `DEST_NEW_RECEIVER`와 같음). 다음 `record_fields`에서 동기화된다.

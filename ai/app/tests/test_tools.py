@@ -346,10 +346,27 @@ def test_personal_place_found_first_and_pick_applies():
                                                            place("김엄마", "대구 수성구 달구벌대로 2450"))))
     out = call(c, "find_destination", {"name": "김엄마"})
     assert out["status"] == "needs_choice" and len(out["facts"]["labels"]) == 1
+    assert "맞나요" in out["facts"]["guidance"]  # 후보 1건은 질문으로 확인하게 한다
     assert apply_pick(c.state, out["facts"]["labels"][0])
     s = c.state
     assert s.field_of("receiver_name").value == "김엄마" and s.field_of("receiver_name").source == Source.PIN
     assert s.current.receiver_geo is not None and s.candidates is None
+
+
+def test_narrowing_offered_candidates_to_one_applies_the_pick():
+    """후보 여럿을 제시한 뒤 고객이 지역으로 고른 말을 모델이 find_destination으로 넘기면 재제시하지 않고 바로 적용한다
+    (통화 d9b5208e: 재제시 뒤 Decision pick이 하한에 걸려 받는 곳이 비었다)."""
+    pins = (place("박지호", "경상북도 구미시 인의로 1"), place("박지호", "서울특별시 양천구 신정로 2", detail="403호"),
+            place("박지호", "경상북도 구미시 인의로 3"))
+    c = ctx(customer=Customer(caller_phone=CALLER, places=pins))
+    assert call(c, "record_fields", {"receiver_name": "박지호"})["code"] == "DEST_MANY"
+    out = call(c, "find_destination", {"name": "박지호", "place": "양천구"})
+    s = c.state
+    assert out["code"] == "DEST_PICKED" and s.candidates is None and "receiver_address" not in out["missing"]
+    assert s.field_of("receiver_address").value == "서울특별시 양천구 신정로 2"
+    assert s.field_of("receiver_address_detail").value == "403호" and s.field_of("receiver_address").source == Source.PIN
+    # 제시된 후보가 없을 때 1건이 나오면 지금처럼 확인을 거친다
+    assert call(c, "find_destination", {"name": "박지호", "place": "양천구"})["status"] == "needs_choice"
 
 
 def test_place_resolves_to_address_then_book_confirms_or_new_receiver(corrector, fake_kakao):
