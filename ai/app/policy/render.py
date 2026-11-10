@@ -1,7 +1,7 @@
 """정책 → Live 지시문·Backend 지시문·Decision 질문. 같은 Policy 객체에서 서버 판정(app/domain/assess.py)도 나온다.
 
-Live 지시문 = [페르소나: BE promptText, 없으면 policy/persona_default.md] + [업무 규칙: policy/business_rules.md
-+ 정책 렌더링(절차·위임·금지·서버 결과 읽는 법)] + [통화 정보]. 업무 규칙이 페르소나보다 우선(business_rules.md 첫머리).
+Live 지시문 = [페르소나: BE promptText, 없으면 policy/persona_default.md] + [위임 정책] + [업무 규칙: policy/business_rules.md
++ 정책 렌더링(절차·금지·서버 결과 읽는 법)] + [통화 정보]. 업무 규칙이 페르소나보다 우선(business_rules.md 첫머리).
 Backend 지시문 = policy/backend_rules.md. 문장은 파일에 두고 코드는 이어 붙이기만 한다(docs/architecture/prompt-layout-plan.md).
 """
 
@@ -46,23 +46,10 @@ def _labels(policy: Policy, names) -> list[str]:
     return [policy.fields[n].label for n in names]
 
 
-def render_policy(policy: Policy, tools: tuple[tuple[str, str], ...] = ()) -> str:
-    collect = policy.collect_stages()
-    order = [n for s in collect for n in s.required]
-    auto = [n for n, f in policy.fields.items() if f.kind == "auto"]
+def render_delegation(policy: Policy, tools: tuple[tuple[str, str], ...] = ()) -> str:
+    """위임 정책. 페르소나 바로 뒤에 둔다 — 지시문 끝 쪽에 있을 때 Live가 값을 받고도 위임하지 않는 통화가 이어져서."""
     choice = [n for n, f in policy.fields.items() if f.kind == "choice"]
-    lines = [f"# 상담 절차 (정책 {policy.version})", "",
-             "## 택배 정보 받는 순서(고정, 한 번에 하나씩)",
-             " → ".join(f"{i}. {label}" for i, label in enumerate(_labels(policy, order), 1)),
-             f"- {', '.join(_labels(policy, auto))}는 서버가 채웁니다. 묻지 않습니다.",
-             "- 접수 정보를 수집할 때만 현재 택배의 최신 서버 결과(또는 summary)에 있는 missing의 첫 항목을 하나만 묻습니다. "
-             "fields에서 valid인 항목은 건너뛰고, missing이 비어 있으면 새 수집 질문을 하지 않습니다.",
-             "- 서버가 needs, 선택 확인, 되읽기를 요청하면 수집 질문보다 먼저 처리합니다. 고객의 정정은 해당 항목을 다룹니다.",
-             "- 순서 밖의 값이나 한 번에 말한 값도 함께 맡기고, 결과를 기다리는 동안 같은 값을 다시 묻지 않습니다."]
-    lines += [f"- {policy.fields[n].label}: {s.rule}" for s in collect for n in s.required if s.rule]
-    lines += ["", render_input_rules(policy), "", "## 단계"]
-    lines += [f"- {s.goal}" + (" (서버가 확인 내용이나 결과를 줄 때만 합니다)" if s.gate else "") for s in policy.stage]
-    lines += ["", "## 백엔드에 맡기기", "Generate <|SpawnThinking|> when:",
+    lines = ["# 백엔드에 맡기기", "Generate <|SpawnThinking|> when:",
               f"- 고객이 다음 정상 범위의 값을 말하거나 고칠 때: {', '.join(_labels(policy, policy.free_fields()))}",
               "- 고객이 처음 또는 추가로 물건 이름을 말하면 박스 후보를 제안할 근거가 있을 때 box_suggestion으로, "
               "크기나 개수가 애매할 때 box_size_needed로 맡깁니다.",
@@ -84,8 +71,26 @@ def render_policy(policy: Policy, tools: tuple[tuple[str, str], ...] = ()) -> st
               "- 채우는 말에는 저장 결과·되읽기·다음 접수 질문을 넣지 않습니다. "
               "명백한 입력 제한 위반의 설명과 재질문은 바로 할 수 있습니다. 저장 결과는 서버 결과가 온 뒤에 말합니다.",
               "- 고객이 말을 시작하면 하던 말을 바로 멈추고 고객 말을 먼저 받습니다. 기다리던 결과가 뒤늦게 오면 "
-              "고객이 방금 한 말에 맞춰 필요한 것만 이어서 안내합니다(이미 지나간 이야기를 다시 꺼내지 않습니다).", "",
-              "## 하지 않는 것"]
+              "고객이 방금 한 말에 맞춰 필요한 것만 이어서 안내합니다(이미 지나간 이야기를 다시 꺼내지 않습니다)."]
+    return "\n".join(lines)
+
+
+def render_policy(policy: Policy) -> str:
+    collect = policy.collect_stages()
+    order = [n for s in collect for n in s.required]
+    auto = [n for n, f in policy.fields.items() if f.kind == "auto"]
+    lines = [f"# 상담 절차 (정책 {policy.version})", "",
+             "## 택배 정보 받는 순서(고정, 한 번에 하나씩)",
+             " → ".join(f"{i}. {label}" for i, label in enumerate(_labels(policy, order), 1)),
+             f"- {', '.join(_labels(policy, auto))}는 서버가 채웁니다. 묻지 않습니다.",
+             "- 접수 정보를 수집할 때만 현재 택배의 최신 서버 결과(또는 summary)에 있는 missing의 첫 항목을 하나만 묻습니다. "
+             "fields에서 valid인 항목은 건너뛰고, missing이 비어 있으면 새 수집 질문을 하지 않습니다.",
+             "- 서버가 needs, 선택 확인, 되읽기를 요청하면 수집 질문보다 먼저 처리합니다. 고객의 정정은 해당 항목을 다룹니다.",
+             "- 순서 밖의 값이나 한 번에 말한 값도 함께 맡기고, 결과를 기다리는 동안 같은 값을 다시 묻지 않습니다."]
+    lines += [f"- {policy.fields[n].label}: {s.rule}" for s in collect for n in s.required if s.rule]
+    lines += ["", render_input_rules(policy), "", "## 단계"]
+    lines += [f"- {s.goal}" + (" (서버가 확인 내용이나 결과를 줄 때만 합니다)" if s.gate else "") for s in policy.stage]
+    lines += ["", "## 하지 않는 것"]
     lines += [f"- {item}" for item in policy.forbid.items]
     lines += ["", "## 읽기 규칙"] + [f"- {v}" for v in policy.speech.values()]
     if policy.results:
@@ -100,9 +105,9 @@ def render_policy(policy: Policy, tools: tuple[tuple[str, str], ...] = ()) -> st
 
 def render_live(prompt_text: str | None, policy: Policy, call_info: dict[str, str] | None = None,
                 tools: tuple[tuple[str, str], ...] = ()) -> str:
-    """페르소나(교체 가능) → 업무 규칙(고정) → 정책 절차 → 통화 정보. 페르소나가 비면 기본 페르소나(P2)."""
+    """페르소나(교체 가능) → 위임 정책 → 업무 규칙(고정) → 정책 절차 → 통화 정보. 페르소나가 비면 기본 페르소나(P2)."""
     persona = prompt_text.strip() if prompt_text and prompt_text.strip() else default_persona()
-    parts = [persona, "", business_rules(), "", render_policy(policy, tools)]
+    parts = [persona, "", render_delegation(policy, tools), "", business_rules(), "", render_policy(policy)]
     if call_info:
         parts += ["", "# 통화 정보"] + [f"- {k}: {v}" for k, v in call_info.items()]
     return "\n".join(parts)

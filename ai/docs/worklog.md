@@ -1045,3 +1045,9 @@
 - `offer_destination`: 후보 1건 결과에 "질문으로 확인한다" guidance를 붙인다(`record_fields` 경로의 guidance는 그대로).
 - Decision pick 하한·비교값(confidence → p(choice))은 이 커밋에서 바꾸지 않는다. 11-08 이후 통화 69건의 pick 판단 83건 중 후보 선택 11건, 하한 미달 2건(p 0.56·0.65), 오적용 0건. 별도 작업(그림자 측정 2단계)에서 pick 전용 설정값으로 다룬다.
 - 참고: `find_destination`의 ok 결과는 `record_fields`와 달리 즉시 intake 동기화를 하지 않는다(기존 `DEST_NEW_RECEIVER`와 같음). 다음 `record_fields`에서 동기화된다.
+
+## 2026-11-10 — Live 지시문의 위임 정책을 페르소나 바로 뒤로
+
+- 배경: 운영 통화에서 Live가 받는 분 성함 등 값을 받고도 위임하지 않아 서버에 기록이 남지 않는 일이 이어졌다. 위임은 Live 재량이라 API로 강제할 수 없고, 서버 안전망은 이중 위임 위험으로 채택하지 않았다(사용자 결정 2026-11-10).
+- 변경: `render.render_delegation`으로 "백엔드에 맡기기"(Generate/Do not generate <|SpawnThinking|>, Backend tools, 대기 중 규칙)를 떼어 `render_live` 순서를 페르소나 → 위임 정책 → 업무 규칙 → 상담 절차 → 통화 정보로 바꿨다. 전에는 지시문 끝 쪽(상담 절차 안)이었다. 문구는 그대로이고 제목만 최상위(`#`)로 올렸다(옛 렌더 결과와 줄 단위 대조).
+- 테스트: 블록 순서 단언 추가, 전체 AI 테스트 738 passed. 실통화 효과는 미측정.
