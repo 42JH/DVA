@@ -23,7 +23,7 @@ export function PromptEditor({
       <header className="flex flex-wrap items-center gap-3 border-b border-ops-line px-5 py-3">
         <span className="text-[15px] font-bold">{vm.tag}</span>
         <span className="text-[13px] text-ops-sub">{vm.subtitle}</span>
-        <Btn className="ml-auto" onClick={vm.openVoice}>
+        <Btn kind="warning" className="ml-auto" onClick={vm.openVoice}>
           음성 세부 조절
         </Btn>
       </header>
