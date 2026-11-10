@@ -8,6 +8,7 @@ const {
 } = require('./helpers/application.cjs');
 const { OrdersRepository } = require('../dist/orders/orders.repository');
 const f = applicationFixture('주문 탭 집계');
+process.env.SWAGGER_ENABLED = 'true';
 const orderIds = [],
   draftIds = [];
 after(async () => {
@@ -25,7 +26,15 @@ after(async () => {
     await pool.end();
   }
 });
-const empty = { all: 0, incomplete: 0, notPaid: 0, paid: 0, submissionFailed: 0, cancelled: 0 };
+const empty = {
+  all: 0,
+  incomplete: 0,
+  notPaid: 0,
+  paid: 0,
+  accepted: 0,
+  submissionFailed: 0,
+  cancelled: 0,
+};
 const range = { from: '2096-01-01T00:00:00+09:00', to: '2096-01-02T00:00:00+09:00' };
 async function json(response) {
   assert.equal(response.status, 200, await response.clone().text());
@@ -100,7 +109,8 @@ test('status counts retain payment groups independently of the selected tab and 
     incomplete: 1,
     notPaid: 1,
     paid: 3,
-    submissionFailed: 2,
+    accepted: 1,
+    submissionFailed: 1,
     cancelled: 1,
   };
   for (const statusGroup of [
@@ -108,6 +118,7 @@ test('status counts retain payment groups independently of the selected tab and 
     'COLLECTING',
     'notPaid',
     'PAID',
+    'ACCEPTED',
     'SUBMISSION_FAILED',
     'CANCELLED',
   ]) {
@@ -119,6 +130,27 @@ test('status counts retain payment groups independently of the selected tab and 
     assert.deepEqual(outside.statusCounts, expected);
     assert.equal(outside.total_count, first.total_count);
     assert.deepEqual(outside.data, []);
+    if (statusGroup) {
+      const statuses = {
+        COLLECTING: ['COLLECTING'],
+        notPaid: ['notPaid'],
+        PAID: ['PAID', 'SUBMITTING', 'SUBMITTING_FAILED'],
+        ACCEPTED: ['ACCEPTED'],
+        SUBMISSION_FAILED: ['SUBMISSION_FAILED'],
+        CANCELLED: ['CANCELLED'],
+      }[statusGroup];
+      assert.equal(first.total_count, statuses.length);
+      assert.equal(first.hasNext, statuses.length > 1);
+      const rows = [];
+      for (let offset = 0; offset < first.total_count; offset++) {
+        const page = await json(await list({ ...query, offset }));
+        assert.deepEqual(page.statusCounts, expected);
+        assert.equal(page.total_count, statuses.length);
+        assert.equal(page.hasNext, offset < statuses.length - 1);
+        rows.push(page.data[0].status);
+      }
+      assert.deepEqual(rows.sort(), [...statuses].sort());
+    }
   }
 });
 
@@ -251,6 +283,15 @@ test('empty scopes, administrator roles, AI denial, new draft filter validation 
     401,
     'UNAUTHORIZED',
   );
+  const spec = await json(await f.get('/api/docs-json'));
+  assert.deepEqual(
+    spec.paths['/api/admin/orders'].get.parameters.find(
+      (parameter) => parameter.name === 'statusGroup',
+    ).schema.enum,
+    ['COLLECTING', 'notPaid', 'PAID', 'ACCEPTED', 'SUBMISSION_FAILED', 'CANCELLED'],
+  );
+  assert.equal(spec.components.schemas.AdminOrderStatusCountsDto.properties.accepted.minimum, 0);
+  assert.ok(spec.components.schemas.AdminOrderStatusCountsDto.required.includes('accepted'));
   for (const query of [
     { organizationSeq: 0 },
     { from: '2096-01-02T00:00:00Z', to: '2096-01-01T00:00:00Z' },

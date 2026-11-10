@@ -2,7 +2,7 @@
 
 2026-11-05 갱신. 백엔드 변경만 포함하며 `ai/`는 수정하지 않았다. 팀원 작성 AI 코드는 사용자 결정에 따라 담당자에게 인계한다.
 
-이번 인계의 필수 변경은 DIR-01 요청의 `Authorization: Bearer <AI_BUSINESS_TOKEN>`과 정규화된 q 1~100자 처리다. 관리자 쿠키만으로 DIR-01을 호출할 수 없다. FE는 [별도 관리자 사원 검색](../../docs/api/company-members-search.md)으로 전환한다. 053의 기업 PIN 제거는 [과거 주문 호환·배포 절차](company-pin-retirement.md)를 따른다. 아래 과거 검증 결과는 이 변경의 검증 결과를 대신하지 않는다.
+AI의 DIR-01 요청은 기존 `Authorization: Bearer <AI_BUSINESS_TOKEN>`과 정규화된 q 1~100자 처리를 유지한다. 2026-11-10부터 관리자는 같은 DIR-01을 유효한 세션 쿠키로도 조회한다. 프론트는 [관리자 배송지 조회 명세](company-directory-admin-access.md)를 따르며, 사번·주소 없는 사원 조회에는 [별도 관리자 사원 검색](../../docs/api/company-members-search.md)을 유지한다. 053의 기업 PIN 제거는 [과거 주문 호환·배포 절차](company-pin-retirement.md)를 따른다. 아래 과거 검증 결과는 이번 관리자 인증 확장의 검증 결과를 대신하지 않는다.
 
 ## 데이터 기준
 

@@ -31,15 +31,18 @@ backend 모놀리식의 관리자 세션을 사용한다. 쓰기에는 기존 �
 | all | 조회 가능한 실제 주문 + INCOMPLETE 초안. 이관 원본 중복 제외 |
 | incomplete | INCOMPLETE 배송 초안. 원본 주문·고객·통화 삭제와 독립적인 초안 보관 기준 적용 |
 | notPaid | 결제 대기 주문 |
-| paid | PAID·SUBMITTING·ACCEPTED 주문 |
-| submissionFailed | SUBMITTING_FAILED·SUBMISSION_FAILED 주문 |
+| paid | PAID·SUBMITTING·SUBMITTING_FAILED 주문 |
+| accepted | ACCEPTED 주문 |
+| submissionFailed | SUBMISSION_FAILED 주문 |
 | cancelled | CANCELLED 주문 |
 
 `all`에 `incomplete`가 이미 포함되므로 두 값을 다시 더하지 않는다. `GET /api/admin/orders?statusGroup=COLLECTING`은 INCOMPLETE 초안만 조회하며 기존 단독 초안 목록도 유지한다. 통합 목록의 초안 행은 `draftSeq`가 있고 `orderSeq`가 예약번호다. 실제 주문 행은 `draftSeq=null`이다. 초안 상세·생성·수정 응답에는 별도 `reservedOrderSeq`를 제공한다.
 
+상태 그룹은 COLLECTING·notPaid·PAID·ACCEPTED·SUBMISSION_FAILED·CANCELLED의 6개다. 접수 완료 탭은 `statusGroup=ACCEPTED`·`statusCounts.accepted`를 사용한다. 자동 접수 재시도는 PAID 그룹으로 이동했으며 홈의 `pendingWork.submissionFailed`도 최종 실패만 집계한다. [변경 명세](order-status-groups.md)를 따른다.
+
 초안 목록에도 같은 `from`·`to`·`organizationSeq` 필터를 추가했다. 날짜는 초안 생성 시각 기준이며 시간대가 필요하다. 검색은 NFC·앞뒤 공백 제거 후 최대 200자이며 전화번호의 하이픈을 허용한다. 기존 AI 통화/고객 범위 검사는 유지한다. 미완료 숫자에서 이동할 때 같은 검색·기간·기업 조건을 전달한다.
 
-검색·기간·기업 범위에 실제 주문과 미완료 초안이 모두 없으면 모든 집계가 0이다. 선택 탭이 비었거나 페이지 범위를 벗어나 `data=[]`여도 다른 탭의 건수는 유지한다. 기존 프론트가 새 필드를 사용하지 않아도 기존 목록은 동일하게 조회할 수 있다.
+검색·기간·기업 범위에 실제 주문과 미완료 초안이 모두 없으면 모든 집계가 0이다. 선택 탭이 비었거나 페이지 범위를 벗어나 `data=[]`여도 다른 탭의 건수는 유지한다. 기존 PAID·SUBMISSION_FAILED 필터의 범위가 바뀌므로 프론트는 새 ACCEPTED 탭과 건수 연결을 함께 적용한다.
 
 ### 1단계 검증
 

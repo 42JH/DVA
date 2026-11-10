@@ -567,21 +567,27 @@ test('admin order screen validates only bounded screen filters and preserves str
   assert.equal(result.q, '한글');
   assert.equal(result.limit, 1);
   assert.equal(result.offset, 2);
-  assert.equal(
-    (
-      await pipe.transform(
-        { statusGroup: 'SUBMISSION_FAILED' },
-        { type: 'query', metatype: AdminOrderListQueryDto },
-      )
-    ).statusGroup,
+  for (const statusGroup of [
+    'COLLECTING',
+    'notPaid',
+    'PAID',
+    'ACCEPTED',
     'SUBMISSION_FAILED',
-  );
+    'CANCELLED',
+  ])
+    assert.equal(
+      (await pipe.transform({ statusGroup }, { type: 'query', metatype: AdminOrderListQueryDto }))
+        .statusGroup,
+      statusGroup,
+    );
   for (const patch of [
     { q: ['a'] },
     { q: 'x\0' },
     { q: 'x'.repeat(201) },
     { statusGroup: ['PAID'] },
     { statusGroup: 'SUBMITTING' },
+    { statusGroup: 'SUBMITTING_FAILED' },
+    { statusGroup: 'SUMBITTING' },
     { status: 'PAID' },
     { limit: '1.0' },
     { offset: '-1' },

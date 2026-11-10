@@ -14,6 +14,7 @@ AI 상담 성능 대시보드 GET 4개·고객 탭·현재/직전 활성 버전 
 
 - 프론트는 배포된 BE의 `/api`를 base path로 사용한다. 같은 origin이면 상대 경로 `/api/...`로 호출하고, 다른 origin이면 실제 환경 설정을 사용한다.
 - 관리자 인증은 HttpOnly `dva_session` 쿠키다. fetch는 `credentials: 'include'`. AI 서비스 토큰을 브라우저에 넣지 않는다.
+- 기업 공유 배송지 `GET /api/companies/search?q=...`도 같은 관리자 세션으로 조회한다. 기업·소속·고객 ACTIVE 및 주소가 있는 사원만 반환하며, [관리자 배송지 조회 명세](company-directory-admin-access.md)를 따른다. 사번·주소 없는 사원 검색 API는 별도로 유지한다.
 - 고객 확인·등록·상세·수정도 관리자 화면에서는 유효한 세션을 보낸다. 익명 호출은 지원하지 않는다. [S01 업무 토큰](ai-business-auth.md)은 AI 서버 전용이며 프론트 인증 방식은 유지한다.
 - 변경 요청은 허용된 Origin과 JSON Content-Type이 필요하다. 브라우저 Origin을 임의 값으로 덮어쓰지 않는다. 프론트 도메인은 서버 `CORS_ORIGINS`에 정확히 허용되어 있어야 한다. 이번 문서 작성으로 서버 CORS·nginx가 바뀌지는 않는다.
 - ACTIVE인 OPERATOR·SUPERVISOR·SYSTEM_ADMIN이 일반 업무를 사용한다. 관리자 계정 관리는 SYSTEM_ADMIN, 페르소나 편집·publish·AI 옵션은 SUPERVISOR·SYSTEM_ADMIN이다. 로그인하지 않았거나 계정이 비활성이면 해당 로그인/권한 처리를 수행한다.
@@ -177,7 +178,7 @@ source.onerror = () => {
 | SUBMISSION_FAILED | 자동 재시도 종료, 담당자 확인 |
 | CANCELLED         | 취소                          |
 
-화면 목록의 query는 `statusGroup`이다. `PAID` 탭은 PAID·SUBMITTING·ACCEPTED, `SUBMISSION_FAILED` 탭은 SUBMITTING_FAILED·SUBMISSION_FAILED를 포함한다. 그룹명과 각 행의 실제 status를 구분한다. 일반 주문 조회의 `status` 필터와도 섞지 않는다.
+화면 목록의 query는 `statusGroup`이다. 전체는 생략하고 COLLECTING·notPaid·PAID·ACCEPTED·SUBMISSION_FAILED·CANCELLED의 6개 그룹을 사용한다. `PAID`는 PAID·SUBMITTING·SUBMITTING_FAILED, `ACCEPTED`는 ACCEPTED, `SUBMISSION_FAILED`는 SUBMISSION_FAILED만 포함한다. `statusCounts.accepted`를 접수 완료 탭 건수로 사용하며 기존 `paid`·`submissionFailed`도 새 그룹 기준이다. 각 행의 실제 status는 유지하며 일반 주문 조회의 `status` 필터와도 섞지 않는다. [변경 명세](order-status-groups.md)를 따른다.
 
 디버 요청은 최대 10초, 첫 전송부터 10분 동안 최소 1분 간격으로 BE가 자동 재시도한다. 프론트의 refresh·재호출은 이 기한을 연장하지 않는다. 자동 재시도 중 매분 수동 API를 반복 호출하지 않는다. 명시적 재시도 버튼은 `POST /api/admin/orders/{id}/retry`이며 현재 상태를 재조회하고 409·처리 중을 구분한다. 수동 재시도도 자동 기한을 새로 열지 않는다. ACCEPTED만 접수 성공이다.
 

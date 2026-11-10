@@ -2,6 +2,8 @@
 
 최종 홈 화면의 오늘 주문·통화 건수와 최대 11개 미리보기는 [프론트 QA 연동 명세](docs/frontend-qa-api.md)를 따른다. 주문 전체는 실제 주문과 유효한 미완료 배송 단건 초안을 함께 반환한다. 미완료의 24시간·최신 확정 통화 조건은 [만료 명세](docs/incomplete-expiry-latest-call.md)를 따른다. 미답변 질문의 정확한 발화 연결은 현행 보장 범위에 포함하지 않는다. [후속 작업·검증 기록](docs/final-wireframe-follow-up.md)을 함께 확인한다.
 
+관리자 주문 목록은 [6개 상태 그룹](docs/order-status-groups.md)을 따른다. PAID는 PAID·SUBMITTING·SUBMITTING_FAILED, ACCEPTED는 접수 완료, SUBMISSION_FAILED는 최종 실패만 조회한다. 응답에 statusCounts.accepted를 추가하며 홈의 접수 실패 건수도 최종 실패 기준이다. 실제 주문 상태 8개와 결제·디버 전송은 유지한다.
+
 API 성능 개선은 [계획·동일 결과 검증·측정 기록](docs/api-performance-optimization.md)을 따른다. 응답·기능·오류·권한·보관 기준을 유지하며, 관리자 주문 목록의 배송상세 JSON과 통화 목록의 recordedAt은 페이지 선택 후 해당 행만 계산한다. 홈의 AI 통계 4개는 대상 통화 조회를 공유하며 개별 통계 API와 같은 값을 반환한다. 페르소나 목록·상세는 기존 버전·초안·프롬프트를 유지하면서 현재 페이지의 상세만 구성한다. 추가 migration·환경변수는 없다.
 
 프론트 QA 반영 작업은 [API 계약·검증 기록](docs/frontend-qa-api.md)을 따른다. 관리자 주문 목록은 기존 목록 필드에 같은 검색·기간·기업 조건의 statusCounts를 추가하며 미완료는 INCOMPLETE 배송 초안 목록으로 연결한다. GET /api/dashboard/home은 처리할 일·최대 5개 미리보기·기존 AI 통계 4개를 하나의 조회 스냅샷으로 제공한다. DELETE /api/companies는 organizationSeqs 배열 1~100개를 전체 성공·실패 단위로 처리하고 기존 단건 URL도 유지한다. 추가 migration은 없다.
@@ -68,7 +70,7 @@ AI 고객 기본 주소 PATCH는 `call_session_seq`로 진행 중 본인 통화�
 
 통화별 AI 요약은 [ANL-01](../docs/api/call-analysis.md)을 따른다. `isNewCustomer`, `registeredParcelCount`, `faqAnswerCount`, `orderLookupCount`, `cancelledParcelCount`, `hasHandoffRequest`를 추가하고 실제 사용 `aiPersonaVersionSeq`도 AI가 전달한다. 접수·취소는 배송 상세 기준이며 접수에 결제 대기를 포함한다. 백엔드는 검증·저장·조회만 담당한다. 새 앱 실행 전에 migration 041·042를 적용한다. 042는 대표 분류 result를 삭제하고 기존 재전송 해시를 갱신하므로 기존 백엔드 중지·백업 후 전환한다. AI의 result 전송·프론트의 analysis.result 표시와 result 목록 필터를 제거해야 한다. 과거 요약은 null, result를 제거한 동일 재전송은 204, 다른 최종값은 409이며 프론트는 기존 통화 목록·상세의 analysis에서 조회한다.
 
-기업 공유 배송지는 활성 기업 사원의 현재 고객 주소로 조회하며 DIR-01은 AI_BUSINESS_TOKEN Bearer 전용이다. 관리자 상단바는 세션 전용 [사원 검색](../docs/api/company-members-search.md)을 사용하며 주소 없는 사원과 선택적 비활성 검색을 지원한다. 두 검색 q는 정규화 후 1~100자다. 기업 PIN API는 폐기하며 053 migration으로 company_pins를 제거한다. 개인 PIN·과거 주문 주소/COMPANY 논리 참조·감사는 보존하고 companyPins는 빈 배열로 유지한다. [기업 검색 계약](../docs/api/company-directory.md), [제거·배포·복구 안내](docs/company-pin-retirement.md), [AI 인계](docs/company-address-directory-handoff.md)를 따른다. AI/FE 코드·운영 배포는 별도이며 053 없는 구버전 이미지로 단독 복귀하지 않는다.
+기업 공유 배송지는 활성 기업 사원의 현재 고객 주소로 조회하며 DIR-01은 활성 관리자 세션 또는 기존 AI_BUSINESS_TOKEN Bearer를 허용한다. [관리자 배송지 조회 명세](docs/company-directory-admin-access.md)를 따른다. 관리자 상단바는 세션 전용 [사원 검색](../docs/api/company-members-search.md)을 사용하며 주소 없는 사원과 선택적 비활성 검색을 지원한다. 두 검색 q는 정규화 후 1~100자다. 기업 PIN API는 폐기하며 053 migration으로 company_pins를 제거한다. 개인 PIN·과거 주문 주소/COMPANY 논리 참조·감사는 보존하고 companyPins는 빈 배열로 유지한다. [기업 검색 계약](../docs/api/company-directory.md), [제거·배포·복구 안내](docs/company-pin-retirement.md), [AI 인계](docs/company-address-directory-handoff.md)를 따른다. AI/FE 코드·운영 배포는 별도이며 053 없는 구버전 이미지로 단독 복귀하지 않는다.
 
 통화 고객 번호는 nullable 논리 참조로 저장한다. 고객이 없어도 통화를 보존하며 전화번호 변경 후에도 통화·미답변의 고객 연결을 유지한다. 새 앱 전에 migration 040이 필요하다. 기존 데이터 보완과 연동 범위는 [통화 고객 연결](docs/call-customer-reference.md)을 따른다.
 

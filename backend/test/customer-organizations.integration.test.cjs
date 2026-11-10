@@ -265,6 +265,7 @@ test('admin order company changes use current membership with matching filter, p
         incomplete: 0,
         notPaid: 0,
         paid: 0,
+        accepted: 0,
         submissionFailed: 0,
         cancelled: 0,
       },
