@@ -6,6 +6,7 @@ import { ApiError } from '@/shared/api/client'
 import { useSession } from '@/shared/auth/useSession'
 import {
   DEFAULT_VOICE_LABEL,
+  PROMPT_SECTIONS,
   SPEED_CHOICE,
   SPEED_LABEL,
   VERSION_TAG,
@@ -22,6 +23,7 @@ import {
   requestApply,
   type Persona,
   type PersonaVersion,
+  type PromptKey,
 } from '@/features/persona/api/personaApi'
 
 type PanelTab = 'persona' | 'history'
@@ -55,7 +57,7 @@ export interface VersionItem {
 interface PromptView {
   tag: string // 'v7 · 저장됨' · 'v6 · 적용 중' · 'v4'
   subtitle: string // '빠른 접수형 · 10.30 김지훈'
-  lines: { no: number; text: string; heading: boolean }[] // '# '로 시작하는 줄 = 굵게
+  sections: { key: PromptKey; group: string | null; sub: boolean; title: string; text: string }[] // 고정 제목 + 본문(마크다운)
   canEdit: boolean // [수정] · [음성 세부 조절] — 맨 위 버전 · 적용본을 볼 때만 (지난 버전은 보기만)
   compareLabel: string | null // 'v4와 비교' — 맨 위가 적용 안 된 새 버전(저장됨)일 때만
 }
@@ -105,15 +107,21 @@ interface CompareView {
   baseTag: string // '적용 중' · '마지막 적용'
   target: string // 'v7'
   targetTag: string // '저장됨' · '적용 대기'
-  removed: number // '빠진 줄 2'
+  removed: number // '빠진 줄 2' — 여섯 칸 합
   added: number // '더한 줄 3'
-  rows: {
-    key: string
-    kind: 'same' | 'del' | 'add'
-    from: number | null
-    to: number | null
-    text: string
-    heading: boolean
+  sections: {
+    key: PromptKey
+    group: string | null
+    sub: boolean
+    title: string
+    changed: boolean // 이 칸에 빠진 줄 · 더한 줄이 있음
+    rows: {
+      key: string
+      kind: 'same' | 'del' | 'add'
+      from: number | null // 줄 번호는 칸 안에서 1부터
+      to: number | null
+      text: string
+    }[]
   }[]
 }
 
@@ -187,15 +195,25 @@ export function usePersonaPage() {
   const canCompare = !!latest && !!applied && latest.version > applied.version
   const compare = (): CompareView | null => {
     if (!comparing || !persona || !canCompare) return null
-    const rows = lineDiff(applied.prompt.split('\n'), latest.prompt.split('\n'))
+    // 칸마다 따로 비교 — 한 칸의 줄이 다른 칸 줄과 짝지어지지 않게 (11/10 칸별 비교)
+    const sections = PROMPT_SECTIONS.map((s) => {
+      const rows = lineDiff(applied.prompt[s.key].split('\n'), latest.prompt[s.key].split('\n'))
+      return {
+        ...s,
+        changed: rows.some((r) => r.kind !== 'same'),
+        rows: rows.map((r, i) => ({ ...r, key: String(i) })),
+      }
+    })
+    const count = (kind: 'del' | 'add') =>
+      sections.reduce((n, s) => n + s.rows.filter((r) => r.kind === kind).length, 0)
     return {
       base: `v${applied.version}`,
       baseTag: persona.inUse ? '적용 중' : '마지막 적용',
       target: `v${latest.version}`,
       targetTag: VERSION_TAG[latest.status]?.label ?? '',
-      removed: rows.filter((r) => r.kind === 'del').length,
-      added: rows.filter((r) => r.kind === 'add').length,
-      rows: rows.map((r, i) => ({ ...r, key: String(i), heading: r.text.startsWith('# ') })),
+      removed: count('del'),
+      added: count('add'),
+      sections,
     }
   }
 
@@ -412,9 +430,7 @@ function toPromptView(
   return {
     tag: tag ? `v${v.version} · ${tag.label}` : `v${v.version}`,
     subtitle: [p.name, `${fmtShortDate(v.savedAt)} ${v.author}`.trim()].join(' · '),
-    lines: v.prompt
-      .split('\n')
-      .map((text, i) => ({ no: i + 1, text, heading: text.startsWith('# ') })),
+    sections: PROMPT_SECTIONS.map((s) => ({ ...s, text: v.prompt[s.key] })),
     canEdit,
     // 맨 위(저장됨)를 볼 때만 '적용본과 비교' — 부르는 쪽이 맨 위일 때만 compareWith를 줌
     compareLabel: compareWith !== null ? `${withGwa(compareWith)} 비교` : null,

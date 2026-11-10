@@ -14,12 +14,24 @@ export interface VoiceSettings {
   waitTime: WaitTime
 }
 
+// 프롬프트 여섯 칸 (백엔드 59948ac, 11/09) — 서버가 칸별로 저장하고 promptText는 합친 읽기 전용이라 안 씀
+// 순서 = 화면 순서(보기 · 수정 · 비교). 제목 문구는 labels.ts
+export const PROMPT_KEYS = [
+  'role',
+  'personality',
+  'tone',
+  'speedInstruction',
+  'backchannel',
+  'interruption',
+] as const
+export type PromptKey = (typeof PROMPT_KEYS)[number]
+export type PromptFields = Record<PromptKey, string>
+
 /** 서버 버전 (PersonaVersionDto) — 쓰는 칸만 */
-export interface PersonaVersionDto {
+export interface PersonaVersionDto extends PromptFields {
   aiPersonaVersionSeq: number
   version: number
   name: string
-  promptText: string
   voiceId: string | null
   speakingRate: number | null
   turnWaitLevel: WaitTime
@@ -31,11 +43,10 @@ export interface PersonaVersionDto {
 }
 
 /** 서버 초안 (PersonaDraftDto) — 쓰는 칸만. 번호가 없음 (확정하면 HEAD + 1) */
-export interface PersonaDraftDto {
+export interface PersonaDraftDto extends PromptFields {
   draftRevision: string // 저장마다 바뀌는 UUID — 다음 저장 · 확정의 expectedDraftRevision
   baseVersion: number // 초안을 시작한 HEAD 번호
   name: string
-  promptText: string
   voiceId: string | null
   speakingRate: number | null
   turnWaitLevel: WaitTime
@@ -65,7 +76,7 @@ export interface PersonaVersion {
   changes: VersionChange // 바로 앞 버전과 무엇이 다른지 (요약 문장은 화면 층에서)
   author: string // 확인할 수 없는 옛 작성자는 ''
   savedAt: string // 'YYYY-MM-DD' (화면 시간대)
-  prompt: string
+  prompt: PromptFields
   voice: VoiceSettings
 }
 
@@ -104,6 +115,23 @@ export function toRate(speed: Speed, range: { min: number; max: number } | null)
   return range ? Math.min(range.max, Math.max(range.min, RATE[speed])) : RATE[speed]
 }
 
+// DTO에서 여섯 칸만 — 통째로 넘기면 다른 서버 칸까지 prompt에 섞임
+export const toPrompt = ({
+  role,
+  personality,
+  tone,
+  speedInstruction,
+  backchannel,
+  interruption,
+}: PromptFields): PromptFields => ({
+  role,
+  personality,
+  tone,
+  speedInstruction,
+  backchannel,
+  interruption,
+})
+
 const toVoice = (v: PersonaVersionDto): VoiceSettings => ({
   voice: v.voiceId ?? '',
   speed: toSpeed(v.speakingRate),
@@ -115,7 +143,7 @@ const draftRow = (d: PersonaDraftDto, headVersion: number): PersonaVersionDto =>
   aiPersonaVersionSeq: 0, // 서버 버전이 아님 — 적용은 확정(POST versions)부터
   version: headVersion + 1,
   name: d.name,
-  promptText: d.promptText,
+  ...toPrompt(d),
   voiceId: d.voiceId,
   speakingRate: d.speakingRate,
   turnWaitLevel: d.turnWaitLevel,
@@ -141,7 +169,7 @@ export function toVersions(
     const before = prev && toVoice(prev)
     const changes: VersionChange = {
       first: !prev,
-      prompt: !!prev && prev.promptText !== v.promptText,
+      prompt: !!prev && PROMPT_KEYS.some((k) => prev[k] !== v[k]),
       voice: before && before.voice !== voice.voice ? [before.voice, voice.voice] : null,
       speed: before && before.speed !== voice.speed ? [before.speed, voice.speed] : null,
       waitTime:
@@ -168,7 +196,7 @@ export function toVersions(
       changes,
       author: v.createdByAdminUserName ?? '',
       savedAt: ymd(new Date(v.createdAt)),
-      prompt: v.promptText,
+      prompt: toPrompt(v),
       voice,
     }
   })

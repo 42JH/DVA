@@ -12,6 +12,7 @@ import {
   type PersonaDraftDto,
   type PersonaDto,
   type PersonaVersionDto,
+  type PromptFields,
   type VoiceSettings,
 } from './personaMap'
 import {
@@ -24,10 +25,13 @@ import {
 } from './personaDemo'
 
 export { PERSONA_DEMO }
+export { PROMPT_KEYS } from './personaMap'
 
 export type {
   Persona,
   PersonaVersion,
+  PromptFields,
+  PromptKey,
   Speed,
   VersionChange,
   VersionStatus,
@@ -105,14 +109,14 @@ export async function saveDraft(
   input: {
     expectedVersion: number // HEAD 번호
     expectedDraftRevision: string | null
-    prompt: string | null // null = 안 바뀜
+    prompt: Partial<PromptFields> // 바뀐 칸만 (서버는 생략한 칸을 유지)
     voice: Partial<VoiceSettings> // 바뀐 것만
     rateRange: AiOptions['rateRange']
   },
 ): Promise<void> {
   const { voice, speed, waitTime } = input.voice
   const changed = {
-    ...(input.prompt !== null && { promptText: input.prompt }),
+    ...input.prompt,
     ...(voice !== undefined && { voiceId: voice || null }),
     ...(speed !== undefined && { speakingRate: toRate(speed, input.rateRange) }),
     ...(waitTime !== undefined && { turnWaitLevel: waitTime }),
@@ -158,13 +162,13 @@ export async function applyLatest(
 export async function createPersona(input: {
   code: string
   name: string
-  prompt: string
+  prompt: PromptFields // 서버는 여섯 칸 모두 필수
   voice: VoiceSettings
   rateRange: AiOptions['rateRange']
 }): Promise<number> {
   const body = {
     name: input.name,
-    promptText: input.prompt,
+    ...input.prompt,
     voiceId: input.voice.voice || null,
     speakingRate: toRate(input.voice.speed, input.rateRange),
     turnWaitLevel: input.voice.waitTime,

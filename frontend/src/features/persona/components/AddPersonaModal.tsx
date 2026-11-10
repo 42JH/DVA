@@ -3,7 +3,7 @@ import { useAddPersona } from '@/features/persona/hooks/useAddPersona'
 
 // 07 페르소나 추가 창 — Figma에 화면이 없어 주문 추가 · 음성 세부 조절 창과 같은 모양 (라벨 왼쪽 120)
 // 11/05 새 디자인: 새 창(Dialog — 칸도 새 모양) · 버튼 big · [추가] 파랑
-// 이름 · 시스템 프롬프트 · 음성 → [추가] = v1 저장됨 (통화엔 아직 안 씀). API의 code는 자동 (useAddPersona)
+// 이름 · 시스템 프롬프트(고정 제목 여섯 칸, 11/10) · 음성 → [추가] = v1 저장됨 (통화엔 아직 안 씀). API의 code는 자동 (useAddPersona)
 export function AddPersonaModal({
   onDone,
   onClose,
@@ -22,9 +22,9 @@ export function AddPersonaModal({
       onClose={onClose}
       footer={
         <>
-          {vm.submitError && (
+          {(vm.emptyNotice ?? vm.submitError) && (
             <p role="alert" className="min-w-0 text-body text-danger">
-              {vm.submitError}
+              {vm.emptyNotice ?? vm.submitError}
             </p>
           )}
           <Button big className="ml-auto" onClick={onClose}>
@@ -44,12 +44,16 @@ export function AddPersonaModal({
           value={vm.name}
           onChange={(e) => vm.setName(e.target.value)}
         />
-        <TextArea
-          label="시스템 프롬프트"
-          placeholder={'# 역할\n너는 디버 택배 전화 접수 AI다.'}
-          value={vm.prompt}
-          onChange={(e) => vm.setPrompt(e.target.value)}
-        />
+        <h3 className="mt-2 text-body font-bold">시스템 프롬프트</h3>
+        {vm.sections.map((s) => (
+          <TextArea
+            key={s.key}
+            label={s.group ? `${s.group} · ${s.title}` : s.title}
+            value={s.value}
+            onChange={(e) => vm.setField(s.key, e.target.value)}
+            className="[field-sizing:content] min-h-20!" // 글만큼 늘어남 (Chrome · Edge)
+          />
+        ))}
         <h3 className="mt-2 text-body font-bold">음성</h3>
         <div className="w-[360px]">
           <SelectField

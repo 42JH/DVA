@@ -2,15 +2,27 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import { useBlocker } from 'react-router'
 import { ApiError } from '@/shared/api/client'
-import { DRAFT_TAG, unsupportedText } from '@/features/persona/labels'
-import { personaQueries, saveDraft, type VoiceSettings } from '@/features/persona/api/personaApi'
+import {
+  DRAFT_TAG,
+  emptyPromptNotice,
+  PROMPT_SECTIONS,
+  unsupportedText,
+} from '@/features/persona/labels'
+import {
+  personaQueries,
+  PROMPT_KEYS,
+  saveDraft,
+  type PromptFields,
+  type PromptKey,
+  type VoiceSettings,
+} from '@/features/persona/api/personaApi'
 import { useVoiceOptions } from '@/features/persona/hooks/useVoiceOptions'
 
 /** 수정 창이 무엇을 고치는지 — 늘 그 페르소나의 최신 버전에서 시작: 초안이 있으면 초안, 없으면 HEAD (11/02 결정) */
 export interface EditTarget {
   personaSeq: number
   personaName: string
-  prompt: string // 시작 글
+  prompt: PromptFields // 시작 글 (여섯 칸)
   voice: VoiceSettings // 시작 음성 설정
   basedOn: number // HEAD 번호 = 서버 expectedVersion
   draftRevision: string | null // 초안의 UUID = 서버 expectedDraftRevision (초안이 없으면 null). 그새 누가 저장했으면 409
@@ -29,13 +41,14 @@ const RATE: Record<VoiceSettings['speed'], number> = { SLOW: 0.85, NORMAL: 1, FA
 export function usePromptEditor(target: EditTarget, onDone: (savedVersion?: number) => void) {
   const qc = useQueryClient()
   const options = useVoiceOptions()
-  const [text, setText] = useState(target.prompt)
+  const [prompt, setPrompt] = useState(target.prompt)
   const [voice, setVoice] = useState(target.voice)
   const [voiceOpen, setVoiceOpen] = useState(target.voiceFirst)
-  const [caretLine, setCaretLine] = useState<number | null>(null) // 커서가 있는 줄 (줄 번호 남색)
   const [askingCancel, setAskingCancel] = useState(false)
   const afterLeave = useRef<(() => void) | undefined>(undefined) // 확인 창에서 [나가기]를 누르면 할 일 (패널에서 고른 페르소나 · 버전 보기)
-  const promptChanged = text !== target.prompt
+  const changedKeys = PROMPT_KEYS.filter((k) => prompt[k] !== target.prompt[k])
+  const promptChanged = changedKeys.length > 0
+  const emptyNotice = emptyPromptNotice(prompt)
   const voiceChanged =
     voice.voice !== target.voice.voice ||
     voice.speed !== target.voice.speed ||
@@ -48,7 +61,7 @@ export function usePromptEditor(target: EditTarget, onDone: (savedVersion?: numb
       saveDraft(target.personaSeq, {
         expectedVersion: target.basedOn,
         expectedDraftRevision: target.draftRevision,
-        prompt: promptChanged ? text : null,
+        prompt: Object.fromEntries(changedKeys.map((k) => [k, prompt[k]])), // 바뀐 칸만
         voice: {
           ...(voice.voice !== target.voice.voice && { voice: voice.voice }),
           ...(voice.speed !== target.voice.speed && { speed: voice.speed }),
@@ -85,13 +98,14 @@ export function usePromptEditor(target: EditTarget, onDone: (savedVersion?: numb
   return {
     tag: `v${target.saveTo} · ${DRAFT_TAG}`,
     subtitle: `${target.personaName} · v${target.basedOn}에서 시작`,
-    text,
-    setText,
-    lineCount: text.split('\n').length,
-    caretLine,
-    // 커서 위치(글자 번호) → 몇째 줄인지. 입력 직후엔 아직 이전 글이 state에 있어서, 방금 바뀐 글을 같이 받음
-    onCaret: (value: string, pos: number) => setCaretLine(value.slice(0, pos).split('\n').length),
-    clearCaret: () => setCaretLine(null),
+    // 칸마다 고정 제목 + 입력칸 (11/10 — 제목은 못 고침, 줄 번호 없음)
+    sections: PROMPT_SECTIONS.map((s) => ({
+      ...s,
+      value: prompt[s.key],
+      empty: prompt[s.key].trim() === '',
+    })),
+    setField: (key: PromptKey, value: string) => setPrompt((p) => ({ ...p, [key]: value })),
+    emptyNotice, // 저장이 막힌 이유 — 고친 게 있을 때만 화면에 보이면 됨
 
     // 음성 세부 조절 창
     voiceOpen,
@@ -120,7 +134,7 @@ export function usePromptEditor(target: EditTarget, onDone: (savedVersion?: numb
     },
 
     saveLabel: mutation.isPending ? '저장 중…' : `저장 → v${target.saveTo}`,
-    canSave: dirty && text.trim() !== '' && !options.isPending && !mutation.isPending,
+    canSave: dirty && !emptyNotice && !options.isPending && !mutation.isPending,
     save: () => mutation.mutate(),
     saveError: !mutation.error
       ? null
