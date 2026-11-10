@@ -24,7 +24,7 @@ from app.domain.parcel_items import (ItemIssue, contextual_keyword, excluded_evi
                                      size_issues, supported_box_correction, unclassified_mentions)
 from app.domain.pickup import check_pickup, default_pickup, describe, rule_of
 from app.domain.rules import normalize_phone, parse_pickup
-from app.domain.state import BoxProposal, Items, Source
+from app.domain.state import BoxProposal, ConversationState, Items, Source
 from app.domain.store import hold_items, open_for_edit
 from app.observability.trace import observe_latency
 from app.policy.model import InputLimits, Policy
@@ -35,6 +35,8 @@ from app.tools.outcome import ToolOutcome, state_summary
 TEXT = ("sender_name", "sender_address_detail", "receiver_name", "receiver_address_detail")
 ADDRESSES = ("sender_address", "receiver_address")
 COUNTS = ("document_count", "small_box_count", "medium_box_count", "big_box_count")
+BOX_COUNTS = COUNTS[1:]
+CountField = Literal["document_count", "small_box_count", "medium_box_count", "big_box_count"]
 
 
 class ItemEvidence(Args):
@@ -59,17 +61,26 @@ class RecordArgs(Args):
     receiver_phone: str | None = Field(None, max_length=40, description="들은 그대로(한글 숫자 가능)")
     receiver_address: str | None = Field(None, max_length=120, description="받는 곳 기본주소(도로명·지번). '○○로 보낼게요'의 ○○")
     receiver_address_detail: str | None = Field(None, max_length=60, description="받는 곳 상세주소. 없다고 하면 빈 문자열")
-    document_count: int | None = Field(None, ge=0, description="서류 봉투 수. 물품은 지금 보낼 전체 구성을 넣는다")
+    document_count: int | None = Field(None, ge=0, description="서류 봉투 수. 생략하면 기존 값을 유지하고 0은 제외한다")
     small_box_count: int | None = Field(None, ge=0, description="소형 박스 수")
     medium_box_count: int | None = Field(None, ge=0, description="중형 박스 수")
     big_box_count: int | None = Field(None, ge=0, description="대형 박스 수")
-    box_suggestion: BoxSuggestion | None = Field(None, description="박스 규격을 직접 말하지 않았을 때 제안할 후보. 확정 수량과 함께 넣지 않는다")
+    add_item_counts: list[CountField] | None = Field(None, max_length=4, description="수량을 더할 항목 이름만 넣는다. 각 항목의 숫자 필드에 추가할 개수를 넣는다")
+    box_suggestion: BoxSuggestion | None = Field(None, description="박스 규격을 직접 말하지 않았을 때 추가할 박스 후보")
+    box_size_needed: str | None = Field(None, min_length=1, max_length=200, description="박스 규격·개수를 더 확인해야 하는 물품의 고객 발화 원문")
+    omit_unconfirmed_box: str | None = Field(None, min_length=1, max_length=200, description="확인 중인 추가 박스만 제외해 달라는 고객 발화 원문")
     item_evidence: list[ItemEvidence] | None = Field(None, max_length=12, description="고객이 언급한 제한 품목·포장·규격 초과의 근거")
     omit_blocked_parcel: str | None = Field(None, max_length=200, description="문제 택배 전체를 빼 달라는 고객 발화 원문")
     item_price: int | None = Field(None, description="물품 가액(원). 예: 만 원 → 10000")
     client_comment: str | None = Field(None, max_length=100, description="배송 요청 사항(고객이 말했을 때만)")
     pickup_at: str | None = Field(None, max_length=40, description="고객이 수거 시각을 바꿀 때만. 한국 시간 ISO 8601"
                                   "(예: 2026-11-05T10:00:00+09:00). 오늘·내일은 지시문의 현재 시각 기준")
+
+    @model_validator(mode="after")
+    def check_additions(self):
+        if any(not getattr(self, name) for name in self.add_item_counts or ()):
+            raise ValueError("추가할 물품 항목에는 1개 이상의 추가 수량이 필요합니다")
+        return self
 
 
 @lru_cache(maxsize=16)
@@ -190,7 +201,8 @@ async def record_fields(ctx: ToolContext, args: RecordArgs, *, expected_box: Box
             _apply_address(ctx, addr, r, given, facts, needs)
         for name in invalid_fields(needs):
             s.record_invalid(name, next(n["reason"] for n in needs if n["field"] == name))
-        changed = bool(facts["recorded"] or facts.get("blocked_parcel_omitted") or facts.get("box_proposal"))
+        changed = bool(facts["recorded"] or facts.get("blocked_parcel_omitted") or facts.get("box_proposal")
+                       or facts.get("box_request_removed"))
         if changed:
             s.awaiting_fix = False
         nothing = not changed and not needs
@@ -225,7 +237,8 @@ def _check_items(ctx: ToolContext, args: RecordArgs, counts: dict, facts: dict, 
                 and (ctx.item_utterance is None or e.quote.strip() in text)]
     issues = {key: replace(issue, utterance_id=utterance_id)
               for key, issue in unclassified_mentions(policy, text).items()}
-    if not (counts or evidence or issues or args.omit_blocked_parcel or args.box_suggestion):
+    if not (counts or evidence or issues or args.omit_blocked_parcel or args.box_suggestion
+            or args.box_size_needed or args.omit_unconfirmed_box):
         return
     if utterance_id and utterance_id < s.latest_item_utterance_id:
         needs.append({"field": "items", "reason": "RESULT_SUPERSEDED"})
@@ -302,33 +315,97 @@ def _check_items(ctx: ToolContext, args: RecordArgs, counts: dict, facts: dict, 
     if s.unassigned_item_issues and draft.empty():
         needs.append({"field": "items", "reason": "ITEM_PARCEL_UNCLEAR"})
         return
-    items = Items(**counts)
-    if items.any() and "format" not in issues:
+    if any(counts.values()) and "format" not in issues:
         draft.item_issues.pop("format", None)
     if issues:
         hold_items(s, issues)
-    if items.any() and not any(key in draft.item_issues for key in ("format", "side_cm", "weight_kg")):
-        draft.box_proposal = None
-        s.record("items", items)
-        facts["recorded"].append("items")
+    box_counts = any(counts.get(name, 0) for name in BOX_COUNTS)
+    if counts and not any(key in draft.item_issues for key in ("format", "side_cm", "weight_kg")):
+        _record_item_counts(ctx, args, counts, facts, utterance_id)
+    omit_box = (not box_counts and (draft.box_size_pending or "box_count" in draft.item_issues)
+                and _quoted(ctx, args.omit_unconfirmed_box))
+    if omit_box:
+        draft.item_issues.pop("box_count", None)
+        _set_box_request(s, pending=False)
+        facts["box_request_removed"] = True
     if draft.item_issues:
         needs.extend({"field": "items", "reason": issue.code, "detail": issue.guidance}
                      for issue in draft.item_issues.values())
-    elif args.box_suggestion and not counts and not draft["items"].valid:
+        return
+    if args.box_suggestion and not box_counts and not omit_box:
         suggestion = args.box_suggestion
-        quote = suggestion.quote.strip()
-        if (not s.unassigned_item_issues and quote and suggestion.count <= ctx.policy.input_limits.box_total_max
-                and (not text or quote in text)):
-            proposal = draft.box_proposal = BoxProposal(suggestion.size, suggestion.count, ctx.clock())
-            s.bump()
+        current = draft["items"].value or Items()
+        if not s.unassigned_item_issues and _quoted(ctx, suggestion.quote):
+            if _box_total(current) + suggestion.count > ctx.policy.input_limits.box_total_max:
+                _set_box_request(s, pending=True)
+                needs.append({"field": "items", "reason": "ITEM_BOX_LIMIT"})
+                return
+            proposal = BoxProposal(suggestion.size, suggestion.count, ctx.clock())
+            _set_box_request(s, pending=True, proposal=proposal)
             facts["box_proposal"] = {"label": proposal.label}
         else:
-            draft.box_proposal = None
             needs.append({"field": "items", "reason": "ITEM_UNSPECIFIED"})
-    elif (counts and not items.any()) or not draft["items"].valid:
+    elif not box_counts and not omit_box and _quoted(ctx, args.box_size_needed):
+        _set_box_request(s, pending=True)
+    if draft.box_size_pending and draft.box_proposal is None:
+        needs.append({"field": "items", "reason": "ITEM_BOX_SIZE_NEEDED"})
+    elif not draft.box_size_pending and not draft["items"].valid:
         needs.append({"field": "items", "reason": "ITEM_UNSPECIFIED"})
     elif resolved or dismissed:
+        if "items" not in facts["recorded"]:
+            facts["recorded"].append("items")
+
+
+def _quoted(ctx: ToolContext, quote: str | None) -> bool:
+    return bool(quote and quote.strip() and (ctx.item_utterance is None or quote.strip() in ctx.item_utterance[1]))
+
+
+def _set_box_request(state: ConversationState, *, pending: bool, proposal: BoxProposal | None = None) -> None:
+    draft = state.current
+    if draft.box_size_pending != pending or draft.box_proposal is not proposal:
+        draft.box_size_pending, draft.box_proposal = pending, proposal
+        if state.pending and state.pending.kind == "parcel":
+            state.pending = None
+            state.address_offer = None
+        state.bump()
+
+
+def _box_total(items: Items) -> int:
+    return sum(getattr(items, name) for name in BOX_COUNTS)
+
+
+def _record_item_counts(ctx: ToolContext, args: RecordArgs, counts: dict, facts: dict, utterance_id: int) -> None:
+    state, limits = ctx.state, ctx.policy.input_limits
+    draft = state.current
+    current = draft["items"].value or Items()
+    additions = set(args.add_item_counts or ())
+    changes = {name: value + (getattr(current, name) if name in additions else 0)
+               for name, value in counts.items()
+               if not (name in additions and utterance_id and draft.item_addition_turns.get(name) == utterance_id)}
+    items = replace(current, **changes)
+    exceeded = {}
+    if items.document_count > limits.document_max:
+        exceeded["document_count"] = ItemIssue("ITEM_DOCUMENT_LIMIT", f"서류는 최대 {limits.document_max}개입니다.")
+    if _box_total(items) > limits.box_total_max:
+        exceeded["box_count"] = ItemIssue("ITEM_BOX_LIMIT", f"박스 합계는 최대 {limits.box_total_max}개입니다.")
+    if exceeded:
+        hold_items(state, exceeded)
+        return
+    if "document_count" in changes:
+        draft.item_issues.pop("document_count", None)
+    if any(name in changes for name in BOX_COUNTS):
+        draft.item_issues.pop("box_count", None)
+    if any(changes.get(name, 0) for name in BOX_COUNTS):
+        _set_box_request(state, pending=False)
+    if not changes:
+        return
+    if items.any():
+        state.record("items", items)
         facts["recorded"].append("items")
+    else:
+        state.clear("items")
+    if utterance_id:
+        draft.item_addition_turns.update({name: utterance_id for name in additions & changes.keys()})
 
 
 def invalid_fields(needs: list[dict]) -> list[str]:

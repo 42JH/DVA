@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from app.domain.assess import assess
-from app.domain.state import ConversationState
+from app.domain.state import ConversationState, FieldStatus
 from app.policy.model import Policy
 
 Status = Literal["ok", "needs_input", "needs_choice", "needs_confirmation", "rejected", "unavailable", "unknown"]
@@ -38,5 +38,9 @@ def state_summary(state: ConversationState, policy: Policy) -> dict:
     fields = {}
     if state.current is not None:
         fields = {n: f.status.value for n, f in state.current.fields.items() if policy.fields[n].kind != "auto"}
-    return {"stage": a.stage, "fields": fields, "missing": list(a.missing), "can_proceed": a.readback_ready,
-            "parcels": len(state.parcels)}
+    summary = {"stage": a.stage, "fields": fields, "missing": list(a.missing), "can_proceed": a.readback_ready,
+               "parcels": len(state.parcels)}
+    if state.current and state.current.box_size_pending:
+        fields["items"] = FieldStatus.PENDING_CHOICE.value
+        summary["box_size_pending"] = True
+    return summary

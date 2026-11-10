@@ -109,13 +109,15 @@ class ParcelDraft:
     client_comment: str | None = None     # 묻지 않고, 말하면 기록
     item_issues: dict[str, ItemIssue] = field(default_factory=dict)
     box_proposal: BoxProposal | None = None  # 고객이 확인하기 전에는 물품 수량으로 보내지 않는다
+    box_size_pending: bool = False
+    item_addition_turns: dict[str, int] = field(default_factory=dict)
     client_parcel_id: str | None = None   # 같은 통화의 배송 초안과 연결하는 UUID
 
     def __getitem__(self, name: str) -> FieldState:
         return self.fields[name]
 
     def empty(self) -> bool:
-        return not self.item_issues and self.box_proposal is None and all(
+        return not self.item_issues and not self.box_size_pending and self.box_proposal is None and all(
             f.status == FieldStatus.EMPTY or f.source == Source.CALLER_ID for f in self.fields.values())
 
 
@@ -264,4 +266,5 @@ def draft_snapshot(draft: ParcelDraft) -> dict:
 
 def copy_draft(draft: ParcelDraft) -> ParcelDraft:
     return replace(draft, fields={k: replace(v) for k, v in draft.fields.items()},
-                   item_issues=draft.item_issues.copy(), box_proposal=None)
+                   item_issues=draft.item_issues.copy(), box_proposal=None,
+                   item_addition_turns=draft.item_addition_turns.copy())

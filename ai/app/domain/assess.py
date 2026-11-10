@@ -51,19 +51,17 @@ def assess(state: ConversationState, policy: Policy) -> Assessment:
     stages: dict[str, StageStatus] = {}
     missing: list[str] = []
     collecting = state.current is not None and not state.current.empty() or state.editing is not None
+    items_blocked = state.unassigned_item_issues or state.current and (
+        state.current.item_issues or state.current.box_size_pending)
     for s in policy.collect_stages():
         m, b = [], []
         for name in s.required:
             f = _field(state, name)
-            if f is None or not f.valid:
+            blocked = name == "items" and items_blocked
+            if blocked or f is None or not f.valid:
                 m.append(name)
-            if f is not None and f.status in (FieldStatus.INVALID, FieldStatus.PENDING_CHOICE):
+            if blocked or f is not None and f.status in (FieldStatus.INVALID, FieldStatus.PENDING_CHOICE):
                 b.append(name)
-        if "items" in s.required and (state.unassigned_item_issues or state.current and state.current.item_issues):
-            if "items" not in m:
-                m.append("items")
-            if "items" not in b:
-                b.append("items")
         stages[s.id] = StageStatus(s.id, not m, tuple(m), tuple(b))
         missing += m
 

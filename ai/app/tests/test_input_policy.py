@@ -41,7 +41,7 @@ def test_input_boundaries_are_enforced_by_executor(args, accepted):
     elif "item_price" in args:
         assert c.state.field_of("item_price").value == args["item_price"]
     else:
-        assert c.state.field_of("items").value == Items(**args)
+        assert c.state.field_of("items").value == Items(**({"small_box_count": 1} | args))
 
 
 def test_toml_change_reaches_prompts_session_schema_and_executor(tmp_path):

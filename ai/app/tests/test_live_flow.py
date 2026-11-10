@@ -469,11 +469,13 @@ def test_box_proposal_uses_separate_confirmation(answer):
         old = await run_tool(s.tools, "record_fields", json.dumps({"item_evidence": [
             {"rule": "format", "quote": "냉장고 하나", "status": "included"}]}), "unfounded-format")
         assert old["code"] == "ITEM_UNSPECIFIED" and not st.current.item_issues
+        st.record("items", Items(document_count=10))
         s.tools.item_utterance = (2, "신발 한 켤레 보내려고요")
         result = await run_tool(s.tools, "record_fields", json.dumps({"box_suggestion": {
             "size": "small", "count": 1, "quote": "신발 한 켤레"}}), "box-suggest")
         assert result["facts"]["box_proposal"]["label"] == "소형 박스 1개"
-        assert result["missing"] == ["items", "item_price"] and not st.current["items"].valid
+        assert result["missing"] == ["items", "item_price"] and result["box_size_pending"]
+        assert st.current["items"].value == Items(document_count=10)
         assert st.pending is None
         box = st.current.box_proposal
         questions = decision_questions(P, "item", box_label=box.label)
@@ -486,11 +488,11 @@ def test_box_proposal_uses_separate_confirmation(answer):
         await lf.apply(s, reply, question, {"box": (answer, 1.0)}, None, box=box)
         assert st.current.box_proposal is None and st.pending is None and not st.parcels
         if answer == "yes":
-            assert st.current["items"].value == Items(small_box_count=1)
+            assert st.current["items"].value == Items(document_count=10, small_box_count=1)
             assert any((e.get("data") or {}).get("content", {}).get("summary", {}).get("missing") == ["item_price"]
                        for e in s.events)
         else:
-            assert not st.current["items"].valid
+            assert st.current.box_size_pending and st.current["items"].value == Items(document_count=10)
             assert any((e.get("data") or {}).get("content", {}).get("box_proposal_declined") for e in s.events)
 
     run(scenario())

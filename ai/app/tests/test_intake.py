@@ -10,6 +10,7 @@ from app.calls.intake import IntakeService
 from app.calls.live import LiveFlow, Spoken
 from app.domain.confirm import issue_cancel_confirmation, issue_parcel_confirmation
 from app.domain.parcel_items import ItemIssue
+from app.domain.state import Items
 from app.domain.store import hold_items, open_for_edit
 from app.policy.render import decision_questions
 from app.tests.test_calls import until
@@ -45,7 +46,11 @@ def test_live_confirmation_saves_and_lookup_combines_both_sources(tmp_path):
     db.add_order(CALLER, "ACCEPTED", [("이영희", "이전 주소")])
 
     async def scenario():
-        pending = issue_parcel_confirmation(s.state, P, 100)
+        s.state.record("items", Items(document_count=10))
+        s.tools.clock = lambda: 100
+        combined = await run_tool(s.tools, "record_fields", '{"small_box_count": 1}', "mixed-items")
+        assert combined["facts"]["readback"]["items"] == {"document_count": 10, "small_box_count": 1}
+        pending = s.state.pending
         readback = Spoken(1, "접수 내용 확인 부탁드릴게요. 받는 분은", 3000, 4800, 101, 101)
         await lf.apply(s, Spoken(2, "네", 4000, 4200, 102, 102), readback,
                        {"confirm": ("yes", 0.98, {"yes": 0.98})}, pending.id)
@@ -83,7 +88,7 @@ def test_live_confirmation_saves_and_lookup_combines_both_sources(tmp_path):
         assert selected["status"] == "READY"
         assert selected["receiver_address"] == first["parcel"]["destination"]["roadAddress"]
         assert selected["sender_address"] == first["parcel"]["origin"]["roadAddress"]
-        assert selected["items"] == {"small_box_count": 1}
+        assert selected["items"] == {"document_count": 10, "small_box_count": 1}
         assert selected["item_price"] == 30000 and selected["shipping_fee"] > 0
         assert not any("phone" in key or "detail" in key for key in selected)
 
