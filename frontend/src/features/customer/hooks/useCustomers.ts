@@ -1,6 +1,6 @@
 // 고객 — 기업 · 개인 상관없이 모든 고객 (기업 피드백: 고객 관리 화면 · 개인 주소록 확인)
 // GET /customers (이름 부분 검색 · 전화번호 4자리 이상 부분 검색) · GET /customers/{id}/pins (개인 주소록). 고객 번호 내림차순, 한 쪽 개수는 고른 대로
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import {
   keepPreviousData,
   queryOptions,
@@ -134,7 +134,14 @@ export function useCustomer(seq: number) {
   const c = useQuery(customerOpts(seq))
   const pins = useQuery(pinsOpts(seq))
   const ctx = useQuery({ ...contextOpts(c.data?.phoneNumber ?? ''), enabled: !!c.data })
+  const [editing, setEditing] = useState(false) // 패널이 고객마다 key로 새로 그려져 고객을 바꾸면 풀림
   return {
+    dto: c.data, // 수정 폼의 원래 값
+    // 탈퇴 고객은 서버가 복구를 막고 화면도 보기 전용
+    editing: editing && !!c.data && c.data.status === 'ACTIVE',
+    canEdit: c.data?.status === 'ACTIVE',
+    startEdit: () => setEditing(true),
+    stopEdit: () => setEditing(false),
     c: c.data && {
       name: c.data.name,
       phone: fmtPhone(c.data.phoneNumber),
