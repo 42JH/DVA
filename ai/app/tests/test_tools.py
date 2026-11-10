@@ -358,7 +358,21 @@ def test_place_resolves_to_address_then_book_confirms_or_new_receiver(corrector,
     out = call(c, "find_destination", {"place": "구미시 인동9길 8"})
     assert out["code"] == "DEST_NEW_RECEIVER" and s.field_of("receiver_address").value == "경상북도 구미시 인동9길 8"
     # 핀과 같은 건물이면 그 받는 분을 확인
-    assert call(c, "find_destination", {"place": "구미시 인동9길 7-3"})["facts"]["labels"] == ["101호"]
+    assert call(c, "find_destination", {"place": "구미시 인동9길 7-3"})["facts"]["labels"] == ["박지점 구미시 y"]
+
+
+def test_pin_labels_name_and_region_then_detail():
+    from backend_client.order import pin_labels
+    from app.tools.lookup import _to_be
+    a = place("김철수", "경상북도 구미시 인동9길 22-1", detail="502호")
+    b = place("유민국", "경상북도 구미시 인동9길 22-1", detail="501호")
+    assert pin_labels([_to_be(a), _to_be(b)]) == ["김철수 구미시 y", "유민국 구미시 y"]
+    # 같은 이름·지역이면 상세주소로 구별
+    c_ = place("유민국", "경상북도 구미시 인동9길 22-1", detail="502호")
+    assert pin_labels([_to_be(b), _to_be(c_)]) == ["유민국 구미시 y 501호", "유민국 구미시 y 502호"]
+    # geo 없음: 도로명으로
+    no_geo = Place("이영희", "01000000000", "서울특별시 강남구 테헤란로 212", "3층", None, Source.PIN)
+    assert pin_labels([_to_be(no_geo)]) == ["이영희 강남구 테헤란로"]
 
 
 def company(name="주소하나", organization="주소기업", seq=26):
