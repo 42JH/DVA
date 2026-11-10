@@ -22,6 +22,7 @@ import { CustomerAddressDto } from './customer-address.dto';
 
 const trim = ({ value }: TransformFnParams): unknown =>
   typeof value === 'string' ? value.trim() : value;
+const phoneSearchPattern = /^[0-9]{1,11}(?![\s\S])/;
 
 export class CreateCustomerDto {
   @ApiProperty({
@@ -96,12 +97,12 @@ export class ListCustomersQueryDto extends PaginationQueryDto {
   q?: string;
 
   @ApiPropertyOptional({
-    description: '휴대전화 번호 11자리 정확히 일치 검색.',
-    pattern: MOBILE_PHONE_PATTERN.source,
+    description: '전화번호 부분 검색. 숫자 1~11자리로 앞·중간·끝 어디든 일치하면 검색됩니다.',
+    pattern: phoneSearchPattern.source,
   })
   @ValidateIf((_object, value) => value !== undefined)
   @IsString()
-  @Matches(MOBILE_PHONE_PATTERN)
+  @Matches(phoneSearchPattern)
   phoneNumber?: string;
 
   @ApiPropertyOptional({ enum: CUSTOMER_STATUSES })

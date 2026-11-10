@@ -39,6 +39,54 @@ describe('Operations infrastructure (e2e)', () => {
     await request(app.getHttpServer()).get('/customer/health').expect(404);
   });
 
+  it('preserves the original public health and DB/AI readiness responses', async () => {
+    const config = app.get(ConfigService);
+    const previous = config.get<string>('AI_AGENT_URL');
+    config.set('AI_AGENT_URL', 'http://health-fixture');
+    const fetchHealth = jest.spyOn(globalThis, 'fetch');
+    try {
+      for (const databaseUp of [true, false]) {
+        pool.query.mockImplementation((sql: string) =>
+          sql === 'SELECT 1' && !databaseUp
+            ? Promise.reject(new Error('database unavailable'))
+            : Promise.resolve({ rows: [], rowCount: 0 }),
+        );
+        for (const aiUp of [true, false]) {
+          fetchHealth.mockImplementation((input, init) => {
+            expect(input).toBe('http://health-fixture/health');
+            expect(init?.signal).toBeInstanceOf(AbortSignal);
+            return Promise.resolve(new Response('', { status: aiUp ? 200 : 503 }));
+          });
+          await request(app.getHttpServer())
+            .get('/health/ready')
+            .set('Authorization', 'Bearer invalid')
+            .set('Cookie', 'dva_session=invalid')
+            .expect(databaseUp && aiUp ? 200 : 503)
+            .expect({
+              status: databaseUp && aiUp ? 'ok' : 'unhealthy',
+              dependencies: { database: databaseUp ? 'up' : 'down', aiAgent: aiUp ? 'up' : 'down' },
+            });
+          await request(app.getHttpServer())
+            .get('/health')
+            .expect(200)
+            .expect({ status: 'ok', service: 'backend' });
+        }
+      }
+      pool.query.mockResolvedValue({ rows: [], rowCount: 0 });
+      fetchHealth.mockRejectedValue(new Error('AI unreachable'));
+      await request(app.getHttpServer())
+        .get('/health/ready')
+        .expect(503)
+        .expect({ status: 'unhealthy', dependencies: { database: 'up', aiAgent: 'down' } });
+      await request(app.getHttpServer()).get('/api/health').expect(404);
+      await request(app.getHttpServer()).get('/api/health/ready').expect(404);
+    } finally {
+      pool.query.mockResolvedValue({ rows: [], rowCount: 0 });
+      fetchHealth.mockRestore();
+      config.set('AI_AGENT_URL', previous);
+    }
+  });
+
   it('serves Swagger UI and its assets under the same prefix', async () => {
     await request(app.getHttpServer())
       .get('/operations/docs')
@@ -56,6 +104,8 @@ describe('Operations infrastructure (e2e)', () => {
       .expect(200)
       .expect(({ body }: { body: { info: { title: string }; paths: Record<string, unknown> } }) => {
         expect(body.info.title).toBe('DVA Operations API');
+        expect(body.paths['/health']).toBeUndefined();
+        expect(body.paths['/health/ready']).toBeUndefined();
         expect(Object.keys(body.paths)).toEqual(
           expect.arrayContaining([
             '/operations/health',

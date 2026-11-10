@@ -57,7 +57,7 @@ test('customer PATCH and personal PIN APIs preserve HTTP, call locks and separat
  let count=0;
  async function fetchSide(side,method,path,body,options={},requestId=randomUUID()){
   const endpoint=/^\/api\/(auth|audit-logs)(\/|\?|$)/.test(path)?side.auth:side.base;
-  const response=await fetch(endpoint+path,{method,redirect:'error',signal:AbortSignal.timeout(28000),headers:{'X-Request-Id':requestId,...(path.startsWith('/api/customers')?{Authorization:'Bearer '+process.env.AI_BUSINESS_TOKEN}:{}),
+  const response=await fetch(endpoint+path,{method,redirect:'error',signal:AbortSignal.timeout(28000),headers:{'X-Request-Id':requestId,...(/^\/api\/(?:customers|pins)(?:\/|$)/.test(path)?{Authorization:'Bearer '+process.env.AI_BUSINESS_TOKEN}:{}),
    ...(options.admin?{Cookie:side.cookies[options.admin],Origin:origin}:{}),...(options.cookie?{Cookie:options.cookie}:{}),
    ...(options.origin?{Origin:options.origin}:{}),...(options.key?{'Idempotency-Key':options.key}:{}),...(options.call===undefined?{}:{call_session_seq:String(options.call)}),
    ...(body===undefined?{}:{'Content-Type':'application/json'})},body:body===undefined?undefined:options.raw?body:JSON.stringify(body)});

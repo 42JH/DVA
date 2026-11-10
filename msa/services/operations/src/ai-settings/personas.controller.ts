@@ -128,7 +128,7 @@ export class PersonasController {
   @ApiOperation({
     summary: '페르소나 등록',
     description:
-      '전체 프롬프트와 음성 설정을 버전 1·INACTIVE로 저장하고 HEAD로 지정합니다. 실제 상담 적용은 별도 publish 요청입니다.',
+      '역할·성격·톤·속도 지시문·맞장구·끼어들기 6개 항목과 음성 설정을 버전 1·INACTIVE로 저장합니다. promptText는 서버가 조합한 읽기 전용 본문이며 입력받지 않습니다. 실제 상담 적용은 별도 publish 요청입니다.',
   })
   @ApiCreatedResponse({ description: '생성한 전체 설정 버전.', type: PersonaVersionResponseDto })
   @ApiResponse({ status: 409, description: '고유 코드 중복.', type: ErrorResponseDto })

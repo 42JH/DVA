@@ -58,6 +58,7 @@ test('FAQ production APIs preserve HTTP, snapshots, audits and durable notificat
     const id=randomUUID(), results=[];
     for (const side of sides) {
       const headers={Origin:'http://localhost:5173','X-Request-Id':id,
+        ...(path.startsWith('/api/ai/faqs')?{Authorization:'Bearer '+process.env.PGPASSWORD}:{}),
         ...(actor===null?{}:{Cookie:side.cookies[actor]}),
         ...(body===undefined?{}:{'Content-Type':'application/json'}),...extra};
       for(const key of Object.keys(headers)) if(headers[key]===undefined) delete headers[key];

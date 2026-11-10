@@ -1,5 +1,5 @@
 {
-  "commit": "9624b7789ee7876648b6c56b5e7a4a7a5a9ef378",
+  "commit": "864ccde5ea6235684341bbc1eea3fd045e16cf8c",
   "jira": "S15P31D109-160",
   "inventory": {
     "routes": [
@@ -187,6 +187,13 @@
       },
       {
         "method": "POST",
+        "path": "/api/ai/calls/:id/analysis/failure",
+        "service": "consultation",
+        "stream": false,
+        "file": "backend/src/call-insights/call-insights.controller.ts"
+      },
+      {
+        "method": "POST",
         "path": "/api/ai/calls/:id/analysis",
         "service": "consultation",
         "stream": false,
@@ -235,6 +242,13 @@
         "file": "backend/src/consultations/consultations.controller.ts"
       },
       {
+        "method": "DELETE",
+        "path": "/api/customers",
+        "service": "customer",
+        "stream": false,
+        "file": "backend/src/customers/customers.controller.ts"
+      },
+      {
         "method": "POST",
         "path": "/api/customers/context",
         "service": "customer",
@@ -268,6 +282,13 @@
         "service": "customer",
         "stream": false,
         "file": "backend/src/customers/customers.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/api/dashboard/home",
+        "service": "consultation",
+        "stream": false,
+        "file": "backend/src/dashboard/dashboard.controller.ts"
       },
       {
         "method": "GET",
@@ -607,6 +628,13 @@
       },
       {
         "method": "DELETE",
+        "path": "/api/companies",
+        "service": "customer",
+        "stream": false,
+        "file": "backend/src/organizations/organizations.controller.ts"
+      },
+      {
+        "method": "DELETE",
         "path": "/api/companies/:id",
         "service": "customer",
         "stream": false,
@@ -674,6 +702,13 @@
         "service": "order",
         "stream": false,
         "file": "backend/src/payments/payments.controller.ts"
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/pins",
+        "service": "customer",
+        "stream": false,
+        "file": "backend/src/pins/pins.controller.ts"
       },
       {
         "method": "GET",
@@ -948,9 +983,30 @@
       {
         "file": "backend/migrations/055-parcel-draft-intake.sql",
         "sha256": "4ea7e8bca1e95e8d2a1ebf2a067df3dd961fb72a05840ab32822ec5354651d72"
+      },
+      {
+        "file": "backend/migrations/056-call-analysis-failure.sql",
+        "sha256": "b5711c4d91b1b9ab2a6f7a6222e10b06138d5167379aef9f7e7608ab0443e99d"
+      },
+      {
+        "file": "backend/migrations/057-call-complaint-judging.sql",
+        "sha256": "bed72577bd5ad5c9b0344a07d0282081939b71d140d61e8e75c5d1bb008bbc7d"
+      },
+      {
+        "file": "backend/migrations/058-parcel-draft-order-reservation.sql",
+        "sha256": "4dbdf76b042425f4a4917619ede9c47aaaf21388bf3790a657dc793a2747188f"
+      },
+      {
+        "file": "backend/migrations/059-incomplete-latest-call-index.sql",
+        "sha256": "1368b4446d2d59d6b785dc5f15ccb5e7f11dcc04198f6911904fb76f06bcc5dd"
+      },
+      {
+        "file": "backend/migrations/060-persona-prompt-fields.sql",
+        "sha256": "4e38b0540c16c7dd599412af6307f779b972c034fee43da046f14f586d8f20a7"
       }
     ],
     "workers": [
+      "backend/src/call-insights/complaints/complaint-judge.worker.ts",
       "backend/src/consultations/active-call-count.service.ts",
       "backend/src/faqs/faq-notifications.worker.ts",
       "backend/src/orders/order-maintenance.worker.ts",

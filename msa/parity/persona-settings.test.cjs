@@ -150,7 +150,9 @@ test('persona APIs preserve production HTTP, complete settings, drafts, publicat
   for (const name of refs) assert.deepEqual(documents[1].components.schemas[name], documents[0].components.schemas[name], name);
   for (const name of ['bearer', 'adminSession']) assert.deepEqual(documents[1].components.securitySchemes[name], documents[0].components.securitySchemes[name]);
   const auth = { Authorization: 'Bearer ' + process.env.AI_PERSONA_TOKEN };
-  const settings = { code: 'same-parcel', name: ' 상담원 ', promptText: ' 원문\n줄 바꿈  ', voiceId: 'test-voice', speakingRate: 1.2, turnWaitLevel: 'LONG' };
+  const promptFields={role:' 원문\n줄 바꿈  ',personality:'차분함',tone:'친절함',speedInstruction:'천천히',backchannel:'네',interruption:'고객 우선'};
+  const expectedPrompt=`# 페르소나\n\n## 역할\n${promptFields.role}\n\n## 성격\n${promptFields.personality}\n\n## 발화 스타일\n### 톤\n${promptFields.tone}\n\n### 속도\n${promptFields.speedInstruction}\n\n## 맞장구\n${promptFields.backchannel}\n\n## 끼어들기\n${promptFields.interruption}`;
+  const settings = { code: 'same-parcel', name: ' 상담원 ', ...promptFields, voiceId: 'test-voice', speakingRate: 1.2, turnWaitLevel: 'LONG' };
   for (const actor of [0, 1, 2]) await request('GET', '/api/personas', undefined, 200, actor);
   await request('GET', '/api/personas', undefined, 401, null);
   await request('GET', '/api/personas', undefined, 401, null, { Cookie: 'dva_session=invalid' });
@@ -166,6 +168,8 @@ test('persona APIs preserve production HTTP, complete settings, drafts, publicat
   for (const extra of [{ promptText: '' }, { voiceId: 'not-supported' }, { speakingRate: 2 }, { turnWaitLevel: 'BAD' }, { extra: 'unknown' }]) {
     await request('POST', '/api/personas', { ...settings, ...extra }, 'voiceId' in extra || 'speakingRate' in extra ? 422 : 400);
   }
+  for(const field of Object.keys(promptFields))for(const value of ['',null,9])await request('POST','/api/personas',{...settings,[field]:value},400);
+  await request('POST','/api/personas',{...settings,role:'😀'.repeat(20000)},422);
   for (const optionsMode of ['unavailable', 'invalid', 'malformed', 'large', 'redirect', 'slow']) {
     await Promise.all(sides.map((side) => ai(side, { optionsMode })));
     await request('POST', '/api/personas', settings, 503);
@@ -174,7 +178,8 @@ test('persona APIs preserve production HTTP, complete settings, drafts, publicat
   const versions = await request('POST', '/api/personas', settings, 201);
   const id = versions[0].aiPersonaSeq;
   const versionId = versions[0].aiPersonaVersionSeq;
-  assert.equal(versions[0].promptText, settings.promptText);
+  assert.equal(versions[0].promptText, expectedPrompt);
+  for(const [field,value]of Object.entries(promptFields))assert.equal(versions[0][field],value);
   assert.equal(versions[0].createdByAdminUserName, '관리자 0');
   await request('POST', '/api/personas', settings, 409);
   for (const actor of [0, 1, 2]) {
@@ -194,7 +199,7 @@ test('persona APIs preserve production HTTP, complete settings, drafts, publicat
   const committed = await request('POST', `/api/personas/${id}/versions`, (side) => ({ expectedVersion: 1, expectedDraftRevision: draft[sides.indexOf(side)].draftRevision }), 200);
   assert.equal(committed[0].version, 2);
   assert.equal(committed[0].voiceId, null);
-  assert.equal(committed[0].promptText, settings.promptText);
+  assert.equal(committed[0].promptText, expectedPrompt);
   await request('POST', `/api/personas/${id}/versions`, (side) => ({ expectedVersion: 1, expectedDraftRevision: draft[sides.indexOf(side)].draftRevision }), 409);
   await request('POST', `/api/personas/${id}/activate`, { expectedVersion: 1, aiPersonaVersionSeq: versionId }, 409);
   const activate = { expectedVersion: 2, aiPersonaVersionSeq: committed[0].aiPersonaVersionSeq };
@@ -222,7 +227,7 @@ test('persona APIs preserve production HTTP, complete settings, drafts, publicat
     RETURN NEW; END $$; CREATE TRIGGER parity_fail_persona_audit BEFORE INSERT ON audit_logs FOR EACH ROW EXECUTE FUNCTION parity_fail_persona_audit();`);
   try { await request('POST', '/api/personas', { ...settings, code: 'failed-creation' }, 500); }
   finally { for (const side of sides) await side.db.query('DROP TRIGGER parity_fail_persona_audit ON audit_logs; DROP FUNCTION parity_fail_persona_audit();'); }
-  const next = await request('POST', '/api/personas', { code: 'other-type', name: '다른 유형', promptText: '새 원문' }, 201, 1);
+  const next = await request('POST', '/api/personas', { code: 'other-type', name: '다른 유형', ...promptFields, role:'새 원문' }, 201, 1);
   assert.equal(next[0].voiceId, null);
   assert.equal(next[0].speakingRate, null);
   assert.equal(next[0].turnWaitLevel, 'NORMAL');

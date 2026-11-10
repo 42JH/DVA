@@ -98,12 +98,13 @@ def main():
                '-e', 'CONSULTATION_AUTH_TOKEN='+token, '-e', 'CUSTOMER_AUTH_TOKEN='+password, network='container:'+RUN+'-'+side+'-db',
                command=('node', '--require', './test/analysis-environment-fixture.cjs',
                         '--test', '--test-concurrency=1', 'test/webhook.integration.test.cjs', 'test/consultation-worker.test.cjs',
-                        'test/call-analysis.test.cjs', 'test/call-dashboard-metrics.test.cjs', 'test/unanswered-questions.test.cjs'))
+                        'test/call-analysis.test.cjs', 'test/call-dashboard-metrics.test.cjs', 'test/unanswered-questions.test.cjs', 'test/call-events.test.cjs', 'test/complaint-judge.test.cjs'))
         for source in (ROOT/'backend/test/webhook.integration.test.cjs', ROOT/'msa/parity/consultation-worker.test.cjs',
-                       ROOT/'backend/test/call-analysis.test.cjs', ROOT/'backend/test/call-dashboard-metrics.test.cjs', ROOT/'backend/test/unanswered-questions.test.cjs',
-                       ROOT/'msa/parity/analysis-environment-fixture.cjs'):
+                       ROOT/'backend/test/call-analysis.test.cjs', ROOT/'backend/test/call-dashboard-metrics.test.cjs', ROOT/'backend/test/unanswered-questions.test.cjs', ROOT/'backend/test/call-events.test.cjs',
+                       ROOT/'backend/test/complaint-judge.test.cjs', ROOT/'msa/parity/analysis-environment-fixture.cjs'):
             target = '/app/service/test/'
             run('docker', 'cp', str(source), name+':'+target+source.name, label=side+'-copy-'+source.name)
+        run('docker', 'cp', str(ROOT/'backend/test/fixtures'), name+':/app/service/test/fixtures', label='complaint-cases-copy')
         complete(name)
         side = 'consultation'
         name=RUN+'-'+side+'-recording-policy-suite'
@@ -136,6 +137,19 @@ def main():
         start_apps('production')
         run('docker', 'cp', RUN+'-operations-app:/app/service/dist/auth/password.js',
             str(LOGS/'seed-password.cjs'), label='password-fixture-copy')
+        name = RUN+'-complaint-integration'
+        create(name, images['consultation-checks'], '-e', 'NODE_ENV=test', '-e', 'DB_HOST=127.0.0.1',
+               '-e', 'DB_PORT=5432', '-e', 'DB_USER=consultation_app', '-e', 'DB_PASSWORD='+password,
+               '-e', 'DB_NAME=dva_webhook_test', '-e', 'AI_BUSINESS_TOKEN='+password, '-e', 'AI_AGENT_URL=http://ai.invalid:8000',
+               '-e', 'CUSTOMER_URL=http://customer-app:3001', '-e', 'OPERATIONS_URL=http://operations-app:3005',
+               '-e', 'ORDER_URL=http://order-app:3002', '-e', 'CONSULTATION_AUTH_TOKEN='+token, '-e', 'CUSTOMER_AUTH_TOKEN='+password,
+               network='container:'+RUN+'-consultation-db',
+               command=('node', '--test', 'test/complaint-judge.integration.test.cjs'))
+        run('docker', 'cp', str(ROOT/'backend/test/complaint-judge.integration.test.cjs'),
+            name+':/app/service/test/complaint-judge.integration.test.cjs', label='complaint-integration-copy')
+        run('docker', 'cp', str(ROOT/'msa/services/consultation/test/helpers/application.cjs'),
+            name+':/app/service/test/helpers/application.cjs', label='complaint-fixture-copy')
+        complete(name)
         name = RUN+'-differential'
         create(name, images['consultation-checks'], '-e', 'AI_BUSINESS_TOKEN='+password, '-e', 'PGPASSWORD='+password,
                '-e', 'PGDATABASE=dva_webhook_test', '-e', 'PBX_WEBHOOK_TOKEN='+pbx,

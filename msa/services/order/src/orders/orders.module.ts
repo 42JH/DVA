@@ -1,4 +1,6 @@
 import { ParcelDraftRetentionWorker } from './parcel-draft-retention.worker';
+import { CallReadReferencesController } from './call-read-references.controller';
+import { CallEventOrderScopeController } from './call-event-order-scope.controller';
 import { ParcelDraftMigrationService } from './parcel-draft-migration.service';
 import { CallDraftDeletionController } from './call-draft-deletion.controller';
 import { OrderDeletionCheckClient } from './order-deletion-check.client';
@@ -16,6 +18,8 @@ import { OrderReadController } from './order-read.controller';
 @Module({
   imports: [DatabaseModule],
   controllers: [
+    CallReadReferencesController,
+    CallEventOrderScopeController,
     OrdersController,
     CallDraftDeletionController,
     OrderCancellationController,

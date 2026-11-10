@@ -1,11 +1,25 @@
 """Append-only 055 upgrades and all new source columns, constraints, indexes and snapshots."""
 import json
 import shutil
+from functools import partial
+import xml.etree.ElementTree as ET
 
 
 def verify_parcel_draft_schema(base, logs, sql, lb, report):
     source = 'parcel_draft_source_upgrade_db'
-    migrations = sorted((base.parents[1] / 'backend/migrations').glob('[0-9][0-9][0-9]-*.sql'))
+    migrations = [p for p in sorted((base.parents[1] / 'backend/migrations').glob('[0-9][0-9][0-9]-*.sql')) if int(p.name[:3]) <= 55]
+    assert migrations[-1].name.startswith('055-'), 'The historical upgrade must end at 055'
+    # Keep the existing 055 transition independent of later append-only changesets.
+    upgrade = logs / '055-upgrade-changelog'
+    shutil.copytree(base / 'changelog', upgrade, dirs_exist_ok=True)
+    ET.register_namespace('', 'http://www.liquibase.org/xml/ns/dbchangelog')
+    for owner, count in (('order', 4), ('consultation', 8)):
+        path = upgrade / owner / 'db.changelog.xml'
+        tree = ET.parse(path)
+        for changeset in list(tree.getroot())[count:]:
+            tree.getroot().remove(changeset)
+        tree.write(path, encoding='utf-8', xml_declaration=True)
+    lb = partial(lb, changelog_root=upgrade)
     sql('postgres', f'CREATE DATABASE {source};', 'draft-source-setup')
     sql(source, 'BEGIN;\n' + '\n'.join(p.read_text(encoding='utf-8') for p in migrations[:-1]) + '\nCOMMIT;', 'draft-source-baseline')
     fixtures = {owner: (base / 'tests' / f'parcel-draft-{owner}-fixture.sql').read_text(encoding='utf-8') for owner in ('orders', 'calls')}
@@ -37,7 +51,7 @@ def verify_parcel_draft_schema(base, logs, sql, lb, report):
         assert legacy_before == expected_before
         history = sql(db, 'SELECT id,md5sum,dateexecuted FROM databasechangelog ORDER BY orderexecuted;', prefix + '-old-history')
         failing = logs / ('atomicity-' + prefix)
-        shutil.copytree(base / 'changelog', failing, dirs_exist_ok=True)
+        shutil.copytree(upgrade, failing, dirs_exist_ok=True)
         migration = failing / owner / file
         migration.write_text(migration.read_text(encoding='utf-8') + '\nSELECT 1/0;\n', encoding='utf-8')
         output = lb(owner, db, 'update', prefix + '-late-failure', failure=True, changelog_root=failing)

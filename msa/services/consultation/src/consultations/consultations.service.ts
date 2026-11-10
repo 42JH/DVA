@@ -11,6 +11,9 @@ import type { PoolClient } from 'pg';
 import { CallSessionRepository } from './call-session.repository';
 import { CallEndRepository } from './call-end.repository';
 import type { CallEndedPayload } from '../webhooks/pbx/pbx-webhook.payload';
+import type { CallQueryDto } from './dto/call-query.dto';
+import type { CallDetailDto } from './dto/call-response.dto';
+import { RecordingPlaybackService } from './recording-playback.service';
 @Injectable()
 export class ConsultationsService {
   constructor(
@@ -20,6 +23,7 @@ export class ConsultationsService {
     private readonly repository: ConsultationsRepository,
     private readonly database: DatabaseService,
     private readonly draftDeletion: CallDraftDeletionClient,
+    private readonly playback: RecordingPlaybackService,
   ) {}
   attachRecording(client: PoolClient, callId: number, objectKey: string) {
     return this.sessions.attachRecording(client, callId, objectKey);
@@ -120,6 +124,41 @@ export class ConsultationsService {
           );
         throw error;
       });
+  }
+
+  async findMany(query: CallQueryDto) {
+    const from = query.from === undefined ? undefined : Date.parse(query.from);
+    const to = query.to === undefined ? undefined : Date.parse(query.to);
+    if (
+      (from !== undefined && !Number.isFinite(from)) ||
+      (to !== undefined && !Number.isFinite(to)) ||
+      (from !== undefined && to !== undefined && from >= to)
+    )
+      throw new ApiException(
+        400,
+        'INVALID_REQUEST',
+        '시작 시각은 종료 시각보다 빨라야 합니다.',
+      );
+    return new ListResponse(await this.repository.findMany(query), query.limit);
+  }
+
+  async findOne(id: number): Promise<CallDetailDto> {
+    const row = await this.repository.findOne(id);
+    if (!row)
+      throw new ApiException(404, 'NOT_FOUND', '통화 기록을 찾을 수 없습니다.');
+    const { analysis, ...call } = row;
+    const recordings = await this.repository.findRecordings(id);
+    return {
+      call,
+      analysis,
+      aiActionCount: await this.repository.countActions(id),
+      recordings: await Promise.all(
+        recordings.map(async ({ objectKey, ...recording }) => ({
+          ...recording,
+          ...(await this.playback.create(objectKey)),
+        })),
+      ),
+    };
   }
 
   async findTranscript(id: number, query: TranscriptQueryDto) {

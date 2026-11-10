@@ -78,7 +78,7 @@ test('both cancellation APIs preserve source HTTP, full order/payment/shipment r
   async function request(side,id,options={},requestId=randomUUID()){
     const selected=Object.hasOwn(options,'parcels')||Object.hasOwn(options,'body');
     const headers=options.headers??{Origin:origin,Cookie:cookie};
-    const response=await fetch(side.url+'/api/orders/'+id+(selected?'/parcels':'')+'/cancel',{method:'POST',headers:{...headers,'Content-Type':'application/json','X-Request-Id':requestId},
+    const response=await fetch(side.url+'/api/orders/'+id+(selected?'/parcels':'')+'/cancel',{method:'POST',headers:{Authorization:'Bearer '+process.env.PGPASSWORD,...headers,'Content-Type':'application/json','X-Request-Id':requestId},
       body:Object.hasOwn(options,'body')?JSON.stringify(options.body):selected?JSON.stringify({orderParcelSeqs:options.parcels}):undefined,signal:AbortSignal.timeout(40000)});
     const raw=await response.text();assert.equal(response.headers.get('x-request-id'),requestId);
     return{status:response.status,body:raw?JSON.parse(raw):null,cache:response.headers.get('cache-control')};

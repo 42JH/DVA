@@ -91,7 +91,7 @@ export class UnansweredQuestionQueryDto extends PaginationQueryDto {
   )
   @IsString()
   @MaxLength(200)
-  @Matches(/^[^\0]*$/u)
+  @Matches(new RegExp(`^[^${String.fromCharCode(0)}]*$`, 'u'))
   q?: string;
 
   @ApiPropertyOptional({

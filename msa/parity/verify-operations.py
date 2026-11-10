@@ -143,7 +143,17 @@ def main():
                '--test-concurrency=1', 'test/auth.test.cjs', 'test/auth.integration.test.cjs'))
         run('docker', 'cp', str(runtime), name + ':/app/service/test/customer-runtime', label='auth-consumer-runtime')
         for file in ('auth.test.cjs', 'auth.integration.test.cjs'):
-            copy('backend/test/' + file, name, '/app/service/test/' + file)
+            source = ROOT / 'backend/test' / file
+            if file == 'auth.integration.test.cjs':
+                # Cross-domain rows do not exist in the operations DB; assert absence instead.
+                text = source.read_text(encoding='utf-8')
+                for table, alias in (('customers', 'customers'), ('orders', 'orders'), ('call_sessions', 'calls')):
+                    original = f'(SELECT count(*) FROM {table}) AS {alias}'
+                    assert text.count(original) == 1, 'Source ownership snapshot changed: ' + table
+                    text = text.replace(original, f'(SELECT to_regclass(\'{table}\')::text) AS {alias}')
+                source = runtime.parent / file
+                source.write_text(text, encoding='utf-8')
+            copy(source, name, '/app/service/test/' + file)
         copy('msa/parity/auth-consumer-fixture.cjs', name, '/app/service/test/auth-consumer-fixture.cjs')
         complete(name)
         # Auth bootstrap requires zero administrators; persona fixtures create their own.
@@ -268,7 +278,7 @@ def main():
         name=RUN+'-faq-after-restart'
         create(name,images['operations-checks'],'-e','NODE_ENV=test','-e','PGUSER=operations_app',
                '-e','PGPASSWORD='+password,'-e','PGDATABASE=dva_webhook_test',
-               '-e','AI_FAQ_TOKEN='+password,'-e','FAQ_RECOVERY=after',
+               '-e','AI_FAQ_TOKEN='+password,'-e','AI_BUSINESS_TOKEN='+password,'-e','FAQ_RECOVERY=after',
                command=('node','--test','test/faq-recovery.test.cjs'))
         copy('msa/parity/faq-recovery.test.cjs',name,'/app/service/test/faq-recovery.test.cjs')
         run('docker','cp',str(LOGS/'faq-before-restart.json'),name+':/app/service/test/faq-before-restart.json',label='faq-recovery-copy-state')

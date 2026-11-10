@@ -72,3 +72,19 @@ test('AI domain errors are not rewritten and local detail establishes its snapsh
   for (const callId of [undefined,'','0','-1','1,2','2147483648'])
     await assert.rejects(orders.detail(null,1,callId),error=>error.getStatus()===400);
 });
+
+test('payment settings retain the original enable flag, test keys, URL and Origin validation', () => {
+  const {validateEnvironment}=require('../dist/config/environment');
+  const valid={NODE_ENV:'test',DB_HOST:'db',DB_USER:'test',DB_PASSWORD:'test',DB_NAME:'test',
+    OPERATIONS_URL:'http://operations:3005',CUSTOMER_AUTH_TOKEN:'a'.repeat(40),
+    CUSTOMER_URL:'http://customer:3001',CONSULTATION_URL:'http://consultation:3004',DELIVERY_URL:'http://delivery:3003',
+    CORS_ORIGINS:'http://localhost:5173',ORDER_PAYMENTS_ENABLED:'true',PAYMENT_PUBLIC_URL:'http://localhost:5173/api/payments',
+    TOSS_TEST_CLIENT_KEY:'test_gck_fixture',TOSS_TEST_SECRET_KEY:'test_gsk_fixture',
+    PAYMENT_MATTERMOST_WEBHOOK_URL:'https://mattermost.example.test/hooks/parity'};
+  assert.equal(validateEnvironment(valid).ORDER_PAYMENTS_ENABLED,true);
+  assert.equal(validateEnvironment({...valid,ORDER_PAYMENTS_ENABLED:'false'}).ORDER_PAYMENTS_ENABLED,false);
+  for(const [field,value] of [['ORDER_PAYMENTS_ENABLED','1'],['PAYMENT_PUBLIC_URL','http://localhost:5173/other'],
+    ['PAYMENT_PUBLIC_URL','http://other:5173/api/payments'],['PAYMENT_TOSS_BASE_URL','https://other.test'],
+    ['TOSS_TEST_CLIENT_KEY','live_gck_fixture'],['TOSS_TEST_SECRET_KEY','live_gsk_fixture']])
+    assert.throws(()=>validateEnvironment({...valid,[field]:value}),error=>error.fields.includes(field));
+});

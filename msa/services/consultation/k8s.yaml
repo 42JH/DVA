@@ -37,6 +37,10 @@ spec:
               value: production
             - name: PORT
               value: "3004"
+            - name: MSA_INSTANCE_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
             - name: SECURITY_LOG_HMAC_KEY
               valueFrom:
                 secretKeyRef: {name: msa-security-logs, key: hmac-key}
@@ -135,6 +139,12 @@ spec:
     - host: k15d109.p.ssafy.io
       http:
         paths:
+          - path: /api/dashboard
+            pathType: Prefix
+            backend:
+              service:
+                name: consultation
+                port: { number: 3004 }
           - path: /api/ai/unanswered-questions
             pathType: Prefix
             backend:

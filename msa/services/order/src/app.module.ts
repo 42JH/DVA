@@ -1,5 +1,6 @@
 import { BillingModule } from './billing/billing.module';
 import { Module } from '@nestjs/common';
+import { PaymentsModule } from './payments/payments.module';
 import { AppController } from './app.controller';
 import { ApplicationConfigModule } from './config/application-config.module';
 import { DatabaseModule } from './database/database.module';
@@ -15,6 +16,7 @@ import { OrdersModule } from './orders/orders.module';
     DatabaseModule,
     AuthModule,
     OrdersModule,
+    PaymentsModule,
   ],
   controllers: [AppController],
 })

@@ -7,6 +7,7 @@ import { ApiException } from '../common/errors/api.exception';
 import { AiPersonaClient, validatePersonaOptions } from './ai-persona.client';
 import { AiSettingsRepository } from './ai-settings.repository';
 import { Persona, PersonaDraft, PersonaSettings, PersonaVersion } from './ai-settings.types';
+import { composePersonaPrompt, PERSONA_PROMPT_FIELDS } from './persona-prompt';
 import {
   CommitPersonaDraftDto,
   CreatePersonaDto,
@@ -14,7 +15,13 @@ import {
   UpdatePersonaDto,
 } from './dto/persona-request.dto';
 
-const SETTINGS = ['name', 'promptText', 'voiceId', 'speakingRate', 'turnWaitLevel'] as const;
+const SETTINGS = [
+  'name',
+  ...PERSONA_PROMPT_FIELDS,
+  'voiceId',
+  'speakingRate',
+  'turnWaitLevel',
+] as const;
 
 @Injectable()
 export class AiSettingsService {
@@ -91,10 +98,11 @@ export class AiSettingsService {
     actorId: number,
     requestId: string,
   ): Promise<PersonaVersion> {
-    validatePersonaOptions(input, await this.ai.options());
+    const settings = { ...input, promptText: composePersonaPrompt(input) };
+    validatePersonaOptions(settings, await this.ai.options());
     return this.database.transaction(async (client) => {
       const id = await this.repository.create(input.code, client);
-      const version = await this.repository.append(id, 1, input, actorId, client);
+      const version = await this.repository.append(id, 1, settings, actorId, client);
       await this.audit.recordSuccess(
         {
           actorId,
@@ -124,11 +132,19 @@ export class AiSettingsService {
     const source = draft ?? base;
     const settings: PersonaSettings = {
       name: input.name ?? source.name,
-      promptText: input.promptText ?? source.promptText,
+      role: input.role ?? source.role,
+      personality: input.personality ?? source.personality,
+      tone: input.tone ?? source.tone,
+      speedInstruction: input.speedInstruction ?? source.speedInstruction,
+      backchannel: input.backchannel ?? source.backchannel,
+      interruption: input.interruption ?? source.interruption,
+      promptText: source.promptText,
       voiceId: input.voiceId === undefined ? source.voiceId : input.voiceId,
       speakingRate: input.speakingRate === undefined ? source.speakingRate : input.speakingRate,
       turnWaitLevel: input.turnWaitLevel ?? source.turnWaitLevel,
     };
+    if (PERSONA_PROMPT_FIELDS.some((key) => input[key] !== undefined && input[key] !== source[key]))
+      settings.promptText = composePersonaPrompt(settings);
     validatePersonaOptions(settings, await this.ai.options());
     return this.database.transaction(async (client) => {
       await this.repository.lock(client);

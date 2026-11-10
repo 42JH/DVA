@@ -41,7 +41,7 @@ test('customer writes preserve monolith HTTP, business rows and immediately visi
     'SELECT organization_seq,name,status,monthly_billing_enabled,created_at,deleted_at FROM organizations ORDER BY organization_seq',
     'SELECT department_seq,organization_seq,name,group_billing_enabled,created_at,deleted_at FROM departments ORDER BY department_seq',
     'SELECT membership_seq,customer_seq,organization_seq,department_seq,employee_no,role,status,deleted_at FROM memberships ORDER BY membership_seq',
-    'SELECT personal_pin_seq,customer_seq,label,address_data,version FROM personal_pins ORDER BY personal_pin_seq'];
+    'SELECT personal_pin_seq,customer_seq,label,address_data,version,deleted_at FROM personal_pins ORDER BY personal_pin_seq'];
   const auditSQL='SELECT audit_log_seq,actor_type,actor_seq,actor_name,action,target_type,target_seq,target_admin_name,request_id,result,metadata,occurred_at FROM audit_logs ORDER BY audit_log_seq';
   async function compareState(label){
     for(const sql of queries)assert.deepEqual(normalize((await customer.query(sql)).rows),normalize((await reference.query(sql)).rows),label+' '+sql);
@@ -135,11 +135,43 @@ test('customer writes preserve monolith HTTP, business rows and immediately visi
   for(const side of sides)await side.db.query("UPDATE customers SET status='WITHDRAWN' WHERE customer_seq=$1",[ai]);
   await request('POST','/api/companies',{name:'전체 rollback',departments:[{name:'준비 부서'}],members:[{name:'탈퇴 충돌',phoneNumber:'01011110001',employeeNo:'R001'}]},422);
   assert.equal((await customer.query("SELECT count(*)::int AS n FROM organizations WHERE name='전체 rollback'")).rows[0].n,0);
-  const trigger=`CREATE FUNCTION reject_customer_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.action='CUSTOMER_CREATED' AND NEW.result='SUCCESS' THEN RAISE EXCEPTION 'injected audit failure'; END IF; RETURN NEW; END $$;
+  const bulkIds=[];
+  const companies=[];
+  for(const [name,phoneNumber] of [['다건 기업 A','01055551001'],['다건 기업 B','01055551002']])companies.push((await request('POST','/api/companies',{name,departments:[{name:'삭제 부서'}],members:[{name,phoneNumber,employeeNo:name,departmentName:'삭제 부서'}]},201)).data.organizationSeq);
+  const pinIds=[];
+  for(const side of sides){const rows=(await side.db.query("INSERT INTO personal_pins(customer_seq,label,address_data) SELECT customer_seq,'다건 PIN', $1::jsonb FROM customers WHERE deleted_at IS NULL ORDER BY customer_seq DESC LIMIT 2 RETURNING personal_pin_seq",[pinAddress])).rows;if(side===sides[0])pinIds.push(...rows.map(r=>r.personal_pin_seq));}
+  for(const [path,key,ids] of [['/api/companies','organizationSeqs',companies],['/api/pins','personalPinSeqs',pinIds]]){
+    for(const body of [{},{[key]:[]},{[key]:[ids[0],ids[0]]},{[key]:['1']},{[key]:[0]}])await request('DELETE',path,body,400);
+    await request('DELETE',path,{[key]:ids},401,null);
+    await request('DELETE',path,{[key]:[...ids,2147483647]},404);
+    for(const db of [reference,operations])await db.query(`CREATE FUNCTION reject_bulk_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.action IN ('ORGANIZATION_DELETED','PERSONAL_PIN_DELETED') AND NEW.result='SUCCESS' THEN RAISE EXCEPTION 'injected audit failure'; END IF; RETURN NEW; END $$; CREATE TRIGGER reject_bulk_audit BEFORE INSERT ON audit_logs FOR EACH ROW EXECUTE FUNCTION reject_bulk_audit()`);
+    try{await request('DELETE',path,{[key]:ids},500);}finally{for(const db of [reference,operations])await db.query('DROP TRIGGER reject_bulk_audit ON audit_logs; DROP FUNCTION reject_bulk_audit()');}
+    await request('DELETE',path,{[key]:[...ids].reverse()},204,'writer');
+    await request('DELETE',path,{[key]:ids},404);
+  }
+  for(const [name,phone] of [['삭제 A','01055550001'],['삭제 B','01055550002']])
+    bulkIds.push((await request('POST','/api/customers',person(name,phone),201)).data.customerSeq);
+  for(const side of sides){
+    await side.db.query('INSERT INTO personal_pins(customer_seq,label,address_data) VALUES($1,$2,$3)',[bulkIds[0],'다건 삭제 PIN',pinAddress]);
+    await side.db.query('INSERT INTO memberships(customer_seq,organization_seq,department_seq,employee_no,role,status) VALUES($1,$2,$3,$4,$5,$6)',[bulkIds[0],other,foreign,'bulk-customer-delete','MEMBER','ACTIVE']);
+  }
+  for(const input of [{},{customerSeqs:[]},{customerSeqs:[bulkIds[0],bulkIds[0]]},{customerSeqs:['1']},{customerSeqs:[0]}])
+    await request('DELETE','/api/customers',input,400);
+  await request('DELETE','/api/customers',{customerSeqs:bulkIds},401,null);
+  await request('DELETE','/api/customers',{customerSeqs:[bulkIds[0],2147483647]},404);
+  assert.equal((await customer.query('SELECT count(*)::int n FROM customers WHERE customer_seq=ANY($1::int[]) AND deleted_at IS NULL',[bulkIds])).rows[0].n,2);
+  await request('DELETE','/api/customers',{customerSeqs:[...bulkIds].reverse()},204);
+  assert.equal((await customer.query('SELECT count(*)::int n FROM customers WHERE customer_seq=ANY($1::int[]) AND deleted_at IS NOT NULL',[bulkIds])).rows[0].n,2);
+  assert.equal((await customer.query('SELECT count(*)::int n FROM personal_pins WHERE customer_seq=$1 AND deleted_at IS NULL',[bulkIds[0]])).rows[0].n,0);
+  assert.equal((await customer.query('SELECT count(*)::int n FROM memberships WHERE customer_seq=$1 AND deleted_at IS NOT NULL',[bulkIds[0]])).rows[0].n,1);
+  await request('DELETE','/api/customers',{customerSeqs:bulkIds},404);
+  const auditVictim=(await request('POST','/api/customers',person('삭제 감사 롤백','01055550003'),201)).data.customerSeq;
+  const trigger=`CREATE FUNCTION reject_customer_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.action IN ('CUSTOMER_CREATED','CUSTOMER_DELETED') AND NEW.result='SUCCESS' THEN RAISE EXCEPTION 'injected audit failure'; END IF; RETURN NEW; END $$;
     CREATE TRIGGER reject_customer_audit BEFORE INSERT ON audit_logs FOR EACH ROW EXECUTE FUNCTION reject_customer_audit()`;
   for(const db of [reference,operations])await db.query(trigger);
-  try{await request('POST','/api/customers',person('감사 실패','01099990001'),500);}finally{for(const db of [reference,operations])await db.query('DROP TRIGGER reject_customer_audit ON audit_logs; DROP FUNCTION reject_customer_audit()');}
+  try{await request('POST','/api/customers',person('감사 실패','01099990001'),500);await request('DELETE','/api/customers',{customerSeqs:[auditVictim]},500);}finally{for(const db of [reference,operations])await db.query('DROP TRIGGER reject_customer_audit ON audit_logs; DROP FUNCTION reject_customer_audit()');}
   assert.equal((await customer.query("SELECT count(*)::int AS n FROM customers WHERE phone_number='01099990001'")).rows[0].n,0);
+  assert.equal((await customer.query('SELECT deleted_at FROM customers WHERE customer_seq=$1',[auditVictim])).rows[0].deleted_at,null);
   await request('POST','/api/companies',{name:'Origin 없음'},403,'writer',{noOrigin:true});
   await request('PATCH','/api/admins/2',{status:'INACTIVE'},204);
   await request('POST','/api/companies',{name:'회수 세션'},401,'writer');
@@ -153,7 +185,7 @@ test('customer writes preserve monolith HTTP, business rows and immediately visi
       if(seen.has(name))return;seen.add(name);assert.ok(documents[0].components.schemas[name]);
       assert.deepEqual(documents[1].components.schemas[name],documents[0].components.schemas[name],name+' write schema');schemas(documents[0].components.schemas[name]);
     }for(const child of Object.values(value))schemas(child);}
-  for(const [path,methods] of Object.entries({'/api/customers':['post'],'/api/companies':['post'],
+  for(const [path,methods] of Object.entries({'/api/customers':['post','delete'],'/api/companies':['post','delete'],'/api/pins':['delete'],
     '/api/companies/{id}':['patch','delete'],'/api/companies/{id}/members':['post'],'/api/companies/{id}/departments':['post'],
     '/api/members/{id}':['patch','delete'],'/api/departments/{id}':['patch','delete']}))for(const method of methods){
     assert.deepEqual(documents[1].paths[path][method],documents[0].paths[path][method],method+' '+path+' OpenAPI');schemas(documents[0].paths[path][method]);}

@@ -1,4 +1,4 @@
-"""Isolate the existing 055 regressions from later backend API changes."""
+"""Isolate the pinned monolith reference without changing the working backend."""
 import json
 from pathlib import Path
 import re

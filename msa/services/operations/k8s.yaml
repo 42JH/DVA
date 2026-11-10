@@ -53,6 +53,9 @@ spec:
             - name: DB_NAME
               valueFrom:
                 secretKeyRef: {name: operations-db, key: PGDATABASE}
+            - name: AI_BUSINESS_TOKEN
+              valueFrom:
+                secretKeyRef: {name: msa-ai-business, key: AI_BUSINESS_TOKEN, optional: true}
             - name: CORS_ORIGINS
               value: "https://13.209.59.180,https://k15d109.p.ssafy.io"
             - name: SWAGGER_ENABLED
@@ -140,6 +143,21 @@ spec:
     - host: k15d109.p.ssafy.io
       http:
         paths:
+          - path: /health
+            pathType: Exact
+            backend:
+              service:
+                name: operations
+                port:
+                  number: 3005
+          - path: /health/ready
+            pathType: Exact
+            backend:
+              service:
+                name: operations
+                port:
+                  number: 3005
+
           - path: /api/auth
             pathType: Prefix
             backend:

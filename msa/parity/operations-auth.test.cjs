@@ -48,11 +48,17 @@ test('identical production HTTP requests produce identical auth/admin/audit data
     if (typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, normalize(v, k)]));
     return value;
   };
+  const verifiedPasswords = new Map();
   async function snapshot(side) {
     const admins = (await side.db.query(`SELECT admin_user_seq,login_id,name,role,status,
       password_hash,created_at,last_login_at,deleted_at FROM admin_users ORDER BY admin_user_seq`)).rows;
     for (const row of admins) {
-      assert.equal(await verifyPassword(passwords.get(row.login_id), row.password_hash), true, row.login_id);
+      const expectedPassword = passwords.get(row.login_id);
+      assert.equal(typeof expectedPassword, 'string', row.login_id);
+      if (verifiedPasswords.get(row.password_hash) !== expectedPassword) {
+        assert.equal(await verifyPassword(expectedPassword, row.password_hash), true, row.login_id);
+        verifiedPasswords.set(row.password_hash, expectedPassword);
+      }
       delete row.password_hash;
     }
     const sessions = (await side.db.query(`SELECT admin_user_seq,session_token_hash,created_at,expires_at
@@ -108,6 +114,30 @@ test('identical production HTTP requests produce identical auth/admin/audit data
     assert.deepEqual(await snapshot(sides[1]), await snapshot(sides[0]), `${method} ${path} DB parity`);
     return results[0].body;
   }
+  async function healthControl(input) {
+    for (const side of sides) {
+      const response = await fetch('http://persona-fixture:8000/' + side.name + '/__control', {
+        method: 'POST', headers: { Authorization: 'Bearer ' + process.env.PGPASSWORD,
+          'Content-Type': 'application/json' }, body: JSON.stringify(input),
+      });
+      assert.equal(response.status, 204);
+    }
+  }
+  await request('GET', '/health', undefined, undefined, 200);
+  await request('GET', '/health/ready', undefined, undefined, 200);
+  await healthControl({ healthStatus: 503 });
+  await request('GET', '/health/ready', undefined, undefined, 503);
+  await healthControl({ healthStatus: 200, healthHold: true });
+  const healthStarted = Date.now();
+  await request('GET', '/health/ready', undefined, undefined, 503);
+  assert.ok(Date.now() - healthStarted >= 3900, 'both production AI probes enforce the 2s timeout');
+  await healthControl({ healthHold: false });
+  await request('GET', '/health/ready', undefined, undefined, 200);
+  for (const side of sides) {
+    const document = await (await fetch(side.base + '/api/docs-json')).json();
+    assert.equal(document.paths['/health'], undefined);
+    assert.equal(document.paths['/health/ready'], undefined);
+  }
   const login = (id, pass = password, actor = id) => request('POST', '/api/auth/login',
     { loginId: id, password: pass }, actor, 200, { login: actor });
   await request('GET', '/api/auth/me', undefined, undefined, 401);
@@ -123,6 +153,8 @@ test('identical production HTTP requests produce identical auth/admin/audit data
   await login('operator');
   await request('GET', '/api/auth/me', undefined, 'root', 200);
   await request('GET', '/api/admins?status=PENDING&limit=1&offset=0', undefined, 'root', 200);
+  for(const q of ['', '  ', 'root','운영','%', '_'])await request('GET','/api/admins?'+new URLSearchParams({q}),undefined,'root',200);
+  for(const q of ['x'.repeat(101),'\u0000'])await request('GET','/api/admins?'+new URLSearchParams({q}),undefined,'root',400);
   await request('GET', '/api/admins', undefined, 'operator', 403);
   await request('PATCH', '/api/admins/4', {}, 'root', 400);
   await request('PATCH', '/api/admins/4', { status: 'ACTIVE', role: 'SUPERVISOR' }, 'root', 204);
@@ -159,4 +191,5 @@ test('identical production HTTP requests produce identical auth/admin/audit data
   await request('GET', '/api/audit-logs/0', undefined, 'root', 400);
   await request('GET', '/api/audit-logs?result=INVALID', undefined, 'root', 400);
   await request('OPTIONS', '/api/auth/login', undefined, undefined, 204);
+  t.diagnostic(`${verifiedPasswords.size} distinct persisted password hashes verified; unchanged hashes reused`);
 });
