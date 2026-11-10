@@ -173,10 +173,11 @@ function Row({ r, from, onWarm }: { r: CallsRow; from: string; onWarm: () => voi
         </span>,
       )}
       {cell(
-        <span className="flex min-w-0 items-center gap-1.5">
-          <span className="truncate font-medium">{r.name}</span>
+        // 이름만 가운데 — 신규는 흐름 밖(absolute)에 두어 이름 위치를 밀지 않음
+        <span className="relative min-w-0">
+          <span className="block truncate font-medium">{r.name}</span>
           {r.isNew && (
-            <span className="shrink-0 rounded bg-ops-route-soft px-1 text-[11px] font-semibold text-ops-route">
+            <span className="absolute top-1/2 left-full ml-1.5 -translate-y-1/2 rounded bg-ops-route-soft px-1 text-[11px] font-semibold whitespace-nowrap text-ops-route">
               신규
             </span>
           )}
