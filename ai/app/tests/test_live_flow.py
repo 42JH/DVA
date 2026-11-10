@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock
 import pytest
 from conftest import CALLER, run
 
-from app.calls.live import LiveFlow
+from app.calls.live import LiveFlow, value_hit
 from app.calls.session import Phase
 from app.tests.test_calls import FakeClient, incoming, service, started, until
 
@@ -996,3 +996,12 @@ def test_call_record_keeps_decision_io_backend_text_tool_args_and_delivery():
         await task
 
     run(scenario())
+
+
+def test_value_hit_numeric_utterances_use_lower_threshold():
+    """그림자 측정 value 판정(2026-11-10 2단계): p(yes) 하한은 설정값, 번호·호수·개수가 든 발화는 낮은 하한."""
+    assert value_hit("신지환이요", 0.56, 0.5, 0.35) and not value_hit("신지환이요", 0.45, 0.5, 0.35)
+    assert value_hit("오백 이호요", 0.45, 0.5, 0.35) and value_hit("공일공일이삼사오륙칠팔입니다", 0.49, 0.5, 0.35)
+    assert value_hit("소형 박스 한개요", 0.4, 0.5, 0.35) and value_hit("1004호요", 0.36, 0.5, 0.35)
+    assert not value_hit("이봄 맞아요, 이봄", 0.48, 0.5, 0.35)  # 한 글자 수사(이·사)는 숫자로 보지 않는다
+    assert not value_hit("네", 0.9, 0.95, 0.35)

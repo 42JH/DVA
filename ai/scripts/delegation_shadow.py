@@ -5,7 +5,7 @@
   - 헛 호출: value=yes인데 위임도 없고 실제 값도 아닌 발화 → 목록을 사람이 보고 가린다
   - 놓침: value=no인데 Live가 위임한 발화(거름망이 빠뜨릴 발화)
 
-사용: python -X utf8 -m scripts.delegation_shadow <통화 기록 JSON 폴더> [--gap-ms 800] [--min-confidence 0.6]
+사용: python -X utf8 -m scripts.delegation_shadow <통화 기록 JSON 폴더> [--gap-ms 800] [--min-confidence 0.5] [--numeric-min 0.35]
       python -X utf8 -m scripts.delegation_shadow --selftest
 입력: 운영 서버 ai_logs 볼륨의 calls/{trace_id}.json(events·transcript·tool_calls). value 질문이 없는 옛 기록은 건너뛴다.
 """
@@ -14,6 +14,8 @@ import argparse
 import json
 import sys
 from pathlib import Path
+
+from app.calls.live import value_hit  # 서버와 같은 판정(p(yes) 하한, 숫자 발화는 낮은 하한)
 
 GAP_MS = 800
 
@@ -37,7 +39,7 @@ def bound(decision: dict, dls: list[dict], gap_ms: int) -> bool:
     return False
 
 
-def rows_of(record: dict, gap_ms: int, min_conf: float) -> list[dict]:
+def rows_of(record: dict, gap_ms: int, min_conf: float, numeric_min: float = 0.35) -> list[dict]:
     events = record.get("events") or []
     dls = delegations(events)
     out = []
@@ -53,8 +55,7 @@ def rows_of(record: dict, gap_ms: int, min_conf: float) -> list[dict]:
         if p_yes is None:  # 확률이 없는 기록: choice로 대신
             p_yes = 1.0 if v["choice"] == "yes" else 0.0
         out.append({"stage": d.get("stage"), "text": said, "value": v["choice"], "confidence": p_yes,
-                    # confidence가 아니라 p(yes)로 거른다: 재생에서 choice=yes·confidence 0.1대인 값 발화가 흔했다(2026-11-10)
-                    "server_yes": p_yes >= min_conf, "delegated": bound(d, dls, gap_ms)})
+                    "server_yes": value_hit(said, p_yes, min_conf, numeric_min), "delegated": bound(d, dls, gap_ms)})
     return out
 
 
@@ -72,7 +73,8 @@ def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("folder", nargs="?")
     ap.add_argument("--gap-ms", type=int, default=GAP_MS)
-    ap.add_argument("--min-confidence", type=float, default=0.5, help="p(yes) 하한")
+    ap.add_argument("--min-confidence", type=float, default=0.5, help="p(yes) 하한(decision_value_min_p)")
+    ap.add_argument("--numeric-min", type=float, default=0.35, help="숫자·수사가 든 발화의 p(yes) 하한(decision_value_numeric_min_p)")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args(argv)
     if a.selftest:
@@ -86,7 +88,7 @@ def main(argv: list[str]) -> int:
         except (OSError, ValueError):
             skipped += 1
             continue
-        got = rows_of(record, a.gap_ms, a.min_confidence)
+        got = rows_of(record, a.gap_ms, a.min_confidence, a.numeric_min)
         if not got:
             skipped += 1
         rows += [r | {"call": path.stem[:8]} for r in got]
