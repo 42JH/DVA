@@ -293,7 +293,14 @@ def test_gate_requires_previous_ai_line_to_be_the_question():
     assert check_gate(s, P, p.id, YES, cust, cut, **kw).code == "CONFIRM_BEFORE_READBACK_END"
     assert check_gate(s, P, p.id, YES, cust, asked, **kw).ok
     proceed = ConfirmAnswer("proceed", {"proceed": 0.98})
-    interrupted = Utterance(4, 3000, 5500, 101.0, "접수 내용 확인 부탁드릴게요. 보내는 분은")
+    assert check_gate(s, P, p.id, proceed, cust, asked, **kw).ok
+    unrelated = Utterance(4, 3000, 4800, 101.0, "더 궁금하신 점 있으세요?")
+    assert check_gate(s, P, p.id, proceed, cust, unrelated, **kw).code == "CONFIRM_BEFORE_READBACK_END"
+    unlinked = Utterance(4, 3000, 5500, 101.0, "접수 내용 확인 부탁드릴게요. 보내는 분은")
+    assert check_gate(s, P, p.id, proceed, cust, unlinked, **kw).code == "CONFIRM_BEFORE_READBACK_END"
+    stale = Utterance(4, 3000, 4800, 101.0, asked.text, "old-pending")
+    assert check_gate(s, P, p.id, proceed, cust, stale, **kw).code == "CONFIRM_BEFORE_READBACK_END"
+    interrupted = Utterance(4, 3000, 5500, 101.0, "바뀐 받는 분은", p.id)
     assert check_gate(s, P, p.id, proceed, cust, interrupted, **kw).ok
     s.record("item_price", 31000)
     assert check_gate(s, P, p.id, proceed, cust, interrupted, **kw).code == "CONFIRM_SNAPSHOT_CHANGED"

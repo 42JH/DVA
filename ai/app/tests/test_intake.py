@@ -56,7 +56,7 @@ def test_live_confirmation_saves_and_lookup_combines_both_sources(tmp_path):
                        {"confirm": ("yes", 0.98, {"yes": 0.98})}, pending.id)
         assert not s.state.parcels and s.state.pending is pending and not db.drafts
         assert any(event["text"] == "CONFIRM_BEFORE_READBACK_END" for event in s.events)
-        retry = Spoken(3, readback.text, 5000, 7000, 103, 103)
+        retry = Spoken(3, "바뀐 받는 분은", 5000, 7000, 103, 103, readback_id=pending.id)
         await lf.apply(s, Spoken(4, "네, 맞습니다. 그냥 그렇게 접수해 주세요", 6200, 6900, 104, 104), retry,
                        {"confirm": ("proceed", 0.98, {"proceed": 0.98})}, pending.id)
         await until(lambda: s.rt.ready_notice is not None)
