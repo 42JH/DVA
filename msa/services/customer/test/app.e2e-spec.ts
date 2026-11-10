@@ -140,12 +140,13 @@ describe('Customer read API (e2e)', () => {
       .expect(({ body }: { body: { paths: Record<string, Record<string, unknown>> } }) => {
         const paths = body.paths;
         for (const [path, methods] of Object.entries({
-          '/api/customers': ['get', 'post'],
+          '/api/customers': ['delete', 'get', 'post'],
           '/api/customers/context': ['post'],
           '/api/customers/{id}': ['get', 'patch'],
           '/api/customers/{id}/pins': ['get', 'post'],
           '/api/pins/{id}': ['patch'],
-          '/api/companies': ['get', 'post'],
+          '/api/pins': ['delete'],
+          '/api/companies': ['delete', 'get', 'post'],
           '/api/companies/search': ['get'],
           '/api/companies/members/search': ['get'],
           '/api/companies/{id}': ['get', 'patch', 'delete'],

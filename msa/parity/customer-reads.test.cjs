@@ -115,7 +115,7 @@ test('customer reads match monolith with independent operations sessions and imm
       await request('GET',path,actor,200);
   }
   for (const path of ['/api/customers?q=%25_%5B','/api/customers?phoneNumber=01000000004',
-    '/api/customers?status=WITHDRAWN','/api/customers?limit=1&offset=1','/api/customers?offset=99999',
+    '/api/customers?phoneNumber=0000','/api/customers?phoneNumber=0','/api/customers?status=WITHDRAWN','/api/customers?limit=1&offset=1','/api/customers?offset=99999',
     '/api/companies?q=%25_%5B','/api/companies?status=INACTIVE','/api/companies?limit=1&offset=99999',
     '/api/companies/2/members?status=INACTIVE','/api/companies/1/members?limit=1&offset=99999',
     '/api/companies/4/members','/api/companies/1/departments?limit=1&offset=99999','/api/companies/4/departments'])
@@ -169,6 +169,10 @@ test('customer reads match monolith with independent operations sessions and imm
   await request('DELETE','/api/admins/2','root',204);
   await request('GET','/api/customers','operator',401);
   const docs = await Promise.all(sides.map(async side => (await (await fetch(side.base+'/api/docs-json')).json())));
+  for(const q of ['', '  ', '검색', '0000', '010-0000', '%', '_'])
+    await request('GET','/api/companies/1/members?q='+encodeURIComponent(q),'root',200);
+  for(const q of ['x'.repeat(101), '\0'])
+    await request('GET','/api/companies/1/members?q='+encodeURIComponent(q),'root',400);
   const schemas = new Set();
   function compareSchemas(value) {
     if (!value || typeof value !== 'object') return;

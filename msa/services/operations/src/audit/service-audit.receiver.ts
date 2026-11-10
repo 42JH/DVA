@@ -8,6 +8,23 @@ import type { Environment } from '../config/environment';
 import { AuditRepository } from './audit.repository';
 import { ApiException } from '../common/errors/api.exception';
 import { AUDIT_ACTOR_TYPES, AUDIT_RESULTS, type AuditEvent, type AuditResult } from './audit.types';
+import {
+  assembleFaqExamples,
+  validateFaqChunks,
+  validateFaqExamples,
+  type FaqExamplesPayload,
+} from '@dva/events/faq-question-examples.cjs';
+import {
+  commitFaqExamples,
+  isFaqExamplesPreparation,
+  prepareFaqExamples,
+} from '../faqs/faq-question-examples';
+import { validateFaqConversionEvent } from '@dva/events/faq-conversion.cjs';
+import {
+  prepareFaqConversion,
+  commitFaqConversion,
+  isFaqConversionPreparation,
+} from '../faqs/faq-conversion';
 
 const object = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -18,8 +35,10 @@ const invalid = () => new HttpException({ error: 'INVALID_AUDIT_EVENT' }, 422);
 const actions = new Set([
   'CUSTOMER_CREATED',
   'CUSTOMER_UPDATED',
+  'CUSTOMER_DELETED',
   'PERSONAL_PIN_CREATED',
   'PERSONAL_PIN_UPDATED',
+  'PERSONAL_PIN_DELETED',
   'ORGANIZATION_CREATED',
   'ORGANIZATION_UPDATED',
   'ORGANIZATION_DELETED',
@@ -46,7 +65,10 @@ const consultationActions = new Set([
   'CALL_DELETED',
   'UNANSWERED_QUESTION_RECORDED',
   'UNANSWERED_QUESTION_DELETED',
+  'UNANSWERED_QUESTION_REGISTERED',
   'CALL_ANALYSIS_RECORDED',
+  'CALL_ANALYSIS_FAILED',
+  'CALL_EVENTS_RECORDED',
   'CALL_DROPOFF_RECORDED',
   'CALL_RESPONSE_WAIT_RECORDED',
 ]);
@@ -112,9 +134,11 @@ function auditInput(
               ? 'ORDER_PARCEL'
               : 'ORDER')
         : audit.targetType ===
-          (['UNANSWERED_QUESTION_RECORDED', 'UNANSWERED_QUESTION_DELETED'].includes(
-            audit.action as string,
-          )
+          ([
+            'UNANSWERED_QUESTION_RECORDED',
+            'UNANSWERED_QUESTION_DELETED',
+            'UNANSWERED_QUESTION_REGISTERED',
+          ].includes(audit.action as string)
             ? 'UNANSWERED_QUESTION'
             : 'CALL_SESSION')) ||
     typeof audit.requestId !== 'string' ||
@@ -131,7 +155,9 @@ function auditInput(
       audit.action !== 'CALL_STARTED' &&
       payload.result === 'SUCCESS' &&
       (audit.actorType !==
-        (['CALL_DELETED', 'UNANSWERED_QUESTION_DELETED'].includes(audit.action as string)
+        (['CALL_DELETED', 'UNANSWERED_QUESTION_DELETED', 'UNANSWERED_QUESTION_REGISTERED'].includes(
+          audit.action as string,
+        )
           ? 'ADMIN'
           : 'AI') ||
         audit.targetId === null)) ||
@@ -265,15 +291,21 @@ export class ServiceAuditReceiver implements OnModuleInit, OnModuleDestroy {
           await client.query('SELECT pg_advisory_xact_lock(20261105,hashtext($1))', [
             transactionId,
           ]);
-          const prepared = await client.query(
-            `SELECT event_id FROM ${table} WHERE event_id=ANY($1::uuid[]) AND transaction_id=$2 AND NOT aborted FOR UPDATE`,
+          const prepared = await client.query<{ event_id: string; audit: unknown }>(
+            `SELECT event_id,audit FROM ${table} WHERE event_id=ANY($1::uuid[]) AND transaction_id=$2 AND NOT aborted
+             ORDER BY array_position($1::uuid[],event_id) FOR UPDATE`,
             [ids, transactionId],
           );
           if (prepared.rowCount !== ids.length) throw invalid();
+          for (const row of prepared.rows)
+            if (service === 'consultation' && isFaqExamplesPreparation(row.audit))
+              await commitFaqExamples(client, row.audit, transactionId);
+            else if (service === 'consultation' && isFaqConversionPreparation(row.audit))
+              await commitFaqConversion(client, row.audit, transactionId);
           await client.query(
             `INSERT INTO audit_logs OVERRIDING SYSTEM VALUE
           SELECT (jsonb_populate_record(NULL::audit_logs,p.audit)).* FROM unnest($1::uuid[]) WITH ORDINALITY i(id,n)
-          JOIN ${table} p ON p.event_id=i.id ORDER BY i.n`,
+          JOIN ${table} p ON p.event_id=i.id WHERE p.audit ? 'audit_log_seq' ORDER BY i.n`,
             [ids],
           );
           await client.query(`DELETE FROM ${table} WHERE event_id=ANY($1::uuid[])`, [ids]);
@@ -306,7 +338,119 @@ export class ServiceAuditReceiver implements OnModuleInit, OnModuleDestroy {
         },
       });
     }
+    handlers['consultation:FaqConversionCommitted'] = handlers['consultation:AuditCommitted'];
+    handlers['consultation:FaqQuestionExamplesChunkPrepared'] = async (client, event) => {
+      try {
+        validateFaqExamples(event.payload);
+      } catch {
+        throw invalid();
+      }
+      const transactionId = transaction(event.payload);
+      await client.query('SELECT pg_advisory_xact_lock(20261105,hashtext($1))', [transactionId]);
+      const terminal = await client.query<{ aborted: boolean }>(
+        'SELECT aborted FROM consultation_audit_preparations WHERE event_id=$1',
+        [transactionId],
+      );
+      if (terminal.rows[0]?.aborted) return;
+      await client.query(
+        'INSERT INTO consultation_audit_preparations(event_id,transaction_id,audit) VALUES($1,$2,$3)',
+        [event.eventId, transactionId, { _faqExamplesChunk: event.payload }],
+      );
+    };
+    handlers['consultation:FaqQuestionExamplesPrepared'] = async (client, event) => {
+      let input: FaqExamplesPayload | undefined;
+      let chunkIds: string[] = [];
+      try {
+        if (Object.hasOwn(event.payload, 'chunkEventIds')) {
+          validateFaqChunks(event.payload);
+          chunkIds = event.payload.chunkEventIds;
+        } else {
+          validateFaqExamples(event.payload);
+          input = event.payload;
+        }
+      } catch {
+        throw invalid();
+      }
+      const transactionId = transaction(event.payload);
+      await client.query('SELECT pg_advisory_xact_lock(20261105,hashtext($1))', [transactionId]);
+      const terminal = await client.query<{ aborted: boolean }>(
+        'SELECT aborted FROM consultation_audit_preparations WHERE event_id=$1',
+        [transactionId],
+      );
+      if (terminal.rows[0]?.aborted) return;
+      if (chunkIds.length) {
+        const chunks = await client.query<{ audit: unknown }>(
+          `SELECT audit FROM consultation_audit_preparations
+           WHERE event_id=ANY($1::uuid[]) AND transaction_id=$2 AND NOT aborted
+           ORDER BY array_position($1::uuid[],event_id) FOR UPDATE`,
+          [chunkIds, transactionId],
+        );
+        if (chunks.rowCount !== chunkIds.length) throw invalid();
+        try {
+          input = assembleFaqExamples(
+            chunks.rows.map((row) => {
+              if (!object(row.audit)) throw invalid();
+              validateFaqExamples(row.audit._faqExamplesChunk);
+              return row.audit._faqExamplesChunk;
+            }),
+            transactionId,
+          );
+        } catch {
+          throw invalid();
+        }
+      }
+      const prepared = await prepareFaqExamples(client, input!);
+      await client.query(
+        'INSERT INTO consultation_audit_preparations(event_id,transaction_id,audit) VALUES($1,$2,$3)',
+        [event.eventId, transactionId, prepared],
+      );
+      if (chunkIds.length)
+        await client.query(
+          'DELETE FROM consultation_audit_preparations WHERE event_id=ANY($1::uuid[])',
+          [chunkIds],
+        );
+    };
+    handlers['consultation:FaqConversionPrepared'] = async (client, event) => {
+      try {
+        validateFaqConversionEvent(event);
+      } catch {
+        throw invalid();
+      }
+      const transactionId = transaction(event.payload);
+      await client.query('SELECT pg_advisory_xact_lock(20261105,hashtext($1))', [transactionId]);
+      const terminal = await client.query<{ aborted: boolean }>(
+        'SELECT aborted FROM consultation_audit_preparations WHERE event_id=$1',
+        [transactionId],
+      );
+      if (terminal.rows[0]?.aborted) return;
+      const prepared = await prepareFaqConversion(client, event.payload, repository);
+      await client.query(
+        'INSERT INTO consultation_audit_preparations(event_id,transaction_id,audit) VALUES($1,$2,$3)',
+        [event.eventId, transactionId, prepared],
+      );
+    };
     this.receive = createReceiver<PoolClient>({ pool: database.pool, sources, handlers });
+  }
+
+  async prepareConversion(input: unknown, authorization: string) {
+    try {
+      validateFaqConversionEvent(input);
+    } catch {
+      throw invalid();
+    }
+    await this.receive(input, authorization);
+    const prepared = (
+      await this.database.pool.query<{ audit: unknown }>(
+        'SELECT audit FROM consultation_audit_preparations WHERE event_id=$1 AND transaction_id=$2 AND NOT aborted',
+        [input.eventId, input.payload.transactionId],
+      )
+    ).rows[0]?.audit;
+    if (!isFaqConversionPreparation(prepared)) throw new Error('FAQ preparation unavailable');
+    return {
+      eventId: input.eventId,
+      status: 'processed',
+      payload: { faqEntrySeq: prepared._faqConversion.faq.faq_entry_seq },
+    };
   }
 
   onModuleInit() {

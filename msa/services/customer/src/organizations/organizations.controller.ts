@@ -41,6 +41,7 @@ import { AuditOperation } from '../audit/audit-operation';
 import { AiBusinessAccess } from '../auth/auth.guard';
 import { CompanyDirectoryEnvelopeDto, CompanyDirectoryQueryDto } from './dto/company-directory.dto';
 import { OrganizationDeletionService } from './organization-deletion.service';
+import { DeleteOrganizationsDto } from './dto/delete-organizations.dto';
 import { OrganizationBillingService } from './organization-billing.service';
 import { BillingMonthQueryDto, BillingMonthEnvelopeDto } from './dto/billing-month.dto';
 
@@ -153,6 +154,26 @@ export class OrganizationsController {
     await this.organizations.update(
       params.id,
       changes,
+      request.admin.adminUserSeq,
+      request.requestId,
+    );
+  }
+
+  @Delete()
+  @HttpCode(204)
+  @AuditOperation({ action: 'ORGANIZATION_DELETED', targetType: 'ORGANIZATION', target: 'none' })
+  @ApiOperation({
+    summary: '기업 단건·다건 삭제',
+    description:
+      'organizationSeqs 배열 1~100개. 모두 존재해야 하며 한 건이라도 실패하면 전체를 롤백합니다. 기존 단건 삭제와 같은 권한·soft delete·감사·보관 기준입니다.',
+  })
+  @ApiNoContentResponse({ description: '모두 삭제 완료. 응답 본문 없음.' })
+  @ApiNotFoundResponse({ type: ErrorResponseDto })
+  @ApiConflictResponse({ type: ErrorResponseDto })
+  removeMany(@Body() body: DeleteOrganizationsDto, @Req() request: AuthRequest) {
+    return this.deletion.remove(
+      body.organizationSeqs,
+      false,
       request.admin.adminUserSeq,
       request.requestId,
     );

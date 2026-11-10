@@ -73,22 +73,33 @@ describe('Consultation PBX and active calls (e2e)', () => {
       .expect(({ body }: { body: { paths: Record<string, unknown> } }) => {
         expect(Object.keys(body.paths).sort()).toEqual([
           '/api/ai/calls/{id}/analysis',
+          '/api/ai/calls/{id}/analysis/failure',
+          '/api/ai/calls/{id}/events',
           '/api/ai/calls/{id}/response-wait-metrics',
           '/api/ai/calls/{id}/stage-metrics',
           '/api/ai/unanswered-questions',
+          '/api/calls',
           '/api/calls/active-count',
           '/api/calls/active-count/stream',
           '/api/calls/{id}',
           '/api/calls/{id}/actions',
           '/api/calls/{id}/processing-results',
           '/api/calls/{id}/transcript',
+          '/api/dashboard/complaint-calls',
+          '/api/dashboard/registration-time',
+          '/api/dashboard/response-wait',
+          '/api/dashboard/stage-dropoffs',
+          '/api/unanswered-questions',
           '/api/unanswered-questions/{id}',
+          '/api/unanswered-questions/{id}/faqs',
           '/consultation/health',
           '/consultation/health/ready',
           '/webhooks/pbx/call-ended',
         ]);
+        expect(body.paths['/api/calls/{id}']).toHaveProperty('get');
+        expect(body.paths['/api/calls/{id}']).toHaveProperty('delete');
       });
-    await request(app.getHttpServer()).get('/api/calls').expect(404);
+    await request(app.getHttpServer()).get('/api/calls').expect(401);
     await request(app.getHttpServer())
       .delete('/api/calls/1')
       .set('Origin', 'http://localhost:5173')

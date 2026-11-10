@@ -11,6 +11,7 @@ import { AiRuntimeController } from './ai-runtime.controller';
 import { AiSettingsGuard } from './ai-settings-access';
 import { PersonaApplicationService } from './persona-application.service';
 import { PersonaVersionController } from './persona-version.controller';
+import { CallReadReferencesController } from './call-read-references.controller';
 
 @Module({
   imports: [ApplicationConfigModule, DatabaseModule, AuditModule],
@@ -19,6 +20,7 @@ import { PersonaVersionController } from './persona-version.controller';
     AiOptionsController,
     AiRuntimeController,
     PersonaVersionController,
+    CallReadReferencesController,
   ],
   providers: [
     AiSettingsRepository,

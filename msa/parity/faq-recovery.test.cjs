@@ -48,7 +48,7 @@ test('real FAQ worker preserves order and UUID through failure, claim, SIGKILL a
       const audits=(await side.db.query("SELECT action,result,actor_type FROM audit_logs WHERE target_type='FAQ_CHANGE_NOTIFICATION' AND target_seq=ANY($1::int[]) ORDER BY audit_log_seq",[r.map((row)=>row.faq_change_notification_seq)])).rows;
       assert.equal(audits.filter((a)=>a.action==='FAQ_NOTIFICATION_SENT').length,2);
       assert.ok(audits.every((a)=>a.actor_type==='SYSTEM'));
-      const response=await fetch(`http://${side.name}-faq-app:3005/api/ai/faqs`);
+      const response=await fetch(`http://${side.name}-faq-app:3005/api/ai/faqs`,{headers:{Authorization:'Bearer '+process.env.AI_BUSINESS_TOKEN}});
       assert.equal(response.status,200);
       assert.ok((await response.json()).data.length>0);
     }));

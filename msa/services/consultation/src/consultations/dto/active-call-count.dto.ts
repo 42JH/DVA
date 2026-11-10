@@ -6,7 +6,8 @@ export class ActiveCallCountDto {
     type: Number,
     minimum: 0,
     example: 37,
-    description: '기능 도입 후 등록되어 PBX 종료가 확인되지 않은 통화 수.',
+    description:
+      '기능 도입 후 등록되어 PBX·AI 분석 어느 쪽에도 종료 시각이 없는 통화 수.',
   })
   activeCallCount!: number;
 

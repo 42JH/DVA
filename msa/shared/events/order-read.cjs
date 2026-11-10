@@ -34,12 +34,13 @@ class OrderReadError extends Error {
 const nullable = (value, check) => value === null || check(value);
 const text = value => typeof value === 'string';
 const instant = value => text(value) && Number.isFinite(Date.parse(value));
+const ORDER_STATUSES = ['COLLECTING','notPaid','PAID','SUBMITTING','SUBMITTING_FAILED','ACCEPTED','SUBMISSION_FAILED','CANCELLED'];
 const amount = value => Number.isSafeInteger(value) && value >= 0;
 const addressKeys = 'detailAddress,dongName,jibunAddress,name,phoneNumber,postalCode,roadAddress';
 const address = value => keys(value,addressKeys) && Object.values(value).every(field=>nullable(field,text));
 const summaryKeys = 'createdAt,creationSource,customerSeq,orderSeq,paidAt,parcelCount,paymentDueAt,paymentMethodType,pickupRequestedAt,status,totalAmount';
 const header = value => id(value.orderSeq) && nullable(value.customerSeq,id) &&
-  ['COLLECTING','notPaid','PAID','SUBMITTING','SUBMITTING_FAILED','ACCEPTED','SUBMISSION_FAILED','CANCELLED'].includes(value.status) &&
+  ORDER_STATUSES.includes(value.status) &&
   ['AI','ADMIN','UNKNOWN'].includes(value.creationSource) && nullable(value.totalAmount,amount) &&
   nullable(value.paymentMethodType,method=>['cat','billing','credit','groupBilling'].includes(method)) &&
   ['createdAt','paidAt','paymentDueAt','pickupRequestedAt'].every(key=>key==='createdAt'?instant(value[key]):nullable(value[key],instant));
@@ -104,4 +105,4 @@ async function requestOrderRead(url, token, event) {
     throw new Error('Invalid order read result');
   return value;
 }
-module.exports = { validateOrderRead, requestOrderRead, OrderReadError };
+module.exports = { validateOrderRead, requestOrderRead, OrderReadError, ORDER_STATUSES };

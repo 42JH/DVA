@@ -15,6 +15,9 @@ import { PersonaListQueryDto } from './dto/persona-request.dto';
 
 const VERSION_SELECT = `SELECT v.ai_persona_version_seq AS "aiPersonaVersionSeq",
  v.ai_persona_seq AS "aiPersonaSeq", identity.code, v.version, v.name, v.prompt_text AS "promptText",
+ CASE WHEN v.role_text='' THEN v.prompt_text ELSE v.role_text END AS role,
+ v.personality_text AS personality,v.tone_text AS tone,v.speed_instruction AS "speedInstruction",
+ v.backchannel_text AS backchannel,v.interruption_text AS interruption,
  v.voice_id AS "voiceId", v.speaking_rate::float8 AS "speakingRate", v.turn_wait_level AS "turnWaitLevel",
  v.status, v.created_by_admin_user_seq AS "createdByAdminUserSeq", v.created_at AS "createdAt",
  v.application_id AS "applicationId", v.requested_by_admin_user_seq AS "requestedByAdminUserSeq",
@@ -24,6 +27,9 @@ const VERSION_SELECT = `SELECT v.ai_persona_version_seq AS "aiPersonaVersionSeq"
 
 const DRAFT_SELECT = `SELECT ai_persona_seq AS "aiPersonaSeq",draft_revision AS "draftRevision",
  base_version AS "baseVersion",name,prompt_text AS "promptText",voice_id AS "voiceId",
+ CASE WHEN role_text='' THEN prompt_text ELSE role_text END AS role,
+ personality_text AS personality,tone_text AS tone,speed_instruction AS "speedInstruction",
+ backchannel_text AS backchannel,interruption_text AS interruption,
  speaking_rate::float8 AS "speakingRate",turn_wait_level AS "turnWaitLevel",
  updated_by_admin_user_seq AS "updatedByAdminUserSeq",created_at AS "createdAt",updated_at AS "updatedAt"
  FROM ai_persona_drafts`;
@@ -130,12 +136,16 @@ export class AiSettingsRepository {
   ): Promise<PersonaDraft> {
     await client.query(
       `INSERT INTO ai_persona_drafts(ai_persona_seq,draft_revision,base_version,name,prompt_text,
-       voice_id,speaking_rate,turn_wait_level,updated_by_admin_user_seq)
-       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
+       voice_id,speaking_rate,turn_wait_level,updated_by_admin_user_seq,
+       role_text,personality_text,tone_text,speed_instruction,backchannel_text,interruption_text)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
        ON CONFLICT(ai_persona_seq) DO UPDATE SET draft_revision=EXCLUDED.draft_revision,
        base_version=EXCLUDED.base_version,name=EXCLUDED.name,prompt_text=EXCLUDED.prompt_text,
        voice_id=EXCLUDED.voice_id,speaking_rate=EXCLUDED.speaking_rate,
        turn_wait_level=EXCLUDED.turn_wait_level,updated_by_admin_user_seq=EXCLUDED.updated_by_admin_user_seq,
+       role_text=EXCLUDED.role_text,personality_text=EXCLUDED.personality_text,
+       tone_text=EXCLUDED.tone_text,speed_instruction=EXCLUDED.speed_instruction,
+       backchannel_text=EXCLUDED.backchannel_text,interruption_text=EXCLUDED.interruption_text,
        updated_at=clock_timestamp()`,
       [
         id,
@@ -147,6 +157,12 @@ export class AiSettingsRepository {
         settings.speakingRate,
         settings.turnWaitLevel,
         actorId,
+        settings.role,
+        settings.personality,
+        settings.tone,
+        settings.speedInstruction,
+        settings.backchannel,
+        settings.interruption,
       ],
     );
     return (await this.draft(id, client))!;
@@ -169,26 +185,37 @@ export class AiSettingsRepository {
   }
 
   async personas(query: PersonaListQueryDto, id?: number): Promise<PageRows<Persona>> {
-    const result = await readPage<Persona>(
+    const result = await readPage<
+      Pick<Persona, 'aiPersonaSeq' | 'code'> & {
+        details: Omit<Persona, 'aiPersonaSeq' | 'code'>;
+      }
+    >(
       this.database.pool,
-      `SELECT p.ai_persona_seq AS "aiPersonaSeq", p.code, row_to_json(latest) AS "latestVersion",
+      `SELECT p.ai_persona_seq AS "aiPersonaSeq",p.code FROM ai_personas p
+       WHERE ($1::int IS NULL OR p.ai_persona_seq=$1)
+        AND EXISTS(SELECT 1 FROM ai_persona_versions v WHERE v.ai_persona_seq=p.ai_persona_seq)`,
+      [id ?? null],
+      query,
+      '"aiPersonaSeq" DESC',
+      `page.*,(SELECT row_to_json(details) FROM (
+       SELECT row_to_json(latest) AS "latestVersion",
        row_to_json(latest) AS "headVersion",
        row_to_json(active) AS "activeVersion",row_to_json(pending) AS "pendingVersion",
        row_to_json(draft) AS draft,active."aiPersonaVersionSeq" AS "activeVersionSeq",
        pending."aiPersonaVersionSeq" AS "pendingVersionSeq"
-       FROM ai_personas p JOIN LATERAL (${VERSION_SELECT}
-        WHERE v.ai_persona_seq=p.ai_persona_seq ORDER BY v.version DESC LIMIT 1) latest ON true
+       FROM LATERAL (${VERSION_SELECT}
+        WHERE v.ai_persona_seq=page."aiPersonaSeq" ORDER BY v.version DESC LIMIT 1) latest
        LEFT JOIN LATERAL (${VERSION_SELECT}
-        WHERE v.ai_persona_seq=p.ai_persona_seq AND v.status='ACTIVE') active ON true
+        WHERE v.ai_persona_seq=page."aiPersonaSeq" AND v.status='ACTIVE') active ON true
        LEFT JOIN LATERAL (${VERSION_SELECT}
-        WHERE v.ai_persona_seq=p.ai_persona_seq AND v.status='PENDING') pending ON true
-       LEFT JOIN LATERAL (${DRAFT_SELECT} WHERE ai_persona_seq=p.ai_persona_seq) draft ON true
-       WHERE ($1::int IS NULL OR p.ai_persona_seq=$1)`,
-      [id ?? null],
-      query,
-      '"aiPersonaSeq" DESC',
+        WHERE v.ai_persona_seq=page."aiPersonaSeq" AND v.status='PENDING') pending ON true
+       LEFT JOIN LATERAL (${DRAFT_SELECT} WHERE ai_persona_seq=page."aiPersonaSeq") draft ON true
+      ) details) AS details`,
     );
-    return result;
+    return {
+      ...result,
+      rows: result.rows.map(({ details, ...persona }) => ({ ...persona, ...details })),
+    };
   }
 
   async versions(id: number, query: PersonaListQueryDto): Promise<PageRows<PersonaVersion>> {
@@ -219,8 +246,9 @@ export class AiSettingsRepository {
   ): Promise<PersonaVersion> {
     const row = (
       await client.query<{ id: number }>(
-        `INSERT INTO ai_persona_versions(ai_persona_seq,version,name,prompt_text,voice_id,speaking_rate,turn_wait_level,created_by_admin_user_seq,created_by_admin_user_name)
-       VALUES($1,$2,$3,$4,$5,$6,$7,$8,(SELECT name FROM admin_users WHERE admin_user_seq=$8)) RETURNING ai_persona_version_seq AS id`,
+        `INSERT INTO ai_persona_versions(ai_persona_seq,version,name,prompt_text,voice_id,speaking_rate,turn_wait_level,created_by_admin_user_seq,created_by_admin_user_name,
+        role_text,personality_text,tone_text,speed_instruction,backchannel_text,interruption_text)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,(SELECT name FROM admin_users WHERE admin_user_seq=$8),$9,$10,$11,$12,$13,$14) RETURNING ai_persona_version_seq AS id`,
         [
           id,
           version,
@@ -230,6 +258,12 @@ export class AiSettingsRepository {
           settings.speakingRate,
           settings.turnWaitLevel,
           actorId,
+          settings.role,
+          settings.personality,
+          settings.tone,
+          settings.speedInstruction,
+          settings.backchannel,
+          settings.interruption,
         ],
       )
     ).rows[0];

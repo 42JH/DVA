@@ -59,7 +59,7 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
       'SELECT legacy_order_seq,call_session_seq,caller_phone_number FROM legacy_parcel_draft_call_snapshots LIMIT 0',
     );
     await this.pool.query(
-      'SELECT ai_persona_version_seq,has_callback_request FROM call_analyses LIMIT 0',
+      'SELECT ai_persona_version_seq,has_callback_request,complaint_attempts,complaint_retry_at FROM call_analyses LIMIT 0',
     );
     await this.pool.query(
       'SELECT response_wait_payload_hash FROM call_dashboard_metrics LIMIT 0',
@@ -69,6 +69,26 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
       'SELECT singleton,pruned FROM parcel_draft_call_snapshot_state LIMIT 0',
     );
     await this.pool.query('SELECT reason FROM unanswered_questions LIMIT 0');
+  }
+
+  async readOnly<T>(work: (client: PoolClient) => Promise<T>): Promise<T> {
+    const client = await this.pool.connect();
+    let broken: Error | undefined;
+    try {
+      await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+      const result = await work(client);
+      await client.query('COMMIT');
+      return result;
+    } catch (error: unknown) {
+      try {
+        await client.query('ROLLBACK');
+      } catch {
+        broken = new Error('Read rollback failed');
+      }
+      throw error;
+    } finally {
+      client.release(broken);
+    }
   }
 
   async transaction<T>(work: (client: PoolClient) => Promise<T>): Promise<T> {

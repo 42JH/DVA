@@ -1,12 +1,12 @@
-import { CallerContextEnvelopeDto, CallerContextRequestDto } from './dto/caller-context.dto';
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Headers,
-  Patch,
   HttpCode,
   Param,
+  Patch,
   Post,
   Query,
   Req,
@@ -21,10 +21,12 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { AuditOperation } from '../audit/audit-operation';
 import * as authGuard from '../auth/auth.guard';
 import { ErrorResponseDto } from '../common/dto/api-response.dto';
 import { CustomersService } from './customers.service';
+import { AuditOperation } from '../audit/audit-operation';
+import { CallerContextEnvelopeDto, CallerContextRequestDto } from './dto/caller-context.dto';
+import { DeleteCustomersDto } from './dto/delete-customers.dto';
 import {
   CreateCustomerDto,
   CustomerIdParamsDto,
@@ -48,6 +50,24 @@ import {
 export class CustomersController {
   constructor(private readonly customers: CustomersService) {}
 
+  @Delete()
+  @HttpCode(204)
+  @ApiCookieAuth('adminSession')
+  @AuditOperation({ action: 'CUSTOMER_DELETED', targetType: 'CUSTOMER', target: 'none' })
+  @ApiOperation({
+    summary: '고객 단건·다건 soft delete',
+    description:
+      '모든 ACTIVE 관리자 세션·허용 Origin 전용. customerSeqs 배열 1~100개. 고객과 소속·개인 PIN을 soft delete하며 주문·통화·결제 이력은 보존합니다. 미존재·기삭제가 있거나 감사 저장에 실패하면 전체 롤백합니다. 잠금 경합은 409입니다.',
+  })
+  @ApiNoContentResponse({ description: '전체 삭제 완료. 응답 본문 없음.' })
+  removeMany(@Body() input: DeleteCustomersDto, @Req() request: authGuard.AuthRequest) {
+    return this.customers.removeMany(
+      input.customerSeqs,
+      request.admin.adminUserSeq,
+      request.requestId,
+    );
+  }
+
   @Post('context')
   @HttpCode(200)
   @authGuard.MvpAiCustomerAccess()
@@ -66,7 +86,8 @@ export class CustomersController {
   @ApiCookieAuth('adminSession')
   @ApiOperation({
     summary: '고객 목록',
-    description: '모든 ACTIVE 관리자. 고객 번호 내림차순. AI 초기 데이터 조회는 별도 API입니다.',
+    description:
+      '모든 ACTIVE 관리자. 고객 번호 내림차순. availablePaymentMethods는 고객 확인 API와 동일한 현재 결제 가능 수단이며 탈퇴 고객은 빈 배열입니다. 실제 주문·결제 시 자격은 다시 확인합니다. AI 초기 데이터 조회는 별도 API입니다.',
   })
   @ApiOkResponse({ type: CustomersEnvelopeDto })
   list(@Query() query: ListCustomersQueryDto) {
@@ -99,6 +120,7 @@ export class CustomersController {
   find(@Param() params: CustomerIdParamsDto, @Req() request: authGuard.AuthRequest) {
     return this.customers.find(params.id, Boolean(request.admin));
   }
+
   @Patch(':id')
   @AuditOperation({ action: 'CUSTOMER_UPDATED', targetType: 'CUSTOMER', target: 'id' })
   @authGuard.MvpAiCustomerAccess()

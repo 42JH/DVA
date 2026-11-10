@@ -13,12 +13,15 @@ test('production unanswered writes and call content/deletion match the monolith'
   const mono=new Pool({host:'monolith-db',user:'monolith_app'}),cons=new Pool({host:'consultation-db',user:'consultation_app'}),ops=new Pool({host:'operations-db',user:'operations_app'});
   const sides=[{base:'http://monolith-app:3000',db:mono,identity:mono},{base:'http://consultation-app:3004',db:cons,identity:ops}];
   const children=new Set(),expiryFixtures=[];
-  t.after(async()=>{for(const child of children)child.kill('SIGKILL');for(const fixture of expiryFixtures){await fixture.query('ROLLBACK');fixture.release();}await Promise.all([mono.end(),cons.end(),ops.end()]);});
+  const requestIds=new Set(),parallelRequests=new Map(),times=new Map(),registeredIds=new Set();
+  t.after(async()=>{for(const child of children)child.kill('SIGKILL');for(const fixture of expiryFixtures){await fixture.query('ROLLBACK');fixture.release();}
+    for(const db of [mono,cons])await truncateFixture(db,'TRUNCATE call_sessions RESTART IDENTITY CASCADE');
+    for(const db of [mono,ops]){await db.query("DELETE FROM faq_entries WHERE question LIKE 'content-conversion %'");await db.query('DELETE FROM faq_change_notifications WHERE request_id=ANY($1::uuid[])',[[...requestIds]]);}
+    await Promise.all([mono.end(),cons.end(),ops.end()]);});
   for(const side of sides)for(let attempt=0;;attempt++){
     try{if((await fetch(side.base+(side.db===mono?'/health':'/consultation/health/ready'))).status===200)break;}catch{}
     assert.ok(attempt<60,'production app did not become ready');await delay(100);
   }
-  const requestIds=new Set(),parallelRequests=new Map(),times=new Map();
   let comparisons=0;
   for(const side of sides){
     await truncateFixture(side.db, 'TRUNCATE call_sessions RESTART IDENTITY CASCADE');
@@ -44,7 +47,19 @@ test('production unanswered writes and call content/deletion match the monolith'
     for(const row of calls)row.deleted_at=receipt(side,'call-deleted-'+row.call_session_seq,row.deleted_at);
     const questions=(await side.db.query(`SELECT unanswered_question_seq,event_id,call_session_seq,question_text,occurred_at::text,offset_seconds,status,reason,
       faq_entry_seq,payload_hash,faq_conversion_hash,created_at,registered_at::text,deleted_at FROM unanswered_questions ORDER BY unanswered_question_seq`)).rows;
-    for(const row of questions){row.created_at=receipt(side,'question-created-'+row.unanswered_question_seq,row.created_at);row.deleted_at=receipt(side,'question-deleted-'+row.unanswered_question_seq,row.deleted_at);}
+    for(const row of questions){row.created_at=receipt(side,'question-created-'+row.unanswered_question_seq,row.created_at);row.deleted_at=receipt(side,'question-deleted-'+row.unanswered_question_seq,row.deleted_at);
+      if(registeredIds.has(row.unanswered_question_seq))row.registered_at=receipt(side,'question-registered-'+row.unanswered_question_seq,row.registered_at);}
+    const faqs=(await side.identity.query("SELECT * FROM faq_entries WHERE question LIKE 'content-conversion %' ORDER BY faq_entry_seq")).rows;
+    for(const row of faqs){
+      assert.ok(side.admins.includes(row.updated_by_admin_user_seq));row.updated_by_admin_user_seq='<admin-'+side.admins.indexOf(row.updated_by_admin_user_seq)+'>';
+      row.created_at=receipt(side,'faq-created-'+row.faq_entry_seq,row.created_at);row.updated_at=receipt(side,'faq-updated-'+row.faq_entry_seq+'-'+(row.deleted_at===null?'created':'deleted'),row.updated_at);
+      row.deleted_at=receipt(side,'faq-deleted-'+row.faq_entry_seq,row.deleted_at);
+    }
+    const notifications=(await side.identity.query('SELECT * FROM faq_change_notifications WHERE request_id=ANY($1::uuid[]) ORDER BY faq_change_notification_seq',[[...requestIds]])).rows;
+    for(const row of notifications){assert.match(row.event_id,/^[0-9a-f-]{36}$/);row.event_id='<notification-'+row.faq_change_notification_seq+'>';
+      row.created_at=receipt(side,'notification-created-'+row.faq_change_notification_seq,row.created_at);row.next_attempt_at=receipt(side,'notification-next-'+row.faq_change_notification_seq,row.next_attempt_at);
+      row.request_id=parallelRequests.get(row.request_id)??row.request_id;
+    }
     const events=(await side.db.query(`SELECT event_id,call_session_seq,event_order,kind,occurred_at::text,offset_seconds,call_utterance_seq,unanswered_question_seq,payload,payload_hash
       FROM call_insight_events ORDER BY event_order,event_id`)).rows;
     const utterances=(await side.db.query(`SELECT call_utterance_seq,call_session_seq,utterance_order,speaker,utterance_text,last_sentence_seq,received_at::text
@@ -57,7 +72,7 @@ test('production unanswered writes and call content/deletion match the monolith'
       row.request_id=parallelRequests.get(row.request_id)??row.request_id;
     }
     audits.sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)));
-    return {calls,questions,events,utterances,audits};
+    return {calls,questions,events,utterances,audits,faqs,notifications};
   }
   async function compare(){assert.deepEqual(await snapshot(sides[1]),await snapshot(sides[0]));}
   async function http(side,method,path,body,options,requestId){
@@ -66,9 +81,18 @@ test('production unanswered writes and call content/deletion match the monolith'
     if(options.session!==false)headers.Cookie=options.cookie??side.cookies[options.actor??0];
     if(options.bearer!==undefined)headers.Authorization='Bearer '+options.bearer;
     if(body!==undefined)headers['Content-Type']='application/json';
-    const response=await fetch(side.base+path,{method,headers,redirect:'error',signal:AbortSignal.timeout(15000),body:body===undefined?undefined:JSON.stringify(body)});
+    const base=side.db===cons&&path.startsWith('/api/faqs')?'http://operations-app:3005':side.base;
+    const response=await fetch(base+path,{method,headers,redirect:'error',signal:AbortSignal.timeout(15000),body:body===undefined?undefined:JSON.stringify(body)});
     const text=await response.text();
-    return {status:response.status,body:text?JSON.parse(text):null,cache:response.headers.get('cache-control'),
+    const parsed=text?JSON.parse(text):null;
+    if(method==='GET'&&path.startsWith('/api/faqs/')&&response.status===200){
+      const id=Number(path.split('/').at(-1)),stored=(await side.identity.query('SELECT created_at,updated_at,updated_by_admin_user_seq FROM faq_entries WHERE faq_entry_seq=$1',[id])).rows[0];
+      assert.equal(parsed.data.createdAt,stored.created_at.toISOString());assert.equal(parsed.data.updatedAt,stored.updated_at.toISOString());
+      assert.equal(parsed.data.updatedByAdminUserSeq,stored.updated_by_admin_user_seq);assert.ok(side.admins.includes(parsed.data.updatedByAdminUserSeq));
+      parsed.data.createdAt=receipt(side,'faq-created-'+id,parsed.data.createdAt);parsed.data.updatedAt=receipt(side,'faq-updated-'+id+'-created',parsed.data.updatedAt);
+      parsed.data.updatedByAdminUserSeq='<admin-'+side.admins.indexOf(parsed.data.updatedByAdminUserSeq)+'>';
+    }
+    return {status:response.status,body:parsed,cache:response.headers.get('cache-control'),
       requestId:response.headers.get('x-request-id'),cors:response.headers.get('access-control-allow-origin'),location:response.headers.get('location')};
   }
   async function pair(method,path,body,status,options={}){
@@ -165,7 +189,7 @@ test('production unanswered writes and call content/deletion match the monolith'
   assert.equal((await mono.query('SELECT question_text FROM unanswered_questions WHERE unanswered_question_seq=$1',[qid])).rows[0].question_text,first.questionText);
   results=(await pair('GET','/api/calls/100001/processing-results',undefined,200)).data;
   assert.equal(results[0].questionText,null);assert.equal(results[0].unansweredReason,null);
-  // Existing conversion state is preserved on replay and cannot be deleted; conversion itself is a later phase.
+  // Preserve a legacy registered state independently of the public conversion scenarios below.
   for(const side of sides)await side.db.query(`UPDATE unanswered_questions SET status='REGISTERED',faq_entry_seq=31,faq_conversion_hash=$2,registered_at='2026-11-01T01:02:00Z'
     WHERE unanswered_question_seq=$1`,[classifiedId,'b'.repeat(64)]);
   await pair('DELETE','/api/unanswered-questions/'+classifiedId,undefined,409);await collect(classified,200);
@@ -202,8 +226,93 @@ test('production unanswered writes and call content/deletion match the monolith'
   await pair('DELETE','/api/calls/'+callId,undefined,204);
   for(const route of ['transcript','actions','processing-results'])await pair('GET','/api/calls/'+callId+'/'+route,undefined,404);
   await collect(first,404);await pair('DELETE','/api/unanswered-questions/'+qid,undefined,404);
+  const faqBody=(changes={})=>({category:'수거 일정',question:'content-conversion '+randomUUID(),answer:' 답변 원문\n\n- 안내 ',...changes});
+  const conversionPath=id=>'/api/unanswered-questions/'+id+'/faqs';
+  async function collectConversion(){const input=question(100002,{questionText:'FAQ 전환 원문 '+randomUUID()});return{input,id:(await collect(input)).data.unansweredQuestionSeq};}
+  const conversion=await collectConversion(),conversionInput=faqBody();registeredIds.add(conversion.id);
+  await pair('POST',conversionPath(conversion.id),conversionInput,204);
+  const faqId=(await mono.query('SELECT faq_entry_seq FROM unanswered_questions WHERE unanswered_question_seq=$1',[conversion.id])).rows[0].faq_entry_seq;
+  await pair('POST',conversionPath(conversion.id),conversionInput,204);
+  await collect(conversion.input,200);await pair('DELETE','/api/unanswered-questions/'+conversion.id,undefined,409);
+  await pair('GET','/api/faqs/'+faqId,undefined,200);
+  for(const changes of [{question:conversionInput.question+' '},{category:'기타'},{answer:conversionInput.answer+'추가'}])await pair('POST',conversionPath(conversion.id),{...conversionInput,...changes},409);
+  await pair('DELETE','/api/faqs',{faqEntrySeqs:[faqId]},204);
+  await pair('POST',conversionPath(conversion.id),conversionInput,409);
+  await pair('POST',conversionPath(qid),faqBody(),404);await pair('POST',conversionPath(199999),faqBody(),404);
+  const deletedConversion=await collectConversion();await pair('DELETE','/api/unanswered-questions/'+deletedConversion.id,undefined,204);
+  await pair('POST',conversionPath(deletedConversion.id),faqBody(),409);
+  const open=await collectConversion(),duplicateInput=faqBody();registeredIds.add(open.id);
+  await pair('POST','/api/faqs',{items:[duplicateInput]},204);
+  await pair('POST',conversionPath(open.id),{...duplicateInput,question:duplicateInput.question.toUpperCase().replaceAll(' ','  ')},409);
+  for(const options of [{session:false},{cookie:'dva_session=bad'}])await pair('POST',conversionPath(open.id),faqBody(),401,options);
+  for(const options of [{origin:false},{origin:'https://evil.invalid'}])await pair('POST',conversionPath(open.id),faqBody(),403,options);
+  for(const id of ['0','2147483648','abc'])await pair('POST',conversionPath(id),faqBody(),400);
+  for(const changes of [{category:'전체'},{question:' '},{question:'x\u0000'},{answer:' '},{question:'😀'.repeat(1001)},{answer:'😀'.repeat(20001)},{faqEntrySeq:1}])await pair('POST',conversionPath(open.id),faqBody(changes),400);
+  await pair('POST',conversionPath(open.id),faqBody({answer:'x'.repeat(110000)}),413);
+  const maximum=await collectConversion();registeredIds.add(maximum.id);
+  await pair('POST',conversionPath(maximum.id),faqBody({question:'content-conversion '+'😀'.repeat(981),answer:'😀'.repeat(20000)}),204);
+  const unicode=await collectConversion(),unicodeInput=faqBody({question:'content-conversion \ud800 '+randomUUID(),answer:'원본 \udc00 답변'});registeredIds.add(unicode.id);
+  await pair('POST',conversionPath(unicode.id),unicodeInput,204);await pair('POST',conversionPath(unicode.id),unicodeInput,204);
+  const unicodeFaq=(await mono.query('SELECT faq_entry_seq FROM unanswered_questions WHERE unanswered_question_seq=$1',[unicode.id])).rows[0].faq_entry_seq;
+  const storedUnicode=(await pair('GET','/api/faqs/'+unicodeFaq,undefined,200)).data;assert.ok(storedUnicode.question.includes('\ufffd'));assert.ok(storedUnicode.answer.includes('\ufffd'));
+  await pair('POST',conversionPath(unicode.id),{...unicodeInput,question:unicodeInput.question.replace('\ud800','\ufffd')},409);
+  const dangling=await collectConversion(),danglingInput=faqBody(),danglingHash=createHash('sha256').update(JSON.stringify(danglingInput)).digest('hex');
+  for(const side of sides)await side.db.query("UPDATE unanswered_questions SET status='REGISTERED',faq_entry_seq=2147483647,faq_conversion_hash=$2,registered_at='2026-11-01T01:02:00Z' WHERE unanswered_question_seq=$1",[dangling.id,danglingHash]);
+  await pair('POST',conversionPath(dangling.id),danglingInput,409);
+  for(const action of ['FAQ_CREATED','UNANSWERED_QUESTION_REGISTERED']){
+    const failed=await collectConversion(),input=faqBody();registeredIds.add(failed.id);
+    for(const side of sides)await side.identity.query(`CREATE FUNCTION content_conversion_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+      IF NEW.action='${action}' AND NEW.result='SUCCESS' THEN RAISE EXCEPTION 'injected conversion audit failure'; END IF; RETURN NEW; END $$;
+      CREATE TRIGGER content_conversion_failure BEFORE INSERT ON audit_logs FOR EACH ROW EXECUTE FUNCTION content_conversion_failure()`);
+    try{await pair('POST',conversionPath(failed.id),input,500);}finally{for(const side of sides)await side.identity.query('DROP TRIGGER content_conversion_failure ON audit_logs; DROP FUNCTION content_conversion_failure()');}
+    await pair('POST',conversionPath(failed.id),input,204);await pair('POST',conversionPath(failed.id),input,204);
+  }
+  const parallelConversion=await collectConversion(),parallelInput=faqBody(),parallelIds=Array.from({length:5},()=>randomUUID());registeredIds.add(parallelConversion.id);
+  parallelIds.forEach(id=>{requestIds.add(id);parallelRequests.set(id,parallelIds[0]);});
+  for(const side of sides){const responses=await Promise.all(parallelIds.map(id=>http(side,'POST',conversionPath(parallelConversion.id),parallelInput,{},id)));
+    assert.ok(responses.every(response=>response.status===204));assert.equal(new Set(responses.map(response=>response.location)).size,1);}
+  await compare();
+  const gated=await collectConversion(),gatedInput=faqBody(),gateId=randomUUID(),blockers=[],gatedRequests=[];registeredIds.add(gated.id);requestIds.add(gateId);
+  try{
+    for(const side of sides){
+      await side.identity.query(`CREATE FUNCTION content_conversion_gate() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+        IF NEW.action='UNANSWERED_QUESTION_REGISTERED' AND NEW.result='SUCCESS' THEN PERFORM pg_advisory_xact_lock(20261111,1); END IF; RETURN NEW; END $$;
+        CREATE TRIGGER content_conversion_gate BEFORE INSERT ON audit_logs FOR EACH ROW EXECUTE FUNCTION content_conversion_gate()`);
+      const blocker=await side.identity.connect();blockers.push(blocker);await blocker.query('BEGIN');await blocker.query('SELECT pg_advisory_xact_lock(20261111,1)');
+      gatedRequests.push(http(side,'POST',conversionPath(gated.id),gatedInput,{},gateId));
+    }
+    await until(async()=>{for(const side of sides)if(!(await side.identity.query("SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND wait_event='advisory' AND query LIKE '%INSERT INTO audit_logs%' LIMIT 1")).rowCount)return false;return true;},'both conversion transactions did not reach the audit gate');
+    await compare();
+    const during=await pair('GET','/api/unanswered-questions?status=ALL&unansweredQuestionSeq='+gated.id,undefined,200);assert.equal(during.data[0].status,'OPEN');
+    const duplicates=[];
+    for(let n=0;n<5;n++){const id=randomUUID();requestIds.add(id);const both=sides.map(side=>http(side,'POST','/api/faqs',{items:[gatedInput]},{},id));
+      duplicates.push(Promise.all(both).then(([source,actual])=>{assert.equal(source.status,409);assert.deepEqual(actual,source);}));}
+    for(const blocker of blockers)await blocker.query('ROLLBACK');
+    const results=await Promise.all(gatedRequests);assert.equal(results[0].status,204);assert.deepEqual(results[1],results[0]);await Promise.all(duplicates);await compare();
+  }finally{
+    for(const blocker of blockers){await blocker.query('ROLLBACK');blocker.release();}
+    for(const side of sides)await side.identity.query('DROP TRIGGER IF EXISTS content_conversion_gate ON audit_logs; DROP FUNCTION IF EXISTS content_conversion_gate()');
+    await Promise.allSettled(gatedRequests);
+  }
+  const delayed=await collectConversion(),delayedInput=faqBody(),delayedId=randomUUID(),readers=[];registeredIds.add(delayed.id);requestIds.add(delayedId);
+  const confirmationGate=await ops.connect();let delayedRequest;
+  try{
+    await ops.query(`CREATE FUNCTION content_conversion_confirmation_gate() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+      IF current_query() LIKE '%jsonb_populate_record(NULL::faq_entries%' THEN PERFORM pg_advisory_xact_lock(20261111,2); END IF; RETURN NEW; END $$;
+      CREATE TRIGGER content_conversion_confirmation_gate BEFORE INSERT ON faq_entries FOR EACH ROW EXECUTE FUNCTION content_conversion_confirmation_gate()`);
+    await confirmationGate.query('BEGIN');await confirmationGate.query('SELECT pg_advisory_xact_lock(20261111,2)');
+    const source=await http(sides[0],'POST',conversionPath(delayed.id),delayedInput,{},delayedId);assert.equal(source.status,204);
+    delayedRequest=http(sides[1],'POST',conversionPath(delayed.id),delayedInput,{},delayedId);
+    await until(async()=>(await cons.query("SELECT 1 FROM unanswered_questions u JOIN outbox_events o ON o.event_type='FaqConversionCommitted' AND o.delivered_at IS NULL WHERE u.unanswered_question_seq=$1 AND u.status='REGISTERED' LIMIT 1",[delayed.id])).rowCount===1,'the actual question commit did not precede owner confirmation');
+    for(let n=0;n<5;n++){const reader={settled:false,promise:undefined};reader.promise=pair('GET','/api/unanswered-questions?status=ALL&unansweredQuestionSeq='+delayed.id,undefined,200).then(result=>{reader.settled=true;assert.equal(result.data[0].status,'REGISTERED');assert.ok(result.data[0].faqEntrySeq);});readers.push(reader);}
+    await delay(150);assert.ok(readers.every(reader=>!reader.settled),'reads cannot expose a registered question without its committed FAQ');
+    await confirmationGate.query('ROLLBACK');const actual=await delayedRequest;assert.deepEqual(actual,source);await Promise.all(readers.map(reader=>reader.promise));await compare();
+  }finally{
+    await confirmationGate.query('ROLLBACK');confirmationGate.release();await ops.query('DROP TRIGGER IF EXISTS content_conversion_confirmation_gate ON faq_entries; DROP FUNCTION IF EXISTS content_conversion_confirmation_gate()');
+    await Promise.allSettled([delayedRequest,...readers.map(reader=>reader.promise)].filter(Boolean));
+  }
   const docs=await Promise.all(sides.map(async side=>(await fetch(side.base+'/api/docs-json')).json()));
-  const paths=[['/api/ai/unanswered-questions','post'],['/api/unanswered-questions/{id}','delete'],['/api/calls/{id}','delete'],
+  const paths=[['/api/ai/unanswered-questions','post'],['/api/unanswered-questions/{id}','delete'],['/api/unanswered-questions/{id}/faqs','post'],['/api/calls/{id}','delete'],
     ...['transcript','actions','processing-results'].map(s=>['/api/calls/{id}/'+s,'get'])];
   const seen=new Set();
   function schema(value){if(Array.isArray(value))return value.forEach(schema);if(!value||typeof value!=='object')return;
@@ -235,6 +344,8 @@ test('production unanswered writes and call content/deletion match the monolith'
   async function until(check,label){for(let i=0;i<100;i++){if(await check())return;await delay(100);}assert.fail(label);}
   // Kill actual producer processes on both sides of the existing audit commit boundary.
   const crashFixtures=[];
+  const conversionCrashes=[];
+  for(const mode of ['prepared','committed']){const fixture=await collectConversion();registeredIds.add(fixture.id);conversionCrashes.push({...fixture,mode,faq:faqBody()});}
   for(const operation of ['collect','delete'])for(const mode of ['prepared','committed']){
     const input=question(100002),id=operation==='delete'?(await collect(input)).data.unansweredQuestionSeq:undefined;
     crashFixtures.push({operation,mode,input,id});
@@ -255,6 +366,251 @@ test('production unanswered writes and call content/deletion match the monolith'
     const current=(await cons.query('SELECT question_text,status FROM unanswered_questions WHERE event_id=$1',[input.eventId])).rows[0];assert.equal(current.question_text,input.questionText);
     assert.equal(current.status,operation==='collect'?'OPEN':'DELETED');
   }
+  for(const fixture of conversionCrashes){
+    const requestId=randomUUID();requestIds.add(requestId);let gate;
+    try{
+      if(fixture.mode==='committed'){
+        await ops.query(`CREATE FUNCTION content_conversion_confirmation_gate() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+          IF current_query() LIKE '%jsonb_populate_record(NULL::faq_entries%' THEN PERFORM pg_advisory_xact_lock(20261111,2); END IF; RETURN NEW; END $$;
+          CREATE TRIGGER content_conversion_confirmation_gate BEFORE INSERT ON faq_entries FOR EACH ROW EXECUTE FUNCTION content_conversion_confirmation_gate()`);
+        gate=await ops.connect();await gate.query('BEGIN');await gate.query('SELECT pg_advisory_xact_lock(20261111,2)');
+      }
+      const child=fork(require.resolve('./call-content-claimant.cjs'),[],{env:{...process.env,CONTENT_CRASH_PAYLOAD:JSON.stringify({operation:'convert',mode:fixture.mode,input:fixture.faq,id:fixture.id,adminId:sides[1].admins[0],requestId})},stdio:['ignore','pipe','pipe','ipc']});
+      children.add(child);child.once('exit',()=>children.delete(child));
+      const [ready]=await once(child,'message',{signal:AbortSignal.timeout(15000)});assert.deepEqual(ready,{ready:true});
+      const preparation=(await ops.query("SELECT transaction_id,audit->'_faqConversion'->'faq'->>'faq_entry_seq' AS faq_id FROM consultation_audit_preparations WHERE audit->'_faqConversion'->>'requestId'=$1",[requestId])).rows[0];
+      assert.ok(preparation);const reservedId=Number(preparation.faq_id);
+      assert.equal((await ops.query('SELECT 1 FROM faq_entries WHERE faq_entry_seq=$1',[reservedId])).rowCount,0);
+      const exited=once(child,'exit');child.kill('SIGKILL');await exited;
+      if(gate){await gate.query('ROLLBACK');gate.release();gate=undefined;}
+      await until(async()=>(await ops.query('SELECT 1 FROM consultation_audit_preparations WHERE transaction_id=$1 AND NOT aborted',[preparation.transaction_id])).rowCount===0,'FAQ creation preparation did not reconcile after SIGKILL');
+      const saved=(await cons.query('SELECT status,faq_entry_seq,faq_conversion_hash FROM unanswered_questions WHERE unanswered_question_seq=$1',[fixture.id])).rows[0];
+      assert.equal(saved.status,fixture.mode==='committed'?'REGISTERED':'OPEN');
+      assert.equal((await ops.query("SELECT count(*)::int n FROM audit_logs WHERE request_id=$1 AND result='SUCCESS'",[requestId])).rows[0].n,fixture.mode==='committed'?2:0);
+      if(fixture.mode==='committed'){
+        assert.equal(saved.faq_entry_seq,reservedId);assert.equal((await ops.query('SELECT 1 FROM faq_entries WHERE faq_entry_seq=$1',[reservedId])).rowCount,1);
+        assert.equal(saved.faq_conversion_hash,createHash('sha256').update(JSON.stringify(fixture.faq)).digest('hex'));
+        await until(async()=>(await cons.query("SELECT 1 FROM outbox_events WHERE event_type='FaqConversionCommitted' AND payload->>'transactionId'=$1 AND delivered_at IS NOT NULL",[preparation.transaction_id])).rowCount===1,'committed FAQ intent was not confirmed');
+      }else{assert.equal(saved.faq_entry_seq,null);assert.equal(saved.faq_conversion_hash,null);assert.equal((await ops.query('SELECT 1 FROM faq_entries WHERE faq_entry_seq=$1',[reservedId])).rowCount,0);}
+      const retryId=randomUUID();requestIds.add(retryId);
+      const retry=await http(sides[1],'POST',conversionPath(fixture.id),fixture.faq,{},retryId);assert.equal(retry.status,204);
+      const linked=(await cons.query('SELECT faq_entry_seq FROM unanswered_questions WHERE unanswered_question_seq=$1',[fixture.id])).rows[0].faq_entry_seq;
+      if(fixture.mode==='prepared')assert.notEqual(linked,reservedId,'a rolled-back source identity is consumed');
+      else assert.equal(linked,reservedId);
+      assert.equal((await ops.query("SELECT count(*)::int n FROM faq_change_notifications WHERE operation='INSERT' AND faq_entry_seqs=ARRAY[$1::int]",[linked])).rows[0].n,1);
+      assert.equal((await ops.query('SELECT count(*)::int n FROM faq_entries WHERE question=$1',[fixture.faq.question])).rows[0].n,1);
+    }finally{if(gate){await gate.query('ROLLBACK');gate.release();}await ops.query('DROP TRIGGER IF EXISTS content_conversion_confirmation_gate ON faq_entries; DROP FUNCTION IF EXISTS content_conversion_confirmation_gate()');}
+  }
   t.diagnostic(`production HTTP pairs: ${comparisons}; per-request business rows/hashes/content and all request audits match`);
-  t.diagnostic('actual SIGKILL at prepared and committed audit boundaries: collect/delete rollback, recovery and replay');
+  t.diagnostic('actual SIGKILL at prepared and committed audit boundaries: collect/delete/FAQ conversion rollback, owner confirmation, recovery and replay');
+});
+
+test('call reference owners and public APIs preserve original joins, filters and pagination',async t=>{
+  const {requestReferences}=require('@dva/events/call-read-references.cjs');
+  const mono=new Pool({host:'monolith-db',user:'monolith_app'}),cons=new Pool({host:'consultation-db',user:'consultation_app'}),customer=new Pool({host:'customer-db',user:'customer_app'}),orders=new Pool({host:'order-db',user:'order_app'}),ops=new Pool({host:'operations-db',user:'operations_app'});
+  const customerIds=Array.from({length:250},(_,n)=>9300001+n),orderIds=Array.from({length:250},(_,n)=>9301001+n),organizationIds=[9302001,9302002,9302003],callIds=Array.from({length:530},(_,n)=>9303001+n);
+  const personaId=9304001,versionId=9304002,adminId=9305001,session='d'.repeat(64),locks=[];
+  const endpoints={order:['http://order-app:3002',process.env.CUSTOMER_AUTH_TOKEN],customer:['http://customer-app:3001',process.env.CONSULTATION_AUTH_TOKEN],persona:['http://operations-app:3005',process.env.CONSULTATION_AUTH_TOKEN]};
+  t.after(async()=>{
+    for(const client of locks){await client.query('ROLLBACK');client.release();}
+    for(const db of [mono,cons]){
+      await db.query('DELETE FROM unanswered_questions WHERE call_session_seq=ANY($1::int[])',[callIds]);
+      await db.query('DELETE FROM recordings WHERE call_session_seq=ANY($1::int[])',[callIds]);
+      await db.query('DELETE FROM call_analyses WHERE call_session_seq=ANY($1::int[])',[callIds]);
+      await db.query('DELETE FROM call_sessions WHERE call_session_seq=ANY($1::int[])',[callIds]);
+    }
+    for(const db of [mono,orders])await db.query('DELETE FROM orders WHERE order_seq=ANY($1::int[])',[orderIds]);
+    for(const db of [mono,customer]){
+      await db.query('DELETE FROM memberships WHERE customer_seq=ANY($1::int[])',[customerIds]);
+      await db.query('DELETE FROM organizations WHERE organization_seq=ANY($1::int[])',[organizationIds]);
+      await db.query('DELETE FROM customers WHERE customer_seq=ANY($1::int[])',[customerIds]);
+    }
+    for(const db of [mono,ops]){
+      await db.query('DELETE FROM faq_entries WHERE faq_entry_seq IN(9307001,9307002)');
+      await db.query('DELETE FROM ai_persona_versions WHERE ai_persona_version_seq=ANY($1::int[])',[[versionId,versionId+1,versionId+2]]);
+      await db.query('DELETE FROM ai_personas WHERE ai_persona_seq=$1',[personaId]);
+    }
+    for(const db of [mono,ops]){
+      await db.query('DELETE FROM admin_sessions WHERE admin_user_seq=$1',[adminId]);
+      await db.query('DELETE FROM admin_users WHERE admin_user_seq=$1',[adminId]);
+    }
+    await Promise.all([mono.end(),cons.end(),customer.end(),orders.end(),ops.end()]);
+  });
+  for(const [kind,[base]]of Object.entries(endpoints))for(let retry=0;;retry++){
+    const prefix=kind==='persona'?'operations':kind;
+    try{if((await fetch(base+'/'+prefix+'/health/ready')).status===200)break;}catch{}
+    assert.ok(retry<100,'reference owner did not start');await delay(100);
+  }
+  for(const db of [mono,customer]){
+    await db.query(`INSERT INTO customers(customer_seq,name,phone_number,status) OVERRIDING SYSTEM VALUE
+      SELECT $1::int+n,'가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가'||n,'0106600'||lpad(n::text,4,'0'),CASE WHEN n=1 THEN 'WITHDRAWN' ELSE 'ACTIVE' END FROM generate_series(0,249)n`,[customerIds[0]]);
+    for(const [n,id]of organizationIds.entries())await db.query("INSERT INTO organizations(organization_seq,name,status) OVERRIDING SYSTEM VALUE VALUES($1,$2,$3)",[id,'현재 기업 '+n,n?'ACTIVE':'INACTIVE']);
+    for(let n=0;n<3;n++)await db.query("INSERT INTO memberships(customer_seq,organization_seq,employee_no,status) VALUES($1,$2,$3,$4)",[customerIds[n===2?3:n],organizationIds[n],'ref-'+n,n?'ACTIVE':'INACTIVE']);
+    await db.query('UPDATE customers SET deleted_at=clock_timestamp() WHERE customer_seq=$1',[customerIds[2]]);
+    await db.query('UPDATE organizations SET deleted_at=clock_timestamp() WHERE organization_seq=$1',[organizationIds[1]]);
+    await db.query('UPDATE memberships SET deleted_at=clock_timestamp() WHERE customer_seq=$1',[customerIds[3]]);
+  }
+  for(const db of [mono,orders]){
+    await db.query(`INSERT INTO orders(order_seq,customer_seq,status,creation_source) OVERRIDING SYSTEM VALUE
+      SELECT $1::int+n,$2::int+n,'COLLECTING','AI' FROM generate_series(0,249)n`,[orderIds[0],customerIds[0]]);
+    await db.query('UPDATE orders SET deleted_at=clock_timestamp() WHERE order_seq=$1',[orderIds[3]]);
+    const lock=await db.connect();await lock.query('BEGIN');await lock.query('SELECT 1 FROM orders WHERE order_seq=$1 FOR KEY SHARE',[orderIds[4]]);locks.push(lock);
+    await db.query("UPDATE orders SET created_at=clock_timestamp()-interval '6 years' WHERE order_seq=$1",[orderIds[4]]);
+  }
+  for(const db of [mono,ops]){
+    await db.query('INSERT INTO ai_personas(ai_persona_seq,code) OVERRIDING SYSTEM VALUE VALUES($1,$2)',[personaId,'call-reference-parity']);
+    await db.query("INSERT INTO ai_persona_versions(ai_persona_version_seq,ai_persona_seq,version,prompt_text,name,turn_wait_level,status) OVERRIDING SYSTEM VALUE VALUES($1,$2,1,'원본 설정','조회 버전','NORMAL','INACTIVE')",[versionId,personaId]);
+  }
+  for(const db of [mono,ops]){
+    await db.query("INSERT INTO admin_users(admin_user_seq,login_id,name,password_hash,role,status) OVERRIDING SYSTEM VALUE VALUES($1,'refparity','조회 운영자','not-a-login','OPERATOR','ACTIVE')",[adminId]);
+    await db.query('INSERT INTO admin_sessions(session_token_hash,admin_user_seq) VALUES($1,$2)',[createHash('sha256').update(session).digest('hex'),adminId]);
+  }
+  const scenarios=[{order:0,customer:1},{order:1,customer:0},{order:2,customer:0},{order:3,customer:3},{order:4,customer:0},{order:null,customer:0}];
+  const provider='reference-'+randomUUID(),seed=callIds.map((id,n)=>{const scenario=scenarios[n]??{order:n%250,customer:(n+1)%250};return{id,n,customer:customerIds[scenario.customer],order:scenario.order===null?null:orderIds[scenario.order]};});
+  for(const db of [mono,cons]){
+    await db.query(`INSERT INTO call_sessions(call_session_seq,provider_call_id,caller_phone_number,incoming_at,started_at,ended_at,customer_seq,order_seq) OVERRIDING SYSTEM VALUE
+      SELECT r.id,$2||'-'||r.n::text,'01066000000',CASE WHEN r.n=5 OR r.n>=260 THEN NULL ELSE '2026-11-01T00:59:59Z'::timestamptz END,
+       CASE WHEN r.n IN(3,4,5) OR r.n>=260 THEN NULL WHEN r.n<6 THEN '2026-11-01T01:00:00Z'::timestamptz ELSE '2026-11-01T01:00:00.123000Z'::timestamptz+((r.n*7)%257)*interval '1 microsecond' END,
+       CASE WHEN r.n<3 OR r.n BETWEEN 6 AND 259 THEN '2026-11-01T01:03:00Z'::timestamptz ELSE NULL END,r.customer,r."order"
+      FROM jsonb_to_recordset($1::jsonb) AS r(id integer,n integer,customer integer,"order" integer)`,[JSON.stringify(seed),provider]);
+    await db.query('UPDATE call_sessions SET analysis_failed_at=$2 WHERE call_session_seq=ANY($1::int[])',[[callIds[0],callIds[1]],'2026-11-01T01:05:00Z']);
+    await db.query('UPDATE call_sessions SET deleted_at=$2 WHERE call_session_seq=$1',[callIds[528],'2026-11-01T02:00:00Z']);
+    const lock=await db.connect();await lock.query('BEGIN');await lock.query('SELECT 1 FROM call_sessions WHERE call_session_seq=$1 FOR KEY SHARE',[callIds[529]]);locks.push(lock);
+    await db.query('UPDATE call_sessions SET incoming_at=$2 WHERE call_session_seq=$1',[callIds[529],'2020-01-01T00:00:00Z']);
+    for(const n of [0,4])await db.query(`INSERT INTO call_analyses(call_session_seq,ai_persona_version_seq,ai_started_at,ai_ended_at,repeat_question_count,has_complaint,complaints,payload_hash,analysed_at)
+      VALUES($1,$2,'2026-11-01T01:00:01Z','2026-11-01T01:02:50Z',1,$3,$4,$5,'2026-11-01T01:04:00Z')`,[callIds[n],versionId,n===4,JSON.stringify(n===4?[{type:'DISSATISFACTION_EXPRESSION',evidenceText:'원본 근거',offsetSeconds:0,utteranceOrders:[1]}]:[]),'a'.repeat(64)]);
+    for(let n=0;n<2;n++)await db.query('INSERT INTO recordings(recording_seq,call_session_seq,object_key,created_at) OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,$4)',[9306001+n,callIds[0],'recordings/reference-'+n+'.wav','2026-11-01T01:04:'+(n?'00':'30')+'Z']);
+  }
+  let apiPairs=0;
+  async function get(path,status=200,headers={}){
+    const requestId=randomUUID(),responses=[];
+    for(const base of ['http://monolith-app:3000','http://consultation-app:3004']){
+      const response=await fetch(base+path,{headers:{Cookie:'dva_session='+session,'X-Request-Id':requestId,...headers}});
+      const body=await response.json();assert.equal(response.status,status,JSON.stringify(body));
+      assert.equal(response.headers.get('cache-control'),'no-store');responses.push(body);
+    }
+    assert.deepEqual(responses[1],responses[0]);apiPairs++;return responses[0];
+  }
+  const ids={order:orderIds,customer:customerIds,persona:[versionId,2147483647]};
+  const read=kind=>requestReferences(kind,endpoints[kind][0]+'/internal/call-read-references',endpoints[kind][1],ids[kind]);
+  async function compare(){
+    const [orderRows,customerRows,versions]=await Promise.all(['order','customer','persona'].map(read));
+    const orderMap=new Map(orderRows.map(row=>[row.order_seq,row])),customerMap=new Map(customerRows.map(row=>[row.customer_seq,row]));
+    assert.equal(orderRows.length,249);assert.equal(customerRows.length,249);assert.equal(versions.length,1);
+    assert.ok(Buffer.byteLength(JSON.stringify(customerRows))>16384);assert.ok(orderMap.has(orderIds[4]),'call detail also shows old undeleted linked orders');
+    for(const [n,scenario]of scenarios.entries()){
+      const detail=(await get('/api/calls/'+callIds[n])).data,order=orderMap.get(orderIds[scenario.order]),owner=customerMap.get(order?.customer_seq??customerIds[scenario.customer]);
+      assert.deepEqual({customerSeq:owner?.customer_seq??null,customerName:owner?.name??null,organizationName:owner?.organization_name??null,orderStatus:order?.status??null,orderTotalAmount:order?.total_amount??null},
+        {customerSeq:detail.call.customerSeq,customerName:detail.call.customerName,organizationName:detail.call.organizationName,orderStatus:detail.call.orderStatus,orderTotalAmount:detail.call.orderTotalAmount});
+      if(detail.analysis)assert.deepEqual({id:versions[0].ai_persona_version_seq,name:versions[0].name,version:versions[0].version},{id:detail.analysis.aiPersonaVersionSeq,name:detail.analysis.personaName,version:detail.analysis.personaVersion});
+    }
+  }
+  await compare();
+  for(const db of [mono,customer])await db.query('UPDATE customers SET name=$2 WHERE customer_seq=$1',[customerIds[0],'변경된 현재 이름 가나다 %_']);
+  for(const db of [mono,orders])await db.query("UPDATE orders SET status='notPaid',payment_method_type='cat',total_amount=12000,payment_due_at=clock_timestamp()+interval '1 day' WHERE order_seq=$1",[orderIds[0]]);
+  await compare();
+  const list=(query={})=>'/api/calls?'+new URLSearchParams({callerPhoneNumber:'01066000000',...query}).toString();
+  const first=await get(list());assert.equal(first.total_count,528);assert.equal(first.data.length,20);
+  for(const query of [{limit:100},{offset:245,limit:20},{offset:495,limit:30},{offset:99999},{orderSeq:orderIds[0]},
+    {organizationSeq:organizationIds[0]},{organizationSeq:organizationIds[1]},{organizationSeq:organizationIds[2]},
+    {q:' 가나다 '},{q:'가나다'.normalize('NFD')},{q:'%_'},{q:'%'},{q:'_'},{q:'0106600'},
+    {q:'없는 이름'},{q:'   '},{q:'0106600',offset:245},{q:'0106600',offset:495},{q:'0106600',offset:530},
+    {orderStatus:'COLLECTING',offset:250,limit:50},{orderStatus:'notPaid'},{hasComplaint:true},{hasComplaint:false},
+    {aiPersonaVersionSeq:versionId},{aiPersonaVersionSeq:2147483647},{from:'2026-11-01T01:00:00Z',to:'2026-11-01T01:00:00.123100Z'}])await get(list(query));
+  for(const query of [{limit:101},{offset:-1},{organizationSeq:0},{orderStatus:'paid'},{hasComplaint:'0'},
+    {aiPersonaVersionSeq:'1.5'},{from:'bad'},{from:'2026-11-02T00:00:00Z',to:'2026-11-01T00:00:00Z'},{extra:'field'}])await get(list(query),400);
+  await get(list()+'&q=one&q=two',400);await get(list(),401,{Cookie:''});await get('/api/calls/'+callIds[0],401,{Cookie:''});
+  for(const id of [2147483647,callIds[528],callIds[529]])await get('/api/calls/'+id,404);
+  for(const id of ['bad',0,-1,2147483648])await get('/api/calls/'+id,400);
+  await Promise.all(Array.from({length:5},()=>get(list({q:'0106600',offset:495,limit:30}))));
+  for(const db of [mono,ops]){
+    for(let n=0;n<2;n++)await db.query(`INSERT INTO faq_entries(faq_entry_seq,question,answer,category,updated_by_admin_user_seq,deleted_at)
+      OVERRIDING SYSTEM VALUE VALUES($1,$2,'원본 답변','기타',$3,$4)`,[9307001+n,'목록 참조 '+n,adminId,n?'2026-11-01T02:00:00Z':null]);
+  }
+  const {requestComplaintFaqs}=require('@dva/events/call-read-references.cjs');
+  for(const db of [mono,ops])await db.query('UPDATE faq_entries SET answer=$2 WHERE faq_entry_seq=$1',[9307001,'원본 긴 답변'.repeat(80000)]);
+  const faqs=await requestComplaintFaqs('http://operations-app:3005/internal/call-read-references/complaint-faqs',process.env.CONSULTATION_AUTH_TOKEN);
+  assert.deepEqual(faqs,(await mono.query('SELECT question,answer FROM faq_entries WHERE deleted_at IS NULL ORDER BY faq_entry_seq')).rows);
+  assert.ok(Buffer.byteLength(JSON.stringify(faqs))>1024*1024);
+  const complaintEvent={eventId:randomUUID(),source:'consultation',eventType:'ComplaintFaqSnapshotRequested',payload:{}};
+  for(const [body,token,status]of [[complaintEvent,'wrong',403],[{...complaintEvent,payload:{limit:10}},process.env.CONSULTATION_AUTH_TOKEN,422]])
+    assert.equal((await fetch('http://operations-app:3005/internal/call-read-references/complaint-faqs',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify(body)})).status,status);
+  const questions=callIds.map((call,n)=>({id:9308001+n,call,eventId:randomUUID(),n}));
+  for(const db of [mono,cons])await db.query(`INSERT INTO unanswered_questions(unanswered_question_seq,event_id,call_session_seq,question_text,occurred_at,
+    offset_seconds,reason,payload_hash,status,faq_entry_seq,faq_conversion_hash,registered_at,deleted_at) OVERRIDING SYSTEM VALUE
+    SELECT r.id,r."eventId"::uuid,r.call,'목록검증 %_ 질문 '||r.n::text,'2026-11-01T01:01:00Z'::timestamptz,
+     CASE WHEN r.n%3=0 THEN NULL ELSE r.n END,CASE WHEN r.n%3=0 THEN NULL WHEN r.n%3=1 THEN 'KB_NO_ANSWER' ELSE 'KB_UNAVAILABLE' END,
+     repeat('a',64),CASE WHEN r.n=6 THEN 'DELETED' WHEN r.n IN(0,1) THEN 'REGISTERED' ELSE 'OPEN' END,
+     CASE WHEN r.n IN(0,1) THEN 9307001+r.n ELSE NULL END,CASE WHEN r.n IN(0,1) THEN repeat('b',64) ELSE NULL END,
+     CASE WHEN r.n IN(0,1) THEN '2026-11-01T01:02:00Z'::timestamptz ELSE NULL END,
+     CASE WHEN r.n=6 THEN '2026-11-01T02:00:00Z'::timestamptz ELSE NULL END
+    FROM jsonb_to_recordset($1::jsonb) AS r(id integer,call integer,"eventId" text,n integer)`,[JSON.stringify(questions)]);
+  const unanswered=(query={})=>'/api/unanswered-questions?'+new URLSearchParams(query).toString();
+  const open=await get(unanswered({q:'0106600'}));assert.equal(open.total_count,525);
+  const all=await get(unanswered({q:'목록검증',status:'ALL'}));assert.equal(all.total_count,527);
+  for(const query of [{},{q:'   '},{status:'REGISTERED'},{status:'ALL',q:'0106600',offset:245},{status:'ALL',q:'0106600',offset:495,limit:100},
+    {status:'ALL',q:'0106600',offset:99999},{q:'%_'},{q:'목록검증'.normalize('NFD')},{q:'가나다'},{q:'가나다'.normalize('NFD')},
+    {q:'없는 질문'},{reason:'KB_NO_ANSWER'},{reason:'KB_UNAVAILABLE'},{reason:'UNCLASSIFIED'},
+    {aiPersonaVersionSeq:versionId,status:'ALL'},{unansweredQuestionSeq:9308001,status:'ALL'},{callSessionSeq:callIds[4]},
+    {from:'2026-11-01T01:00:00Z',to:'2026-11-01T01:00:00.123100Z',status:'ALL'}])await get(unanswered(query));
+  const registered=await get(unanswered({unansweredQuestionSeq:9308001,status:'ALL'}));assert.equal(registered.data[0].faqEntrySeq,9307001);
+  const deletedFaq=await get(unanswered({unansweredQuestionSeq:9308002,status:'ALL'}));assert.equal(deletedFaq.data[0].faqEntrySeq,null);
+  for(const query of [{status:'DELETED'},{reason:'OTHER'},{unansweredQuestionSeq:0},{callSessionSeq:'1.2'},
+    {from:'2026-11-01T00:00:00Z'},{to:'2026-11-01T00:00:00Z'},
+    {from:'2026-11-02T00:00:00Z',to:'2026-11-01T00:00:00Z'},{unknown:1},{q:'x\u0000'}])await get(unanswered(query),400);
+  await get(unanswered({q:'목록검증'})+'&status=OPEN&status=ALL',400);await get(unanswered(),401,{Cookie:''});
+  for(const db of [mono,ops])await db.query("UPDATE faq_entries SET deleted_at='2026-11-01T03:00:00Z' WHERE faq_entry_seq=9307001");
+  const nowDeleted=await get(unanswered({unansweredQuestionSeq:9308001,status:'ALL'}));assert.equal(nowDeleted.data[0].faqEntrySeq,null);
+  await Promise.all(Array.from({length:5},()=>get(unanswered({q:'목록검증',status:'ALL',offset:495,limit:100}))));
+  const statistics=['stage-dropoffs','registration-time','complaint-calls','response-wait'];
+  for(const route of statistics)for(const customerType of ['ALL','NEW','EXISTING'])await get('/api/dashboard/'+route+'?customerType='+customerType);
+  for(const db of [mono,ops]){
+    for(let n=1;n<=2;n++)await db.query(`INSERT INTO ai_persona_versions(ai_persona_version_seq,ai_persona_seq,version,prompt_text,name,turn_wait_level,status)
+      OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,'다른 설정',$4,'NORMAL','INACTIVE')`,[versionId+n,personaId,n+1,n===1?'직전 활성':'다른 비활성']);
+    await db.query(`UPDATE ai_persona_versions SET status='ACTIVE',application_id=$2,requested_by_admin_user_seq=$3,
+      requested_at='2026-11-01T00:00:00Z',applied_at='2026-11-01T00:01:00Z',previous_active_version_seq=$4 WHERE ai_persona_version_seq=$1`,[versionId,randomUUID(),adminId,versionId+1]);
+  }
+  const complaintTypes=['INFORMATION_RECOGNITION_ERROR','INTENT_RECOGNITION_ERROR','UNSUPPORTED_ANSWER','SLOW_RESPONSE','INTERRUPTION','DISSATISFACTION_EXPRESSION'];
+  const complaints=[...complaintTypes,...complaintTypes.slice(0,1),'REPEATED_QUESTION'].map(type=>({type,evidenceText:'보존 근거',offsetSeconds:0,utteranceOrders:[1]}));
+  for(const db of [mono,cons]){
+    for(let n=524;n<=527;n++)await db.query(`INSERT INTO call_analyses(call_session_seq,ai_persona_version_seq,ai_started_at,ai_ended_at,
+      is_new_customer,registered_parcel_count,has_complaint,complaints,payload_hash,analysed_at) VALUES($1,$2,
+      '2026-11-01T01:00:00Z','2026-11-01T01:03:00Z',$3,$4,$5,$6,$7,'2026-11-01T01:04:00Z')`,
+      [callIds[n],n===524?versionId:n===525?versionId+1:n===527?versionId+2:null,n===526?null:n!==525,n===526?null:n===525?0:2,n===526?null:n===524,JSON.stringify(n===524?complaints:[]),'a'.repeat(64)]);
+    await db.query('UPDATE call_analyses SET is_new_customer=true,registered_parcel_count=3 WHERE call_session_seq=$1',[callIds[0]]);
+    await db.query('UPDATE call_analyses SET is_new_customer=false,registered_parcel_count=2,ai_persona_version_seq=$2 WHERE call_session_seq=$1',[callIds[4],versionId+1]);
+    for(const [n,stage,wait]of [[0,'NONE',100],[4,'FAQ_ANSWER',200000],[524,'ORDER_LOOKUP',500],[525,'NONE',0]])await db.query(`INSERT INTO call_dashboard_metrics(call_session_seq,dropoff_stage,dropoff_payload_hash,dropoff_received_at,
+      total_wait_ms,latency_stats,response_wait_payload_hash,response_wait_received_at) VALUES($1,$2,$3,'2026-11-01T01:04:00Z',$4,$5,$3,'2026-11-01T01:04:00Z')`,
+      [callIds[n],stage,'c'.repeat(64),wait,JSON.stringify(wait?[{processType:'FAQ_LOOKUP',measurementCount:2,totalLatencyMs:wait}]:[])]);
+  }
+  for(const route of statistics){for(const customerType of ['ALL','NEW','EXISTING'])await get('/api/dashboard/'+route+'?customerType='+customerType);
+    for(const query of ['?customerType=OTHER','?customerType=ALL&customerType=NEW','?from=2026-11-01'])await get('/api/dashboard/'+route+query,400);
+    await get('/api/dashboard/'+route,401,{Cookie:''});}
+  const registration=(await get('/api/dashboard/registration-time')).data;
+  assert.equal(registration.comparison.current.aiPersonaVersionSeq,versionId);assert.equal(registration.comparison.previous.aiPersonaVersionSeq,versionId+1);
+  assert.ok(registration.registeredParcelCount>registration.comparison.current.registeredParcelCount+registration.comparison.previous.registeredParcelCount,'other historical versions contribute only to the overall total');
+  const complaint=(await get('/api/dashboard/complaint-calls')).data;assert.ok(complaint.legacyTypeCallCount>=1);assert.equal(complaint.types.length,6);
+  assert.ok((await get('/api/dashboard/response-wait')).data.invalidWaitCallCount>=1);
+  for(const db of [mono,ops])await db.query('UPDATE ai_persona_versions SET previous_active_version_seq=NULL WHERE ai_persona_version_seq=$1',[versionId]);
+  assert.equal((await get('/api/dashboard/registration-time')).data.comparison.previous,null);
+  for(const db of [mono,ops])await db.query("UPDATE ai_persona_versions SET status='INACTIVE' WHERE ai_persona_version_seq=$1",[versionId]);
+  const noActive=(await get('/api/dashboard/registration-time')).data;assert.equal(noActive.comparison.current,null);assert.equal(noActive.comparison.previous,null);
+  const docs=await Promise.all(['http://monolith-app:3000','http://consultation-app:3004'].map(async base=>(await fetch(base+'/api/docs-json')).json()));
+  for(const path of ['/api/calls','/api/calls/{id}','/api/unanswered-questions'])assert.deepEqual(docs[1].paths[path],docs[0].paths[path]);
+  for(const name of ['CallDto','CallListItemDto','CallListResponseDto','CallDetailDto','CallDetailResponseDto','CallAnalysisDto','CallComplaintDto','RecordingDto','UnansweredQuestionDto','UnansweredQuestionListResponseDto']){assert.ok(docs[0].components.schemas[name],name+' missing in source');assert.deepEqual(docs[1].components.schemas[name],docs[0].components.schemas[name]);}
+  for(const route of statistics)assert.deepEqual(docs[1].paths['/api/dashboard/'+route],docs[0].paths['/api/dashboard/'+route]);
+  for(const name of Object.keys(docs[0].components.schemas).filter(name=>/^(StageDropoff|RegistrationTime|PersonaRegistrationTime|ComplaintCalls|ComplaintType|ResponseWait|ProcessLatency)/.test(name)))assert.deepEqual(docs[1].components.schemas[name],docs[0].components.schemas[name],name);
+  assert.deepEqual(await requestReferences('faq','http://operations-app:3005/internal/call-read-references/faqs',process.env.CONSULTATION_AUTH_TOKEN,[9307001,9307002]),[]);
+  assert.equal((await fetch('http://operations-app:3005/internal/call-read-references/faqs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})})).status,403);
+  await Promise.all(Array.from({length:5},()=>Promise.all(['order','customer','persona'].map(read))));
+  for(const [kind,[base,token]]of Object.entries(endpoints)){
+    const event={eventId:randomUUID(),source:'consultation',eventType:'CallReadReferencesRequested',payload:{ids:ids[kind]}};
+    const post=(body,authorization='Bearer '+token,path='/internal/call-read-references')=>fetch(base+path,{method:'POST',headers:{Authorization:authorization,'Content-Type':'application/json'},body:JSON.stringify(body)});
+    for(const authorization of ['', 'Bearer wrong','Bearer '+(kind==='order'?process.env.CONSULTATION_AUTH_TOKEN:process.env.CUSTOMER_AUTH_TOKEN)])assert.equal((await post(event,authorization)).status,403);
+    for(const changed of [{...event,source:'customer'},{...event,payload:{ids:[]}},{...event,payload:{ids:[1,1]}},{...event,payload:{ids:Array.from({length:251},(_,n)=>n+1)}}])assert.equal((await post(changed)).status,422);
+    assert.equal((await post(event,'Bearer '+token,'/api/internal/call-read-references')).status,404);
+    assert.ok(!Object.keys((await(await fetch(base+'/api/docs-json')).json()).paths).some(path=>path.includes('call-read-references')));
+  }
+  for(const db of [customer,orders,ops])assert.equal((await db.query("SELECT count(*)::int n FROM inbox_events WHERE event_type='CallReadReferencesRequested'")).rows[0].n,0);
+  t.diagnostic(`call, unanswered and dashboard HTTP pairs: ${apiPairs}; current owner joins, FAQ deletion, pagination and all four original metric SQL paths including actual ACTIVE/previous persona selection`);
 });

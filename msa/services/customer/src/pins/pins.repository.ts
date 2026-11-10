@@ -6,6 +6,26 @@ import { CreatedPersonalPinDto, PersonalPinDto, PinVersionDto } from './dto/pin-
 
 @Injectable()
 export class PinsRepository {
+  async lockForRemoval(client: PoolClient, ids: number[]): Promise<number[]> {
+    // 기존 PIN 쓰기와 같이 고객을 먼저 잠가 고객 삭제·주소록 수정과 순서를 맞춘다.
+    await client.query(
+      'SELECT customer_seq FROM customers WHERE customer_seq IN (SELECT customer_seq FROM personal_pins WHERE personal_pin_seq=ANY($1::int[]) AND deleted_at IS NULL) ORDER BY customer_seq FOR UPDATE',
+      [ids],
+    );
+    const result = await client.query<{ id: number }>(
+      'SELECT personal_pin_seq AS id FROM personal_pins WHERE personal_pin_seq=ANY($1::int[]) AND deleted_at IS NULL ORDER BY personal_pin_seq FOR UPDATE',
+      [ids],
+    );
+    return result.rows.map((row) => row.id);
+  }
+
+  async removeMany(client: PoolClient, ids: number[]): Promise<void> {
+    await client.query(
+      'UPDATE personal_pins SET deleted_at=clock_timestamp() WHERE personal_pin_seq=ANY($1::int[]) AND deleted_at IS NULL',
+      [ids],
+    );
+  }
+
   async customer(client: PoolClient, id: number, lock: boolean) {
     return (
       await client.query<{ phone: string; status: string }>(

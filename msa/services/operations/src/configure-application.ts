@@ -7,6 +7,8 @@ import { ResponseEnvelopeInterceptor } from './common/http/response-envelope.int
 import { API_PREFIX, requestContext } from './common/http/request-context';
 import { createValidationPipe } from './common/http/validation.pipe';
 import { ErrorResponseDto, RequestMetaDto } from './common/dto/api-response.dto';
+import { json } from 'express';
+import type { NextFunction, Request, Response } from 'express';
 
 export function configureApplication(app: INestApplication, logger = new Logger('Http')): void {
   const config = app.get<ConfigService<Environment, true>>(ConfigService);
@@ -16,6 +18,11 @@ export function configureApplication(app: INestApplication, logger = new Logger(
       proxyHops: config.get('AUTH_PROXY_HOPS', { infer: true }),
     }),
   );
+  // Derived question snapshots can exceed the public body limit; retain the shared event transport bound.
+  const eventParser = json({ limit: '1mb' });
+  app.use('/internal/events', (request: Request, response: Response, next: NextFunction) => {
+    eventParser(request, response, next);
+  });
   app.enableCors({
     origin: (
       origin: string | undefined,
@@ -39,11 +46,18 @@ export function configureApplication(app: INestApplication, logger = new Logger(
   });
   app.setGlobalPrefix(API_PREFIX, {
     exclude: [
+      { path: 'health', method: RequestMethod.ALL },
+      { path: 'health/ready', method: RequestMethod.ALL },
       { path: 'operations/health', method: RequestMethod.ALL },
       { path: 'operations/health/ready', method: RequestMethod.ALL },
       { path: 'internal/auth/session', method: RequestMethod.ALL },
       { path: 'internal/events', method: RequestMethod.ALL },
+      { path: 'internal/events/faq-conversion', method: RequestMethod.ALL },
       { path: 'internal/persona-version', method: RequestMethod.ALL },
+      { path: 'internal/call-read-references', method: RequestMethod.ALL },
+      { path: 'internal/call-read-references/faqs', method: RequestMethod.ALL },
+      { path: 'internal/call-read-references/persona-comparison', method: RequestMethod.ALL },
+      { path: 'internal/call-read-references/complaint-faqs', method: RequestMethod.ALL },
     ],
   });
   app.useGlobalPipes(createValidationPipe());

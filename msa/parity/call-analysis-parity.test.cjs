@@ -53,7 +53,7 @@ test('production analysis and metrics match the unchanged monolith and preserve 
       order_lookup_count,cancelled_parcel_count,has_handoff_request,has_callback_request FROM call_analyses ORDER BY call_session_seq`)).rows;
     const metrics=(await side.db.query('SELECT * FROM call_dashboard_metrics ORDER BY call_session_seq')).rows;
     const calls=(await side.db.query(`SELECT call_session_seq,provider_call_id,caller_phone_number,incoming_at::text,registered_at::text,
-      started_at::text,ended_at::text,deleted_at::text FROM call_sessions ORDER BY call_session_seq`)).rows;
+      started_at::text,ended_at::text,deleted_at::text,analysis_failed_at FROM call_sessions ORDER BY call_session_seq`)).rows;
     // Provisional audit allocation can leave sequence gaps; compare all business audit fields.
     const audit=(await side.identity.query(`SELECT actor_type,actor_seq,actor_name,action,target_type,target_seq,target_admin_name,request_id,result,metadata,occurred_at
       FROM audit_logs WHERE request_id=ANY($1::uuid[]) ORDER BY request_id,action,result`,[[...requestIds]])).rows;
@@ -95,7 +95,7 @@ test('production analysis and metrics match the unchanged monolith and preserve 
     assert.equal(ids[0],ids[1]);return{id:ids[0],provider};
   }
   const c=await call();
-  for(const [section,input]of[['analysis',body(c.provider)],['stage-metrics',stage(c.provider)],['response-wait-metrics',wait(c.provider)]]){
+  for(const [section,input]of[['analysis',body(c.provider)],['analysis/failure',{providerCallId:c.provider}],['stage-metrics',stage(c.provider)],['response-wait-metrics',wait(c.provider)]]){
     for(const headers of [{Authorization:''},{Authorization:'Bearer wrong'},{Authorization:'Bearer '+token+', Bearer '+token},
       {Authorization:'',Cookie:cookie,Origin:origin}])await post(c.id,section,input,401,{headers});
     await post(c.id,section,input,403,{headers:{Cookie:cookie}});
@@ -144,7 +144,7 @@ test('production analysis and metrics match the unchanged monolith and preserve 
   await post(fallback.id,'response-wait-metrics',wait(fallback.provider,{totalWaitMs:0,latencyStats:[]}),204);
   for(const extra of [{incoming:'2020-01-01T00:00:00Z'},{deleted:'2026-11-01T02:00:00Z'}]){
     const hidden=await call(extra);
-    for(const [section,input]of[['analysis',body(hidden.provider)],['stage-metrics',stage(hidden.provider)],['response-wait-metrics',wait(hidden.provider)]])
+    for(const [section,input]of[['analysis',body(hidden.provider)],['analysis/failure',{providerCallId:hidden.provider}],['stage-metrics',stage(hidden.provider)],['response-wait-metrics',wait(hidden.provider)]])
       await post(hidden.id,section,input,404);
   }
   const concurrent=await call();
@@ -164,9 +164,27 @@ test('production analysis and metrics match the unchanged monolith and preserve 
   finally{for(const side of sides)await side.identity.query('DROP TRIGGER fail_analysis_audit ON audit_logs; DROP FUNCTION fail_analysis_audit();');}
   for(const side of sides)assert.equal((await side.db.query('SELECT count(*) FROM call_analyses WHERE call_session_seq=$1',[failed.id])).rows[0].count,'0');
   await post(failed.id,'analysis',body(failed.provider),204);
+  const reported=await call();
+  for(const invalid of [{},{providerCallId:''},{providerCallId:7},{providerCallId:reported.provider,reason:'extra'}])await post(reported.id,'analysis/failure',invalid,400);
+  await post(reported.id,'analysis/failure',{providerCallId:'wrong-provider'},403);
+  await post(2147483647,'analysis/failure',{providerCallId:reported.provider},404);
+  await Promise.all(Array.from({length:6},()=>post(reported.id,'analysis/failure',{providerCallId:reported.provider},204,{concurrent:true})));
+  await compare();
+  const firstFailure=[];
+  for(const side of sides){firstFailure.push((await side.db.query('SELECT analysis_failed_at FROM call_sessions WHERE call_session_seq=$1',[reported.id])).rows[0].analysis_failed_at.getTime());assert.equal((await side.identity.query("SELECT count(*)::int n FROM audit_logs WHERE action='CALL_ANALYSIS_FAILED' AND result='SUCCESS' AND target_seq=$1",[reported.id])).rows[0].n,1);}
+  await post(reported.id,'analysis/failure',{providerCallId:reported.provider},204);
+  await post(reported.id,'analysis',body(reported.provider),204);
+  await post(reported.id,'analysis/failure',{providerCallId:reported.provider},204);
+  for(const [index,side]of sides.entries())assert.equal((await side.db.query('SELECT analysis_failed_at FROM call_sessions WHERE call_session_seq=$1',[reported.id])).rows[0].analysis_failed_at.getTime(),firstFailure[index]);
+  await post(c.id,'analysis/failure',{providerCallId:c.provider},204);
+  for(const side of sides)assert.equal((await side.db.query('SELECT analysis_failed_at FROM call_sessions WHERE call_session_seq=$1',[c.id])).rows[0].analysis_failed_at,null);
+  const failureAudit=await call();
+  for(const side of sides)await side.identity.query(`CREATE FUNCTION reject_failure_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.action='CALL_ANALYSIS_FAILED' AND NEW.result='SUCCESS' THEN RAISE EXCEPTION 'injected audit failure'; END IF; RETURN NEW; END $$; CREATE TRIGGER reject_failure_audit BEFORE INSERT ON audit_logs FOR EACH ROW EXECUTE FUNCTION reject_failure_audit()`);
+  try{await post(failureAudit.id,'analysis/failure',{providerCallId:failureAudit.provider},500);}finally{for(const side of sides)await side.identity.query('DROP TRIGGER reject_failure_audit ON audit_logs; DROP FUNCTION reject_failure_audit()');}
+  for(const side of sides)assert.equal((await side.db.query('SELECT analysis_failed_at FROM call_sessions WHERE call_session_seq=$1',[failureAudit.id])).rows[0].analysis_failed_at,null);
   await compare();
   const docs=await Promise.all(sides.map(async side=>(await fetch(side.base+'/api/docs-json')).json()));
-  for(const suffix of ['analysis','stage-metrics','response-wait-metrics']){
+  for(const suffix of ['analysis','analysis/failure','stage-metrics','response-wait-metrics']){
     const path='/api/ai/calls/{id}/'+suffix;
     assert.deepEqual(docs[1].paths[path],docs[0].paths[path]);
   }
@@ -253,4 +271,246 @@ test('production analysis and metrics match the unchanged monolith and preserve 
   assert.equal((await(await query(freshRetry)).json()).payload.exists,false);
   assert.equal((await ops.query('SELECT count(*) FROM inbox_events WHERE event_id=$1',[fresh.eventId])).rows[0].count,'0');
   t.diagnostic('split reference checks: authenticated current lookup, invalid events, delete protection from lookup ACK, lookup-only/prepared SIGKILL rollback, committed SIGKILL recovery, replay and late abort');
+});
+
+test('event order references match the source permission decision and retain one owner transaction',async t=>{
+  const {createServer}=require('node:http'),{networkInterfaces}=require('node:os');
+  const {privateAddress,validateScopeResult}=require('@dva/events/call-event-reference.cjs');
+  const reference=new Pool({host:'monolith-db',user:'monolith_app'}),orders=new Pool({host:'order-db',user:'order_app'});
+  const customers=[9100001,9100002],ids=[9100101,9100102,9100103,9100104],calls=[],requestIds=[];
+  const scripts=new Map(),address=Object.values(networkInterfaces()).flat().find(v=>v?.family==='IPv4'&&privateAddress(v.address))?.address;
+  assert.ok(address);
+  const headers={Authorization:'Bearer '+process.env.PGPASSWORD,'Content-Type':'application/json'};
+  const probe=async(id,locked)=>{
+    const client=await orders.connect();
+    try{await client.query('BEGIN');const work=client.query('SELECT order_seq FROM orders WHERE order_seq=$1 FOR UPDATE NOWAIT',[id]);if(locked)await assert.rejects(work,{code:'55P03'});else assert.equal((await work).rowCount,1);}
+    finally{await client.query('ROLLBACK');client.release();}
+  };
+  const server=createServer(async(req,res)=>{
+    try{
+      assert.equal(req.url,'/internal/call-event-order-scope/continue');assert.equal(req.headers.authorization,headers.Authorization);
+      const chunks=[];for await(const chunk of req)chunks.push(chunk);
+      const input=JSON.parse(Buffer.concat(chunks));validateScopeResult(input);
+      const p=input.payload,script=scripts.get(p.scopeId);assert.ok(script);script.seen++;
+      assert.deepEqual(p.lookup,script.steps[p.step].lookup);
+      assert.equal(p.exists?p.allowed===true:undefined,script.steps[p.step].expected);
+      if(p.exists)await probe(p.lookup.orderSeq,true);
+      if(script.fail){res.writeHead(503,{'Content-Type':'application/json'}).end('{}');return;}
+      res.writeHead(200,{'Content-Type':'application/json'}).end(JSON.stringify({eventId:input.eventId,status:'processed',payload:{next:script.steps[p.step+1]?.lookup??null}}));
+    }catch(error){if(!res.destroyed&&!res.writableEnded)res.writeHead(503,{'Content-Type':'application/json'}).end(JSON.stringify({error:String(error)}));}
+  });
+  await new Promise(resolve=>server.listen(3004,'0.0.0.0',resolve));
+  t.after(async()=>{
+    await new Promise(resolve=>server.close(resolve));
+    await reference.query('DELETE FROM call_insight_events WHERE call_session_seq=ANY($1::int[])',[calls]);
+    await reference.query('DELETE FROM call_sessions WHERE call_session_seq=ANY($1::int[])',[calls]);
+    await reference.query('DELETE FROM audit_logs WHERE request_id=ANY($1::uuid[])',[requestIds]);
+    for(const db of [reference,orders])await db.query('DELETE FROM orders WHERE order_seq=ANY($1::int[])',[ids]);
+    await reference.query('DELETE FROM customers WHERE customer_seq=ANY($1::int[])',[customers]);
+    await Promise.all([reference.end(),orders.end()]);
+  });
+  for(const [index,id]of customers.entries())await reference.query("INSERT INTO customers(customer_seq,name,phone_number,status) OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,$4)",[id,'참조 고객 '+index,'0107777000'+(index+1),index?'WITHDRAWN':'ACTIVE']);
+  for(const db of [reference,orders]){
+    for(const [index,id]of ids.entries())await db.query("INSERT INTO orders(order_seq,customer_seq,status,creation_source) OVERRIDING SYSTEM VALUE VALUES($1,$2,'COLLECTING','AI')",[id,customers[index===1?1:0]]);
+    await db.query('UPDATE orders SET deleted_at=clock_timestamp() WHERE order_seq=$1',[ids[2]]);
+    await db.query("UPDATE orders SET created_at=clock_timestamp()-interval '6 years' WHERE order_seq=$1",[ids[3]]);
+  }
+  const lookups=[
+    {orderSeq:ids[0],callOrderSeq:null,customerSeq:customers[0]},
+    {orderSeq:ids[1],callOrderSeq:null,customerSeq:customers[0]},
+    {orderSeq:ids[0],callOrderSeq:ids[1],customerSeq:customers[0]},
+    {orderSeq:ids[0],callOrderSeq:ids[0],customerSeq:null},
+    {orderSeq:2147483647,callOrderSeq:null,customerSeq:customers[0]},
+    {orderSeq:ids[2],callOrderSeq:null,customerSeq:customers[0]},
+    {orderSeq:ids[3],callOrderSeq:null,customerSeq:customers[0]},
+    {orderSeq:ids[1],callOrderSeq:null,customerSeq:customers[1]},
+    {orderSeq:ids[0],callOrderSeq:ids[2],customerSeq:customers[0]},
+  ];
+  const decisions=[];
+  for(const lookup of lookups){
+    const provider='scope-'+randomUUID(),requestId=randomUUID();requestIds.push(requestId);
+    const phone=lookup.customerSeq===customers[1]?'01077770002':lookup.customerSeq===null?'01077779999':'01077770001';
+    const id=(await reference.query('INSERT INTO call_sessions(provider_call_id,caller_phone_number,incoming_at,order_seq) VALUES($1,$2,clock_timestamp(),$3) RETURNING call_session_seq',[provider,phone,lookup.callOrderSeq])).rows[0].call_session_seq;calls.push(id);
+    const response=await fetch(`http://monolith-app:3000/api/ai/calls/${id}/events`,{method:'POST',headers:{Authorization:'Bearer '+process.env.AI_INSIGHTS_TOKEN,'Content-Type':'application/json','X-Request-Id':requestId},body:JSON.stringify({providerCallId:provider,events:[{eventId:randomUUID(),eventOrder:1,kind:'AI_ACTION',occurredAt:new Date().toISOString(),offsetSeconds:null,payload:{action:'ORDER_LOOKUP',summaryText:'참조',orderSeq:lookup.orderSeq}}]})});
+    assert.ok([204,403,404].includes(response.status),await response.text());
+    decisions.push({lookup,expected:response.status===204?true:response.status===403?false:undefined});
+  }
+  const run=async(steps,fail=false)=>{
+    const eventId=randomUUID(),script={steps,seen:0,fail};scripts.set(eventId,script);
+    const response=await fetch('http://order-app:3002/internal/call-event-order-scope',{method:'POST',headers,signal:AbortSignal.timeout(30000),body:JSON.stringify({eventId,source:'consultation',eventType:'CallEventOrderScopeRequested',payload:{callbackAddress:address,lookup:steps[0].lookup}})});
+    const text=await response.text();assert.equal(response.status,fail?500:200,text);if(!fail)assert.deepEqual(JSON.parse(text),{eventId,status:'processed',payload:null});assert.equal(script.seen,fail?1:steps.length);scripts.delete(eventId);
+  };
+  const initial={eventId:randomUUID(),source:'consultation',eventType:'CallEventOrderScopeRequested',payload:{callbackAddress:address,lookup:decisions[0].lookup}};
+  for(const authorization of ['', 'Bearer wrong'])assert.equal((await fetch('http://order-app:3002/internal/call-event-order-scope',{method:'POST',headers:{...headers,Authorization:authorization},body:JSON.stringify(initial)})).status,403);
+  assert.equal((await fetch('http://order-app:3002/internal/call-event-order-scope',{method:'POST',headers,body:JSON.stringify({...initial,payload:{...initial.payload,callbackAddress:'169.254.169.254'}})})).status,422);
+  assert.equal((await fetch('http://order-app:3002/api/internal/call-event-order-scope',{method:'POST',headers,body:JSON.stringify(initial)})).status,404);
+  assert.ok(!Object.keys((await(await fetch('http://order-app:3002/api/docs-json')).json()).paths).some(path=>path.includes('call-event-order-scope')));
+  const before=(await orders.query('SELECT * FROM orders WHERE order_seq=ANY($1::int[]) ORDER BY order_seq',[ids])).rows;
+  await run(decisions);
+  await Promise.all(Array.from({length:5},()=>run(decisions.slice(0,2))));
+  await run(Array.from({length:50},()=>decisions[0]));
+  await run(decisions.slice(0,1),true);await probe(ids[0],false);
+  assert.deepEqual((await orders.query('SELECT * FROM orders WHERE order_seq=ANY($1::int[]) ORDER BY order_seq',[ids])).rows,before);
+});
+
+test('public call events preserve the source batch, references, FAQ examples and audit outcomes',async t=>{
+  const mono=new Pool({host:'monolith-db',user:'monolith_app'}),cons=new Pool({host:'consultation-db',user:'consultation_app'}),ops=new Pool({host:'operations-db',user:'operations_app'});
+  const customer=new Pool({host:'customer-db',user:'customer_app'}),orders=new Pool({host:'order-db',user:'order_app'});
+  const sides=[{base:'http://monolith-app:3000',db:mono,audit:mono},{base:'http://consultation-app:3004',db:cons,audit:ops}];
+  const faqIds=[9200001,9200002,9200003,9200004],callIds=[9200101,9200102,9200103],customerIds=[9200201,9200202],orderIds=[9200301,9200302,9200303,9200304],questionId=9200401;
+  const providers=callIds.map(()=> 'public-events-'+randomUUID()),requestIds=new Set(),concurrentIds=new Set(),gates=[];
+  const exampleIds=new Map(),reverseExampleIds=new Map(),sessionToken='c'.repeat(64);
+  const headers={Authorization:'Bearer '+process.env.AI_INSIGHTS_TOKEN,'Content-Type':'application/json'};
+  t.after(async()=>{
+    for(const gate of gates){await gate.query('SELECT pg_advisory_unlock(20261110,$1)',[faqIds[0]]);gate.release();}
+    for(const db of [mono,ops]){
+      await db.query('DROP TRIGGER IF EXISTS gate_event_audit ON audit_logs; DROP FUNCTION IF EXISTS gate_event_audit(); DROP TRIGGER IF EXISTS reject_event_audit ON audit_logs; DROP FUNCTION IF EXISTS reject_event_audit()');
+      await db.query('DELETE FROM faq_entries WHERE faq_entry_seq=ANY($1::int[])',[faqIds]);
+      await db.query('DELETE FROM audit_logs WHERE request_id=ANY($1::uuid[])',[[...requestIds]]);
+      await db.query('DELETE FROM admin_sessions WHERE admin_user_seq=9200501');
+      await db.query('DELETE FROM admin_users WHERE admin_user_seq=9200501');
+    }
+    for(const db of [mono,cons]){
+      await db.query('DELETE FROM call_insight_events WHERE call_session_seq=ANY($1::int[])',[callIds]);
+      await db.query('DELETE FROM call_utterances WHERE call_session_seq=ANY($1::int[])',[callIds]);
+      await db.query('DELETE FROM unanswered_questions WHERE unanswered_question_seq=$1',[questionId]);
+      await db.query('DELETE FROM call_sessions WHERE call_session_seq=ANY($1::int[])',[callIds]);
+    }
+    for(const db of [mono,orders])await db.query('DELETE FROM orders WHERE order_seq=ANY($1::int[])',[orderIds]);
+    for(const db of [mono,customer])await db.query('DELETE FROM customers WHERE customer_seq=ANY($1::int[])',[customerIds]);
+    await Promise.all([mono.end(),cons.end(),ops.end(),customer.end(),orders.end()]);
+  });
+  for(const url of ['http://monolith-app:3000/health','http://consultation-app:3004/consultation/health/ready',
+    'http://operations-app:3005/operations/health/ready','http://customer-app:3001/customer/health/ready','http://order-app:3002/order/health/ready'])for(let retry=0;;retry++){
+    try{if((await fetch(url)).status===200)break;}catch{}
+    assert.ok(retry<100,'event fixture service did not start: '+url);await delay(100);
+  }
+  for(const db of [mono,customer])for(const [n,id]of customerIds.entries())await db.query("INSERT INTO customers(customer_seq,name,phone_number,status) OVERRIDING SYSTEM VALUE VALUES($1,'이벤트 고객',$2,$3)",[id,'0107777888'+(n+8),n?'WITHDRAWN':'ACTIVE']);
+  for(const db of [mono,orders]){
+    for(const [n,id]of orderIds.entries())await db.query("INSERT INTO orders(order_seq,customer_seq,status,creation_source) OVERRIDING SYSTEM VALUE VALUES($1,$2,'COLLECTING','AI')",[id,customerIds[n===1?1:0]]);
+    await db.query('UPDATE orders SET deleted_at=clock_timestamp() WHERE order_seq=$1',[orderIds[2]]);
+    await db.query("UPDATE orders SET created_at=clock_timestamp()-interval '6 years' WHERE order_seq=$1",[orderIds[3]]);
+  }
+  for(const db of [mono,cons]){
+    for(const [n,id]of callIds.entries())await db.query('INSERT INTO call_sessions(call_session_seq,provider_call_id,caller_phone_number,incoming_at,order_seq) OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,clock_timestamp(),$4)',[id,providers[n],n===2?'01077778889':'01077778888',n===1?orderIds[1]:null]);
+    await db.query("INSERT INTO unanswered_questions(unanswered_question_seq,event_id,call_session_seq,question_text,occurred_at,payload_hash,status) OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,'다른 통화 질문',clock_timestamp(),$4,'OPEN')",[questionId,randomUUID(),callIds[1],'a'.repeat(64)]);
+  }
+  for(const db of [mono,ops]){
+    await db.query("INSERT INTO admin_users(admin_user_seq,login_id,name,password_hash,role,status) OVERRIDING SYSTEM VALUE VALUES(9200501,'evparity','이벤트 운영자','not-a-login','OPERATOR','ACTIVE')");
+    await db.query('INSERT INTO admin_sessions(session_token_hash,admin_user_seq) VALUES($1,9200501)',[createHash('sha256').update(sessionToken).digest('hex')]);
+    for(const id of faqIds)await db.query("INSERT INTO faq_entries(faq_entry_seq,question,answer,category,updated_by_admin_user_seq,created_at,updated_at,deleted_at) OVERRIDING SYSTEM VALUE VALUES($1::int,'원본 FAQ '||$1::text,'답변','기타',9200501,'2026-11-01T00:00:00Z',$2,$3)",[id,id===faqIds[3]?'2100-01-01T00:00:00Z':'2026-11-01T00:00:00Z',id===faqIds[2]?new Date():null]);
+  }
+  const begun=Date.now(),base=Date.now()+30000;
+  const action=(order,changes={})=>({eventId:randomUUID(),eventOrder:order,kind:'AI_ACTION',occurredAt:new Date(base).toISOString(),offsetSeconds:null,payload:{action:'PIN_SEARCH',summaryText:'동작 원문\n',orderSeq:null},...changes});
+  const utterance=(order,text,speaker,eventOrder)=>action(eventOrder,{kind:'UTTERANCE',payload:{utteranceOrder:order,utteranceText:text,speaker,lastSentenceSeq:order}});
+  const result=(order,eventOrder,at=base)=>action(eventOrder,{kind:'BUSINESS_RESULT',occurredAt:new Date(at).toISOString(),payload:{action:'FAQ_ANSWERED',orderSeq:null,unansweredQuestionSeq:null,summaryText:'FAQ 응답',faqEntrySeqs:[...faqIds,2147483647],questionUtteranceOrder:order,answerUtteranceOrder:2}});
+  const sampleSQL='SELECT faq_question_example_seq,faq_entry_seq,event_id,question_text,occurred_at::text FROM faq_question_examples WHERE faq_entry_seq=ANY($1::int[]) ORDER BY faq_entry_seq,occurred_at,event_id';
+  const eventSQL=`SELECT e.event_id,e.call_session_seq,e.event_order,e.kind,e.occurred_at,e.offset_seconds,e.unanswered_question_seq,e.payload,e.payload_hash,u.utterance_order
+    FROM call_insight_events e LEFT JOIN call_utterances u ON u.call_utterance_seq=e.call_utterance_seq WHERE e.call_session_seq=ANY($1::int[]) ORDER BY e.event_id`;
+  const utteranceSQL='SELECT call_session_seq,utterance_order,speaker,utterance_text,last_sentence_seq FROM call_utterances WHERE call_session_seq=ANY($1::int[]) ORDER BY call_session_seq,utterance_order';
+  const auditSQL='SELECT actor_type,actor_seq,actor_name,action,target_type,target_seq,target_admin_name,request_id,result,metadata FROM audit_logs WHERE request_id=ANY($1::uuid[]) ORDER BY request_id,action,result,target_seq';
+  const compare=async()=>{
+    assert.deepEqual((await cons.query(eventSQL,[callIds])).rows,(await mono.query(eventSQL,[callIds])).rows);
+    assert.deepEqual((await cons.query(utteranceSQL,[callIds])).rows,(await mono.query(utteranceSQL,[callIds])).rows);
+    const actual=(await ops.query(sampleSQL,[faqIds])).rows,expected=(await mono.query(sampleSQL,[faqIds])).rows;
+    assert.equal(actual.length,expected.length);
+    // The source sorts by time/event only, so cross-FAQ identity assignment within one event is unspecified.
+    for(let n=0;n<actual.length;n++){
+      const sourceId=expected[n].faq_question_example_seq,splitId=actual[n].faq_question_example_seq;
+      if(exampleIds.has(sourceId))assert.equal(exampleIds.get(sourceId),splitId);
+      else{assert.ok(!reverseExampleIds.has(splitId));exampleIds.set(sourceId,splitId);reverseExampleIds.set(splitId,sourceId);}
+      assert.deepEqual({...actual[n],faq_question_example_seq:sourceId},expected[n]);
+    }
+    assert.deepEqual([...exampleIds.keys()].sort((a,b)=>a-b),[...exampleIds.values()].sort((a,b)=>a-b));
+    const sequenceSQL="SELECT last_value FROM pg_sequences WHERE schemaname='public' AND sequencename=(SELECT relname FROM pg_class WHERE oid=pg_get_serial_sequence('faq_question_examples','faq_question_example_seq')::regclass)";
+    assert.deepEqual((await ops.query(sequenceSQL)).rows,(await mono.query(sequenceSQL)).rows);
+    const auditRows=async db=>(await db.query(auditSQL,[[...requestIds]])).rows.map(row=>({...row,request_id:concurrentIds.has(row.request_id)?'<same-event winner>':row.request_id})).sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)));
+    assert.deepEqual(await auditRows(ops),await auditRows(mono));
+  };
+  let requests=0;
+  const send=async(side,input,requestId,options={})=>{
+    const response=await fetch(`${side.base}/api/ai/calls/${options.id??callIds[0]}/events`,{method:'POST',headers:{...headers,'X-Request-Id':requestId,...options.headers},body:JSON.stringify(input)});
+    const text=await response.text();return{status:response.status,body:text?JSON.parse(text):null,cache:response.headers.get('cache-control')};
+  };
+  const post=async(events,status,options={})=>{
+    const requestId=options.requestId??randomUUID();requestIds.add(requestId);
+    if(options.concurrent)concurrentIds.add(requestId);
+    const input=options.input??{providerCallId:options.provider??providers[0],events};
+    const responses=await Promise.all(sides.map(side=>send(side,input,requestId,options)));requests++;
+    assert.equal(responses[1].status,responses[0].status,JSON.stringify(responses));
+    if(status!==undefined)assert.equal(responses[0].status,status,JSON.stringify(responses));
+    assert.deepEqual(responses[1].body,responses[0].body);assert.equal(responses[1].cache,responses[0].cache);
+    if(options.compare!==false)await compare();
+    return responses;
+  };
+  for(const authorization of ['', 'Bearer wrong'])await post([action(1)],401,{headers:{Authorization:authorization}});
+  await post([],400);await post([action(1)],400,{input:{providerCallId:providers[0],events:[action(1)],extra:1}});
+  const duplicate=action(1);await post([duplicate,duplicate],400);await post([action(1),action(1)],400);
+  await post([action(1,{payload:{action:'PIN_SEARCH',summaryText:'x',orderSeq:null,status:'SUCCEEDED'}})],400);
+  await post([action(1)],404,{id:2147483647});await post([action(1)],403,{provider:'wrong-provider'});
+  const first=randomUUID(),question=' 원본 질문\n공백 보존 ',examples=Array.from({length:12},(_,n)=>result(1,n+3,base+n*1000));requestIds.add(first);
+  for(const db of [mono,ops]){
+    const gate=await db.connect();await gate.query('SELECT pg_advisory_lock(20261110,$1)',[faqIds[0]]);gates.push(gate);
+    await db.query(`CREATE FUNCTION gate_event_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+      IF NEW.request_id='${first}'::uuid AND NEW.action='CALL_EVENTS_RECORDED' AND NEW.result='SUCCESS'
+      THEN PERFORM pg_advisory_xact_lock(20261110,${faqIds[0]}); END IF; RETURN NEW; END $$;
+      CREATE TRIGGER gate_event_audit BEFORE INSERT ON audit_logs FOR EACH ROW EXECUTE FUNCTION gate_event_audit()`);
+  }
+  const initial=[utterance(1,question,'CUSTOMER',1),utterance(2,'답변','AI',2),...examples];
+  const pending=post(initial,204,{requestId:first,compare:false});void pending.catch(()=>undefined);
+  try{
+    for(const db of [mono,ops])for(let retry=0;;retry++){
+      if((await db.query('SELECT 1 FROM pg_locks WHERE locktype=$1 AND classid=20261110 AND objid=$2 AND NOT granted',['advisory',faqIds[0]])).rowCount)break;
+      assert.ok(retry<200,'request did not reach the real audit gate');await delay(25);
+    }
+    for(const side of sides){assert.equal((await side.audit.query(sampleSQL,[faqIds])).rowCount,0);assert.equal((await side.db.query(eventSQL,[callIds])).rowCount,0);}
+  }finally{for(const gate of gates.splice(0)){await gate.query('SELECT pg_advisory_unlock(20261110,$1)',[faqIds[0]]);gate.release();}}
+  await pending;await compare();assert.equal((await ops.query(sampleSQL,[faqIds])).rowCount,20);
+  for(const db of [mono,ops])await db.query('DROP TRIGGER gate_event_audit ON audit_logs; DROP FUNCTION gate_event_audit()');
+  await post(initial,204);
+  const reordered=structuredClone(examples);for(const e of reordered)e.payload.faqEntrySeqs.reverse();await post(reordered,204);
+  await post([{...initial[0],payload:{...initial[0].payload,utteranceText:'다른 원문'}}],409);
+  await post([initial[0]],409,{id:callIds[1],provider:providers[1]});
+  await post([result(999,20)],404);await post([result(2,20)],422);
+  await post([action(20,{kind:'BUSINESS_RESULT',payload:{action:'QUESTION_UNANSWERED',summaryText:'다른 통화',orderSeq:null,unansweredQuestionSeq:questionId}})],403);
+  await post([action(20,{kind:'BUSINESS_RESULT',payload:{action:'QUESTION_UNANSWERED',summaryText:'없는 질문',orderSeq:null,unansweredQuestionSeq:2147483647}})],404);
+  for(const [n,id]of orderIds.entries())await post([action(24+n,{payload:{action:'PREVIOUS_ORDER_SEARCH',summaryText:'주문 참조',orderSeq:id}})],n===0?204:n===1?403:404);
+  const legacySingle=result(1,28,base+15000);delete legacySingle.payload.faqEntrySeqs;legacySingle.payload.faqEntrySeq=faqIds[0];await post([legacySingle],204);
+  const legacyChanged=structuredClone(legacySingle);delete legacyChanged.payload.faqEntrySeq;legacyChanged.payload.faqEntrySeqs=[faqIds[0]];await post([legacyChanged],409);
+  await post([action(21,{payload:{action:'ORDER_LOOKUP',summaryText:'연결 주문 우선',orderSeq:orderIds[0]}})],403,{id:callIds[1],provider:providers[1]});
+  await post([action(21,{payload:{action:'ORDER_LOOKUP',summaryText:'연결 주문',orderSeq:orderIds[1]}})],204,{id:callIds[1],provider:providers[1]});
+  await post([action(21,{payload:{action:'ORDER_LOOKUP',summaryText:'탈퇴 고객',orderSeq:orderIds[1]}})],204,{id:callIds[2],provider:providers[2]});
+  for(const db of [mono,ops])await db.query("CREATE FUNCTION reject_event_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.action='CALL_EVENTS_RECORDED' AND NEW.result='SUCCESS' THEN RAISE EXCEPTION 'injected event audit failure'; END IF; RETURN NEW; END $$; CREATE TRIGGER reject_event_audit BEFORE INSERT ON audit_logs FOR EACH ROW EXECUTE FUNCTION reject_event_audit()");
+  const retryBatch=[utterance(3,'롤백 질문','CUSTOMER',22),result(3,23,base+20000)];
+  try{await post(retryBatch,500);}finally{for(const db of [mono,ops])await db.query('DROP TRIGGER reject_event_audit ON audit_logs; DROP FUNCTION reject_event_audit()');}
+  await post(retryBatch,204);
+  await post([result(1,30,base+17000),result(1,31,base+17000)],204);
+  for(const id of faqIds.slice(0,2)){
+    const requestId=randomUUID(),responses=await Promise.all(['http://monolith-app:3000','http://operations-app:3005'].map(async base=>{
+      const response=await fetch(base+'/api/faqs/'+id,{headers:{Cookie:'dva_session='+sessionToken,'X-Request-Id':requestId}});assert.equal(response.status,200);return response.json();
+    }));
+    for(const example of responses[1].data.recentQuestions){assert.ok(reverseExampleIds.has(example.faqQuestionExampleSeq));example.faqQuestionExampleSeq=reverseExampleIds.get(example.faqQuestionExampleSeq);}
+    assert.deepEqual(responses[1],responses[0]);
+  }
+  const legacyResults=[];
+  for(let n=0;n<10;n++){
+    const text='\u0001'.repeat(19999)+String.fromCodePoint(0x4e00+n),order=100+n;
+    for(const db of [mono,cons])await db.query('INSERT INTO call_utterances(call_session_seq,utterance_order,speaker,utterance_text,last_sentence_seq) VALUES($1,$2,$3,$4,$2)',[callIds[0],order,'CUSTOMER',text]);
+    legacyResults.push(result(order,100+n,base+30000+n*1000));
+  }
+  await post(legacyResults,204);
+  assert.ok((await ops.query("SELECT count(*)::int n FROM inbox_events WHERE event_type='FaqQuestionExamplesChunkPrepared'")).rows[0].n>=3);
+  assert.equal((await ops.query('SELECT count(*)::int n FROM consultation_audit_preparations WHERE NOT aborted')).rows[0].n,0);
+  const invalidChunk={eventId:randomUUID(),source:'consultation',eventType:'FaqQuestionExamplesChunkPrepared',payload:{transactionId:'00000000-0000-0000-0000-000000000000',questions:[{utteranceOrder:1,text:'question'}],results:[{eventId:randomUUID(),occurredAt:new Date(base).toISOString(),questionUtteranceOrder:1,faqEntrySeqs:[faqIds[0]]}]}};
+  assert.equal((await fetch('http://operations-app:3005/internal/events',{method:'POST',headers:{Authorization:'Bearer '+process.env.CONSULTATION_AUTH_TOKEN,'Content-Type':'application/json'},body:JSON.stringify(invalidChunk)})).status,422);
+  assert.equal((await ops.query('SELECT count(*)::int n FROM inbox_events WHERE event_id=$1',[invalidChunk.eventId])).rows[0].n,0);
+  const concurrent=[action(200,{payload:{action:'ORDER_LOOKUP',summaryText:'동시 동일 재전송',orderSeq:orderIds[0]}})];
+  await Promise.all(Array.from({length:5},()=>post(concurrent,204,{compare:false,concurrent:true})));await compare();
+  for(const db of [mono,ops])assert.equal((await db.query("SELECT count(*)::int n FROM audit_logs WHERE request_id=ANY($1::uuid[]) AND action='CALL_EVENTS_RECORDED' AND result='SUCCESS'",[[...concurrentIds]])).rows[0].n,1);
+  await post(Array.from({length:50},(_,n)=>action(300+n,{payload:{action:'ORDER_LOOKUP',summaryText:'최대 묶음',orderSeq:orderIds[0]}})),204);
+  const huge=utterance(500,'\u0001'.repeat(19999)+'끝','CUSTOMER',500);await post([huge],413);
+  const docs=await Promise.all(sides.map(async side=>(await fetch(side.base+'/api/docs-json')).json()));
+  assert.deepEqual(docs[1].paths['/api/ai/calls/{id}/events'],docs[0].paths['/api/ai/calls/{id}/events']);
+  for(const name of ['CreateCallEventsDto','CallEventInputDto','UtterancePayloadDto','AiActionPayloadDto','BusinessResultPayloadDto'])assert.deepEqual(docs[1].components.schemas[name],docs[0].components.schemas[name]);
+  t.diagnostic(`event HTTP comparisons: ${requests}; event/hash/utterance/FAQ identity mapping/audits match; public gate, retry, large derived inputs and 50 references verified in ${Date.now()-begun}ms`);
 });

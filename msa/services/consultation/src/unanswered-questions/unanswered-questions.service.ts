@@ -5,6 +5,11 @@ import { ApiException } from '../common/errors/api.exception';
 import { DatabaseService } from '../database/database.service';
 import { UnansweredQuestionsRepository } from './unanswered-questions.repository';
 import type { CreateUnansweredQuestionDto } from './dto/create-unanswered-question.dto';
+import type { UnansweredQuestionQueryDto } from './dto/unanswered-question-query.dto';
+import { ListResponse } from '../common/pagination';
+import { retryFaqWrite } from '@dva/events/faq-conversion.cjs';
+import type { CreateFaqDto } from './dto/create-faq.dto';
+import { ensureFaqConversionsConfirmed } from './faq-conversion';
 
 @Injectable()
 export class UnansweredQuestionsService {
@@ -13,6 +18,92 @@ export class UnansweredQuestionsService {
     private readonly repository: UnansweredQuestionsRepository,
     private readonly audit: AuditService,
   ) {}
+
+  async convert(
+    id: number,
+    input: CreateFaqDto,
+    adminId: number,
+    requestId: string,
+  ): Promise<number> {
+    const hash = createHash('sha256')
+      .update(
+        JSON.stringify({
+          category: input.category,
+          question: input.question,
+          answer: input.answer,
+        }),
+      )
+      .digest('hex');
+    return retryFaqWrite(() =>
+      this.database.transaction(async (client) => {
+        const question = await this.repository.findForUpdate(client, id);
+        if (!question)
+          throw new ApiException(
+            404,
+            'NOT_FOUND',
+            '미답변 질문을 찾을 수 없습니다.',
+          );
+        if (question.status === 'DELETED')
+          throw new ApiException(
+            409,
+            'INVALID_STATE',
+            '삭제한 질문은 FAQ로 전환할 수 없습니다.',
+          );
+        if (question.status === 'REGISTERED') {
+          if (question.conversionHash !== hash || question.faqId === null)
+            throw new ApiException(
+              409,
+              'INVALID_STATE',
+              '이미 다른 내용으로 FAQ 전환한 질문입니다.',
+            );
+          await ensureFaqConversionsConfirmed(client);
+          if (!(await this.repository.faqExists(question.faqId)))
+            throw new ApiException(
+              409,
+              'INVALID_STATE',
+              '전환한 FAQ가 삭제되어 다시 생성할 수 없습니다.',
+            );
+          return question.faqId;
+        }
+        const faqId = await this.audit.prepareFaqConversion(client, {
+          faq: input,
+          adminId,
+          requestId,
+        });
+        await this.repository.register(client, id, faqId, hash);
+        await this.audit.recordSuccess(
+          {
+            actorId: adminId,
+            action: 'UNANSWERED_QUESTION_REGISTERED',
+            targetType: 'UNANSWERED_QUESTION',
+            targetId: id,
+            requestId,
+          },
+          client,
+        );
+        return faqId;
+      }),
+    );
+  }
+
+  async findMany(query: UnansweredQuestionQueryDto) {
+    const from = query.from === undefined ? undefined : Date.parse(query.from);
+    const to = query.to === undefined ? undefined : Date.parse(query.to);
+    if (
+      (from === undefined) !== (to === undefined) ||
+      (from !== undefined &&
+        (!Number.isFinite(from) || new Date(from).getUTCFullYear() < 1)) ||
+      (to !== undefined &&
+        (!Number.isFinite(to) || new Date(to).getUTCFullYear() < 1)) ||
+      (from !== undefined && to !== undefined && from >= to)
+    )
+      throw new ApiException(
+        400,
+        'INVALID_REQUEST',
+        '기간은 시작·종료 시각을 함께 지정하고 시작이 종료보다 빨라야 합니다.',
+      );
+    return new ListResponse(await this.repository.findMany(query), query.limit);
+  }
 
   async delete(id: number, adminId: number, requestId: string): Promise<void> {
     await this.database.transaction(async (client) => {

@@ -12,6 +12,9 @@ MR !352 병합 `c400c72`를 기준으로 [주문 조회 4개 API](../docs/msa-or
 
 # MSA CI/CD
 
+현재 동등성 작업 기준은 develop-backend `864ccde5`의 backend다. [작업 보고서](CURRENT-PARITY.md)에
+기능별 대조·계획·구현·검증을 기록한다. 아래 개별 MR 기록은 도입 당시의 범위이며 최신 완료 판정을 뜻하지 않는다.
+
 MR !337 병합 기준 `1597c62`에서 착수하고 최신 `ad40526`(고객 등록 주소 필수·주문 가격 정책)을 반영해 [미답변 수집·삭제와 통화 콘텐츠 조회·삭제 6개 API](../docs/msa-call-content-plan.md)를 이식한다. 원본 054와 동일 입력/응답·삭제 조건·감사를 유지하며 통화 이벤트 수집/FAQ 사례 생성·미답변 목록/전환·주문과 전체 동등성은 후속이다.
 
 MR !326 병합 기준 `3d8bf7b9`로 착수한 뒤 최신 `bae5074`(원본 054·보안 기록/녹취 재시도)를 동기화하며 [FAQ 6개 API·AI 알림 워커 및 상세 원본 통화 조회](../docs/msa-faqs-plan.md)을 이식한다. 질문 사례 생성·통화 이벤트 수집과 전체 동등성은 후속이다.
@@ -32,10 +35,10 @@ Jenkins의 Linux 빌드 노드에서 검증하고, MSA 서버 `k15d109.p.ssafy.i
 
 [CI 비용·#40 전환 실패 보완](../docs/msa-ci-runtime-plan.md)은 앱 배포와 회귀 선택을 분리하고,
 전체 선택 시 11개 checks/production/Liquibase 이미지를 공유한다. 기존 회귀의 원본은
-`baseline.json`의 055 커밋 `9624b778`로 고정하며 `msa/.ci-source/`에서 현재 MSA와 검증한다.
-원래 `backend/`는 변경하지 않는다. 이후 056/API는 이 검사에 섞지 않는다.
-임시 원본의 application 테스트 helper에는 !371의 반복 로그인 제거만 적용한다.
-API·migration·테스트 기대값은 그대로이며 승인된 fixture patch 이외의 backend 차이는 거부한다.
+`baseline.json`의 현재 기준 `864ccde5`(060까지)로 고정하며 `msa/.ci-source/`에서 현재 MSA와 검증한다.
+원래 `backend/`는 변경하지 않는다. 요청 시점 뒤의 변경은 이 기준에 자동 혼합하지 않는다.
+현재 원본에는 반복 로그인 제거가 이미 포함되어 있으므로 과거 055용 fixture patch를 적용하지 않는다.
+API·migration·테스트 helper를 포함한 backend tree가 고정 원본과 정확히 일치해야 한다.
 실제 checkout의 backend와 최초 052 수동 진단 기준은 보존한다.
 최초 052 전체 동등성 진단은 별도 MR !364의 수동 검증이며, 현재 업무 동등성 완료를 의미하지 않는다.
 [Jenkins #44 샌드박스 오류 수정](../docs/msa-build-44-fix.md)은 검증 성공 기록과 Checkout 승계를

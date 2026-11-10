@@ -84,9 +84,14 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
         ['00000000-0000-4000-8000-000000000001',1002,null,null,'2094-01-01T00:00:00Z'],
         ['00000000-0000-4000-8000-000000000002',1002,'2030-01-01T00:00:00Z',null,'2094-01-01T00:00:00Z'],
         ['00000000-0000-4000-8000-000000000003',1003,null,null,'2000-01-01T00:00:00Z'],
-        ['00000000-0000-4000-8000-000000000004',1006,null,'2030-01-01T00:00:00Z','2094-01-01T00:00:00Z']])
+        ['00000000-0000-4000-8000-000000000004',1006,null,'2030-01-01T00:00:00Z','2094-01-01T00:00:00Z'],
+        ['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',1004,null,null,'2094-01-01T00:00:00Z'],
+        ['00000000-0000-4000-8000-000000000006',1012,null,null,'2094-01-01T00:00:00Z'],
+        ['00000000-0000-4000-8000-000000000007',1013,null,null,'2094-01-01T00:00:00Z']])
         await client.query(`INSERT INTO order_payment_requests(payment_request_id,order_seq,amount,expires_at,created_at,invalidated_at,completed_at,provider_reference,notification_status,completion_notification_status)
           VALUES($1,$2,7000,$3,'1999-01-01T00:00:00Z',$4,$5,$6,'SENT',CASE WHEN $5::timestamptz IS NULL THEN 'WAITING' ELSE 'SENT' END)`,[id,order,expires,invalid,completed,completed?'stored-reference':null]);
+      await client.query("UPDATE order_payment_requests SET approval_started_at='2030-01-01T00:00:00Z' WHERE payment_request_id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'");
+      await client.query('UPDATE order_parcels SET origin_name=$1 WHERE order_parcel_seq=20041', ['닫는 </script> & "이름"']);
       await client.query('COMMIT');
     } catch(error) { await client.query('ROLLBACK');throw error; } finally { client.release(); }
   }
@@ -122,10 +127,20 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
   for(const owner of Object.keys(owners)) messageCounts[owner]=await snapshot(databases[owner],['outbox_events','inbox_events']);
   let compared=0;
   async function request(side,path,expected,extra,requestId) {
-    const response=await fetch(side.base+path,{headers:{...extra,'X-Request-Id':requestId},signal:AbortSignal.timeout(20000)});
-    const body=await response.json();
+    const response=await fetch(side.base+path,{headers:{Authorization:'Bearer '+process.env.PGPASSWORD,...extra,'X-Request-Id':requestId},signal:AbortSignal.timeout(20000)});
+    const text=await response.text();
+    const body=response.headers.get('content-type')?.includes('application/json') ? JSON.parse(text) : text;
     assert.equal(response.status,expected,side.name+' '+path+' '+JSON.stringify(body));
     assert.equal(response.headers.get('x-request-id'),requestId);assert.equal(response.headers.get('cache-control'),'no-store');
+    if(path.startsWith('/api/payments/')&&expected===200) {
+      assert.equal(response.headers.get('referrer-policy'),'no-referrer');
+      if(!path.startsWith('/api/payments/requests/')) {
+        assert.equal(response.headers.get('x-content-type-options'),'nosniff');
+        assert.equal(response.headers.get('x-frame-options'),'DENY');
+        assert.equal(response.headers.get('content-security-policy'),"default-src 'self'; script-src 'self' https://js.tosspayments.com; style-src 'self'; style-src-attr 'unsafe-inline'; connect-src 'self' https://*.tosspayments.com https://*.toss.im; frame-src https:; img-src 'self' data: https:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'");
+        assert.equal(response.headers.get('content-type'),path.endsWith('.js')?'text/javascript; charset=utf-8':path.endsWith('.css')?'text/css; charset=utf-8':'text/html; charset=utf-8');
+      } else assert.equal(response.headers.get('content-type'),'application/json; charset=utf-8');
+    }
     return body;
   }
   async function compare(path,expected=200,extra=headers) {
@@ -146,11 +161,80 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
       }
       for(const child of Object.values(value)) schemas(child);
     }
-    for(const path of ['/api/orders','/api/orders/{id}','/api/admin/orders','/api/customers/{id}/addresses']) {
+    for(const path of ['/api/orders','/api/orders/{id}','/api/admin/orders','/api/customers/{id}/addresses','/api/payments/requests/{id}']) {
       assert.deepEqual(documents[1].paths[path].get,documents[0].paths[path].get,path);
       schemas(documents[0].paths[path].get);
     }
     assert.ok(visited.size>5);
+  });
+  await t.test('payment reads preserve every state, exact HTML/assets, escaping and public access without changing stored data',async()=> {
+    for(const [number,status] of [[1,'PENDING'],[2,'CANCELLED'],[3,'EXPIRED'],[4,'PAID'],[5,'REVIEW_REQUIRED']]) {
+      const id=number===5?'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa':'00000000-0000-4000-8000-'+String(number).padStart(12,'0');
+      const view=await compare('/api/payments/requests/'+id,200,{});
+      assert.equal(view.data.status,status);
+      assert.equal(view.data.token,id);
+      await compare('/api/payments/requests/'+id.toUpperCase(),200,{Cookie:'dva_session=invalid'});
+      for(const mode of ['p','success','fail']) {
+        const html=await compare('/api/payments/'+mode+'/'+id,200,{});
+        assert.ok(html.includes('id="payment-data" type="application/json"'));
+        if(number===5) {
+          assert.ok(html.includes('닫는 &lt;/script&gt; &amp; &quot;이름&quot;'));
+          assert.ok(!html.includes('닫는 </script>'));
+          const data=JSON.parse(/<script id="payment-data" type="application\/json">(.*?)<\/script>/s.exec(html)[1]);
+          assert.equal(data.senderName,'닫는 </script> & "이름"');
+        }
+      }
+    }
+    for(const mode of ['requests','p','success','fail']) {
+      for(const id of ['00000000-0000-4000-8000-000000000006','00000000-0000-4000-8000-000000000007','ffffffff-ffff-4fff-8fff-ffffffffffff'])
+        await compare('/api/payments/'+mode+'/'+id,404,{});
+      for(const id of ['invalid','00000000-0000-1000-8000-000000000001'])
+        await compare('/api/payments/'+mode+'/'+id,400,{});
+    }
+    for(const name of ['checkout.js','style.css']) await compare('/api/payments/assets/'+name,200,{});
+    for(const name of ['secret.key','%2e%2e%2fpackage.json']) await compare('/api/payments/assets/'+name,404,{});
+    const documents=await Promise.all(sides.map(async side=>(await fetch(side.base+'/api/docs-json')).json()));
+    assert.deepEqual(documents[1].paths['/api/payments/requests/{id}'].get,documents[0].paths['/api/payments/requests/{id}'].get);
+    for(const name of ['PaymentStatusDto','RequestMetaDto','ErrorResponseDto']) assert.deepEqual(documents[1].components.schemas[name],documents[0].components.schemas[name],name);
+    for(const document of documents) for(const path of ['/api/payments/assets/{name}','/api/payments/p/{id}','/api/payments/success/{id}','/api/payments/fail/{id}']) assert.equal(document.paths[path],undefined);
+  });
+  await t.test('order customer references keep service authentication, current visibility and read-only receipts',async()=> {
+    const {requestReferences}=require('@dva/events/call-read-references.cjs');
+    const base='http://customer-app:3001';
+    const path='/internal/call-read-references/for-orders';
+    const customerToken=process.env.CUSTOMER_AUTH_TOKEN;
+    const consultationToken=process.env.CONSULTATION_AUTH_TOKEN;
+    const ids=[1,3,4,5,7];
+    const expected=(await reference.query(`SELECT c.customer_seq,c.name,o.organization_seq,o.name AS organization_name FROM customers c
+      LEFT JOIN memberships m ON m.customer_seq=c.customer_seq AND m.deleted_at IS NULL
+      LEFT JOIN organizations o ON o.organization_seq=m.organization_seq AND o.deleted_at IS NULL
+      WHERE c.customer_seq=ANY($1::int[]) AND c.deleted_at IS NULL ORDER BY c.customer_seq`,[ids])).rows;
+    assert.deepEqual(await requestReferences('customer',base+path,customerToken,ids,'order'),expected);
+    const maximum=Array.from({length:250},(_,n)=>n+1);
+    const maximumExpected=(await reference.query('SELECT customer_seq FROM customers WHERE customer_seq=ANY($1::int[]) AND deleted_at IS NULL ORDER BY customer_seq',[maximum])).rows;
+    assert.deepEqual((await requestReferences('customer',base+path,customerToken,maximum,'order')).map(row=>({customer_seq:row.customer_seq})),maximumExpected);
+    const packet={eventId:randomUUID(),source:'order',eventType:'CallReadReferencesRequested',payload:{ids}};
+    async function post(target,body,token,expectedStatus) {
+      const response=await fetch(base+target,{method:'POST',headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},body:JSON.stringify(body)});
+      assert.equal(response.status,expectedStatus);
+      if(expectedStatus===200) {
+        assert.equal(response.headers.get('cache-control'),'no-store');
+        assert.deepEqual(await response.json(),{eventId:packet.eventId,status:'processed',payload:expected});
+      } else await response.body?.cancel();
+    }
+    for(const token of [undefined,'wrong',consultationToken]) await post(path,packet,token,403);
+    for(const body of [{...packet,source:'consultation'},{...packet,source:'customer'},
+      {...packet,payload:{ids:[]}},{...packet,payload:{ids:[1,1]}},
+      {...packet,payload:{ids:maximum.concat(251)}},{...packet,payload:{ids,sql:'SELECT private'}}])
+      await post(path,body,customerToken,422);
+    await post(path,packet,customerToken,200);
+    await post(path,packet,customerToken,200);
+    await post('/api'+path,packet,customerToken,404);
+    await post('/internal/call-read-references',{...packet,source:'consultation'},customerToken,403);
+    const old=await requestReferences('customer',base+'/internal/call-read-references',consultationToken,ids);
+    assert.deepEqual(old,expected);
+    const document=await (await fetch(base+'/api/docs-json')).json();
+    assert.ok(!Object.keys(document.paths).some(path=>path.includes('call-read-references')));
   });
   await t.test('all roles, filters, stable order, page boundaries and totals',async()=> {
     for(const token of tokens) await compare('/api/orders',200,{Cookie:'dva_session='+token});

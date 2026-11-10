@@ -1,3 +1,4 @@
+import { ReportCallAnalysisFailureDto } from './dto/report-call-analysis-failure.dto';
 import { Injectable } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { AuditService } from '../audit/audit.service';
@@ -13,6 +14,36 @@ export class CallInsightsService {
     private readonly repository: CallInsightsRepository,
     private readonly audit: AuditService,
   ) {}
+
+  async reportFailure(
+    id: number,
+    input: ReportCallAnalysisFailureDto,
+    requestId: string,
+  ): Promise<void> {
+    await this.database.transaction(async (client) => {
+      const providerCallId = await this.repository.lockFailureCall(client, id);
+      if (providerCallId === undefined)
+        throw new ApiException(404, 'NOT_FOUND', '통화를 찾을 수 없습니다.');
+      if (providerCallId !== input.providerCallId)
+        throw new ApiException(
+          403,
+          'FORBIDDEN',
+          '통화 번호와 AI 통화 ID가 일치하지 않습니다.',
+        );
+      if (!(await this.repository.recordFailure(client, id))) return;
+      await this.audit.recordSuccess(
+        {
+          actorId: null,
+          actorType: 'AI',
+          action: 'CALL_ANALYSIS_FAILED',
+          targetType: 'CALL_SESSION',
+          targetId: id,
+          requestId,
+        },
+        client,
+      );
+    });
+  }
 
   async save(
     id: number,

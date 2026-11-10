@@ -1,4 +1,14 @@
-import { Controller, Delete, HttpCode, Param, Req } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  HttpCode,
+  Param,
+  Post,
+  Req,
+  Res,
+} from '@nestjs/common';
+import type { Response } from 'express';
 import {
   ApiCookieAuth,
   ApiNoContentResponse,
@@ -12,6 +22,7 @@ import { ErrorResponseDto } from '../common/dto/api-response.dto';
 import { ApiException } from '../common/errors/api.exception';
 import { UnansweredQuestionIdDto } from './dto/unanswered-question-id.dto';
 import { UnansweredQuestionsService } from './unanswered-questions.service';
+import { CreateFaqDto } from './dto/create-faq.dto';
 
 @ApiTags('Unanswered Questions')
 @ApiCookieAuth('adminSession')
@@ -54,6 +65,36 @@ import { UnansweredQuestionsService } from './unanswered-questions.service';
 @Controller('unanswered-questions')
 export class UnansweredQuestionsManagementController {
   constructor(private readonly questions: UnansweredQuestionsService) {}
+
+  @Post(':id/faqs')
+  @HttpCode(204)
+  @AuditOperation({
+    action: 'UNANSWERED_QUESTION_REGISTERED',
+    targetType: 'UNANSWERED_QUESTION',
+    target: 'id',
+  })
+  @ApiOperation({
+    summary: '미답변 질문을 FAQ로 전환',
+    description:
+      '분류·질문·답변 모두 필수입니다. FAQ·감사·AI 알림 대기·REGISTERED 전환을 함께 저장합니다. 같은 내용 재시도는 기존 FAQ를 유지합니다.',
+  })
+  @ApiNoContentResponse({
+    description: '전환 완료 또는 동일 전환 재시도. Location에 FAQ 상세 경로.',
+  })
+  async convert(
+    @Param() params: UnansweredQuestionIdDto,
+    @Body() input: CreateFaqDto,
+    @Req() request: AuthRequest,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<void> {
+    const id = await this.questions.convert(
+      params.id,
+      input,
+      request.admin.adminUserSeq,
+      request.requestId,
+    );
+    response.location(`/api/faqs/${id}`);
+  }
 
   @Delete(':id')
   @HttpCode(204)

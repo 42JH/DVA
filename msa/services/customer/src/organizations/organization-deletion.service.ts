@@ -12,71 +12,74 @@ export class OrganizationDeletionService {
     private readonly audit: AuditService,
   ) {}
 
-  async remove(id: number, departmentOnly: boolean, adminId: number, requestId: string) {
+  async remove(id: number | number[], departmentOnly: boolean, adminId: number, requestId: string) {
+    const ids = (Array.isArray(id) ? [...id] : [id]).sort((a, b) => a - b);
     try {
       await this.database.transaction(async (client) => {
         await client.query("SET LOCAL lock_timeout='2s'");
-        const owner = departmentOnly
-          ? await this.repository.department(client, id)
-          : { organizationSeq: id };
-        if (!owner) throw new ApiException(404, 'NOT_FOUND', '부서를 찾을 수 없습니다.');
-        const companyId = owner.organizationSeq,
-          departmentId = departmentOnly ? id : null;
-        await this.repository.lockMembers(client, companyId, departmentId);
-        const company = await this.repository.company(client, companyId);
-        if (!company) throw new ApiException(404, 'NOT_FOUND', '기업을 찾을 수 없습니다.');
-        const departments = await this.repository.departments(client, companyId, departmentId);
-        if (departmentOnly && !departments.length)
+        const owner = departmentOnly ? await this.repository.department(client, ids[0]) : null;
+        if (departmentOnly && !owner)
           throw new ApiException(404, 'NOT_FOUND', '부서를 찾을 수 없습니다.');
-        const context = { organizationSeq: companyId, organizationName: company.name };
-        for (const member of await this.repository.removeMembers(client, companyId, departmentId))
-          await this.audit.recordSuccess(
-            {
-              actorId: adminId,
-              action: 'MEMBERSHIP_REMOVED',
-              targetType: 'MEMBERSHIP',
-              targetId: member.id,
-              requestId,
-              metadata: {
-                ...context,
-                customerSeq: member.customerSeq,
-                departmentSeq: member.departmentSeq,
-                departmentName:
-                  departments.find((d) => d.id === member.departmentSeq)?.name ?? null,
+        const companyIds = owner ? [owner.organizationSeq] : ids;
+        const departmentId = departmentOnly ? ids[0] : null;
+        // 모든 대상 고객을 먼저 잠근 뒤 기업을 잠가 결제와의 순서를 유지한다.
+        await this.repository.lockMembers(client, companyIds, departmentId);
+        for (const companyId of companyIds) {
+          const company = await this.repository.company(client, companyId);
+          if (!company) throw new ApiException(404, 'NOT_FOUND', '기업을 찾을 수 없습니다.');
+          const departments = await this.repository.departments(client, companyId, departmentId);
+          if (departmentOnly && !departments.length)
+            throw new ApiException(404, 'NOT_FOUND', '부서를 찾을 수 없습니다.');
+          const context = { organizationSeq: companyId, organizationName: company.name };
+          for (const member of await this.repository.removeMembers(client, companyId, departmentId))
+            await this.audit.recordSuccess(
+              {
+                actorId: adminId,
+                action: 'MEMBERSHIP_REMOVED',
+                targetType: 'MEMBERSHIP',
+                targetId: member.id,
+                requestId,
+                metadata: {
+                  ...context,
+                  customerSeq: member.customerSeq,
+                  departmentSeq: member.departmentSeq,
+                  departmentName:
+                    departments.find((d) => d.id === member.departmentSeq)?.name ?? null,
+                },
               },
-            },
-            client,
-          );
-        await this.repository.removeDepartments(client, companyId, departmentId);
-        for (const department of departments)
-          await this.audit.recordSuccess(
-            {
-              actorId: adminId,
-              action: 'DEPARTMENT_DELETED',
-              targetType: 'DEPARTMENT',
-              targetId: department.id,
-              requestId,
-              metadata: {
-                ...context,
-                departmentSeq: department.id,
-                departmentName: department.name,
+              client,
+            );
+          await this.repository.removeDepartments(client, companyId, departmentId);
+          for (const department of departments)
+            await this.audit.recordSuccess(
+              {
+                actorId: adminId,
+                action: 'DEPARTMENT_DELETED',
+                targetType: 'DEPARTMENT',
+                targetId: department.id,
+                requestId,
+                metadata: {
+                  ...context,
+                  departmentSeq: department.id,
+                  departmentName: department.name,
+                },
               },
-            },
-            client,
-          );
-        if (!departmentOnly) {
-          await this.repository.removeCompany(client, companyId);
-          await this.audit.recordSuccess(
-            {
-              actorId: adminId,
-              action: 'ORGANIZATION_DELETED',
-              targetType: 'ORGANIZATION',
-              targetId: companyId,
-              requestId,
-              metadata: context,
-            },
-            client,
-          );
+              client,
+            );
+          if (!departmentOnly) {
+            await this.repository.removeCompany(client, companyId);
+            await this.audit.recordSuccess(
+              {
+                actorId: adminId,
+                action: 'ORGANIZATION_DELETED',
+                targetType: 'ORGANIZATION',
+                targetId: companyId,
+                requestId,
+                metadata: context,
+              },
+              client,
+            );
+          }
         }
       });
     } catch (error: unknown) {

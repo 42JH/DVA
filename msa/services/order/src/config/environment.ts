@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
+import { paymentEnvironment, PaymentEnvironment } from '../payments/payment-config';
 const developmentSecurityLogKey = randomBytes(32).toString('hex');
-export interface Environment {
+export interface Environment extends PaymentEnvironment {
   AUTH_PROXY_HOPS: number;
   SECURITY_LOG_HMAC_KEY: string;
   NODE_ENV: 'development' | 'test' | 'production';
@@ -14,6 +15,7 @@ export interface Environment {
   SWAGGER_ENABLED: boolean;
   OPERATIONS_URL: string;
   CUSTOMER_AUTH_TOKEN: string;
+  AI_BUSINESS_TOKEN?: string;
   CONSULTATION_URL: string;
   CUSTOMER_URL: string;
   DELIVERY_URL: string;
@@ -79,7 +81,15 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
       (typeof securityLogKey !== 'string' || !/^[a-fA-F0-9]{64}$/.test(securityLogKey)))
   )
     errors.push('SECURITY_LOG_HMAC_KEY');
+  const businessToken = raw.AI_BUSINESS_TOKEN;
+  if (
+    businessToken !== undefined &&
+    businessToken !== '' &&
+    (typeof businessToken !== 'string' || !/^[\x21-\x7e]{32,256}$/.test(businessToken))
+  )
+    errors.push('AI_BUSINESS_TOKEN');
   const config: Environment = {
+    ...paymentEnvironment(raw, errors),
     AUTH_PROXY_HOPS: Number(authProxyHops),
     SECURITY_LOG_HMAC_KEY:
       typeof securityLogKey === 'string' && securityLogKey
@@ -96,6 +106,8 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
     SWAGGER_ENABLED: swagger === 'true',
     OPERATIONS_URL: required('OPERATIONS_URL'),
     CUSTOMER_AUTH_TOKEN: required('CUSTOMER_AUTH_TOKEN'),
+    AI_BUSINESS_TOKEN:
+      typeof businessToken === 'string' && businessToken ? businessToken : undefined,
     CONSULTATION_URL: required('CONSULTATION_URL'),
     CUSTOMER_URL: required('CUSTOMER_URL'),
     DELIVERY_URL: required('DELIVERY_URL'),

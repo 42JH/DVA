@@ -1,4 +1,6 @@
 import type { Event } from './index.cjs';
+export const ORDER_STATUSES: readonly ['COLLECTING','notPaid','PAID','SUBMITTING','SUBMITTING_FAILED','ACCEPTED','SUBMISSION_FAILED','CANCELLED'];
+export type OrderStatus = (typeof ORDER_STATUSES)[number];
 export interface OrderReadCommand {
   operation: 'OrdersListed' | 'OrderDetailRead' | 'OrderAddressesListed';
   id: number | null;

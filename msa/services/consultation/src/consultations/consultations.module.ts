@@ -10,6 +10,8 @@ import { ConsultationsService } from './consultations.service';
 import { CallSessionRepository } from './call-session.repository';
 import { CallEndRepository } from './call-end.repository';
 import { ActiveCallCountService } from './active-call-count.service';
+import { RecordingPlaybackService } from './recording-playback.service';
+import { CallReadReferencesClient } from './call-read-references.client';
 @Module({
   imports: [DatabaseModule, AuthModule],
   controllers: [
@@ -24,7 +26,9 @@ import { ActiveCallCountService } from './active-call-count.service';
     CallSessionRepository,
     CallEndRepository,
     ActiveCallCountService,
+    RecordingPlaybackService,
+    CallReadReferencesClient,
   ],
-  exports: [ConsultationsService, CallEndRepository],
+  exports: [ConsultationsService, CallEndRepository, CallReadReferencesClient],
 })
 export class ConsultationsModule {}

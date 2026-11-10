@@ -21,6 +21,44 @@ const config = () =>
     S3_RECORDINGS_BUCKET: 'test-recordings',
     RECORDING_ALLOWED_HOSTS: [host],
   });
+
+test('playback uses the source SDK signing lifetime and isolates recording errors',async t=>{
+  const {HeadObjectCommand}=require('@aws-sdk/client-s3');
+  const {RecordingPlaybackService}=require('../dist/consultations/recording-playback.service');
+  const settings=config(),service=new RecordingPlaybackService(settings);
+  const actualNow=Date.now,fixed=Date.UTC(2026,10,10),failure={url:null,expiresAt:null,playbackError:'DEPENDENCY_UNAVAILABLE'};
+  let credentials={accessKeyId:'http-test-only',secretAccessKey:'http-test-only-secret',sessionToken:'test-session',expiration:new Date(fixed+90000)},status=200,heads=0;
+  const head=async command=>{
+    assert.ok(command instanceof HeadObjectCommand);heads++;
+    if(command.input.Key==='recordings/missing.wav'||status!==200)throw Object.assign(new Error('private playback secret'),{$metadata:{httpStatusCode:command.input.Key==='recordings/missing.wav'?404:status}});
+    return{$metadata:{httpStatusCode:200}};
+  };
+  function useCredentials(value){
+    service.s3.destroy();service.s3=new S3Client({region:'ap-northeast-2',credentials:value,maxAttempts:1});
+    t.mock.method(service.s3,'send',head);
+  }
+  useCredentials(credentials);
+  Date.now=()=>fixed;
+  try{
+    const key='recordings/한글.wav',short=await service.create(key),url=new URL(short.url);
+    assert.equal(short.playbackError,null);assert.equal(short.expiresAt.getTime(),fixed+90000);
+    assert.equal(url.protocol,'https:');assert.equal(decodeURIComponent(url.pathname),'/'+key);
+    assert.equal(url.searchParams.get('X-Amz-Expires'),'90');assert.equal(url.searchParams.get('response-cache-control'),'no-store');
+    assert.equal(url.searchParams.get('X-Amz-Security-Token'),'test-session');assert.match(url.searchParams.get('X-Amz-Signature'),/^[a-f0-9]{64}$/);
+    credentials={accessKeyId:'http-test-only',secretAccessKey:'http-test-only-secret'};
+    useCredentials(credentials);
+    assert.equal(new URL((await service.create(key)).url).searchParams.get('X-Amz-Expires'),'300');
+    credentials={...credentials,expiration:new Date(fixed+500)};useCredentials(credentials);assert.deepEqual(await service.create(key),failure);
+    credentials={accessKeyId:'http-test-only',secretAccessKey:'http-test-only-secret'};
+    useCredentials(credentials);
+    for(status of [403,500,undefined])assert.deepEqual(await service.create(key),failure);
+    status=200;
+    const mixed=await Promise.all(['recordings/missing.wav',key].map(value=>service.create(value)));
+    assert.deepEqual(mixed[0],{url:null,expiresAt:null,playbackError:'NOT_FOUND'});assert.equal(mixed[1].playbackError,null);
+    settings.set('S3_RECORDINGS_BUCKET','');const before=heads;assert.deepEqual(await service.create(key),failure);assert.equal(heads,before);
+    assert.ok(!JSON.stringify(mixed).includes('private playback secret'));
+  }finally{Date.now=actualNow;service.onApplicationShutdown();}
+});
 async function server(t, handler) {
   const app = http.createServer(handler);
   await new Promise((resolve) => app.listen(0, '127.0.0.1', resolve));

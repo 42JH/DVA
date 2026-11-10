@@ -42,11 +42,14 @@ async function receipt(data){
   await pool.query("UPDATE pbx_webhooks.call_ended_events SET received_at=clock_timestamp()-interval '2 minutes' WHERE recording_id=$1",[data.recordingId]);
 }
 const event=async id=>(await pool.query('SELECT * FROM pbx_webhooks.call_ended_events WHERE recording_id=$1',[id])).rows[0];
-test('active count excludes unknown legacy registration, soft deletion and expired calls',async()=>{
+test('active count excludes unknown legacy registration, soft deletion, expired and AI-ended calls',async()=>{
   await call('active');await call('legacy');await call('deleted');await call('expired');
   await pool.query("UPDATE call_sessions SET registered_at=NULL WHERE provider_call_id='legacy'; UPDATE call_sessions SET deleted_at=clock_timestamp() WHERE provider_call_id='deleted'; UPDATE call_sessions SET incoming_at=clock_timestamp()-interval '6 years' WHERE provider_call_id='expired'");
+  const aiEnded=await call('ai-ended');await call('analysis-failed');
+  await pool.query("UPDATE call_sessions SET analysis_failed_at=clock_timestamp() WHERE provider_call_id='analysis-failed'");
+  await pool.query("INSERT INTO call_analyses(call_session_seq,ai_started_at,ai_ended_at,repeat_question_count,has_complaint,complaints,payload_hash) VALUES($1,clock_timestamp()-interval '1 minute',clock_timestamp(),NULL,NULL,'[]',repeat('a',64))",[aiEnded]);
   const snapshot=await app.get(ConsultationsRepository).activeCount();
-  assert.equal(snapshot.activeCallCount,1);assert.ok(Number.isFinite(Date.parse(snapshot.observedAt)));
+  assert.equal(snapshot.activeCallCount,2);assert.ok(Number.isFinite(Date.parse(snapshot.observedAt)));
 });
 test('unmatched and ambiguous calls do not download audio and old unlinked receipts expire',async t=>{
   let downloads=0;t.mock.method(storage,'save',async()=>{downloads++;return'fixture/audio';});
@@ -120,4 +123,53 @@ test('a killed claimant leaves a durable lease and recovers only after lease exp
   await worker.processPending();assert.equal(saves,1);assert.equal((await event(data.recordingId)).processing_status,'PROCESSED');
   assert.equal(await repository.processed(data.recordingId,id,'fixture/stale-restart',claim.claimId),false);
   assert.equal((await pool.query('SELECT count(*)::int AS n FROM recordings')).rows[0].n,1);
+});
+
+test('call event order scope advances serially without borrowing a callback DB connection',async t=>{
+  const {createServer}=require('node:http');
+  const {OrderReferenceScopeService}=require('../dist/call-insights/order-reference-scope.service');
+  const {DatabaseService}=require('../dist/database/database.service');
+  const {validateScopeRequest,validateDirective}=require('@dva/events/call-event-reference.cjs');
+  const scopes=app.get(OrderReferenceScopeService),database=app.get(DatabaseService);
+  const originalUrl=config.get('ORDER_URL'),headers={Authorization:'Bearer '+config.get('CUSTOMER_AUTH_TOKEN'),'Content-Type':'application/json'};
+  let mode='normal',last,accepted;
+  const server=createServer(async(req,res)=>{
+    try{
+      assert.equal(req.headers.authorization,headers.Authorization);
+      const chunks=[];for await(const chunk of req)chunks.push(chunk);
+      const input=JSON.parse(Buffer.concat(chunks));validateScopeRequest(input);
+      if(mode==='disconnect'){req.socket.destroy();return;}
+      let lookup=input.payload.lookup;
+      for(let step=0;step<50;step++){
+        last={eventId:randomUUID(),source:'order',eventType:'CallEventOrderChecked',payload:{scopeId:input.eventId,step,lookup,exists:lookup.orderSeq!==3,allowed:lookup.orderSeq===3?null:lookup.orderSeq===1}};
+        const callback=event=>fetch(base+'/internal/call-event-order-scope/continue',{method:'POST',headers,body:JSON.stringify(event)});
+        const observed=new Promise(resolve=>{accepted=resolve;});
+        const pending=callback(last);
+        let duplicate;
+        if(mode==='duplicate')duplicate=callback(last);
+        if(mode==='conflict'){await observed;assert.equal((await callback({...last,payload:{...last.payload,exists:true,allowed:last.payload.allowed===true?false:true}})).status,409);}
+        const ack=await pending;assert.equal(ack.status,200);
+        const body=await ack.json();validateDirective(body.payload);
+        if(duplicate)assert.deepEqual(await(await duplicate).json(),body);
+        if(body.payload.next===null){res.writeHead(200,{'Content-Type':'application/json'}).end(JSON.stringify({eventId:input.eventId,status:'processed',payload:null}));return;}
+        lookup=body.payload.next;
+      }
+      throw Error('scope exceeded input bound');
+    }catch(error){t.diagnostic(error.stack??String(error));if(!res.destroyed&&!res.writableEnded)res.writeHead(503,{'Content-Type':'application/json'}).end(JSON.stringify({error:String(error)}));}
+  });
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  config.set('ORDER_URL','http://127.0.0.1:'+server.address().port);
+  t.after(async()=>{config.set('ORDER_URL',originalUrl);scopes.onModuleDestroy();await new Promise(resolve=>server.close(resolve));});
+  const lookup=orderSeq=>({orderSeq,callOrderSeq:null,customerSeq:null});
+  for(mode of ['normal','duplicate','conflict'])await scopes.run(async()=>{
+    for(const [id,expected]of [[1,true],[2,false],[3,undefined]]){const result=await scopes.check(lookup(id));accepted?.();assert.equal(result,expected);}
+  });
+  mode='normal';
+  await Promise.all(Array.from({length:5},()=>scopes.run(()=>database.transaction(async client=>{
+    for(let step=0;step<50;step++)assert.equal(await scopes.check(lookup(step%3+1)),[true,false,undefined][step%3]);
+    assert.equal((await client.query('SELECT 1 AS n')).rows[0].n,1);
+  }))));
+  assert.equal((await fetch(base+'/internal/call-event-order-scope/continue',{method:'POST',headers,body:JSON.stringify(last)})).status,404);
+  mode='disconnect';
+  await assert.rejects(scopes.run(()=>database.transaction(()=>scopes.check(lookup(1)))),error=>error.getStatus()===503);
 });

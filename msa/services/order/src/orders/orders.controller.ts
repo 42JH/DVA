@@ -64,7 +64,7 @@ export class OrdersController {
   @ApiNotFoundResponse({ type: ErrorResponseDto, description: '없거나 삭제·만료된 주문.' })
   @ApiConflictResponse({ type: ErrorResponseDto, description: '진행 중인 통화·결제·접수.' })
   delete(@Param() params: OrderIdParamsDto, @Req() request: AuthRequest) {
-    return this.orders.delete(params.id, request.admin!.adminUserSeq, request.requestId);
+    return this.orders.delete(params.id, request.admin.adminUserSeq, request.requestId);
   }
 
   @Get()

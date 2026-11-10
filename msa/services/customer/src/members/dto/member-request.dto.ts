@@ -12,6 +12,7 @@ import {
   IsString,
   Matches,
   Max,
+  MaxLength,
   Min,
   ValidateIf,
   ValidateNested,
@@ -152,6 +153,20 @@ export class UpdateMemberDto {
   status?: MemberStatus;
 }
 export class ListMembersQueryDto extends PaginationQueryDto {
+  @ApiPropertyOptional({
+    description:
+      '해당 기업의 이름·사번·전화번호 부분 검색. 이름·사번은 대소문자 구분 없음, 전화번호는 하이픈 허용. 앞뒤 공백 제거 후 최대 100자이며 빈 검색어는 검색하지 않습니다. %, _는 일반 문자입니다.',
+    maxLength: 100,
+  })
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.normalize('NFC').trim() : value,
+  )
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsString()
+  @MaxLength(100)
+  @Matches(new RegExp(`^[^${String.fromCharCode(0)}]*$`, 'u'))
+  q?: string;
+
   @ApiPropertyOptional({ enum: MEMBER_STATUSES })
   @ValidateIf((_object, value) => value !== undefined)
   @IsIn(MEMBER_STATUSES)

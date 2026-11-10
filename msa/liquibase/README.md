@@ -21,7 +21,7 @@ consultation의 비공개 `pbx_webhooks.call_ended_events` 1개를 포함하면 
 
 ## 변경 관리와 도입 당시 검증 기록
 
-아래 항목은 각 changeset을 도입했을 때의 설계·검증 기록이다. 현재 자동 회귀는 055 전환을 기준으로 하며, 001~054의 버전별 데이터 변환·실패 주입 재현은 반복하지 않는다. 현재 실행 범위와 개수는 [테스트 정리 결과](../../docs/msa-test-prune-results.md)를 따른다. 기존 changelog와 SQL checksum은 변경하지 않았다.
+아래 항목은 각 changeset을 도입했을 때의 설계·검증 기록이다. 최신 작업은 [동등성 보고서](../CURRENT-PARITY.md)에 기록하며 현재 원본은 060까지다. 기존 055 전환을 별도로 검증하고 001~054의 버전별 데이터 변환·실패 주입 재현은 반복하지 않는다. 기존 changelog와 SQL checksum은 변경하지 않았다.
 
 - order `004`와 consultation `008`은 원본 055의 초안 테이블/제약/인덱스/부분 스냅샷 및 통화 주문 확정 8개 필드/짝 제약/기본값을 추가한다. 최초 전환은 유입·기존 통화·AI outbox를 정리하고 두 앱 쓰기를 중지/백업한 동일 시점에서 적용한다. 이관 표식/임시 통화 사본/비개인정보 완료 표식 4개 테이블은 서비스 사이의 재시작 복구용이다. 적용 중인 001~003/001~007 checksum은 변경하지 않는다. order는 현재 4개, consultation은 8개 changeset이다. [055 계획·검증과 운영 전환 조건](../../docs/msa-draft-compatibility-plan.md)을 따른다.
 - `verify_parcel_draft_schema.py`는 원본 054→055와 기존 order 003/consultation 007 업그레이드의 모든 스냅샷·통화 신규 필드/제약/인덱스, 재적용과 후반 SQL 실패 rollback을 비교한다. 별도 order 검증에서는 실제 소유 HTTP 이벤트·SIGKILL·정리 ACK 유실/재시작·초안 5년 폐기를 확인한다.

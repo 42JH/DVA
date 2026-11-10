@@ -69,7 +69,8 @@ export class MembersController {
   @Get('companies/:id/members')
   @ApiOperation({
     summary: '기업 구성원 목록',
-    description: '모든 ACTIVE 관리자. 대표자 표시는 관리자 웹 권한과 무관합니다.',
+    description:
+      '모든 ACTIVE 관리자. q로 해당 기업의 이름·사번·전화번호를 부분 검색하며 status와 함께 적용합니다. status 생략 시 활성·비활성을 함께 조회하고 소속 번호 내림차순입니다. 대표자 표시는 관리자 웹 권한과 무관합니다.',
   })
   @ApiOkResponse({ type: MembersEnvelopeDto })
   list(@Param() params: MemberIdParamsDto, @Query() query: ListMembersQueryDto) {

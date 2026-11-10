@@ -64,6 +64,7 @@ describe('Order read API (e2e)', () => {
           '/api/orders/{id}',
           '/api/orders/{id}/cancel',
           '/api/orders/{id}/parcels/cancel',
+          '/api/payments/requests/{id}',
           '/order/health',
           '/order/health/ready',
         ]);
@@ -81,6 +82,24 @@ describe('Order read API (e2e)', () => {
       });
   });
 
+  it('keeps payment reads public, validates UUIDs and returns the original disabled response', async () => {
+    const id = '00000000-0000-4000-8000-000000000001';
+    for (const path of ['requests', 'p', 'success', 'fail']) {
+      await request(app.getHttpServer())
+        .get('/api/payments/' + path + '/' + id)
+        .set('Cookie', 'dva_session=invalid')
+        .expect(503)
+        .expect(({ body }: { body: { error: { code: string; message: string } } }) => {
+          expect(body.error.code).toBe('DEPENDENCY_UNAVAILABLE');
+          expect(body.error.message).toBe('주문 결제 연동이 설정되지 않았습니다.');
+        });
+      await request(app.getHttpServer())
+        .get('/api/payments/' + path + '/invalid')
+        .expect(400);
+    }
+    await request(app.getHttpServer()).get('/api/payments/assets/checkout.js').expect(503);
+  });
+
   it('rejects malformed inputs and invalid cookies before accessing owner data', async () => {
     for (const path of [
       '/api/orders?status=unknown',
@@ -88,8 +107,11 @@ describe('Order read API (e2e)', () => {
       '/api/orders/0',
       '/api/customers/1/addresses?direction=BAD',
     ])
-      await request(app.getHttpServer()).get(path).expect(400);
-    await request(app.getHttpServer()).get('/api/orders').expect(400);
+      await request(app.getHttpServer())
+        .get(path)
+        .set('Authorization', 'Bearer ' + process.env.AI_BUSINESS_TOKEN)
+        .expect(400);
+    await request(app.getHttpServer()).get('/api/orders').expect(401);
     await request(app.getHttpServer())
       .get('/api/orders/1')
       .set('Cookie', 'dva_session=bad')
@@ -121,9 +143,13 @@ describe('Order read API (e2e)', () => {
     ])
       await request(app.getHttpServer())
         .post('/api/orders/1/parcels/cancel')
+        .set('Authorization', 'Bearer ' + process.env.AI_BUSINESS_TOKEN)
         .send(body)
         .expect(400);
-    await request(app.getHttpServer()).post('/api/orders/1/cancel').expect(400);
+    await request(app.getHttpServer())
+      .post('/api/orders/1/cancel')
+      .set('Authorization', 'Bearer ' + process.env.AI_BUSINESS_TOKEN)
+      .expect(400);
     await request(app.getHttpServer())
       .post('/api/orders/1/cancel')
       .set('Origin', 'http://localhost:5173')
