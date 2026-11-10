@@ -317,6 +317,61 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
     await post('/api'+path,packet,token,404);
     const document=await(await fetch(base+'/api/docs-json')).json();assert.ok(!Object.keys(document.paths).some(p=>p.includes('order-draft-call-references')));
   });
+  await t.test('admin read scopes reuse saturated owner pools and retain one snapshot during edits',async()=> {
+    const {createServer}=require('node:http'),{networkInterfaces}=require('node:os');
+    const {requestReferences,requestOrderOrganization}=require('@dva/events/call-read-references.cjs');
+    const {requestDraftCallReferences}=require('@dva/events/parcel-drafts.cjs');
+    const address=Object.values(networkInterfaces()).flat().find(row=>row.family==='IPv4'&&!row.internal)?.address;
+    assert.ok(address);
+    const token=process.env.CUSTOMER_AUTH_TOKEN,consToken=process.env.CONSULTATION_AUTH_TOKEN;
+    const customerBase='http://customer-app:3001',consultationBase='http://consultation-app:3004';
+    const oldName=(await databases.customer.query('SELECT name FROM customers WHERE customer_seq=1')).rows[0].name;
+    const oldStarted=(await databases.consultation.query("SELECT to_jsonb(incoming_at)#>>'{}' AS started FROM call_sessions WHERE call_session_seq=1101")).rows[0].started;
+    let entered,release;const arrivals=new Promise(r=>entered=r),gate=new Promise(r=>release=r),seen=[];let pending=[];
+    const counts={all:0,incomplete:0,notPaid:0,paid:0,submissionFailed:0,cancelled:0};
+    const server=createServer(async(req,res)=>{
+      try {
+        assert.equal(req.url,'/internal/admin-order-read');assert.equal(req.headers.authorization,'Bearer '+token);
+        const chunks=[];for await(const chunk of req)chunks.push(chunk);const packet=JSON.parse(Buffer.concat(chunks));
+        assert.equal(packet.source,'customer');seen.push(packet.eventId);if(seen.length===5)entered();await gate;
+        const customer=await requestReferences('customer',customerBase+'/internal/call-read-references/for-orders',token,[1],'order',packet.eventId);
+        assert.equal(customer[0].name,oldName);
+        const refs=await requestDraftCallReferences(consultationBase+'/internal/order-draft-call-references',token,{callIds:[1101],customerIds:[],phones:[]},packet.eventId);
+        assert.equal(refs.calls[0].started_at,oldStarted);
+        assert.deepEqual(await requestOrderOrganization(customerBase+'/internal/call-read-references/order-organization',token,2147483647,packet.eventId),{organization_seq:2147483647,organization_name:null,customer_seqs:[]});
+        res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({eventId:packet.eventId,status:'processed',payload:{data:[],hasNext:false,total_count:0,statusCounts:counts}}));
+      } catch(error) {res.writeHead(500,{'Content-Type':'application/json'});res.end(JSON.stringify({error:String(error)}));}
+    });
+    await new Promise(r=>server.listen(3002,'0.0.0.0',r));
+    const post=(base,path,body,auth=token,scope)=>fetch(base+path,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+auth,...(scope===undefined?{}:{'X-Msa-Read-Scope':scope})},body:JSON.stringify(body),signal:AbortSignal.timeout(25000)});
+    const packet=()=>({eventId:randomUUID(),source:'order',eventType:'AdminOrdersReadRequested',payload:{query:{limit:20,offset:0},orderAddress:address}});
+    const referencePacket={eventId:randomUUID(),source:'order',eventType:'CallReadReferencesRequested',payload:{ids:[1]}};
+    try {
+      assert.equal((await post(consultationBase,'/internal/admin-order-read',packet(),'wrong')).status,403);
+      assert.equal((await post(consultationBase,'/internal/admin-order-read',{...packet(),source:'customer'})).status,422);
+      const forged=packet();forged.payload.orderAddress='169.254.169.254';assert.equal((await post(consultationBase,'/internal/admin-order-read',forged)).status,422);
+      assert.equal((await post(customerBase,'/internal/call-read-references/admin-orders',packet(),token)).status,403);
+      pending=Array.from({length:5},()=>post(consultationBase,'/internal/admin-order-read',packet()));
+      let timer;try{await Promise.race([arrivals,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('owner pool scope did not enter')),10000);})]);}finally{clearTimeout(timer);}
+      await databases.customer.query("UPDATE customers SET name='수정된 고객' WHERE customer_seq=1");
+      await databases.consultation.query("UPDATE call_sessions SET incoming_at='2030-01-01T00:00:00.123459Z' WHERE call_session_seq=1101");
+      release();
+      for(const response of await Promise.all(pending)){const body=await response.json();assert.equal(response.status,200,JSON.stringify(body));assert.deepEqual(body.payload.statusCounts,counts);}
+      assert.equal(new Set(seen).size,5);
+      for(const scope of ['invalid',...seen])assert.equal((await post(customerBase,'/internal/call-read-references/for-orders',referencePacket,token,scope)).status,scope==='invalid'?422:503);
+      const draft={eventId:randomUUID(),source:'order',eventType:'DraftCallReferencesRequested',payload:{callIds:[1101],customerIds:[],phones:[],phoneHashes:[]}};
+      assert.equal((await post(consultationBase,'/internal/order-draft-call-references',draft,token,seen[0])).status,503);
+      assert.equal((await requestReferences('customer',customerBase+'/internal/call-read-references/for-orders',token,[1],'order'))[0].name,'수정된 고객');
+      assert.equal((await requestDraftCallReferences(consultationBase+'/internal/order-draft-call-references',token,{callIds:[1101],customerIds:[],phones:[]})).calls[0].started_at,'2030-01-01T00:00:00.123459+00:00');
+      for(const [base,prefix]of [[customerBase,'customer'],[consultationBase,'consultation']]){
+        const document=await(await fetch(base+'/'+prefix+'/docs-json')).json();assert.ok(!JSON.stringify(document.paths).includes('admin-order-read'));assert.ok(!JSON.stringify(document.paths).includes('order-organization'));
+      }
+    } finally {
+      release();await Promise.allSettled(pending);await new Promise(r=>server.close(r));
+      await databases.customer.query('UPDATE customers SET name=$1 WHERE customer_seq=1',[oldName]);
+      await databases.consultation.query('UPDATE call_sessions SET incoming_at=$1 WHERE call_session_seq=1101',[oldStarted]);
+    }
+  });
   await t.test('all roles, filters, stable order, page boundaries and totals',async()=> {
     for(const token of tokens) await compare('/api/orders',200,{Cookie:'dva_session='+token});
     for(const path of ['/api/orders?customerSeq=1&limit=2','/api/orders?customerSeq=1&limit=2&offset=2','/api/orders?customerSeq=1&offset=100',

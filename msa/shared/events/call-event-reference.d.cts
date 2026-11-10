@@ -13,4 +13,4 @@ export function privateAddress(value:unknown):value is string;
 export function validateScopeRequest(value:unknown):asserts value is ScopeRequest;
 export function validateScopeResult(value:unknown):asserts value is ScopeResult;
 export function validateDirective(value:unknown):asserts value is ScopeDirective;
-export function requestPacket(url:string,token:string,event:Event,signal:AbortSignal,maximumBytes?:number|null):Promise<unknown>;
+export function requestPacket(url:string,token:string,event:Event,signal:AbortSignal,maximumBytes?:number|null,readScopeId?:string):Promise<unknown>;

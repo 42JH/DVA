@@ -18,6 +18,6 @@ export interface DraftCallReferences {
   phones: { caller_phone_number: string; call_session_seq: number; started_at: string }[];
 }
 export function validateParcelDraftCommand(event: unknown, type: 'DraftCallReferencesRequested', source: 'order'): asserts event is DraftCallEvent;
-export function requestParcelDraftCommand(url: string, token: string, event: DraftCallEvent): Promise<DraftCallReferences>;
+export function requestParcelDraftCommand(url: string, token: string, event: DraftCallEvent, readScopeId?:string): Promise<DraftCallReferences>;
 export function validateDraftCallReferences(rows: unknown, query: DraftCallQuery): asserts rows is DraftCallReferences;
-export function requestDraftCallReferences(url: string, token: string, input: {callIds: number[]; customerIds: number[]; phones: string[]}): Promise<DraftCallReferences>;
+export function requestDraftCallReferences(url: string, token: string, input: {callIds: number[]; customerIds: number[]; phones: string[]}, readScopeId?:string): Promise<DraftCallReferences>;

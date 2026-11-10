@@ -28,7 +28,7 @@ function validateDraftCallReferences(rows, query) {
      new Set(rows.phones.map(r=>r.caller_phone_number)).size!==rows.phones.length)
     throw new Error('Invalid draft call references');
 }
-async function requestDraftCallReferences(url, token, input) {
+async function requestDraftCallReferences(url, token, input, readScopeId) {
   if(!keys(input,'callIds,customerIds,phones') || !Array.isArray(input.callIds) || !Array.isArray(input.customerIds) || !Array.isArray(input.phones) || !input.phones.every(phone)) throw new Error('Invalid draft call scope');
   const phones=[...new Set(input.phones)];
   // Large legacy phone text travels in replies; digest candidates are verified against the full returned values.
@@ -37,7 +37,7 @@ async function requestDraftCallReferences(url, token, input) {
   const event={eventId:randomUUID(),source:'order',eventType:'DraftCallReferencesRequested',payload};
   validateParcelDraftCommand(event,'DraftCallReferencesRequested','order');
   if(!payload.callIds.length&&!payload.customerIds.length&&!payload.phones.length&&!payload.phoneHashes.length)return {calls:[],customers:[],phones:[]};
-  return requestParcelDraftCommand(url,token,event);
+  return requestParcelDraftCommand(url,token,event,readScopeId);
 }
 
 function validateParcelDraftCommand(event, type, source) {
@@ -53,14 +53,15 @@ function validateParcelDraftCommand(event, type, source) {
   if (!valid) throw new Error('Invalid parcel draft command');
 }
 
-async function requestParcelDraftCommand(url, token, event) {
+async function requestParcelDraftCommand(url, token, event, readScopeId) {
+  if(readScopeId!==undefined){require('./read-scope.cjs').validateReadScope(readScopeId);if(event.eventType!=='DraftCallReferencesRequested')throw new Error('Invalid draft read scope');}
   validateParcelDraftCommand(event, event.eventType, event.source);
   if (typeof token !== 'string' || !/^[\x21-\x7e]{32,256}$/.test(token)) throw new Error('Invalid parcel draft credentials');
   const endpoint = new URL(url);
   if (!['http:', 'https:'].includes(endpoint.protocol) || endpoint.username || endpoint.password || endpoint.search || endpoint.hash)
     throw new Error('Invalid parcel draft endpoint');
   const response = await fetch(endpoint, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(5000),
-    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token }, body: JSON.stringify(event) });
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token, ...(readScopeId===undefined?{}:{'X-Msa-Read-Scope':readScopeId}) }, body: JSON.stringify(event) });
   try {
     if (response.status !== 200 || !/^application\/json(?:\s*;|$)/i.test(response.headers.get('content-type') ?? ''))
       throw new Error('Invalid parcel draft response');

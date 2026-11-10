@@ -62,13 +62,37 @@ function detail(value, orderId) {
       ['PENDING','SENDING','SENT','FAILED','UNKNOWN'].includes(request.notificationStatus));
 }
 
-async function requestOrderRead(url, token, event) {
+function validateAdminOrderRead(event, source) {
+  validateEvent(event);
+  require('./read-scope.cjs').validateReadScope(event.eventId);
+  const p=event.payload,q=p.query;
+  const fields=source==='order'?'orderAddress,query':source==='consultation'?'consultationAddress,orderAddress,query':'consultationAddress,customerAddress,orderAddress,query';
+  if(!['order','consultation','customer'].includes(source)||event.source!==source||event.eventType!=='AdminOrdersReadRequested'||!keys(p,fields)||
+     !object(q)||!Object.keys(q).every(k=>['limit','offset','q','from','to','organizationSeq','statusGroup'].includes(k))||
+     !Number.isInteger(q.limit)||q.limit<1||q.limit>100||!amount(q.offset)||
+     q.organizationSeq!==undefined&&!id(q.organizationSeq)||
+     q.statusGroup!==undefined&&!['COLLECTING','notPaid','PAID','SUBMISSION_FAILED','CANCELLED'].includes(q.statusGroup)||
+     q.q!==undefined&&(!text(q.q)||q.q.includes('\0')||[...q.q].length>200)||
+     ['from','to'].some(k=>q[k]!==undefined&&!text(q[k]))||
+     ['orderAddress',...(source==='order'?[]:['consultationAddress']),...(source==='customer'?['customerAddress']:[])].some(k=>p[k]!==null&&!require('./call-event-reference.cjs').privateAddress(p[k])))
+    throw new Error('Invalid administrator order read');
+}
+const adminParty=value=>keys(value,'detailAddress,jibunAddress,name,phoneNumber,roadAddress')&&Object.values(value).every(field=>nullable(field,text));
+function adminPage(value,limit) {
+  return keys(value,'data,hasNext,statusCounts,total_count')&&Array.isArray(value.data)&&value.data.length<=limit&&
+    typeof value.hasNext==='boolean'&&amount(value.total_count)&&keys(value.statusCounts,'all,cancelled,incomplete,notPaid,paid,submissionFailed')&&Object.values(value.statusCounts).every(amount)&&
+    value.data.every(row=>keys(row,'createdAt,customerSeq,draftSeq,orderSeq,organizationName,parcels,pickupRequestedAt,status')&&id(row.orderSeq)&&nullable(row.customerSeq,id)&&nullable(row.draftSeq,id)&&nullable(row.organizationName,text)&&instant(row.createdAt)&&nullable(row.pickupRequestedAt,instant)&&ORDER_STATUSES.includes(row.status)&&
+      Array.isArray(row.parcels)&&row.parcels.every(p=>keys(p,'bigBoxCount,destination,documentCount,mediumBoxCount,orderParcelSeq,origin,otherItemDescription,smallBoxCount,status')&&nullable(p.orderParcelSeq,id)&&['ACTIVE','CANCELLED'].includes(p.status)&&adminParty(p.origin)&&adminParty(p.destination)&&text(p.otherItemDescription)&&['documentCount','smallBoxCount','mediumBoxCount','bigBoxCount'].every(k=>amount(p[k]))));
+}
+async function requestOrderRead(url,token,event){return requestRead(url,token,event,false);}
+async function requestAdminOrderRead(url,token,event){validateAdminOrderRead(event,event.source);return requestRead(url,token,event,true);}
+async function requestRead(url, token, event, admin) {
   if (typeof token !== 'string' || !/^[\x21-\x7e]{32,256}$/.test(token)) throw new Error('Invalid read credentials');
   const endpoint = new URL(url);
   if (!['http:', 'https:'].includes(endpoint.protocol) || endpoint.username || endpoint.password || endpoint.search || endpoint.hash)
     throw new Error('Invalid read endpoint');
   const response = await fetch(endpoint, {
-    method: 'POST', redirect: 'error', signal: AbortSignal.timeout(event.source === 'order' ? 15000 : event.source === 'consultation' ? 10000 : 5000),
+    method: 'POST', redirect: 'error', signal: AbortSignal.timeout(admin ? 30000 : event.source === 'order' ? 15000 : event.source === 'consultation' ? 10000 : 5000),
     headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token }, body: JSON.stringify(event),
   });
   if (!/^application\/json(?:\s*;|$)/i.test(response.headers.get('content-type') ?? '')) {
@@ -94,7 +118,7 @@ async function requestOrderRead(url, token, event) {
   if (!keys(result, 'eventId,payload,status') || result.eventId !== event.eventId || result.status !== 'processed')
     throw new Error('Invalid read acknowledgement');
   const value = result.payload;
-  if (event.payload.command.operation === 'OrderDetailRead'
+  if (admin ? !adminPage(value,event.payload.query.limit) : event.payload.command.operation === 'OrderDetailRead'
     ? !detail(value,event.payload.command.id)
     : !keys(value, 'data,hasNext,total_count') || !Array.isArray(value.data) || value.data.length > 100 ||
       value.data.some(row => event.payload.command.operation === 'OrdersListed'
@@ -105,4 +129,4 @@ async function requestOrderRead(url, token, event) {
     throw new Error('Invalid order read result');
   return value;
 }
-module.exports = { validateOrderRead, requestOrderRead, OrderReadError, ORDER_STATUSES };
+module.exports = { validateOrderRead, requestOrderRead, OrderReadError, ORDER_STATUSES, validateAdminOrderRead, requestAdminOrderRead };

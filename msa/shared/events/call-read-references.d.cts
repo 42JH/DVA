@@ -11,7 +11,7 @@ export type ReferenceRows={
 };
 export function validateReferenceQuery(value:unknown,source?:'consultation'|'order'):asserts value is ReferenceQuery;
 export function validateReferenceRows<K extends keyof ReferenceRows>(kind:K,value:unknown,ids:number[]):asserts value is ReferenceRows[K][];
-export function requestReferences<K extends keyof ReferenceRows>(kind:K,url:string,token:string,ids:number[],source?:'consultation'|'order'):Promise<ReferenceRows[K][]>;
+export function requestReferences<K extends keyof ReferenceRows>(kind:K,url:string,token:string,ids:number[],source?:'consultation'|'order',readScopeId?:string):Promise<ReferenceRows[K][]>;
 export interface PersonaComparisonRow {
   ai_persona_seq:number;ai_persona_version_seq:number;name:string;version:number;
   status:'ACTIVE'|'PENDING'|'INACTIVE';previous_active_version_seq:number|null;
@@ -23,3 +23,8 @@ export type ComplaintFaqRow={question:string;answer:string};
 export function validateComplaintFaqQuery(value:unknown):asserts value is Event;
 export function validateComplaintFaqRows(value:unknown):asserts value is ComplaintFaqRow[];
 export function requestComplaintFaqs(url:string,token:string):Promise<ComplaintFaqRow[]>;
+
+export interface OrderOrganization {organization_seq:number;organization_name:string|null;customer_seqs:number[]}
+export function validateOrderOrganizationQuery(value:unknown):asserts value is Event & {payload:{organizationSeq:number}};
+export function validateOrderOrganizationRows(value:unknown,organizationSeq:number):asserts value is OrderOrganization;
+export function requestOrderOrganization(url:string,token:string,organizationSeq:number,readScopeId?:string):Promise<OrderOrganization>;

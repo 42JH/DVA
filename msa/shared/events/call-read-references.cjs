@@ -29,15 +29,16 @@ function validateReferenceRows(kind,value,ids) {
      !value.every(row=>shapes[kind](row)&&ids.includes(row[primaryKey[kind]]))||
      new Set(value.map(row=>row[primaryKey[kind]])).size!==value.length)throw new Error('Invalid call reference rows');
 }
-async function requestReferences(kind,url,token,ids,source='consultation') {
+async function requestReferences(kind,url,token,ids,source='consultation',readScopeId) {
   if(!Object.hasOwn(shapes,kind)||(source==='order'&&kind!=='customer'))throw new Error('Invalid call reference owner');
+  if(readScopeId!==undefined&&source!=='order')throw new Error('Invalid reference read scope');
   const event={eventId:randomUUID(),source,eventType:'CallReadReferencesRequested',payload:{ids:[...new Set(ids)].sort((a,b)=>a-b)}};
   validateReferenceQuery(event,source);
   const endpoint=new URL(url);
   if(!['http:','https:'].includes(endpoint.protocol)||endpoint.username||endpoint.password||endpoint.search||endpoint.hash||
      typeof token!=='string'||!/^[\x21-\x7e]{32,256}$/.test(token))throw new Error('Invalid call reference destination');
   // Source names are text without a DB length bound; preserve complete legacy lookup values.
-  const rows=await requestPacket(endpoint.href,token,event,AbortSignal.timeout(5000),null);
+  const rows=await requestPacket(endpoint.href,token,event,AbortSignal.timeout(5000),null,readScopeId);
   validateReferenceRows(kind,rows,event.payload.ids);
   return rows;
 }
@@ -70,13 +71,27 @@ function validateComplaintFaqRows(rows) {
 async function requestComplaintFaqs(url,token) {
   return requestSnapshot(url,token,'ComplaintFaqSnapshotRequested',validateComplaintFaqRows);
 }
-async function requestSnapshot(url,token,eventType,validate) {
+function validateOrderOrganizationQuery(value) {
+  validateEvent(value);
+  if(value.source!=='order'||value.eventType!=='OrderOrganizationReadRequested'||!keys(value.payload,'organizationSeq')||!id(value.payload.organizationSeq))throw new Error('Invalid order organization query');
+}
+function validateOrderOrganizationRows(value,organizationSeq) {
+  if(!keys(value,'customer_seqs,organization_name,organization_seq')||value.organization_seq!==organizationSeq||!nullable(value.organization_name,text)||
+     !Array.isArray(value.customer_seqs)||!value.customer_seqs.every(id)||new Set(value.customer_seqs).size!==value.customer_seqs.length||
+     value.organization_name===null&&value.customer_seqs.length)throw new Error('Invalid order organization result');
+}
+async function requestOrderOrganization(url,token,organizationSeq,readScopeId) {
+  const payload={organizationSeq};
+  validateOrderOrganizationQuery({eventId:randomUUID(),source:'order',eventType:'OrderOrganizationReadRequested',payload});
+  return requestSnapshot(url,token,'OrderOrganizationReadRequested',rows=>validateOrderOrganizationRows(rows,organizationSeq),'order',payload,readScopeId);
+}
+async function requestSnapshot(url,token,eventType,validate,source='consultation',payload={},readScopeId) {
   const endpoint=new URL(url);
   if(!['http:','https:'].includes(endpoint.protocol)||endpoint.username||endpoint.password||endpoint.search||endpoint.hash||
      typeof token!=='string'||!/^[\x21-\x7e]{32,256}$/.test(token))throw new Error('Invalid persona comparison destination');
-  const event={eventId:randomUUID(),source:'consultation',eventType,payload:{}};
-  const rows=await requestPacket(endpoint.href,token,event,AbortSignal.timeout(5000),null);
+  const event={eventId:randomUUID(),source,eventType,payload};
+  const rows=await requestPacket(endpoint.href,token,event,AbortSignal.timeout(5000),null,readScopeId);
   validate(rows);
   return rows;
 }
-module.exports={validateReferenceQuery,validateReferenceRows,requestReferences,validatePersonaComparisonQuery,validatePersonaComparisonRows,requestPersonaComparison,validateComplaintFaqQuery,validateComplaintFaqRows,requestComplaintFaqs};
+module.exports={validateReferenceQuery,validateReferenceRows,requestReferences,validatePersonaComparisonQuery,validatePersonaComparisonRows,requestPersonaComparison,validateComplaintFaqQuery,validateComplaintFaqRows,requestComplaintFaqs,validateOrderOrganizationQuery,validateOrderOrganizationRows,requestOrderOrganization};
