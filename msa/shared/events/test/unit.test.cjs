@@ -253,3 +253,61 @@ test('authentication and unsupported events fail before any DB access', async ()
   await assert.rejects(receiver({ ...event(), source: 'customer' }, `Bearer ${token}`), { status: 401 });
   await assert.rejects(receiver({ ...event(), eventType: 'OtherEvent' }, `Bearer ${token}`), { status: 422 });
 });
+
+
+test('read scopes reuse all held clients, drain callbacks and reject expired or duplicate roots',async()=>{
+  const {ReadScopes,validateReadScope,readCallbackUrl}=require('../read-scope.cjs');
+  const reads=new ReadScopes(()=>new Error('unavailable')),id=randomUUID(),client={held:true};
+  assert.throws(()=>validateReadScope('invalid'));
+  assert.equal(readCallbackUrl('http://customer:3001','/internal/query','10.2.3.4'),'http://10.2.3.4:3001/internal/query');
+  for(const address of ['127.0.0.1','8.8.8.8','169.254.169.254','hostname'])assert.throws(()=>readCallbackUrl('http://customer:3001','/internal/query',address));
+  await assert.rejects(reads.use(id,()=>assert.fail()),/unavailable/);
+  let release,entered;const started=new Promise(r=>entered=r),gate=new Promise(r=>release=r);let callback,completed=false;
+  const root=reads.run(id,client,async()=>{callback=reads.use(id,async held=>{assert.equal(held,client);entered();await gate;return 7;});await started;return 3;}).then(value=>{completed=true;return value;});
+  await started;await new Promise(r=>setImmediate(r));assert.equal(completed,false);
+  await assert.rejects(reads.run(id,client,async()=>0),/unavailable/);
+  await assert.rejects(reads.use(id,()=>assert.fail()),/unavailable/);
+  release();assert.equal(await callback,7);assert.equal(await root,3);
+  await assert.rejects(reads.use(id,()=>assert.fail()),/unavailable/);
+  await assert.rejects(reads.run(id,client,async()=>{throw Error('root failed');}),/root failed/);
+  assert.equal(await reads.run(id,client,async()=>reads.use(id,async held=>held)),client);
+  await Promise.all(Array.from({length:5},(_,i)=>{const key=randomUUID(),connection={i};return reads.run(key,connection,()=>reads.use(key,async held=>assert.equal(held,connection)));}));
+});
+
+test('administrator order read protocol preserves owner addresses, scopes and complete metadata',async()=>{
+  const {validateAdminOrderRead,requestAdminOrderRead,OrderReadError}=require('../order-read.cjs');
+  const {requestReferences,requestOrderOrganization,validateOrderOrganizationRows}=require('../call-read-references.cjs');
+  const {requestDraftCallReferences}=require('../parcel-drafts.cjs');
+  const input={eventId:randomUUID(),source:'order',eventType:'AdminOrdersReadRequested',payload:{query:{limit:20,offset:0,q:'_%'},orderAddress:null}};
+  validateAdminOrderRead(input,'order');
+  for(const changed of [{...input,source:'customer'},{...input,payload:{...input.payload,orderAddress:'169.254.169.254'}},{...input,payload:{...input.payload,query:{limit:101,offset:0}}},{...input,payload:{...input.payload,query:{limit:20,offset:0,extra:true}}}])assert.throws(()=>validateAdminOrderRead(changed,'order'));
+  const oldFetch=global.fetch;let mode='ok',seen=0;
+  const counts={all:0,incomplete:0,notPaid:0,paid:0,submissionFailed:0,cancelled:0};
+  global.fetch=async(url,options)=>{
+    const packet=JSON.parse(options.body);seen++;
+    if(packet.eventType==='AdminOrdersReadRequested'){
+      if(mode==='error')return new Response(JSON.stringify({error:{code:'INVALID_REQUEST',message:'original',details:[]}}),{status:400,headers:{'content-type':'application/json'}});
+      const page={data:[],hasNext:false,total_count:0,statusCounts:counts};
+      if(mode==='bad')page.statusCounts={all:0};
+      return Response.json({eventId:mode==='wrong'?randomUUID():packet.eventId,status:'processed',payload:page});
+    }
+    assert.equal(options.headers['X-Msa-Read-Scope'],input.eventId);
+    const payload=packet.eventType==='CallReadReferencesRequested'?[{customer_seq:1,name:'이름'.repeat(10000),organization_seq:2,organization_name:'기업'}]:
+      packet.eventType==='OrderOrganizationReadRequested'?{organization_seq:2,organization_name:'기업',customer_seqs:[1,2]}:{calls:[],customers:[],phones:[]};
+    return Response.json({eventId:packet.eventId,status:'processed',payload});
+  };
+  try {
+    assert.deepEqual((await requestAdminOrderRead('http://consultation/private',token,input)).statusCounts,counts);
+    for(mode of ['bad','wrong'])await assert.rejects(requestAdminOrderRead('http://consultation/private',token,input));
+    mode='error';await assert.rejects(requestAdminOrderRead('http://consultation/private',token,input),err=>err instanceof OrderReadError&&err.status===400&&err.error.message==='original');
+    assert.equal((await requestReferences('customer','http://customer/private',token,[1],'order',input.eventId))[0].name.length,20000);
+    assert.deepEqual((await requestOrderOrganization('http://customer/private',token,2,input.eventId)).customer_seqs,[1,2]);
+    await requestDraftCallReferences('http://consultation/private',token,{callIds:[1],customerIds:[],phones:[]},input.eventId);
+    const previous=seen;
+    await assert.rejects(requestReferences('customer','http://customer/private',token,[1],'order','invalid'));
+    await assert.rejects(requestReferences('customer','http://customer/private',token,[1],'consultation',input.eventId));
+    await assert.rejects(requestAdminOrderRead('http://user:pass@consultation/private',token,input));assert.equal(seen,previous);
+    assert.throws(()=>validateOrderOrganizationRows({organization_seq:2,organization_name:null,customer_seqs:[1]},2));
+    assert.throws(()=>validateOrderOrganizationRows({organization_seq:2,organization_name:'기업',customer_seqs:[1,1]},2));
+  } finally {global.fetch=oldFetch;}
+});

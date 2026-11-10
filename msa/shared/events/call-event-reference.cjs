@@ -32,10 +32,11 @@ function validateDirective(value) {
   if (!keys(value,'next') || !(value.next === null || lookup(value.next)))
     throw new Error('Invalid call event order continuation');
 }
-async function requestPacket(url, token, event, signal, maximumBytes=16384) {
+async function requestPacket(url, token, event, signal, maximumBytes=16384, readScopeId) {
   if(maximumBytes!==null&&(!Number.isInteger(maximumBytes)||maximumBytes<1||maximumBytes>1024*1024))throw new Error('Invalid acknowledgement bound');
+  if(readScopeId!==undefined)require('./read-scope.cjs').validateReadScope(readScopeId);
   const response = await fetch(url, {method:'POST',redirect:'error',signal,
-    headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(event)});
+    headers:{Authorization:'Bearer '+token,'Content-Type':'application/json',...(readScopeId===undefined?{}:{'X-Msa-Read-Scope':readScopeId})},body:JSON.stringify(event)});
   if (response.status !== 200 || !/^application\/json(?:\s*;|$)/i.test(response.headers.get('content-type') || '')) {
     await response.body?.cancel();
     throw new Error('Call event order scope unavailable');

@@ -82,6 +82,11 @@ export function configureApplication(
       { path: 'internal/call-scope', method: RequestMethod.ALL },
       { path: 'internal/order-cancellation', method: RequestMethod.ALL },
       { path: 'internal/order-read', method: RequestMethod.ALL },
+      { path: 'internal/admin-order-read', method: RequestMethod.ALL },
+      {
+        path: 'internal/order-draft-call-references',
+        method: RequestMethod.ALL,
+      },
       {
         path: 'internal/call-event-order-scope/continue',
         method: RequestMethod.ALL,

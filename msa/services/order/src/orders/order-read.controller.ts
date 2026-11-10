@@ -8,15 +8,27 @@ import {
   SetMetadata,
 } from '@nestjs/common';
 import { ApiExcludeController } from '@nestjs/swagger';
-import { validateOrderRead } from '@dva/events/order-read.cjs';
+import { validateOrderRead, validateAdminOrderRead } from '@dva/events/order-read.cjs';
 import { OrdersService } from './orders.service';
 
 @ApiExcludeController()
 @SetMetadata('auth:internal-customer', true)
-@Controller('internal/order-read')
+@Controller('internal')
 export class OrderReadController {
   constructor(private readonly orders: OrdersService) {}
-  @Post()
+  @Post('admin-order-read')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  async admin(@Body() event: unknown) {
+    try {
+      validateAdminOrderRead(event, 'customer');
+    } catch {
+      throw new HttpException({ error: 'INVALID_ADMIN_ORDER_READ' }, 422);
+    }
+    const payload = await this.orders.executeAdmin(event);
+    return { eventId: event.eventId, status: 'processed', payload };
+  }
+  @Post('order-read')
   @HttpCode(200)
   @Header('Cache-Control', 'no-store')
   async query(@Body() event: unknown) {

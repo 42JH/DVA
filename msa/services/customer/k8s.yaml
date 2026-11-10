@@ -38,6 +38,9 @@ spec:
             - name: SECURITY_LOG_HMAC_KEY
               valueFrom:
                 secretKeyRef: {name: msa-security-logs, key: hmac-key}
+            - name: MSA_INSTANCE_IP
+              valueFrom:
+                fieldRef: {fieldPath: status.podIP}
             - name: DB_HOST
               valueFrom:
                 secretKeyRef: {name: customer-db, key: PGHOST}

@@ -20,3 +20,14 @@ export class OrderReadError extends Error {
   status: number;
   error: { code: string; message: string; details: { field: string; reason: string }[] };
 }
+
+export interface AdminOrderReadEvent extends Event {
+  source:'order'|'consultation'|'customer';eventType:'AdminOrdersReadRequested';
+  payload:{query:Record<string,unknown>;orderAddress:string|null;consultationAddress?:string|null;customerAddress?:string|null};
+}
+export interface AdminOrderReadResult {
+  data:{orderSeq:number;customerSeq:number|null;draftSeq:number|null;organizationName:string|null;createdAt:string;pickupRequestedAt:string|null;status:OrderStatus;parcels:unknown[]}[];
+  total_count:number;hasNext:boolean;statusCounts:{all:number;incomplete:number;notPaid:number;paid:number;submissionFailed:number;cancelled:number};
+}
+export function validateAdminOrderRead(event:unknown,source:AdminOrderReadEvent['source']):asserts event is AdminOrderReadEvent;
+export function requestAdminOrderRead(url:string,token:string,event:AdminOrderReadEvent):Promise<AdminOrderReadResult>;

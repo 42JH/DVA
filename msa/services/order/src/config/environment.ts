@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { privateAddress } from '@dva/events/call-event-reference.cjs';
 import { paymentEnvironment, PaymentEnvironment } from '../payments/payment-config';
 const developmentSecurityLogKey = randomBytes(32).toString('hex');
 export interface Environment extends PaymentEnvironment {
@@ -6,6 +7,7 @@ export interface Environment extends PaymentEnvironment {
   SECURITY_LOG_HMAC_KEY: string;
   NODE_ENV: 'development' | 'test' | 'production';
   PORT: number;
+  MSA_INSTANCE_IP?: string;
   DB_HOST: string;
   DB_PORT: number;
   DB_USER: string;
@@ -96,6 +98,10 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
         ? securityLogKey
         : developmentSecurityLogKey,
     NODE_ENV: nodeEnv as Environment['NODE_ENV'],
+    MSA_INSTANCE_IP:
+      typeof raw.MSA_INSTANCE_IP === 'string' && raw.MSA_INSTANCE_IP
+        ? raw.MSA_INSTANCE_IP
+        : undefined,
     PORT: port('PORT', 3002),
     DB_HOST: required('DB_HOST'),
     DB_PORT: port('DB_PORT', 5432),
@@ -139,6 +145,12 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
       errors.push(key);
     }
   }
+  if (
+    raw.MSA_INSTANCE_IP !== undefined &&
+    raw.MSA_INSTANCE_IP !== '' &&
+    !privateAddress(raw.MSA_INSTANCE_IP)
+  )
+    errors.push('MSA_INSTANCE_IP');
   if (errors.length) throw new EnvironmentValidationError(errors);
   return config;
 }

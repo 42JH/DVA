@@ -53,6 +53,8 @@ export function configureApplication(app: INestApplication, logger = new Logger(
       { path: 'internal/caller-context', method: RequestMethod.ALL },
       { path: 'internal/call-read-references', method: RequestMethod.ALL },
       { path: 'internal/call-read-references/for-orders', method: RequestMethod.ALL },
+      { path: 'internal/call-read-references/admin-orders', method: RequestMethod.ALL },
+      { path: 'internal/call-read-references/order-organization', method: RequestMethod.ALL },
       { path: 'internal/call-scope', method: RequestMethod.ALL },
       { path: 'internal/order-cancellation/call', method: RequestMethod.ALL },
       { path: 'internal/order-read', method: RequestMethod.ALL },

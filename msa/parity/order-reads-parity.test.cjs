@@ -10,15 +10,26 @@ const tokens = ['a'.repeat(64), 'b'.repeat(64), 'c'.repeat(64)];
 const headers = { Cookie: 'dva_session='+tokens[0] };
 const ai = id => ({ call_session_seq:String(id) });
 const pause = ms => new Promise(resolve=>setTimeout(resolve,ms));
-const orderTables = ['orders','order_parcels','order_payment_requests','organization_billing_months','order_billing_charges','empty_ai_order_results'];
+const orderTables = ['orders','order_parcels','order_payment_requests','organization_billing_months','order_billing_charges','empty_ai_order_results','order_parcel_drafts'];
 
 test('four order read APIs preserve monolith HTTP and stored data across owner databases', async t => {
   assert.equal(process.env.PGDATABASE,'dva_webhook_test');
   const databases = Object.fromEntries(['monolith','operations','customer','consultation','order'].map(name=>[name,new Pool({host:name+'-db',user:name+'_app'})]));
   const retention=[];
-  t.after(async()=> { for(const client of retention) { await client.query('ROLLBACK');client.release(); } await Promise.all(Object.values(databases).map(db=>db.end())); });
+  t.after(async()=> {
+    try {
+      for(const client of retention) { await client.query('ROLLBACK');client.release(); }
+      for(const db of [databases.monolith,databases.order])await db.query('DELETE FROM order_parcel_drafts WHERE draft_seq BETWEEN 13001 AND 13008');
+      for(const db of [databases.monolith,databases.customer]){
+        await db.query('DELETE FROM memberships WHERE membership_seq BETWEEN 6101 AND 6105');
+        await db.query('DELETE FROM organizations WHERE organization_seq BETWEEN 6001 AND 6003');
+      }
+      for(const db of [databases.monolith,databases.order])await db.query('DELETE FROM organization_billing_months WHERE organization_seq BETWEEN 6001 AND 6003');
+      for(const db of [databases.monolith,databases.consultation])await db.query("DELETE FROM call_sessions WHERE provider_call_id LIKE 'draft-reference-%'");
+    } finally { await Promise.all(Object.values(databases).map(db=>db.end())); }
+  });
   const reference=databases.monolith;
-  const owners={operations:['admin_users','admin_sessions','audit_logs'],customer:['customers','personal_pins'],consultation:['call_sessions'],order:orderTables};
+  const owners={operations:['admin_users','admin_sessions','audit_logs'],customer:['customers','personal_pins','organizations','memberships'],consultation:['call_sessions'],order:orderTables};
   const sides=[{name:'monolith',base:'http://monolith-app:3000'}, {name:'msa',base:'http://order-app:3002'}];
   for (const [service,port] of [['monolith',3000],['operations',3005],['customer',3001],['consultation',3004],['order',3002]]) {
     const url=`http://${service}-app:${port}/${service==='monolith'?'api':service}/docs-json`;
@@ -48,6 +59,12 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
       [id,'고객 '+id,'0100000000'+(id===5?4:id),[3,7].includes(id)?'WITHDRAWN':'ACTIVE',id===4?'2026-01-01T00:00:00Z':null]);
     await db.query(`INSERT INTO personal_pins(personal_pin_seq,customer_seq,address_data,version) OVERRIDING SYSTEM VALUE
       VALUES(2,1,$1,9)`,[{name:'원본 변경됨',phoneNumber:'01000000001',roadAddress:'새 도로',jibunAddress:'새 지번',dongName:'새 동',postalCode:'11111'}]);
+  }
+  for(const db of [reference,databases.customer]){
+    for(const [id,status,deleted]of [[6001,'INACTIVE',null],[6002,'ACTIVE','2026-01-01Z'],[6003,'ACTIVE',null]])await db.query(
+      "INSERT INTO organizations(organization_seq,name,status,created_at,deleted_at) OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,'2025-01-01Z',$4)",[id,'현재 기업 '+id,status,deleted]);
+    for(const [id,customer,org,status,deleted]of [[6101,1,6001,'INACTIVE',null],[6102,3,6001,'ACTIVE',null],[6103,4,6001,'ACTIVE',null],[6104,2,6002,'ACTIVE',null],[6105,5,6003,'ACTIVE','2026-01-01Z']])await db.query(
+      "INSERT INTO memberships(membership_seq,customer_seq,organization_seq,employee_no,status,deleted_at) OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,$4,$5,$6)",[id,customer,org,'00'+id,status,deleted]);
   }
   const statuses=['COLLECTING','notPaid','PAID','SUBMITTING','SUBMITTING_FAILED','ACCEPTED','SUBMISSION_FAILED','CANCELLED','ACCEPTED','ACCEPTED','COLLECTING','ACCEPTED','ACCEPTED','ACCEPTED','COLLECTING'];
   for(const db of [reference,databases.order]) {
@@ -101,6 +118,37 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
       [1010+n,'read-call-'+n,n===4?null:n===5?'01099999999':'0100000000'+(n===10?4:[1,2,3][n-1]??1),n===10?4:null,n===6?1001:null,
         n===9?'2010-01-01T00:00:00Z':'2030-01-01T00:00:00Z',[6,7].includes(n)?'2030-01-02T00:00:00Z':null,n===8?'2026-01-01T00:00:00Z':null]);
   }
+  const longDraftPhone='장'.repeat(40000);
+  const draftCalls=[
+    [1101,1,'01000000001','2030-01-01T00:00:00.123456Z',null,null,null,null],
+    [1099,1,'01000000001','2030-01-01T00:00:00.123457Z','2030-01-01Z','2030-01-02Z','2030-01-02Z','2030-01-03Z'],
+    [1103,1,'01000000001','2031-01-01Z','2031-01-01Z','2031-01-02Z',null,null],
+    [1104,4,'01000000004',null,'2030-01-01T00:00:00.987654Z','2030-01-02Z',null,null],
+    [1105,3,'01000000003','2030-01-01T00:00:00.222222Z',null,null,null,null],
+    [1106,null,longDraftPhone,'2030-01-02Z','2030-01-02Z','2030-01-03Z','2030-01-03Z',null],
+    [1108,3,'01000000003','2030-01-01T00:00:00.222222Z','2030-01-01Z','2030-01-02Z','2030-01-02Z',null],
+  ];
+  for(const db of [reference,databases.consultation])for(const [id,customer,phone,incoming,started,ended,finalized,deleted] of draftCalls)
+    await db.query(`INSERT INTO call_sessions(call_session_seq,provider_call_id,customer_seq,caller_phone_number,incoming_at,started_at,ended_at,order_finalized_at,deleted_at,registered_at,order_completion_received_at,order_completion_payload,order_finalization_result)
+      OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'2030-01-01Z',
+        CASE WHEN $8::timestamptz IS NULL THEN NULL ELSE $7::timestamptz END,
+        CASE WHEN $8::timestamptz IS NULL THEN NULL ELSE '{}'::jsonb END,
+        CASE WHEN $8::timestamptz IS NULL THEN NULL ELSE '{}'::jsonb END)`,[id,'draft-reference-'+id,customer,phone,incoming,started,ended,finalized,deleted]);
+  const drafts=[
+    [13001,1101,1,'01000000001','INCOMPLETE',null,30001],
+    [13002,1105,3,'01000000003','INCOMPLETE',null,30002],
+    [13003,1104,4,'01000000004','INCOMPLETE',null,30003],
+    [13004,null,null,longDraftPhone,'INCOMPLETE',null,30004],
+    [13005,null,null,'no matching historical caller','INCOMPLETE',null,30005],
+    [13006,1099,1,'01000000001','RESUMED',null,30006],
+    [13007,null,1,'01000000001','READY',13006,30006],
+    [13008,1101,null,'01000000001','INCOMPLETE',null,30008],
+  ].map(row=>[...row,randomUUID()]);
+  for(const db of [reference,databases.order])for(const [id,call,customer,phone,status,source,reserved,uuid] of drafts)
+    await db.query(`INSERT INTO order_parcel_drafts(draft_seq,call_session_seq,customer_seq,caller_phone_number,status,source_draft_seq,reserved_order_seq,
+      client_parcel_id,created_by_admin_user_seq,creation_payload,parcel_data,created_at,updated_at,retention_started_at)
+      OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,$4,$5,$6,$7,$8,1,'{}','{}','2030-01-01Z','2030-01-01Z','2030-01-01Z')`,
+      [id,call,customer,phone,status,source,reserved,uuid]);
   await reference.query(`INSERT INTO shipments(order_parcel_seq,tracking_number,status) VALUES(20061,'private-shipment-tracking','sent')`);
   // Retain expired fixtures while exercising their HTTP/SQL invisibility with production purgers enabled.
   for(const [db,table,column,id] of [[reference,'orders','order_seq',1013],[databases.order,'orders','order_seq',1013],
@@ -236,6 +284,105 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
     const document=await (await fetch(base+'/api/docs-json')).json();
     assert.ok(!Object.keys(document.paths).some(path=>path.includes('call-read-references')));
   });
+  await t.test('draft call references reproduce original availability including deleted newer calls, tuple precision and large legacy phones',async()=> {
+    const {requestDraftCallReferences,requestParcelDraftCommand}=require('@dva/events/parcel-drafts.cjs');
+    const base='http://consultation-app:3004';const path='/internal/order-draft-call-references';
+    const token=process.env.CUSTOMER_AUTH_TOKEN;
+    const scope={callIds:[1101,1099,1104,1105],customerIds:[1,3,4],phones:['01000000001',longDraftPhone,'no matching historical caller']};
+    const refs=await requestDraftCallReferences(base+path,token,scope);
+    assert.match(refs.calls.find(r=>r.call_session_seq===1101).started_at,/\.123456/);
+    assert.equal(refs.customers.find(r=>r.customer_seq===1).call_session_seq,1099);
+    assert.equal(refs.customers.find(r=>r.customer_seq===3).call_session_seq,1108);
+    assert.equal(refs.phones.find(r=>r.caller_phone_number===longDraftPhone).call_session_seq,1106);
+    const visible=(await databases.order.query(`WITH origins AS(
+      SELECT * FROM jsonb_to_recordset($1::jsonb) AS c(call_session_seq int,started_at timestamptz)),
+      latest AS(SELECT call_session_seq,customer_seq,NULL::text AS caller_phone_number,started_at FROM jsonb_to_recordset($2::jsonb) AS c(call_session_seq int,customer_seq int,started_at timestamptz)
+        UNION ALL SELECT call_session_seq,NULL::int,caller_phone_number,started_at FROM jsonb_to_recordset($3::jsonb) AS c(call_session_seq int,caller_phone_number text,started_at timestamptz))
+      SELECT d.draft_seq FROM order_parcel_drafts d WHERE d.deleted_at IS NULL AND d.retention_started_at>transaction_timestamp()-interval '5 years'
+       AND (NOT(d.status='INCOMPLETE' OR(d.source_draft_seq IS NOT NULL AND d.status IN('READY','EDITING')))
+        OR(d.retention_started_at>transaction_timestamp()-interval '24 hours' AND NOT EXISTS(
+          SELECT 1 FROM latest newer LEFT JOIN order_parcel_drafts source ON source.draft_seq=d.source_draft_seq
+          LEFT JOIN origins origin ON origin.call_session_seq=COALESCE(d.call_session_seq,source.call_session_seq)
+          WHERE ((d.customer_seq IS NOT NULL AND newer.customer_seq=d.customer_seq)OR(d.customer_seq IS NULL AND newer.caller_phone_number=d.caller_phone_number))
+           AND(newer.started_at,newer.call_session_seq)>(COALESCE(origin.started_at,d.retention_started_at),COALESCE(origin.call_session_seq,0))))) ORDER BY d.draft_seq`,
+      [JSON.stringify(refs.calls),JSON.stringify(refs.customers),JSON.stringify(refs.phones)])).rows.map(r=>r.draft_seq);
+    assert.deepEqual(visible,[13003,13005,13006,13007]);
+    for(const [id] of drafts) {
+      const response=await fetch(sides[0].base+'/api/parcel-drafts/'+id,{headers});
+      assert.equal(response.status,visible.includes(id)?200:404,'original draft availability '+id);
+      const body=await response.json();if(response.ok)assert.equal(body.data.draftSeq,id);
+    }
+    const concurrent=await Promise.all(Array.from({length:5},()=>requestDraftCallReferences(base+path,token,scope)));
+    for(const result of concurrent)assert.deepEqual(result,refs);
+    const packet={eventId:randomUUID(),source:'order',eventType:'DraftCallReferencesRequested',payload:{callIds:Array.from({length:250},(_,n)=>n+1),customerIds:[],phones:[],phoneHashes:[]}};
+    const maximum=await requestParcelDraftCommand(base+path,token,packet);assert.deepEqual(maximum,{calls:[],customers:[],phones:[]});
+    async function post(target,body,credential,expected) {
+      const response=await fetch(base+target,{method:'POST',headers:{'Content-Type':'application/json',...(credential?{Authorization:'Bearer '+credential}:{})},body:JSON.stringify(body)});
+      assert.equal(response.status,expected);await response.body?.cancel();
+    }
+    for(const credential of [undefined,'wrong',process.env.CONSULTATION_AUTH_TOKEN])await post(path,packet,credential,403);
+    for(const body of [{...packet,source:'consultation'},{...packet,payload:{...packet.payload,callIds:[1,1]}},
+      {...packet,payload:{...packet.payload,callIds:packet.payload.callIds.concat(251)}},{...packet,payload:{...packet.payload,sql:'SELECT private'}},
+      {...packet,payload:{...packet.payload,phones:['x'.repeat(257)]}}])await post(path,body,token,422);
+    await post(path,{...packet,payload:{...packet.payload,phones:[longDraftPhone]}},token,413);
+    await post('/api'+path,packet,token,404);
+    const document=await(await fetch(base+'/api/docs-json')).json();assert.ok(!Object.keys(document.paths).some(p=>p.includes('order-draft-call-references')));
+  });
+  await t.test('admin read scopes reuse saturated owner pools and retain one snapshot during edits',async()=> {
+    const {createServer}=require('node:http'),{networkInterfaces}=require('node:os');
+    const {requestReferences,requestOrderOrganization}=require('@dva/events/call-read-references.cjs');
+    const {requestDraftCallReferences}=require('@dva/events/parcel-drafts.cjs');
+    const address=Object.values(networkInterfaces()).flat().find(row=>row.family==='IPv4'&&!row.internal)?.address;
+    assert.ok(address);
+    const token=process.env.CUSTOMER_AUTH_TOKEN,consToken=process.env.CONSULTATION_AUTH_TOKEN;
+    const customerBase='http://customer-app:3001',consultationBase='http://consultation-app:3004';
+    const oldName=(await databases.customer.query('SELECT name FROM customers WHERE customer_seq=1')).rows[0].name;
+    const oldStarted=(await databases.consultation.query("SELECT to_jsonb(incoming_at)#>>'{}' AS started FROM call_sessions WHERE call_session_seq=1101")).rows[0].started;
+    let entered,release;const arrivals=new Promise(r=>entered=r),gate=new Promise(r=>release=r),seen=[];let pending=[];
+    const counts={all:0,incomplete:0,notPaid:0,paid:0,submissionFailed:0,cancelled:0};
+    const server=createServer(async(req,res)=>{
+      try {
+        assert.equal(req.url,'/internal/admin-order-read');assert.equal(req.headers.authorization,'Bearer '+token);
+        const chunks=[];for await(const chunk of req)chunks.push(chunk);const packet=JSON.parse(Buffer.concat(chunks));
+        assert.equal(packet.source,'customer');seen.push(packet.eventId);if(seen.length===5)entered();await gate;
+        const customer=await requestReferences('customer',customerBase+'/internal/call-read-references/for-orders',token,[1],'order',packet.eventId);
+        assert.equal(customer[0].name,oldName);
+        const refs=await requestDraftCallReferences(consultationBase+'/internal/order-draft-call-references',token,{callIds:[1101],customerIds:[],phones:[]},packet.eventId);
+        assert.equal(refs.calls[0].started_at,oldStarted);
+        assert.deepEqual(await requestOrderOrganization(customerBase+'/internal/call-read-references/order-organization',token,2147483647,packet.eventId),{organization_seq:2147483647,organization_name:null,customer_seqs:[]});
+        res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({eventId:packet.eventId,status:'processed',payload:{data:[],hasNext:false,total_count:0,statusCounts:counts}}));
+      } catch(error) {res.writeHead(500,{'Content-Type':'application/json'});res.end(JSON.stringify({error:String(error)}));}
+    });
+    await new Promise(r=>server.listen(3002,'0.0.0.0',r));
+    const post=(base,path,body,auth=token,scope)=>fetch(base+path,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+auth,...(scope===undefined?{}:{'X-Msa-Read-Scope':scope})},body:JSON.stringify(body),signal:AbortSignal.timeout(25000)});
+    const packet=()=>({eventId:randomUUID(),source:'order',eventType:'AdminOrdersReadRequested',payload:{query:{limit:20,offset:0},orderAddress:address}});
+    const referencePacket={eventId:randomUUID(),source:'order',eventType:'CallReadReferencesRequested',payload:{ids:[1]}};
+    try {
+      assert.equal((await post(consultationBase,'/internal/admin-order-read',packet(),'wrong')).status,403);
+      assert.equal((await post(consultationBase,'/internal/admin-order-read',{...packet(),source:'customer'})).status,422);
+      const forged=packet();forged.payload.orderAddress='169.254.169.254';assert.equal((await post(consultationBase,'/internal/admin-order-read',forged)).status,422);
+      assert.equal((await post(customerBase,'/internal/call-read-references/admin-orders',packet(),token)).status,403);
+      pending=Array.from({length:5},()=>post(consultationBase,'/internal/admin-order-read',packet()));
+      let timer;try{await Promise.race([arrivals,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('owner pool scope did not enter')),10000);})]);}finally{clearTimeout(timer);}
+      await databases.customer.query("UPDATE customers SET name='수정된 고객' WHERE customer_seq=1");
+      await databases.consultation.query("UPDATE call_sessions SET incoming_at='2030-01-01T00:00:00.123459Z' WHERE call_session_seq=1101");
+      release();
+      for(const response of await Promise.all(pending)){const body=await response.json();assert.equal(response.status,200,JSON.stringify(body));assert.deepEqual(body.payload.statusCounts,counts);}
+      assert.equal(new Set(seen).size,5);
+      for(const scope of ['invalid',...seen])assert.equal((await post(customerBase,'/internal/call-read-references/for-orders',referencePacket,token,scope)).status,scope==='invalid'?422:503);
+      const draft={eventId:randomUUID(),source:'order',eventType:'DraftCallReferencesRequested',payload:{callIds:[1101],customerIds:[],phones:[],phoneHashes:[]}};
+      assert.equal((await post(consultationBase,'/internal/order-draft-call-references',draft,token,seen[0])).status,503);
+      assert.equal((await requestReferences('customer',customerBase+'/internal/call-read-references/for-orders',token,[1],'order'))[0].name,'수정된 고객');
+      assert.equal((await requestDraftCallReferences(consultationBase+'/internal/order-draft-call-references',token,{callIds:[1101],customerIds:[],phones:[]})).calls[0].started_at,'2030-01-01T00:00:00.123459+00:00');
+      for(const [base,prefix]of [[customerBase,'customer'],[consultationBase,'consultation']]){
+        const document=await(await fetch(base+'/'+prefix+'/docs-json')).json();assert.ok(!JSON.stringify(document.paths).includes('admin-order-read'));assert.ok(!JSON.stringify(document.paths).includes('order-organization'));
+      }
+    } finally {
+      release();await Promise.allSettled(pending);await new Promise(r=>server.close(r));
+      await databases.customer.query('UPDATE customers SET name=$1 WHERE customer_seq=1',[oldName]);
+      await databases.consultation.query('UPDATE call_sessions SET incoming_at=$1 WHERE call_session_seq=1101',[oldStarted]);
+    }
+  });
   await t.test('all roles, filters, stable order, page boundaries and totals',async()=> {
     for(const token of tokens) await compare('/api/orders',200,{Cookie:'dva_session='+token});
     for(const path of ['/api/orders?customerSeq=1&limit=2','/api/orders?customerSeq=1&limit=2&offset=2','/api/orders?customerSeq=1&offset=100',
@@ -272,7 +419,20 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
     for(const query of ['', '?limit=1','?offset=999','?q=한글','?q=010-9876-5432','?q=%25','?q=_','?q=%27%20OR%201%3D1--',
       '?from=2030-02-01T00:00:00Z&to=2030-02-10T00:00:00Z&limit=2']) await compare('/api/admin/orders'+query);
     for(const group of ['COLLECTING','notPaid','PAID','SUBMISSION_FAILED','CANCELLED']) await compare('/api/admin/orders?statusGroup='+group);
+    for(const organization of [6001,6002,6003,2147483647])for(const group of ['', '&statusGroup=COLLECTING','&statusGroup=PAID','&statusGroup=CANCELLED'])await compare('/api/admin/orders?organizationSeq='+organization+group+'&limit=1&offset=1');
+    for(const query of ['?organizationSeq=0','?organizationSeq=2147483648','?organizationSeq=1&organizationSeq=2'])await compare('/api/admin/orders'+query,400);
+    const original=await compare('/api/admin/orders?limit=1&offset=1');
+    for(const query of ['?limit=100','?limit=1&offset=999','?statusGroup=PAID','?statusGroup=COLLECTING'])assert.deepEqual((await compare('/api/admin/orders'+query)).statusCounts,original.statusCounts);
+    const path='/api/admin/orders?limit=2',requestId=randomUUID(),expected=await request(sides[0],path,200,headers,requestId);
+    await Promise.all(Array.from({length:12},async()=>assert.deepEqual(await request(sides[1],path,200,headers,requestId),expected)));
     await compare('/api/admin/orders',401,{});
+    try {
+      for(const db of [reference,databases.order])await db.query(`INSERT INTO order_parcel_drafts(draft_seq,reserved_order_seq,client_parcel_id,created_by_admin_user_seq,creation_payload,parcel_data,status,created_at,updated_at,retention_started_at)
+        OVERRIDING SYSTEM VALUE SELECT 14000+n,40000+n,gen_random_uuid(),1,'{}','{"origin":{"name":"분할 초안 한글_%","phoneNumber":"01098765432"},"documentCount":2,"otherItemDescription":"메모"}'::jsonb,
+        'INCOMPLETE','2030-01-01Z','2030-01-01Z','2030-01-01Z' FROM generate_series(1,251) n`);
+      for(const query of ['?q='+encodeURIComponent('분할 초안 한글_%'),'','?statusGroup=COLLECTING','?q=010-9876-5432'])for(const offset of [0,249,250,251])await compare('/api/admin/orders'+(query||'?')+(query?'&':'')+'limit=1&offset='+offset);
+    } finally {for(const db of [reference,databases.order])await db.query('DELETE FROM order_parcel_drafts WHERE draft_seq BETWEEN 14001 AND 14251');}
+
   });
   await t.test('previous addresses use accepted active snapshots, existing customers and caller bounds',async()=> {
     for(const direction of ['ORIGIN','DESTINATION']) for(const query of ['', '&limit=1','&offset=100','&q=한글','&q=%25',
@@ -351,7 +511,7 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
     try {
       await blocker.query('BEGIN');await blocker.query("SET LOCAL lock_timeout='2s'");
       await blocker.query('LOCK TABLE orders IN ACCESS EXCLUSIVE MODE');
-      pending=fetch(sides[1].base+'/api/orders/1001',{headers:ai(1011),signal:AbortSignal.timeout(20000)});
+      pending=fetch(sides[1].base+'/api/orders/1001',{headers:{Authorization:'Bearer '+process.env.PGPASSWORD,...ai(1011)},signal:AbortSignal.timeout(20000)});
       await blocked(databases.order,'SELECT jsonb_build_object%');
       const ended=databases.consultation.query("UPDATE call_sessions SET ended_at='2030-01-02T00:00:00Z',started_at='2030-01-01T00:00:00Z' WHERE call_session_seq=1011");
       const withdrawn=databases.customer.query("UPDATE customers SET status='WITHDRAWN' WHERE customer_seq=1");
@@ -359,7 +519,7 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
       await blocker.query('COMMIT');
       const response=await pending;assert.equal(response.status,200);assert.equal((await response.json()).data.orderSeq,1001);
       await Promise.all([ended,withdrawn]);
-      const denied=await fetch(sides[1].base+'/api/orders/1001',{headers:ai(1011)});assert.equal(denied.status,409);
+      const denied=await fetch(sides[1].base+'/api/orders/1001',{headers:{Authorization:'Bearer '+process.env.PGPASSWORD,...ai(1011)}});assert.equal(denied.status,409);
       await databases.consultation.query('UPDATE call_sessions SET ended_at=NULL,started_at=NULL WHERE call_session_seq=1011');
       await databases.customer.query("UPDATE customers SET status='ACTIVE' WHERE customer_seq=1");
     } finally { await blocker.query('ROLLBACK');blocker.release();await pending?.catch(()=>{}); }

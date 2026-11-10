@@ -8,11 +8,18 @@ import {
   Body,
   Controller,
   Header,
+  Headers,
   HttpCode,
   HttpException,
   Post,
   SetMetadata,
 } from '@nestjs/common';
+import { PoolClient } from 'pg';
+import { ReadScopes, validateReadScope } from '@dva/events/read-scope.cjs';
+import {
+  validateAdminOrderRead,
+  requestAdminOrderRead,
+} from '@dva/events/order-read.cjs';
 import { ApiExcludeController } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
 import {
@@ -21,6 +28,10 @@ import {
   OrderReadError,
   type OrderReadEvent,
 } from '@dva/events/order-read.cjs';
+import {
+  validateParcelDraftCommand,
+  type DraftCallReferences,
+} from '@dva/events/parcel-drafts.cjs';
 import { ApiException, type ErrorCode } from '../common/errors/api.exception';
 import type { Environment } from '../config/environment';
 import { DatabaseService } from '../database/database.service';
@@ -29,10 +40,117 @@ import { DatabaseService } from '../database/database.service';
 @SetMetadata('auth:internal-customer', true)
 @Controller('internal')
 export class OrderReadScopeController {
+  private readonly reads = new ReadScopes<PoolClient>(
+    () =>
+      new ApiException(
+        503,
+        'DEPENDENCY_UNAVAILABLE',
+        '서비스를 일시적으로 사용할 수 없습니다.',
+      ),
+  );
+
+  @Post('admin-order-read')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  async adminOrders(@Body() event: unknown) {
+    try {
+      validateAdminOrderRead(event, 'order');
+    } catch {
+      throw new HttpException({ error: 'INVALID_ADMIN_ORDER_READ' }, 422);
+    }
+    try {
+      return await this.database.readOnly(async (client) => {
+        await client.query('SELECT 1');
+        return this.reads.run(event.eventId, client, async () => {
+          const payload = await requestAdminOrderRead(
+            this.config.get('CUSTOMER_URL', { infer: true }) +
+              '/internal/call-read-references/admin-orders',
+            this.config.get('CONSULTATION_AUTH_TOKEN', { infer: true }),
+            {
+              ...event,
+              source: 'consultation',
+              payload: {
+                ...event.payload,
+                consultationAddress:
+                  this.config.get('MSA_INSTANCE_IP', { infer: true }) ?? null,
+              },
+            },
+          );
+          return { eventId: event.eventId, status: 'processed', payload };
+        });
+      });
+    } catch (error) {
+      if (error instanceof OrderReadError)
+        throw new HttpException({ error: error.error }, error.status);
+      if (error instanceof ApiException) throw error;
+      throw new ApiException(
+        503,
+        'DEPENDENCY_UNAVAILABLE',
+        '서비스를 일시적으로 사용할 수 없습니다.',
+      );
+    }
+  }
+
   constructor(
     private readonly database: DatabaseService,
     private readonly config: ConfigService<Environment, true>,
   ) {}
+
+  @Post('order-draft-call-references')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  async draftCalls(
+    @Body() event: unknown,
+    @Headers('x-msa-read-scope') scopeId?: string,
+  ) {
+    try {
+      if (scopeId !== undefined) validateReadScope(scopeId);
+      validateParcelDraftCommand(
+        event,
+        'DraftCallReferencesRequested',
+        'order',
+      );
+    } catch {
+      throw new HttpException({ error: 'INVALID_DRAFT_CALL_QUERY' }, 422);
+    }
+    const query = event.payload;
+    const work = async (client: PoolClient) => {
+      const started = 'COALESCE(incoming_at,started_at,registered_at)';
+      const completed =
+        'ended_at IS NOT NULL AND order_finalized_at IS NOT NULL';
+      const calls = (
+        await client.query<DraftCallReferences['calls'][number]>(
+          `SELECT call_session_seq,to_jsonb(${started})#>>'{}' AS started_at FROM call_sessions WHERE call_session_seq=ANY($1::int[]) ORDER BY call_session_seq`,
+          [query.callIds],
+        )
+      ).rows;
+      const customers = (
+        await client.query<DraftCallReferences['customers'][number]>(
+          `SELECT DISTINCT ON(customer_seq) customer_seq,call_session_seq,to_jsonb(${started})#>>'{}' AS started_at FROM call_sessions
+          WHERE customer_seq=ANY($1::int[]) AND ${completed} AND ${started} IS NOT NULL ORDER BY customer_seq,${started} DESC,call_session_seq DESC`,
+          [query.customerIds],
+        )
+      ).rows;
+      const phoneFilter = query.phoneHashes.length
+        ? "(caller_phone_number=ANY($1::text[]) OR encode(sha256(convert_to(caller_phone_number,'UTF8')),'hex')=ANY($2::text[]))"
+        : 'caller_phone_number=ANY($1::text[])';
+      const phones = (
+        await client.query<DraftCallReferences['phones'][number]>(
+          `SELECT DISTINCT ON(caller_phone_number) caller_phone_number,call_session_seq,to_jsonb(${started})#>>'{}' AS started_at FROM call_sessions
+          WHERE ${phoneFilter} AND ${completed} AND ${started} IS NOT NULL ORDER BY caller_phone_number,${started} DESC,call_session_seq DESC`,
+          query.phoneHashes.length
+            ? [query.phones, query.phoneHashes]
+            : [query.phones],
+        )
+      ).rows;
+      return { calls, customers, phones };
+    };
+    const payload =
+      scopeId === undefined
+        ? await this.database.readOnly(work)
+        : await this.reads.use(scopeId, work);
+    return { eventId: event.eventId, status: 'processed', payload };
+  }
 
   @Post('order-read')
   @HttpCode(200)
