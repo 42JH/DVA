@@ -140,12 +140,19 @@ export class OrderSubmissionService {
       throw new ApiException(403, 'FORBIDDEN', '선택한 결제 방식의 사용 자격이 없습니다.');
     if (await this.submissions.hasShipments(client, id))
       throw new ApiException(409, 'INVALID_STATE', '이미 배송 정보가 생성된 주문입니다.');
+    const usablePinIds = await this.repository.usablePersonalPinIds(
+      client,
+      customerId,
+      snapshot.parcels
+        .filter((parcel) => parcel.status !== 'CANCELLED')
+        .flatMap((parcel) => (parcel.originPin ? [parcel.originPin] : [])),
+    );
     for (const parcel of snapshot.parcels) {
       if (parcel.status === 'CANCELLED') continue;
       if (
         parcel.originPin &&
         parcel.originPin.scope === 'PERSONAL' &&
-        !(await this.repository.canUsePin(client, customerId, parcel.originPin))
+        !usablePinIds.has(parcel.originPin.pinSeq)
       )
         throw new ApiException(403, 'FORBIDDEN', '고객이 사용할 수 없는 출발지 PIN입니다.');
     }

@@ -431,6 +431,28 @@ export class OrdersRepository {
     ).rowCount;
   }
 
+  async usablePersonalPinIds(
+    client: PoolClient,
+    customerId: number,
+    pins: OriginPinDto[],
+  ): Promise<Set<number>> {
+    const ids = [
+      ...new Set(pins.filter((pin) => pin.scope === 'PERSONAL').map((pin) => pin.pinSeq)),
+    ].sort((a, b) => a - b);
+    if (!ids.length) return new Set<number>();
+    if (ids.length === 1)
+      return new Set(
+        (await this.canUsePin(client, customerId, { scope: 'PERSONAL', pinSeq: ids[0] }))
+          ? ids
+          : [],
+      );
+    const result = await client.query<{ personal_pin_seq: number }>(
+      `SELECT personal_pin_seq FROM personal_pins WHERE personal_pin_seq=ANY($1::int[]) AND customer_seq=$2 AND deleted_at IS NULL ORDER BY personal_pin_seq FOR SHARE`,
+      [ids, customerId],
+    );
+    return new Set(result.rows.map((row) => row.personal_pin_seq));
+  }
+
   async canUsePin(client: PoolClient, customerId: number, pin: OriginPinDto): Promise<boolean> {
     if (pin.scope !== 'PERSONAL') return false;
     const result = await client.query(
