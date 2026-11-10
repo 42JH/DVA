@@ -127,7 +127,9 @@ function PersonaCard({ p, vm }: { p: PersonaItem; vm: Vm }) {
       </button>
       {h && (
         <div className="mt-3 flex flex-col gap-2">
+          {/* 통일 전 모양(SelectField)이 낫다는 사용자 결정 (11/10), 크기만 ops 칸과 같게 */}
           <SelectField
+            compact
             label="히스토리"
             value={h.value}
             onChange={vm.selectVersion}

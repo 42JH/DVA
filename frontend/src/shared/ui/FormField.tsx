@@ -20,14 +20,12 @@ function Wrap({
   error,
   hint,
   inline,
-  labelClassName,
   children,
 }: {
   label: string
   error?: string
   hint?: string
   inline?: boolean
-  labelClassName?: string // 라벨 글자 모양을 통째로 바꿀 때 (07 프롬프트 수정의 칸 제목, 11/10)
   children: React.ReactNode
 }) {
   const fresh = useContext(NewLook)
@@ -58,11 +56,7 @@ function Wrap({
   return (
     <label className="flex flex-col gap-2">
       {/* 새 디자인 창 안이면 왼쪽 라벨(inline)과 같은 글자 16 · 보통 굵기 (11/05 07 페르소나 추가) */}
-      <span
-        className={
-          labelClassName ?? (fresh ? 'text-body text-sub' : 'text-label font-semibold text-sub')
-        }
-      >
+      <span className={fresh ? 'text-body text-sub' : 'text-label font-semibold text-sub'}>
         {label}
       </span>
       {children}
@@ -140,18 +134,12 @@ export function TextArea({
   label,
   error,
   hint,
-  labelClassName,
   className = '',
   ...rest
-}: TextareaHTMLAttributes<HTMLTextAreaElement> & {
-  label: string
-  error?: string
-  hint?: string
-  labelClassName?: string
-}) {
+}: TextareaHTMLAttributes<HTMLTextAreaElement> & { label: string; error?: string; hint?: string }) {
   const fresh = useContext(NewLook) // 새 디자인 창 안이면 TextField와 같은 선 · 포커스 색 (11/05 07 페르소나 추가)
   return (
-    <Wrap label={label} error={error} hint={hint} labelClassName={labelClassName}>
+    <Wrap label={label} error={error} hint={hint}>
       <textarea
         {...rest}
         aria-invalid={!!error}

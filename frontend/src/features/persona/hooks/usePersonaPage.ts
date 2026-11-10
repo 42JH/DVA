@@ -274,7 +274,7 @@ export function usePersonaPage() {
         return {
           title: `${nameEul(confirmingPersona.name)} 통화에 쓸까요?`,
           target: `${confirmingPersona.name} · v${v} (마지막 적용)`,
-          note: `진행 중인 통화가 끝나면(AI 확인 후) 이 페르소나로 응대합니다.${
+          note: `진행 중인 통화가 끝나면(AI 확인 후) 이 상담가로 응대합니다.${
             confirmingPersona.savedVersion
               ? ` 저장만 한 v${confirmingPersona.savedVersion}는 포함되지 않습니다.`
               : ''
@@ -318,7 +318,7 @@ export function usePersonaPage() {
     applyError: !apply.error
       ? null
       : apply.error instanceof ApiError && apply.error.status === 409
-        ? '그새 다른 관리자가 이 페르소나를 저장 · 적용했습니다. 창을 닫고 최신 버전을 확인해 주세요.'
+        ? '그새 다른 관리자가 이 상담가를 저장 · 적용했습니다. 창을 닫고 최신 버전을 확인해 주세요.'
         : '적용 요청을 보내지 못했습니다. 잠시 뒤 다시 시도해 주세요.',
 
     adding,

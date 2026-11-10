@@ -9,6 +9,7 @@ export function SelectField({
   hint,
   error,
   inline,
+  compact,
 }: {
   label: string
   value: string
@@ -18,12 +19,15 @@ export function SelectField({
   hint?: string
   error?: string
   inline?: boolean // 라벨 왼쪽 120 (TextField inline과 같은 줄 맞춤, 07 음성 세부 조절)
+  compact?: boolean // 칸 36 · 글자 14 · 라벨 12 — ops 화면 칸과 같은 크기 (07 상담가 히스토리, 11/10)
 }) {
   return (
     <label
       className={inline ? 'grid grid-cols-[120px_1fr] items-center gap-x-4' : 'flex flex-col gap-2'}
     >
-      <span className={inline ? 'text-label text-sub' : 'text-label font-semibold text-sub'}>
+      <span
+        className={`${compact ? 'text-[12px]' : 'text-label'} ${inline ? '' : 'font-semibold'} text-sub`}
+      >
         {label}
       </span>
       <span className="relative block">
@@ -31,7 +35,7 @@ export function SelectField({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           aria-invalid={!!error}
-          className={`h-10 w-full appearance-none rounded-lg bg-surface pr-10 pl-3.5 text-body outline-none ring-inset ${
+          className={`${compact ? 'h-9 pr-9 pl-3 text-[14px]' : 'h-10 pr-10 pl-3.5 text-body'} w-full appearance-none rounded-lg bg-surface outline-none ring-inset ${
             error
               ? 'ring-[1.5px] ring-danger'
               : 'ring-1 ring-line focus:ring-[1.5px] focus:ring-action'
@@ -48,7 +52,7 @@ export function SelectField({
         </select>
         <svg
           viewBox="0 0 20 20"
-          className="pointer-events-none absolute top-1/2 right-3.5 size-4 -translate-y-1/2 stroke-sub"
+          className={`pointer-events-none absolute top-1/2 ${compact ? 'right-3' : 'right-3.5'} size-4 -translate-y-1/2 stroke-sub`}
           fill="none"
           strokeWidth={1.6}
           strokeLinecap="round"
