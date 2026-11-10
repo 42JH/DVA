@@ -1,4 +1,4 @@
-"""값 검증 규칙(순수). 전화번호는 한글 숫자 정규화 뒤 BE 계약대로 0으로 시작하는 정확히 11자리,
+"""값 검증 규칙(순수). 전화번호 정규화는 원본(tools/base.py normalize_phone, 실통화 사례 포함) 그대로,
 수거 시각은 P1(현재 + 1시간 이후, decisions.md)."""
 
 import re
@@ -24,9 +24,13 @@ def normalize_phone(raw: str, rule: Phone | None = None) -> str | None:
     if s.startswith("+82"):
         s = "0" + s[3:].lstrip(" -")
     digits = re.sub(r"\D", "", s)
-    # BE는 정확히 11자리만 받는다. 예전의 9~10자리 국내번호 허용은 모델이 한 자리 빠뜨린 휴대전화 정정
-    # ("010 1234 4155" → "0112344155")을 유선번호로 통과시켰다(2026-11-05 통화, S15P31D109-170)
-    return digits if len(digits) == rule.digits and digits.startswith("0") else None
+    if len(digits) == rule.service_digits and digits.startswith(rule.service_prefixes):
+        return digits
+    if digits.startswith(rule.mobile_prefix):
+        return digits if len(digits) == rule.mobile_digits else None
+    if digits.startswith("0") and rule.domestic_min_digits <= len(digits) <= rule.domestic_max_digits:
+        return digits
+    return None
 
 
 def parse_pickup(raw: str, now: datetime, min_lead_minutes: int) -> tuple[str | None, str | None]:
