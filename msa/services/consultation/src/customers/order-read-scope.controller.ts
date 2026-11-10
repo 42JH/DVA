@@ -15,7 +15,11 @@ import {
   SetMetadata,
 } from '@nestjs/common';
 import { PoolClient } from 'pg';
-import { ReadScopes, validateReadScope } from '@dva/events/read-scope.cjs';
+import {
+  ReadScopes,
+  retryReadSnapshot,
+  validateReadScope,
+} from '@dva/events/read-scope.cjs';
 import {
   validateAdminOrderRead,
   requestAdminOrderRead,
@@ -56,49 +60,54 @@ export class OrderReadScopeController {
       throw new HttpException({ error: 'INVALID_DRAFT_READ' }, 422);
     }
     try {
-      return await this.database.transaction(async (client) => {
-        const id = event.payload.command.callSessionSeq;
-        // Match the source read-committed permission locks after a preceding writer commits.
-        if (id === null) await client.query('SET TRANSACTION READ ONLY');
-        if (id === null) await client.query('SELECT 1');
-        else {
-          const call = await this.draftCall(client, id, true);
-          if (!call)
-            throw new ApiException(
-              404,
-              'NOT_FOUND',
-              '통화를 찾을 수 없습니다.',
-            );
-          if (!call.enabled)
-            throw new ApiException(
-              409,
-              'INVALID_STATE',
-              '이전 계약의 통화입니다. 새 통화에서 초안을 접수해 주세요.',
-            );
-        }
-        return this.reads.run(event.eventId, client, async () => {
-          this.draftCallIds.set(event.eventId, id);
-          try {
-            const payload = await requestDraftRead(
-              this.config.get('CUSTOMER_URL', { infer: true }) +
-                '/internal/call-read-references/parcel-drafts',
-              this.config.get('CONSULTATION_AUTH_TOKEN', { infer: true }),
-              {
-                ...event,
-                source: 'consultation',
-                payload: {
-                  ...event.payload,
-                  consultationAddress:
-                    this.config.get('MSA_INSTANCE_IP', { infer: true }) ?? null,
-                },
-              },
-            );
-            return { eventId: event.eventId, status: 'processed', payload };
-          } finally {
-            this.draftCallIds.delete(event.eventId);
+      return await retryReadSnapshot(() =>
+        this.database.transaction(async (client) => {
+          const id = event.payload.command.callSessionSeq;
+          await client.query(
+            'SET TRANSACTION ISOLATION LEVEL REPEATABLE READ' +
+              (id === null ? ' READ ONLY' : ''),
+          );
+          if (id === null) await client.query('SELECT 1');
+          else {
+            const call = await this.draftCall(client, id, true);
+            if (!call)
+              throw new ApiException(
+                404,
+                'NOT_FOUND',
+                '통화를 찾을 수 없습니다.',
+              );
+            if (!call.enabled)
+              throw new ApiException(
+                409,
+                'INVALID_STATE',
+                '이전 계약의 통화입니다. 새 통화에서 초안을 접수해 주세요.',
+              );
           }
-        });
-      });
+          return this.reads.run(event.eventId, client, async () => {
+            this.draftCallIds.set(event.eventId, id);
+            try {
+              const payload = await requestDraftRead(
+                this.config.get('CUSTOMER_URL', { infer: true }) +
+                  '/internal/call-read-references/parcel-drafts',
+                this.config.get('CONSULTATION_AUTH_TOKEN', { infer: true }),
+                {
+                  ...event,
+                  source: 'consultation',
+                  payload: {
+                    ...event.payload,
+                    consultationAddress:
+                      this.config.get('MSA_INSTANCE_IP', { infer: true }) ??
+                      null,
+                  },
+                },
+              );
+              return { eventId: event.eventId, status: 'processed', payload };
+            } finally {
+              this.draftCallIds.delete(event.eventId);
+            }
+          });
+        }),
+      );
     } catch (error) {
       if (error instanceof OrderReadError)
         throw new HttpException({ error: error.error }, error.status);

@@ -13,7 +13,7 @@ function msaRoutes(root) {
       assert.ok(controller, 'Unsupported controller: ' + file);
       for (const match of text.matchAll(/@(Get|Post|Patch|Put|Delete|Sse)\((?:'([^']*)')?\)/g)) {
         const path = [controller[1], match[2]].filter(Boolean).join('/');
-        const prefix = path === 'health' || path === 'health/ready' ? service + '/'
+        const prefix = path === 'health' || path === 'health/ready' ? (service === 'operations' ? '' : service + '/')
           : /^(internal\/|webhooks\/|\w+\/health)/.test(path) ? '' : 'api/';
         routes.push({ method: match[1] === 'Sse' ? 'GET' : match[1].toUpperCase(), path: '/' + prefix + path,
           service, stream: match[1] === 'Sse', file: relative(root, file).replaceAll('\\', '/') });

@@ -148,6 +148,10 @@ spec:
                 name: order
                 port:
                   number: 3002
+          - path: /api/parcel-drafts
+            pathType: Prefix
+            backend:
+              service: { name: order, port: { number: 3002 } }
           - path: /api/orders
             pathType: Prefix
             backend:

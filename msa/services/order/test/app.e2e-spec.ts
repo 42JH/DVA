@@ -64,6 +64,8 @@ describe('Order read API (e2e)', () => {
           '/api/orders/{id}',
           '/api/orders/{id}/cancel',
           '/api/orders/{id}/parcels/cancel',
+          '/api/parcel-drafts',
+          '/api/parcel-drafts/{id}',
           '/api/payments/requests/{id}',
           '/order/health',
           '/order/health/ready',
@@ -102,6 +104,9 @@ describe('Order read API (e2e)', () => {
 
   it('rejects malformed inputs and invalid cookies before accessing owner data', async () => {
     for (const path of [
+      '/api/parcel-drafts?status=unknown',
+      '/api/parcel-drafts?limit=101',
+      '/api/parcel-drafts/0',
       '/api/orders?status=unknown',
       '/api/orders?limit=101',
       '/api/orders/0',
@@ -111,6 +116,7 @@ describe('Order read API (e2e)', () => {
         .get(path)
         .set('Authorization', 'Bearer ' + process.env.AI_BUSINESS_TOKEN)
         .expect(400);
+    await request(app.getHttpServer()).get('/api/parcel-drafts').expect(401);
     await request(app.getHttpServer()).get('/api/orders').expect(401);
     await request(app.getHttpServer())
       .get('/api/orders/1')
@@ -122,6 +128,12 @@ describe('Order read API (e2e)', () => {
 
   it('requires the internal token and rejects unknown payloads without business queries', async () => {
     const before = query.mock.calls.length;
+    await request(app.getHttpServer()).post('/internal/parcel-draft-read').send({}).expect(403);
+    await request(app.getHttpServer())
+      .post('/internal/parcel-draft-read')
+      .set('Authorization', 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN)
+      .send({})
+      .expect(422);
     await request(app.getHttpServer()).post('/internal/order-read').send({}).expect(403);
     await request(app.getHttpServer()).post('/internal/order-cancellation').send({}).expect(403);
     await request(app.getHttpServer())

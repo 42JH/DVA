@@ -5,3 +5,5 @@ export class ReadScopes<Client> {
   run<T>(id:string,client:Client,work:()=>Promise<T>):Promise<T>;
   use<T>(id:string,work:(client:Client)=>Promise<T>):Promise<T>;
 }
+
+export function retryReadSnapshot<T>(work:()=>Promise<T>):Promise<T>;

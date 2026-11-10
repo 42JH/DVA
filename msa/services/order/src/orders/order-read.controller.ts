@@ -9,13 +9,41 @@ import {
 } from '@nestjs/common';
 import { ApiExcludeController } from '@nestjs/swagger';
 import { validateOrderRead, validateAdminOrderRead } from '@dva/events/order-read.cjs';
+import { validateDraftRead } from '@dva/events/parcel-drafts.cjs';
+import { ApiException } from '../common/errors/api.exception';
+import { ParcelDraftReadsService } from './parcel-draft-reads.service';
 import { OrdersService } from './orders.service';
 
 @ApiExcludeController()
 @SetMetadata('auth:internal-customer', true)
 @Controller('internal')
 export class OrderReadController {
-  constructor(private readonly orders: OrdersService) {}
+  constructor(
+    private readonly orders: OrdersService,
+    private readonly drafts: ParcelDraftReadsService,
+  ) {}
+  @Post('parcel-draft-read')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  async draftRead(@Body() event: unknown) {
+    try {
+      validateDraftRead(event, 'customer');
+    } catch {
+      throw new HttpException({ error: 'INVALID_DRAFT_READ' }, 422);
+    }
+    try {
+      const payload = await this.drafts.execute(event);
+      return { eventId: event.eventId, status: 'processed', payload };
+    } catch (error) {
+      if (error instanceof ApiException)
+        throw new HttpException({ error: error.getResponse() }, error.getStatus());
+      if (error instanceof HttpException) throw error;
+      throw new HttpException(
+        { error: { code: 'INTERNAL_ERROR', message: '서버 오류가 발생했습니다.', details: [] } },
+        500,
+      );
+    }
+  }
   @Post('admin-order-read')
   @HttpCode(200)
   @Header('Cache-Control', 'no-store')
