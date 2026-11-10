@@ -40,7 +40,7 @@ const GROUPS: { value: StatusGroup; label: string }[] = [
   { value: 'ALL', label: '전체' },
   { value: 'COLLECTING', label: '미완료' },
   { value: 'notPaid', label: '결제 대기' },
-  { value: 'PAID', label: '결제 완료' },
+  { value: 'PAID', label: '결제 · 접수 완료' }, // 서버 묶음 PAID = 결제 완료 · 디버 접수 중 · 접수 완료 (접수 완료만 따로 묶음 없음, 11/10)
   { value: 'SUBMISSION_FAILED', label: '접수 실패' },
   { value: 'CANCELLED', label: '주문 취소' },
 ]
