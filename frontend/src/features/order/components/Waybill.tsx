@@ -30,6 +30,7 @@ export function WaybillPanel({
   const [editing, setEditing] = useState(false)
   const [notice, setNotice] = useState<string | null>(initialNotice) // 미완료 주문 접수 결과
   const [asking, setAsking] = useState(false)
+  const [askingRetry, setAskingRetry] = useState(false) // [디버에 다시 접수] 확인 창
   const v = w.view
 
   return (
@@ -96,7 +97,7 @@ export function WaybillPanel({
               </Btn>
             )}
             {w.canRetry && (
-              <Btn disabled={w.busy} onClick={w.retry}>
+              <Btn disabled={w.busy} onClick={() => setAskingRetry(true)}>
                 디버에 다시 접수
               </Btn>
             )}
@@ -107,7 +108,29 @@ export function WaybillPanel({
             )}
           </div>
           {w.actionError && <p className="text-[12px] text-ops-stop">{w.actionError}</p>}
+          {w.retryNotice && (
+            <p
+              role="status"
+              className={`text-[12px] ${w.retryNotice.tone === 'stop' ? 'text-ops-stop' : 'text-ops-wait'}`}
+            >
+              {w.retryNotice.text}
+            </p>
+          )}
         </div>
+      )}
+      {/* 결과 저장만 실패했으면 디버엔 이미 접수됐을 수 있음 → 디버 쪽을 먼저 보라고 (orderApi retryOrder 주석) */}
+      {askingRetry && w.canRetry && (
+        <Confirm
+          title="디버에 다시 접수할까요?"
+          ok="다시 접수"
+          busy={w.busy}
+          error={w.actionError}
+          onOk={() => w.retry(() => setAskingRetry(false))}
+          onClose={() => setAskingRetry(false)}
+        >
+          <b className="font-semibold">{v?.no}</b> 주문을 지금 저장된 내용으로 디버에 다시 보냅니다.
+          다시 결제하지 않습니다. 디버에 이미 접수돼 있을 수 있으니 디버 쪽을 먼저 확인해 주세요.
+        </Confirm>
       )}
       {asking && w.canCancel && (
         <Confirm
