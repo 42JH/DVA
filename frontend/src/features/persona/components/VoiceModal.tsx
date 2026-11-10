@@ -7,24 +7,40 @@ import type { usePromptEditor } from '@/features/persona/hooks/usePromptEditor'
 // 'v8 작성 중' (+ 바꾸면 '음성 설정 바뀜') → 목소리 ▾ · 발화 속도 · 말 끝 기다리기 · 미리 듣기 ▶
 // 저장 버튼 없음: 고르는 즉시 작성 중 버전에 반영, 수정 화면 [저장]으로 프롬프트와 같이 저장
 // 11/10 다른 화면과 같은 창(Modal) · 칸(Field) · 버튼(Btn). 아래 줄은 [닫기](✕ · Esc와 같음)만
+// 11/11 보기 화면에서 열면(standalone) 수정 화면이 없으니 창에 [저장]을 두고, 닫기 = 수정 화면 [취소]와 같음
 export function VoiceModal({
   vm,
   subtitle,
+  standalone = false,
 }: {
   vm: ReturnType<typeof usePromptEditor>
   subtitle: string
+  standalone?: boolean
 }) {
+  const close = standalone ? vm.cancel : vm.closeVoice
   return (
     <Modal
       title={vm.voiceTitle}
       extra={vm.voiceChanged ? <Badge tone="route">음성 설정 바뀜</Badge> : undefined}
       sub={subtitle}
       width={560}
-      onClose={vm.closeVoice}
+      onClose={close}
       footer={
-        <Btn className="ml-auto" onClick={vm.closeVoice}>
-          닫기
-        </Btn>
+        <>
+          {standalone && (vm.emptyNotice ?? vm.saveError) && (
+            <p role="alert" className="min-w-0 flex-1 text-[12px] text-ops-stop">
+              {vm.emptyNotice ?? vm.saveError}
+            </p>
+          )}
+          <Btn className="ml-auto" onClick={close}>
+            닫기
+          </Btn>
+          {standalone && (
+            <Btn kind="primary" disabled={!vm.canSave} onClick={vm.save}>
+              {vm.saveLabel}
+            </Btn>
+          )}
+        </>
       }
     >
       <div className="flex flex-col gap-4">
