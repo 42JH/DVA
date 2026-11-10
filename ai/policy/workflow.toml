@@ -257,23 +257,11 @@ type = "choice"
 choices = ["order", "lookup", "cancel", "inquiry", "agent", "end", "chit_chat", "unclear"]
 instructions = "고객 발화의 용건을 고른다. 택배 접수 정보 제공은 order, 보낸 택배 조회는 lookup, 취소는 cancel, 서비스 질문은 inquiry, 상담원 요청은 agent, 명확한 통화 종료는 end, 인사·맞장구·대기 요청은 chit_chat. 직전 AI 발화가 통화를 끝낼지 물었고 고객이 동의하면 end. 접수 중단인지 통화 종료인지 불분명하면 unclear. 직전 AI 발화가 택배 접수를 도와드릴지 물었고 고객이 동의하거나 진행을 바라면(예·네·해 주세요·아뇨 그냥 해 주세요) order. 출발지가 다르다고 해도 택배를 보내려는 것이면 order(예: '아니요 오늘은 회사에서 발송해요'). 직전 AI 발화가 상담원 연결을 권했고 고객이 동의하면 agent."
 
-[[decision.intent.questions]]
-name = "value"
-type = "choice"
-choices = ["yes", "no"]
-instructions = "고객 발화에 새로 기록할 접수 값이 들어 있으면 yes: 보내는 분·받는 분 성함, 받는 분 연락처(번호 일부라도), 발송 주소·받는 곳 주소나 상세주소(지역 이름·도로명·건물명·상호 일부라도), 물품 종류·박스 크기·개수, 물건 가격, 요청 사항, 수거 시각. 예/아니오·후보 고르기·질문·맞장구·대기 요청·연결·종료 요청만 있으면 no."   # 그림자 측정(2026-11-10): 서버는 기록하지 않고 로그만 남긴다
-
 [[decision.collect.questions]]
 name = "switch"
 type = "choice"
 choices = ["none", "edit_parcel", "lookup", "cancel", "inquiry", "agent", "end"]
 instructions = "고객이 하던 업무와 다른 일을 하려는지 고른다. 상담원 연결이나 통화 종료를 명확히 요청하면 확인 답이 섞여 있어도 각각 agent 또는 end다. 직전 AI 발화가 통화를 끝낼지 물었고 고객이 동의하면 end. 접수 중단인지 통화 종료인지 불분명하면 none. 직전 AI 발화가 상담원 연결을 권했고 고객이 동의하면 agent. 접수 정보를 말하거나 질문에 답하면 none, 이미 담은 택배를 고치려 하면 edit_parcel, 보낸 택배 조회는 lookup, 취소는 cancel, 서비스 질문은 inquiry."
-
-[[decision.collect.questions]]
-name = "value"
-type = "choice"
-choices = ["yes", "no"]
-instructions = "고객 발화에 새로 기록할 접수 값이 들어 있으면 yes: 보내는 분·받는 분 성함, 받는 분 연락처(번호 일부라도), 발송 주소·받는 곳 주소나 상세주소(지역 이름·도로명·건물명·상호 일부라도), 물품 종류·박스 크기·개수, 물건 가격, 요청 사항, 수거 시각. 고친 값도 yes. 예/아니오·후보 고르기·질문·맞장구·대기 요청·연결·종료 요청만 있으면 no."   # 그림자 측정(2026-11-10): 서버는 기록하지 않고 로그만 남긴다
 
 [[decision.confirm.questions]]
 name = "confirm"
