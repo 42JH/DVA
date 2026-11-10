@@ -308,6 +308,14 @@ export class OrdersService {
       const customerId = customer?.customerSeq ?? null;
       if (callId !== null && customerId !== null)
         await this.calls.attachCustomer(client, callId, customerId);
+      const usablePinIds =
+        customerId === null
+          ? new Set<number>()
+          : await this.repository.usablePersonalPinIds(
+              client,
+              customerId,
+              draft.parcels.flatMap((parcel) => (parcel.originPin ? [parcel.originPin] : [])),
+            );
       for (const parcel of draft.parcels) {
         if (parcel.originPin?.scope === 'COMPANY')
           throw new ApiException(
@@ -315,11 +323,7 @@ export class OrdersService {
             'INVALID_REQUEST',
             '기업 배송지는 PIN 대신 주소로 전달해 주세요.',
           );
-        if (
-          parcel.originPin &&
-          (customerId === null ||
-            !(await this.repository.canUsePin(client, customerId, parcel.originPin)))
-        )
+        if (parcel.originPin && (customerId === null || !usablePinIds.has(parcel.originPin.pinSeq)))
           throw new ApiException(403, 'FORBIDDEN', '고객이 사용할 수 없는 출발지 PIN입니다.');
       }
       if (input.call && input.outcome !== 'COMPLETE' && !hasOrderData(draft)) {
@@ -475,6 +479,16 @@ export class OrdersService {
       for (const parcelId of input.removeParcelSeqs ?? [])
         if (!byId.has(parcelId))
           throw new ApiException(404, 'NOT_FOUND', '해당 주문의 상세를 찾을 수 없습니다.');
+      const usablePinIds = await this.repository.usablePersonalPinIds(
+        client,
+        customer.customerSeq,
+        (input.parcels ?? []).flatMap((change) => {
+          const previous =
+            change.orderParcelSeq === undefined ? undefined : byId.get(change.orderParcelSeq);
+          const pin = change.originPin === undefined ? previous?.originPin : change.originPin;
+          return pin ? [pin] : [];
+        }),
+      );
       for (const change of input.parcels ?? []) {
         const previous =
           change.orderParcelSeq === undefined ? undefined : byId.get(change.orderParcelSeq);
@@ -499,7 +513,7 @@ export class OrdersService {
               'INVALID_REQUEST',
               '기존 기업 PIN 참조를 새로 지정하거나 주소 변경에 사용할 수 없습니다.',
             );
-        } else if (pin && !(await this.repository.canUsePin(client, customer.customerSeq, pin)))
+        } else if (pin && !usablePinIds.has(pin.pinSeq))
           throw new ApiException(403, 'FORBIDDEN', '고객이 사용할 수 없는 출발지 PIN입니다.');
       }
       await this.repository.updateHeader(
