@@ -1,13 +1,14 @@
 // 고객 (11/06) — 모든 고객 표(이름 · 전화번호 · 구분(개인/기업) · 기본 주소 · 상세주소 · 결제 방법) → 줄을 누르면 오른쪽에 고객 정보 · 개인 주소록 · 주문 내역 · 통화 내역 바로 가기
 import { useRef } from 'react'
 import { Link } from 'react-router'
-import { PageHead } from '@/shared/ui'
+import { Btn, PageHead } from '@/shared/ui'
 import { Icon } from '@/shared/ui'
 import { rowKeys, useEscape } from '@/shared/lib/keys'
 import { SearchBox } from '@/shared/ui/ListFrame'
 import { Pagination } from '@/shared/ui/Pagination'
 import { useScrollable } from '@/shared/lib/useScrollable'
 import { useCustomer, useCustomers } from '../hooks/useCustomers'
+import { CustomerEditForm } from './CustomerEditForm'
 
 export function CustomersPage() {
   const vm = useCustomers()
@@ -118,7 +119,7 @@ export function CustomersPage() {
 
 function CustomerPanel({ seq, onClose }: { seq: number; onClose: () => void }) {
   const v = useCustomer(seq)
-  useEscape(onClose)
+  useEscape(v.editing ? v.stopEdit : onClose) // 수정 중 Esc는 수정만 취소 (적던 내용을 패널째 잃지 않게)
   return (
     <aside
       aria-label="고객 정보"
@@ -126,11 +127,16 @@ function CustomerPanel({ seq, onClose }: { seq: number; onClose: () => void }) {
     >
       <div className="flex h-12 shrink-0 items-center gap-2 border-b border-ops-line px-5">
         <span className="text-[12px] font-medium text-ops-sub">고객 #{seq}</span>
+        {v.canEdit && !v.editing && (
+          <Btn kind="ghost" className="ml-auto" onClick={v.startEdit}>
+            수정
+          </Btn>
+        )}
         <button
           type="button"
           onClick={onClose}
           aria-label="닫기"
-          className="ml-auto grid size-8 place-items-center rounded-md text-ops-sub hover:text-ops-ink"
+          className={`${v.canEdit && !v.editing ? '' : 'ml-auto'} grid size-8 place-items-center rounded-md text-ops-sub hover:text-ops-ink`}
         >
           <Icon name="x" />
         </button>
@@ -138,6 +144,8 @@ function CustomerPanel({ seq, onClose }: { seq: number; onClose: () => void }) {
       <div className="min-h-0 flex-1 [scrollbar-width:thin] overflow-y-auto px-5 py-4">
         {!v.c ? (
           <p className="py-10 text-center text-[14px] text-ops-sub">{v.error ?? '불러오는 중…'}</p>
+        ) : v.editing && v.dto ? (
+          <CustomerEditForm before={v.dto} onDone={v.stopEdit} />
         ) : (
           <>
             <p className="text-[20px] font-bold">{v.c.name}</p>
