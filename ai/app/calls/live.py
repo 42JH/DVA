@@ -46,6 +46,16 @@ GREETING_YES = re.compile(r"(?:네|예|응|맞아요|맞습니다|그렇습니�
 GREETING_OTHER_ORIGIN = re.compile(r"(?:네|예|아니요)?(?:오늘은|이번에는)?다른(?:주소|곳)에서"
                                   r"(?:보낼게요|보내려고요|보냅니다|발송할게요|발송하려고요)")
 
+# 그림자 측정 value 판정. confidence가 아니라 p(yes)로 본다(재생 533발화에서 choice=yes인데 confidence 0.1대인 값 발화 104건).
+# 숫자·수사가 든 발화(번호·호수·개수)는 p(yes)가 0.45 근처로 떨어지는 일이 잦아 낮은 하한을 쓴다(0.35: 재현율 +0.03, 호출 +3%)
+_NUMERIC = re.compile(r"\d|[영공일이삼사오육륙칠팔구]{2,}|[영공일이삼사오육륙칠팔구십백천만]+\s?(?:호|동|층|번|개|박스|원|시|켤레|명|대|상자|마리|장)"
+                      r"|(?:하나|둘|셋|넷|한|두|세|네|다섯|여섯|일곱|여덟|아홉|열)\s?(?:호|동|층|번|개|박스|원|시|켤레|명|대|상자|마리|장)")
+
+
+def value_hit(text: str, p_yes: float, min_p: float, numeric_min_p: float) -> bool:
+    """이 발화를 '새 접수 값이 있는 발화'로 볼지. 운영 동작 없음(stats·집계 전용)."""
+    return p_yes >= (numeric_min_p if _NUMERIC.search(text) else min_p)
+
 
 @dataclass
 class Spoken:
@@ -278,8 +288,13 @@ class LiveFlow:
             answers.pop("origin")  # 인사에서 등록 주소를 대조하지 못했으면 사용 여부는 별도로 묻는다.
         s.note("Decision", ", ".join(f"{k}={v[0]}({v[1]:.2f})" for k, v in answers.items()) + f" {ms}ms",
                {"stage": stage, "pending": pending_id, "input": text, "ms": ms,
+                # 발화 구간: 위임(session.delegation.created.offset_ms)과 같은 발화로 묶는 기준(R1). 그림자 측정(scripts/delegation_shadow.py)
+                "utterance_id": utt.utterance_id, "start_ms": utt.start_ms, "end_ms": utt.end_ms,
                 "answers": {k: {"choice": v[0], "confidence": round(v[1], 3), "probabilities": v[2]}
                             for k, v in answers.items()}})
+        if (v := answers.get("value")) and value_hit(utt.text, v[2].get("yes") or 0, self.cfg.decision_value_min_p,
+                                                     self.cfg.decision_value_numeric_min_p):
+            s.stats["값 발화(그림자)"] += 1  # 서버가 백엔드를 불렀을 발화 수. 동작은 없다(2026-11-10 그림자 측정)
         await self.apply(s, utt, prev, answers, pending_id, box=box, greeting=bool(greeting))
 
     async def _clarify_greeting(self, s: CallSession, utt: Spoken) -> None:

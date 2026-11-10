@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock
 import pytest
 from conftest import CALLER, run
 
-from app.calls.live import LiveFlow
+from app.calls.live import LiveFlow, value_hit
 from app.calls.session import Phase
 from app.tests.test_calls import FakeClient, incoming, service, started, until
 
@@ -195,8 +195,8 @@ def test_order_flow_end_to_end(tmp_path, readback, answer, answer_at):
     assert all(e["event_id"].startswith(s.trace_id) for e in conn.sent)
     # Decision은 고객 발화 끝마다 1번(트리거 아님), 확인 질문은 확인 대기 중에만
     names = [n for _, n in client.decisions.calls]
-    assert len(names) == 3 and names[0] == ["task"] and names[1][0] == "confirm" and "confirm" not in names[2]
-    assert names[2] == ["more", "switch"]
+    assert len(names) == 3 and names[0] == ["task", "value"] and names[1][0] == "confirm" and "confirm" not in names[2]
+    assert names[2] == ["more", "switch", "value"]  # value = 그림자 측정 질문(2026-11-10), 동작 없음
     lat = {r["구간"] for r in snap["latency"]}  # 관제 지연 표
     assert {"Decision", "위임→도구 호출", "도구 record_fields", "확인 '네'→담기", "통화 준비(accept 전)", "accept"} <= lat
     assert any(b["op"].startswith("caller_context") and b["outcome"] == "ok" for b in snap["backend_calls"])  # BE 통신
@@ -498,7 +498,7 @@ def test_box_proposal_uses_separate_confirmation(answer):
         assert st.pending is None
         box = st.current.box_proposal
         questions = decision_questions(P, "item", box_label=box.label)
-        assert [q["name"] for q in questions] == ["box", "switch"]
+        assert [q["name"] for q in questions] == ["box", "switch", "value"]
         reply = Spoken(3, "네" if answer == "yes" else "아니요", 1800, 1900, 102, 103)
         unrelated = Spoken(1, "잠시 기다려 주시겠어요?", 1100, 1500, 101, 101)
         await lf.apply(s, reply, unrelated, {"box": (answer, 1.0)}, None, box=box)
@@ -611,7 +611,7 @@ def test_readback_handoff_or_end_takes_priority_over_yes(customer_request, inten
 
     run(lf.judge(session, utterance, previous))
 
-    assert client.decisions.calls[0][1] == ["confirm", "switch"]
+    assert client.decisions.calls[0][1] == ["confirm", "switch", "value"]
     lf._follow.assert_awaited_once_with(session, "intent", intent)
     assert state.pending is pending and not state.parcels and lf.rt(session).commit is None
 
@@ -686,7 +686,7 @@ def test_customer_info_saved_on_commit_without_asking():
     run(spawned[0])
     assert saved == [{"name": True, "sender": True, "receiver": True, "parcel": facts["parcel_added"]}]
     assert st.address_offer is None
-    assert [q["name"] for q in decision_questions(P, "more_parcels")] == ["more", "switch"]  # 저장 질문 없음
+    assert [q["name"] for q in decision_questions(P, "more_parcels")] == ["more", "switch", "value"]  # 저장 질문 없음
 
 
 def test_order_intent_notice_carries_missing_so_first_question_follows_order():
@@ -876,7 +876,7 @@ def test_order_tool_after_inquiry_or_lookup_switches_intent_to_order():
     lf.svc = SimpleNamespace(stage2=lambda s: None)
     lf.rt = lambda s: SimpleNamespace(intent_started=True)
     for before in ("inquiry", "lookup", "cancel", "agent"):
-        assert [q["name"] for q in decision_questions(P, before)] == ["switch"]  # 끝내기·전환을 듣는다
+        assert [q["name"] for q in decision_questions(P, before)] == ["switch", "value"]  # 끝내기·전환을 듣는다
         st = filled()
         st.intent = before
         lf._business(session(st), "order")
@@ -996,3 +996,12 @@ def test_call_record_keeps_decision_io_backend_text_tool_args_and_delivery():
         await task
 
     run(scenario())
+
+
+def test_value_hit_numeric_utterances_use_lower_threshold():
+    """그림자 측정 value 판정(2026-11-10 2단계): p(yes) 하한은 설정값, 번호·호수·개수가 든 발화는 낮은 하한."""
+    assert value_hit("신지환이요", 0.56, 0.5, 0.35) and not value_hit("신지환이요", 0.45, 0.5, 0.35)
+    assert value_hit("오백 이호요", 0.45, 0.5, 0.35) and value_hit("공일공일이삼사오륙칠팔입니다", 0.49, 0.5, 0.35)
+    assert value_hit("소형 박스 한개요", 0.4, 0.5, 0.35) and value_hit("1004호요", 0.36, 0.5, 0.35)
+    assert not value_hit("이봄 맞아요, 이봄", 0.48, 0.5, 0.35)  # 한 글자 수사(이·사)는 숫자로 보지 않는다
+    assert not value_hit("네", 0.9, 0.95, 0.35)

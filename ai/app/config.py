@@ -115,6 +115,9 @@ class CallConfig(_Strict):
     utterance_gap_ms: int = Field(800, gt=0)         # 마지막 입력 delta 뒤 무 delta → 발화 끝(S0c·S0d)
     decision_budget_sec: float = Field(1.0, gt=0)    # S0d API p95 943ms — 넘으면 판단 없음
     decision_min_confidence: float = Field(0.6, gt=0, le=1)  # task·switch·pick·pay 적용 하한
+    # 그림자 측정 value(이 발화에 새 접수 값이 있는가) 판정: p(yes) 하한. 숫자·수사가 든 발화는 낮은 하한(2단계, 2026-11-10 재생 533발화)
+    decision_value_min_p: float = Field(0.5, gt=0, le=1)
+    decision_value_numeric_min_p: float = Field(0.35, gt=0, le=1)
     unanswered_agent_after: int = Field(3, gt=0)     # 매뉴얼 검색 연속 미답변 → 상담원 권유(업무 규칙 h)
     # 상담원 연결(업무 규칙 e). 전환 대상 SIP URI가 비면 전환하지 않는다(미준비). 근무 시간 밖이면 콜백 제안
     agent_transfer_uri: str = ""
