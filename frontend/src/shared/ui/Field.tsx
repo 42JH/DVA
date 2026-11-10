@@ -90,36 +90,6 @@ export function TextAreaInput({
   )
 }
 
-/** 고르기 칸 (TextInput과 같은 모양) — 브라우저 기본 <select> */
-export function SelectInput({
-  label,
-  value,
-  onChange,
-  options,
-}: {
-  label: string
-  value: string
-  onChange: (v: string) => void
-  options: { value: string; label: string }[]
-}) {
-  return (
-    <label className="flex min-w-0 flex-col gap-1">
-      <Label>{label}</Label>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="h-9 min-w-0 rounded-md bg-white px-2.5 text-[14px] ring-1 ring-ops-line outline-none ring-inset focus:ring-ops-route"
-      >
-        {options.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-      </select>
-    </label>
-  )
-}
-
 /** 치는 대로 추천이 아래에 뜨는 입력 칸 (TextInput과 같은 모양). ↑ ↓로 옮기고 Enter로 고름, Esc · 칸 밖으로 나가면 닫힘 */
 export function SuggestInput<T>({
   label,
