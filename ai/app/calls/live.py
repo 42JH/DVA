@@ -84,6 +84,8 @@ class Runtime:
     cust_end_t: float = 0.0                           # 관제: 마지막 고객 발화 끝(→ AI 말 시작)
     await_speech: tuple[str, float] | None = None     # 관제: (구간 이름, 시작) — 다음 AI 발화 시작까지
     confirm_t: float = 0.0                            # 관제: 확인 "네" 발화 끝(→ 담기)
+    # 서버 질문(후보·확인·출발지·박스·콜백)에 답하는 발화의 Decision 반영 대기. 같은 턴의 Backend 도구 호출이 기다린다
+    deciding: asyncio.Event | None = None
 
     def cancel(self) -> None:
         for h in (self.endpoint, self.ai_end, self.commit):
@@ -174,9 +176,40 @@ class LiveFlow:
             rt.cust_end_t = utt.t_last
         if utt and utt.text.strip() and s.phase == Phase.ACTIVE:
             prev = next((a for a in reversed(rt.ai) if a.t_start < utt.t_start), None)
-            s.spawn(self._judge_customer(s, utt, prev), "decision")
+            gate = asyncio.Event() if self._awaiting_answer(s) else None
+            # 위임은 OpenAI 쪽에서 Live가 시작해 서버가 늦출 수 없다. 대신 이 턴의 도구 호출이 반영을 기다린다(최근 발화 기준)
+            rt.deciding = gate
+            s.spawn(self._judge_customer(s, utt, prev, gate), "decision")
 
-    async def _judge_customer(self, s: CallSession, utt: Spoken, prev: Spoken | None) -> None:
+    def _awaiting_answer(self, s: CallSession) -> bool:
+        """서버가 고객 답으로 상태를 바꿀 질문을 열어 두었는가(Decision의 pick·confirm·origin·box·callback)."""
+        st = s.state
+        return bool(st.candidates or st.pending or (st.callback_offered and not st.callback_requested)
+                    or (st.origin_offered and st.origin_answer is None and not st.origin_applied)
+                    or (st.current and st.current.box_proposal and st.intent == "order")
+                    or assess(st, self.policy).stage == "readback")
+
+    async def _decided(self, s: CallSession) -> None:
+        """서버 질문에 답한 턴이면 Decision 반영까지 기다린다. Backend가 반영 전 상태로 다음 질문을 정하지 않게
+        (운영 통화: 후보 선택으로 연락처가 채워졌는데 Backend가 연락처를 다시 물음)."""
+        gate = self.rt(s).deciding
+        if gate is not None and not gate.is_set():
+            t0 = time.monotonic()
+            try:
+                await asyncio.wait_for(gate.wait(), self.cfg.decision_budget_sec + 0.5)
+            except TimeoutError:
+                pass
+            s.timing("도구→Decision 반영 대기", (time.monotonic() - t0) * 1000)
+
+    async def _judge_customer(self, s: CallSession, utt: Spoken, prev: Spoken | None,
+                              gate: asyncio.Event | None = None) -> None:
+        try:
+            await self._judge_customer_inner(s, utt, prev)
+        finally:
+            if gate is not None:
+                gate.set()
+
+    async def _judge_customer_inner(self, s: CallSession, utt: Spoken, prev: Spoken | None) -> None:
         judge_first = s.state.intent != "order"
         if judge_first:  # 첫 발화가 "농약을 보내려고요"일 수도 있다
             await self.judge(s, utt, prev)
@@ -857,6 +890,7 @@ class LiveFlow:
             s.timing("위임→도구 호출", (d0["tool_t"] - d0["t"]) * 1000)
         if name in TOOL_INTENT:
             self._business(s, TOOL_INTENT[name])
+        await self._decided(s)
         if name == "lookup_orders":
             await self.svc.call_session_seq(s)  # 2단계 통화 등록을 기다린다(실패면 도구가 CALL_NOT_REGISTERED)
         t0 = time.monotonic()
