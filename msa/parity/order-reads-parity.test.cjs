@@ -20,11 +20,16 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
     try {
       for(const client of retention) { await client.query('ROLLBACK');client.release(); }
       for(const db of [databases.monolith,databases.order])await db.query('DELETE FROM order_parcel_drafts WHERE draft_seq BETWEEN 13001 AND 13008');
+      for(const db of [databases.monolith,databases.customer]){
+        await db.query('DELETE FROM memberships WHERE membership_seq BETWEEN 6101 AND 6105');
+        await db.query('DELETE FROM organizations WHERE organization_seq BETWEEN 6001 AND 6003');
+      }
+      for(const db of [databases.monolith,databases.order])await db.query('DELETE FROM organization_billing_months WHERE organization_seq BETWEEN 6001 AND 6003');
       for(const db of [databases.monolith,databases.consultation])await db.query("DELETE FROM call_sessions WHERE provider_call_id LIKE 'draft-reference-%'");
     } finally { await Promise.all(Object.values(databases).map(db=>db.end())); }
   });
   const reference=databases.monolith;
-  const owners={operations:['admin_users','admin_sessions','audit_logs'],customer:['customers','personal_pins'],consultation:['call_sessions'],order:orderTables};
+  const owners={operations:['admin_users','admin_sessions','audit_logs'],customer:['customers','personal_pins','organizations','memberships'],consultation:['call_sessions'],order:orderTables};
   const sides=[{name:'monolith',base:'http://monolith-app:3000'}, {name:'msa',base:'http://order-app:3002'}];
   for (const [service,port] of [['monolith',3000],['operations',3005],['customer',3001],['consultation',3004],['order',3002]]) {
     const url=`http://${service}-app:${port}/${service==='monolith'?'api':service}/docs-json`;
@@ -54,6 +59,12 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
       [id,'고객 '+id,'0100000000'+(id===5?4:id),[3,7].includes(id)?'WITHDRAWN':'ACTIVE',id===4?'2026-01-01T00:00:00Z':null]);
     await db.query(`INSERT INTO personal_pins(personal_pin_seq,customer_seq,address_data,version) OVERRIDING SYSTEM VALUE
       VALUES(2,1,$1,9)`,[{name:'원본 변경됨',phoneNumber:'01000000001',roadAddress:'새 도로',jibunAddress:'새 지번',dongName:'새 동',postalCode:'11111'}]);
+  }
+  for(const db of [reference,databases.customer]){
+    for(const [id,status,deleted]of [[6001,'INACTIVE',null],[6002,'ACTIVE','2026-01-01Z'],[6003,'ACTIVE',null]])await db.query(
+      "INSERT INTO organizations(organization_seq,name,status,created_at,deleted_at) OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,'2025-01-01Z',$4)",[id,'현재 기업 '+id,status,deleted]);
+    for(const [id,customer,org,status,deleted]of [[6101,1,6001,'INACTIVE',null],[6102,3,6001,'ACTIVE',null],[6103,4,6001,'ACTIVE',null],[6104,2,6002,'ACTIVE',null],[6105,5,6003,'ACTIVE','2026-01-01Z']])await db.query(
+      "INSERT INTO memberships(membership_seq,customer_seq,organization_seq,employee_no,status,deleted_at) OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,$4,$5,$6)",[id,customer,org,'00'+id,status,deleted]);
   }
   const statuses=['COLLECTING','notPaid','PAID','SUBMITTING','SUBMITTING_FAILED','ACCEPTED','SUBMISSION_FAILED','CANCELLED','ACCEPTED','ACCEPTED','COLLECTING','ACCEPTED','ACCEPTED','ACCEPTED','COLLECTING'];
   for(const db of [reference,databases.order]) {
@@ -408,7 +419,20 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
     for(const query of ['', '?limit=1','?offset=999','?q=한글','?q=010-9876-5432','?q=%25','?q=_','?q=%27%20OR%201%3D1--',
       '?from=2030-02-01T00:00:00Z&to=2030-02-10T00:00:00Z&limit=2']) await compare('/api/admin/orders'+query);
     for(const group of ['COLLECTING','notPaid','PAID','SUBMISSION_FAILED','CANCELLED']) await compare('/api/admin/orders?statusGroup='+group);
+    for(const organization of [6001,6002,6003,2147483647])for(const group of ['', '&statusGroup=COLLECTING','&statusGroup=PAID','&statusGroup=CANCELLED'])await compare('/api/admin/orders?organizationSeq='+organization+group+'&limit=1&offset=1');
+    for(const query of ['?organizationSeq=0','?organizationSeq=2147483648','?organizationSeq=1&organizationSeq=2'])await compare('/api/admin/orders'+query,400);
+    const original=await compare('/api/admin/orders?limit=1&offset=1');
+    for(const query of ['?limit=100','?limit=1&offset=999','?statusGroup=PAID','?statusGroup=COLLECTING'])assert.deepEqual((await compare('/api/admin/orders'+query)).statusCounts,original.statusCounts);
+    const path='/api/admin/orders?limit=2',requestId=randomUUID(),expected=await request(sides[0],path,200,headers,requestId);
+    await Promise.all(Array.from({length:12},async()=>assert.deepEqual(await request(sides[1],path,200,headers,requestId),expected)));
     await compare('/api/admin/orders',401,{});
+    try {
+      for(const db of [reference,databases.order])await db.query(`INSERT INTO order_parcel_drafts(draft_seq,reserved_order_seq,client_parcel_id,created_by_admin_user_seq,creation_payload,parcel_data,status,created_at,updated_at,retention_started_at)
+        OVERRIDING SYSTEM VALUE SELECT 14000+n,40000+n,gen_random_uuid(),1,'{}','{"origin":{"name":"분할 초안 한글_%","phoneNumber":"01098765432"},"documentCount":2,"otherItemDescription":"메모"}'::jsonb,
+        'INCOMPLETE','2030-01-01Z','2030-01-01Z','2030-01-01Z' FROM generate_series(1,251) n`);
+      for(const query of ['?q='+encodeURIComponent('분할 초안 한글_%'),'','?statusGroup=COLLECTING','?q=010-9876-5432'])for(const offset of [0,249,250,251])await compare('/api/admin/orders'+(query||'?')+(query?'&':'')+'limit=1&offset='+offset);
+    } finally {for(const db of [reference,databases.order])await db.query('DELETE FROM order_parcel_drafts WHERE draft_seq BETWEEN 14001 AND 14251');}
+
   });
   await t.test('previous addresses use accepted active snapshots, existing customers and caller bounds',async()=> {
     for(const direction of ['ORIGIN','DESTINATION']) for(const query of ['', '&limit=1','&offset=100','&q=한글','&q=%25',
@@ -487,7 +511,7 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
     try {
       await blocker.query('BEGIN');await blocker.query("SET LOCAL lock_timeout='2s'");
       await blocker.query('LOCK TABLE orders IN ACCESS EXCLUSIVE MODE');
-      pending=fetch(sides[1].base+'/api/orders/1001',{headers:ai(1011),signal:AbortSignal.timeout(20000)});
+      pending=fetch(sides[1].base+'/api/orders/1001',{headers:{Authorization:'Bearer '+process.env.PGPASSWORD,...ai(1011)},signal:AbortSignal.timeout(20000)});
       await blocked(databases.order,'SELECT jsonb_build_object%');
       const ended=databases.consultation.query("UPDATE call_sessions SET ended_at='2030-01-02T00:00:00Z',started_at='2030-01-01T00:00:00Z' WHERE call_session_seq=1011");
       const withdrawn=databases.customer.query("UPDATE customers SET status='WITHDRAWN' WHERE customer_seq=1");
@@ -495,7 +519,7 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
       await blocker.query('COMMIT');
       const response=await pending;assert.equal(response.status,200);assert.equal((await response.json()).data.orderSeq,1001);
       await Promise.all([ended,withdrawn]);
-      const denied=await fetch(sides[1].base+'/api/orders/1001',{headers:ai(1011)});assert.equal(denied.status,409);
+      const denied=await fetch(sides[1].base+'/api/orders/1001',{headers:{Authorization:'Bearer '+process.env.PGPASSWORD,...ai(1011)}});assert.equal(denied.status,409);
       await databases.consultation.query('UPDATE call_sessions SET ended_at=NULL,started_at=NULL WHERE call_session_seq=1011');
       await databases.customer.query("UPDATE customers SET status='ACTIVE' WHERE customer_seq=1");
     } finally { await blocker.query('ROLLBACK');blocker.release();await pending?.catch(()=>{}); }

@@ -2,6 +2,11 @@ import {
   requestOrderCancellation,
   OrderCancellationError,
 } from '@dva/events/order-cancellation.cjs';
+import { requestReferences, requestOrderOrganization } from '@dva/events/call-read-references.cjs';
+import { requestDraftCallReferences } from '@dva/events/parcel-drafts.cjs';
+import { readCallbackUrl } from '@dva/events/read-scope.cjs';
+import { requestAdminOrderRead, type AdminOrderReadEvent } from '@dva/events/order-read.cjs';
+import { incompleteDraftIds } from './admin-order-drafts';
 import { OrderShipmentCheckClient } from './order-shipment-check.client';
 import { AuditService } from '../audit/audit.service';
 import { writeOrder } from './order-write';
@@ -235,10 +240,119 @@ export class OrdersService {
 
   async adminList(query: AdminOrderListQueryDto) {
     this.assertDateRange(query);
-    return new ListResponse(
-      await this.repository.adminList(this.database.pool, query),
-      query.limit,
+    try {
+      const result = await requestAdminOrderRead(
+        this.config.get('CONSULTATION_URL', { infer: true }) + '/internal/admin-order-read',
+        this.config.get('CUSTOMER_AUTH_TOKEN', { infer: true }),
+        {
+          eventId: randomUUID(),
+          source: 'order',
+          eventType: 'AdminOrdersReadRequested',
+          payload: {
+            query: { ...query },
+            orderAddress: this.config.get('MSA_INSTANCE_IP', { infer: true }) ?? null,
+          },
+        },
+      );
+      return Object.assign(Object.create(ListResponse.prototype) as ListResponse<unknown>, result);
+    } catch (error) {
+      if (error instanceof OrderReadError)
+        throw new ApiException(
+          error.status,
+          error.error.code as ErrorCode,
+          error.error.message,
+          error.error.details,
+        );
+      throw new ApiException(
+        503,
+        'DEPENDENCY_UNAVAILABLE',
+        '서비스를 일시적으로 사용할 수 없습니다.',
+      );
+    }
+  }
+
+  async executeAdmin(event: AdminOrderReadEvent) {
+    const query = (await createValidationPipe().transform(event.payload.query, {
+      metatype: AdminOrderListQueryDto,
+      type: 'query',
+    })) as AdminOrderListQueryDto;
+    this.assertDateRange(query);
+    const token = this.config.get('CUSTOMER_AUTH_TOKEN', { infer: true });
+    const customerOrigin = this.config.get('CUSTOMER_URL', { infer: true }),
+      consultationOrigin = this.config.get('CONSULTATION_URL', { infer: true });
+    const customerUrl = (path: string) =>
+      readCallbackUrl(customerOrigin, path, event.payload.customerAddress ?? null);
+    const consultationUrl = readCallbackUrl(
+      consultationOrigin,
+      '/internal/order-draft-call-references',
+      event.payload.consultationAddress ?? null,
     );
+    return this.database.transaction(async (client) => {
+      await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
+      await client.query('SELECT 1');
+      const organization =
+        query.organizationSeq === undefined
+          ? null
+          : await requestOrderOrganization(
+              customerUrl('/internal/call-read-references/order-organization'),
+              token,
+              query.organizationSeq,
+              event.eventId,
+            );
+      const draftIds = await incompleteDraftIds(
+        client,
+        query,
+        organization?.customer_seqs ?? null,
+        (input) => requestDraftCallReferences(consultationUrl, token, input, event.eventId),
+      );
+      const rows = await this.repository.adminList(
+        client,
+        query,
+        organization?.customer_seqs ?? null,
+        draftIds,
+      );
+      const customerIds = [
+        ...new Set(rows.rows.flatMap((row) => (row.customerSeq === null ? [] : [row.customerSeq]))),
+      ];
+      const customers = new Map(
+        (customerIds.length
+          ? await requestReferences(
+              'customer',
+              customerUrl('/internal/call-read-references/for-orders'),
+              token,
+              customerIds,
+              'order',
+              event.eventId,
+            )
+          : []
+        ).map((row) => [row.customer_seq, row]),
+      );
+      const page = new ListResponse(
+        {
+          ...rows,
+          rows: rows.rows.map((row) => ({
+            ...row,
+            customerSeq:
+              row.customerSeq === null
+                ? null
+                : (customers.get(row.customerSeq)?.customer_seq ?? null),
+            organizationName:
+              row.customerSeq === null
+                ? null
+                : (customers.get(row.customerSeq)?.organization_name ?? null),
+          })),
+        },
+        query.limit,
+      );
+      const counts = await this.repository.adminStatusCounts(
+        client,
+        query,
+        organization?.customer_seqs ?? null,
+      );
+      return Object.assign(page, {
+        statusCounts: { ...counts, all: counts.all + draftIds.length, incomplete: draftIds.length },
+      });
+    });
   }
 
   async list(adminId: number | null, query: OrderQueryDto, header?: string) {

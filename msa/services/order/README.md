@@ -71,3 +71,7 @@ operations Liquibase 010을 앱보다 먼저 적용하고 operations → consult
 production의 10초 워커가 비삭제 기업을 발견하고 원본 generate_series 규칙으로 누락 월을 찾는다. 10건씩 customer 공유 잠금 → order callback → 원장·AuditCommitted 커밋 → operations 감사 확정 ACK를 기다린다. INACTIVE 기업도 포함하며 source와 같은 advisory lock `(20261030,139)`·유일성으로 중복 실행을 조정한다. 초기화한 월마다 credit/groupBilling 두 SYSTEM 감사를 남기고 직전 금액과 0을 기록한다. 청구 사용액을 이전 월에서 이월하지 않는다. test 환경은 자동 워커를 실행하지 않는다.
 
 기존 CUSTOMER_URL/ORDER_URL/CUSTOMER_AUTH_TOKEN과 order 003·operations 010을 재사용한다. 비공개 `/internal/billing/*`는 Ingress와 OpenAPI에서 제외하며 조회/기업 응답을 inbox에 저장하지 않는다. 서비스 장애는 다음 tick에서 다시 확인한다. 원장 SQL·감사 준비 실패는 해당 배치 전체를 롤백한다. 이미 커밋된 응답 유실은 원장 유일성과 기존 감사 복구로 수렴한다. 분리 DB의 전역 원자성을 보장하지 않는다. 주문 결제 시 사용액 적립은 후속 결제/접수 단위에서 연결한다.
+
+관리자 화면 목록은 원본과 같이 현재 고객·기업명, 미완료 초안의 예약 주문번호·draftSeq, 기업 필터와 statusCounts를 반환한다. COLLECTING 탭에는 INCOMPLETE 초안만 포함하며 상태별 건수는 선택 탭과 페이지 제한을 적용하지 않는다. 통화→고객→주문 순서로 읽기 스냅샷을 확보하고 내부 콜백은 확보한 연결을 사용한다. 상담/고객 장애 시 이 화면은 503이며 로컬 주문 목록·상세는 계속 조회할 수 있다.
+
+다중 Pod 및 롤링 배포에서는 각 인스턴스의 `MSA_INSTANCE_IP`가 필요하다. k8s 매니페스트는 Downward API의 `status.podIP`를 주입한다. 이 값은 서비스 자격 증명으로 인증한 내부 읽기 콜백의 목적지로만 쓰며 사설 IPv4만 허용한다. 단일 인스턴스 로컬 실행은 미설정 시 기존 서비스 origin을 사용한다.

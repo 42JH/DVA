@@ -45,6 +45,23 @@ def main():
             raise RuntimeError(name+' exited with '+code)
 
     password, token = uuid.uuid4().hex, uuid.uuid4().hex
+    def start_app(side, port, payment_reads=False):
+        name = RUN+'-'+side+('-payment-read-app' if payment_reads else '-app')
+        create(name, images[side], '--network-alias', side+'-app', '-e', 'NODE_ENV='+('test' if payment_reads else 'production'), '-e', 'PORT='+str(port),
+               '-e', 'DB_HOST='+side+'-db', '-e', 'DB_USER='+side+'_app', '-e', 'DB_PASSWORD='+password,
+               '-e', 'DB_NAME=dva_webhook_test', '-e', 'SECURITY_LOG_HMAC_KEY='+uuid.uuid4().hex+uuid.uuid4().hex,
+               '-e', 'CORS_ORIGINS=http://localhost:5173,https://payments.example.test', '-e', 'SWAGGER_ENABLED=true', '-e', 'AI_BUSINESS_TOKEN='+password,
+               *(['-e', 'ORDER_PAYMENTS_ENABLED=true', '-e', 'PAYMENT_PUBLIC_URL=https://payments.example.test/api/payments',
+                  '-e', 'TOSS_TEST_CLIENT_KEY=test_gck_parity', '-e', 'TOSS_TEST_SECRET_KEY=test_gsk_parity',
+                  '-e', 'PAYMENT_MATTERMOST_WEBHOOK_URL=https://mattermost.example.test/hooks/parity'] if payment_reads else []),
+               '-e', 'AI_AGENT_URL=http://ai.invalid:8000', '-e', 'OPERATIONS_URL=http://operations-app:3005',
+               '-e', 'CUSTOMER_URL=http://customer-app:3001', '-e', 'CONSULTATION_URL=http://consultation-app:3004',
+               '-e', 'DELIVERY_URL=http://delivery-app:3003', '-e', 'ORDER_URL=http://order-app:3002', '-e', 'CUSTOMER_AUTH_TOKEN='+password, '-e', 'CONSULTATION_AUTH_TOKEN='+token)
+        run('docker', 'start', name, label=side+('-payment-read-start' if payment_reads else '-app-start'))
+        if side == 'consultation':
+            # Order restores legacy call bindings through consultation during bootstrap.
+            run('docker', 'exec', name, 'node', '-e', "(async()=>{for(let i=0;i<100;i++){try{if((await fetch('http://127.0.0.1:3004/consultation/health')).ok)return;}catch{}await new Promise(r=>setTimeout(r,100));}throw Error('consultation startup unavailable')})().catch(()=>process.exit(1))", label='consultation-app-ready')
+
     try:
         images = {}
         for side, path, target in (
@@ -95,27 +112,21 @@ def main():
         for side in ('order', 'consultation'):
             run('docker', 'stop', '--time=5', RUN+'-'+side+'-draft-app', label='draft-'+side+'-stop')
         for side, port in (('monolith', 3000), ('operations', 3005), ('customer', 3001), ('consultation', 3004), ('delivery', 3003), ('order', 3002)):
-            name = RUN+'-'+side+'-app'
-            create(name, images[side], '--network-alias', side+'-app', '-e', 'NODE_ENV=production', '-e', 'PORT='+str(port),
-                   '-e', 'DB_HOST='+side+'-db', '-e', 'DB_USER='+side+'_app', '-e', 'DB_PASSWORD='+password,
-                   '-e', 'DB_NAME=dva_webhook_test', '-e', 'SECURITY_LOG_HMAC_KEY='+uuid.uuid4().hex+uuid.uuid4().hex,
-                   '-e', 'CORS_ORIGINS=http://localhost:5173,https://payments.example.test', '-e', 'SWAGGER_ENABLED=true', '-e', 'AI_BUSINESS_TOKEN='+password,
-                   *(['-e', 'ORDER_PAYMENTS_ENABLED=true', '-e', 'PAYMENT_PUBLIC_URL=https://payments.example.test/api/payments',
-                      '-e', 'TOSS_TEST_CLIENT_KEY=test_gck_parity', '-e', 'TOSS_TEST_SECRET_KEY=test_gsk_parity',
-                      '-e', 'PAYMENT_MATTERMOST_WEBHOOK_URL=https://mattermost.example.test/hooks/parity'] if side in ('monolith', 'order') else []),
-                   '-e', 'AI_AGENT_URL=http://ai.invalid:8000', '-e', 'OPERATIONS_URL=http://operations-app:3005',
-                   '-e', 'CUSTOMER_URL=http://customer-app:3001', '-e', 'CONSULTATION_URL=http://consultation-app:3004',
-                   '-e', 'DELIVERY_URL=http://delivery-app:3003', '-e', 'ORDER_URL=http://order-app:3002', '-e', 'CUSTOMER_AUTH_TOKEN='+password, '-e', 'CONSULTATION_AUTH_TOKEN='+token)
-            run('docker', 'start', name, label=side+'-app-start')
-            if side == 'consultation':
-                # Order restores legacy call bindings through consultation during bootstrap.
-                run('docker', 'exec', name, 'node', '-e', "(async()=>{for(let i=0;i<100;i++){try{if((await fetch('http://127.0.0.1:3004/consultation/health')).ok)return;}catch{}await new Promise(r=>setTimeout(r,100));}throw Error('consultation startup unavailable')})().catch(()=>process.exit(1))", label='consultation-app-ready')
+            start_app(side, port)
+        # Payment read fixtures must not become notification jobs in the independent five-second worker.
+        # Cancellation/retention/scheduler suites keep the original production processes below.
+        for side, port in (('monolith', 3000), ('order', 3002)):
+            run('docker', 'stop', '--time=5', RUN+'-'+side+'-app', label=side+'-payment-read-stop')
+            start_app(side, port, payment_reads=True)
         name = RUN+'-differential'
         create(name, images['order-checks'], '-e', 'NODE_ENV=test', '-e', 'PGPASSWORD='+password, '-e', 'PGDATABASE=dva_webhook_test',
                '-e', 'CUSTOMER_AUTH_TOKEN='+password, '-e', 'CONSULTATION_AUTH_TOKEN='+token,
                command=('node', '--test', 'test/order-reads-parity.test.cjs'))
         run('docker', 'cp', str(ROOT/'msa/parity/order-reads-parity.test.cjs'), name+':/app/service/test/order-reads-parity.test.cjs', label='differential-copy')
         complete(name)
+        for side in ('monolith', 'order'):
+            run('docker', 'stop', '--time=5', RUN+'-'+side+'-payment-read-app', label=side+'-payment-read-finish')
+            run('docker', 'start', RUN+'-'+side+'-app', label=side+'-production-restart')
         for suite in ['order-deletion-parity', 'order-deletion-recovery', 'order-cancellation-parity', 'order-cancellation-recovery', 'parcel-draft-compatibility']:
             name = RUN+'-'+suite
             create(name, images['order-checks'], '-e', 'NODE_ENV=test', '-e', 'PGPASSWORD='+password, '-e', 'PGDATABASE=dva_webhook_test',
