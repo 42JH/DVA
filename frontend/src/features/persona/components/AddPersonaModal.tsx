@@ -1,5 +1,5 @@
-import { Btn } from '@/shared/ui'
-import { Choice, SelectInput, TextAreaInput, TextInput } from '@/shared/ui/Field'
+import { Btn, SelectField } from '@/shared/ui'
+import { Choice, TextAreaInput, TextInput } from '@/shared/ui/Field'
 import { Modal } from '@/shared/ui/Modal'
 import { useAddPersona } from '@/features/persona/hooks/useAddPersona'
 
@@ -55,7 +55,8 @@ export function AddPersonaModal({
           />
         ))}
         <h3 className="mt-2 text-[14px] font-bold">음성</h3>
-        <SelectInput
+        <SelectField
+          compact
           label="목소리"
           value={vm.voice.voice}
           onChange={vm.setVoiceName}

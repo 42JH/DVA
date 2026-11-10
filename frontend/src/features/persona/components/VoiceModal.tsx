@@ -1,5 +1,5 @@
-import { Badge, Btn } from '@/shared/ui'
-import { Choice, Label, SelectInput } from '@/shared/ui/Field'
+import { Badge, Btn, SelectField } from '@/shared/ui'
+import { Choice, Label } from '@/shared/ui/Field'
 import { Modal } from '@/shared/ui/Modal'
 import type { usePromptEditor } from '@/features/persona/hooks/usePromptEditor'
 
@@ -28,7 +28,8 @@ export function VoiceModal({
       }
     >
       <div className="flex flex-col gap-4">
-        <SelectInput
+        <SelectField
+          compact
           label="목소리"
           value={vm.voice.voice}
           onChange={vm.setVoiceName}
