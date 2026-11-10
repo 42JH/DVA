@@ -123,7 +123,8 @@ export function useWaybill(orderSeq: number, parcelSeq: number | null) {
     canRetry: status === 'SUBMISSION_FAILED',
     // after = 끝나면 할 일 (초안 삭제면 패널 닫기 — 지운 초안을 다시 묻지 않게)
     cancel: (after?: () => void) => cancel.mutate(undefined, { onSuccess: () => after?.() }),
-    retry: () => retry.mutate(),
+    // after = 성공하면 할 일 (확인 창 닫기 — 다시 실패해도 버튼이 남아 창이 저절로 안 닫힘)
+    retry: (after?: () => void) => retry.mutate(undefined, { onSuccess: () => after?.() }),
     busy: cancel.isPending || retry.isPending,
     // 다시 누르면(mutate) 지난 응답이 지워져 안내도 사라짐
     retryNotice: retry.data ? (RETRY_NOTICE[retry.data.data.status] ?? null) : null,
