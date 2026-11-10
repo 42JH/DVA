@@ -21,8 +21,8 @@ from app.domain.address_book import prefill_sender
 from app.domain.assess import assess, readback_facts
 from app.domain.candidates import apply_pick, offer, reject_candidates
 from app.domain.claims import truth, unverified_claims
-from app.domain.confirm import (ConfirmAnswer, Utterance, asks, check_gate, commit_parcel, issue_cancel_confirmation,
-                                issue_parcel_confirmation, release, take_cancel)
+from app.domain.confirm import (ConfirmAnswer, Utterance, asks, asks_parcel_confirmation, check_gate, commit_parcel,
+                                issue_cancel_confirmation, issue_parcel_confirmation, release, take_cancel)
 from app.domain.state import BOX_SIZE_NAMES, BoxProposal, ConversationState
 from app.domain.store import hold_unclassified_items, item_issues_pending
 from app.observability.trace import span
@@ -55,9 +55,10 @@ class Spoken:
     t_start: float
     t_last: float
     ready_parcel_id: str | None = None
+    readback_id: str | None = None
 
     def utterance(self) -> Utterance:
-        return Utterance(self.utterance_id, self.start_ms or 0, self.end_ms or 0, self.t_start, self.text)
+        return Utterance(self.utterance_id, self.start_ms or 0, self.end_ms or 0, self.t_start, self.text, self.readback_id)
 
 
 @dataclass
@@ -74,6 +75,7 @@ class Runtime:
     commit: asyncio.TimerHandle | None = None
     commit_pid: str | None = None
     ready_notice: str | None = None                    # 다음 AI 발화에 한해 접수를 안내할 수 있는 택배 ID
+    readback_id: str | None = None                     # 현재 말할 서버 확인 내용의 pending ID
     n3: int = 0
     sent_hashes: set[str] = field(default_factory=set)
     intent_started: bool = False
@@ -120,6 +122,7 @@ class LiveFlow:
         rt, now = self.rt(s), time.time()
         if rt.cust is None:
             rt.ready_notice = None
+            rt.readback_id = None
             rt.seq += 1
             rt.cust = Spoken(rt.seq, "", ev.get("start_ms") or 0, ev.get("end_ms") or 0, now, now)
             rt.customer_turns.append(rt.cust)
@@ -138,13 +141,17 @@ class LiveFlow:
     def on_output(self, s: CallSession, ev: dict) -> None:
         rt, now = self.rt(s), time.time()
         last = rt.ai[-1] if rt.ai else None
-        if last and now - last.t_last <= self.cfg.utterance_gap_ms / 1000:
+        pending = s.state.pending
+        readback_id = rt.readback_id if pending and pending.id == rt.readback_id else None
+        customer_cut_in = last and last.readback_id and rt.customer_turns and rt.customer_turns[-1].t_start > last.t_start
+        if last and now - last.t_last <= self.cfg.utterance_gap_ms / 1000 \
+                and not customer_cut_in and (readback_id is None or last.readback_id == readback_id):
             last.text += ev.get("delta", "")
             last.end_ms, last.t_last = ev.get("end_ms") or last.end_ms, now
         else:
             rt.seq += 1
             rt.ai.append(Spoken(rt.seq, ev.get("delta", ""), ev.get("start_ms") or 0, ev.get("end_ms") or 0,
-                                now, now, ready_parcel_id=rt.ready_notice))
+                                now, now, ready_parcel_id=rt.ready_notice, readback_id=readback_id))
             rt.ready_notice = None
             del rt.ai[:-20]
             if rt.cust_end_t:  # 새 AI 발화 시작 = 고객 말 끝 뒤 첫 반응
@@ -195,6 +202,8 @@ class LiveFlow:
         if not rt.ai:
             return
         spoken = rt.ai[-1]
+        if rt.readback_id and spoken.readback_id == rt.readback_id and asks_parcel_confirmation(spoken.text):
+            rt.readback_id = None
         pid = spoken.ready_parcel_id
         ready_receipt = pid is not None and self.svc.intake.confirmed_status(s, pid) == "ready"
         if claims := unverified_claims(spoken.text, s.state, self.policy, ready_receipt=ready_receipt):
@@ -484,7 +493,8 @@ class LiveFlow:
                     facts = {"confirmation": "ask_again", "cancel_target": _order_facts(pending.snapshot)}
                 elif pending and st.current is not None:
                     sources = {n: f.source for n, f in st.current.fields.items()}
-                    facts = {"confirmation": "ask_again", "readback": readback_facts(pending.snapshot, sources, self.policy)}
+                    facts = {"confirmation": "ask_again", "readback": readback_facts(pending.snapshot, sources, self.policy),
+                             "readback_id": pending.id}
             if facts:
                 s.note("확인 다시 묻기", value)
                 await self.notify(s, "N2", facts, again=True)  # 두 번째 애매한 답에도 다시 묻는다(같은 내용 중복 제거 무시)
@@ -836,16 +846,22 @@ class LiveFlow:
         s.tool_calls.append(view)
         s.stats["도구"] += 1
         ctx = s.tools
+        turns = self.rt(s).customer_turns
+        readback_turn = turns[-1].utterance_id if turns else 0
         if name == "record_fields":
             offset = d0["offset_ms"]
-            turns = self.rt(s).customer_turns
             utterance = next((u for u in reversed(turns) if offset is not None
                               and u.start_ms <= offset <= u.end_ms + self.cfg.utterance_gap_ms), None)
             if not utterance and offset is None and len(turns) == 1:
                 utterance = turns[0]
+            if utterance:
+                readback_turn = utterance.utterance_id
             ctx = replace(ctx, item_utterance=(utterance.utterance_id, utterance.text) if utterance else (0, ""))
         with span("tool", tool=name):
             out = await run_tool(ctx, name, item.get("arguments") or "{}", call_id, allowed=MODEL_TOOLS)
+        readback_id = (out.get("facts") or {}).get("readback_id")
+        if readback_id:
+            out = out | {"facts": {key: value for key, value in out["facts"].items() if key != "readback_id"}}
         view.update(status=out.get("code") or out["status"], output=out,
                     elapsed_ms=round((time.monotonic() - t0) * 1000), done_at=time.time())
         if out["status"] != "ok":
@@ -875,9 +891,10 @@ class LiveFlow:
                         out = out | {"facts": out.get("facts", {}) | {"cancel_target": _order_facts(issued.snapshot)}}
         view["output"] = out  # Live에 실제로 넘긴 결과(매뉴얼 미답변 집계·취소 대상이 덧붙은 것)
         s.changed()
-        await self.send(s, {"type": "response.item.create", "item": {
+        delivered = await self.send(s, {"type": "response.item.create", "item": {
             "type": "function_call_output", "call_id": call_id, "output": json.dumps(out, ensure_ascii=False)}})
         d = self._dl(s, did)
+        d["readback_offer"] = (readback_id, readback_turn) if delivered and readback_id else None
         d["inflight"] -= 1
         d["outputs"] += 1
         if d["completed"]:
@@ -895,7 +912,19 @@ class LiveFlow:
             d["outputs"] = 0
             s.note("재개", str(did)[-6:])
             self.rt(s).await_speech = ("재개→AI 발화", time.time())
-            await self.send(s, {"type": "response.create"})
+            offer = d.pop("readback_offer", None)
+            marked = offer is not None and self._mark_readback(s, *offer)
+            if not await self.send(s, {"type": "response.create"}) and marked:
+                self.rt(s).readback_id = None
+
+    def _mark_readback(self, s: CallSession, pending_id: str, customer_turn: int) -> bool:
+        rt, pending = self.rt(s), s.state.pending
+        latest = rt.customer_turns[-1].utterance_id if rt.customer_turns else 0
+        if (s.phase != Phase.ACTIVE or pending is None or pending.kind != "parcel" or pending.id != pending_id
+                or customer_turn != latest or rt.cust is not None):
+            return False
+        rt.readback_id = pending_id
+        return True
 
     def _delegation_in(self, s: CallSession, utt: Spoken) -> bool:
         lo, hi = utt.start_ms, utt.end_ms + self.cfg.utterance_gap_ms
@@ -911,8 +940,12 @@ class LiveFlow:
         """N1' thinking(무음) · N2 commentary(말할 것, AI 발화가 멈춘 뒤·진행 위임 뒤) · N3 instructions(정정, 상한).
         again: 같은 내용이라도 다시 보낸다(마무리 인사 재요청)."""
         rt = self.rt(s)
+        readback_id = facts.get("readback_id")
+        readback_turn = rt.customer_turns[-1].utterance_id if rt.customer_turns else 0
+        if readback_id:
+            facts = {key: value for key, value in facts.items() if key != "readback_id"}
         content = json.dumps(facts, ensure_ascii=False, sort_keys=True)
-        h = hashlib.sha256(f"{level}:{content}".encode()).hexdigest()
+        h = hashlib.sha256(f"{level}:{readback_id}:{content}".encode()).hexdigest()
         if h in rt.sent_hashes and not again:
             return  # 같은 내용 중복 송신 안 함(§6.3)
         rt.sent_hashes.add(h)
@@ -926,6 +959,8 @@ class LiveFlow:
             receipt_pid = facts.get("parcel_added") if facts.get("draft_intake") == "ready" else None
             t0 = time.monotonic()
             await self._wait_quiet(s, min_quiet_ms=self.cfg.utterance_gap_ms if receipt_pid else 0)
+            if readback_id and not self._mark_readback(s, readback_id, readback_turn):
+                return
             if facts.get("greeting_confirmation") == "ask_intent" and (
                     s.state.intent is not None or len(rt.customer_turns) != 1):
                 return
@@ -952,7 +987,9 @@ class LiveFlow:
         s.note(f"전달 {level}", content[:200], {"content": json.loads(content)})
         if level == "N2" and facts.get("closing"):
             s.closing_requested_t = time.time()
-        await self.send(s, {"type": etype, "delegation_id": None, "content": f"[서버 결과] {content}"[:1800]})
+        delivered = await self.send(s, {"type": etype, "delegation_id": None, "content": f"[서버 결과] {content}"[:1800]})
+        if not delivered and readback_id and rt.readback_id == readback_id:
+            rt.readback_id = None
         if level == "N2":
             rt.await_speech = ("N2→AI 발화", time.time())
 
@@ -971,13 +1008,15 @@ class LiveFlow:
         while self.rt(s).cust is not None and time.monotonic() < deadline:
             await asyncio.sleep(0.05)
 
-    async def send(self, s: CallSession, event: dict) -> None:
+    async def send(self, s: CallSession, event: dict) -> bool:
         if s.sideband is None or s.phase in (Phase.CLOSED, Phase.FAILED, Phase.FINALIZING, Phase.DONE):
-            return
+            return False
         try:
             await s.sideband.send(event | {"event_id": s.next_event_id()})
         except Exception as e:
             log.warning("송신 실패 %s %s %s", s.call_id, event.get("type"), type(e).__name__)
+            return False
+        return True
 
 
 def _transcript(s: CallSession, speaker: str, u: Spoken) -> None:

@@ -223,6 +223,7 @@ async def record_fields(ctx: ToolContext, args: RecordArgs, *, expected_box: Box
         if pending:  # 되읽기 gate 개방: 확인 내용을 이 결과로 준다(N1)
             sources = {n: f.source for n, f in s.current.fields.items()}
             facts["readback"] = readback_facts(pending.snapshot, sources, policy)
+            facts["readback_id"] = pending.id
             # 고객 정보·주소 저장은 묻지 않고 택배를 담을 때 한다(사용자 결정 2026-11-06). 여기서는 대상만 정해 둔다
             s.address_offer = save_offer(s) or None
         if pending or "pickup_at" in values or any(n["field"] == "pickup_at" for n in needs):

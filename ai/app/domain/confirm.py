@@ -23,14 +23,21 @@ class Utterance:
     end_ms: int
     t_start: float         # 첫 delta 서버 수신 시각(서버 시계) — issued_t와 비교
     text: str = ""         # AI 발화면 G3에서 확인 질문으로 끝났는지 본다(S5 실통화: 되읽기 도중 "네"로 담김)
+    readback_id: str | None = None
 
 
 QUESTION_END = re.compile(r"(\?|까요|나요|세요|시죠|죠|습니까|십니까|가요|래요|을까|맞아요|맞으세요|맞습니까)[\s.?!…~]*$")
-PARCEL_READBACK_START = re.compile(r"(?:네[,，.]?)?접수내용(?:을)?확인(?:을)?부탁드")
+PARCEL_CONFIRM_QUESTION = re.compile(
+    r"(?:접수(?:를)?(?:해드릴까요|할까요|하시겠어요|하면될까요|진행할까요)|"
+    r"맞(?:나요|으세요|으신가요|습니까|을까요)|맞아요\?)[.?!…~]*$")
 
 
 def asks(text: str) -> bool:
     return bool(QUESTION_END.search(text.strip()))
+
+
+def asks_parcel_confirmation(text: str) -> bool:
+    return bool(PARCEL_CONFIRM_QUESTION.search("".join(text.split())))
 
 
 @dataclass(frozen=True)
@@ -103,14 +110,15 @@ def check_gate(state: ConversationState, policy: Policy, pending_id: str, answer
     change = answer.probabilities.get("change", 0.0)
     if answer.choice not in ("yes", "proceed") or confidence < policy.confirm.yes_min or change >= policy.confirm.change_max:
         return GateResult(False, "CONFIRM_UNCLEAR")                                   # G4
-    if prev_ai is None or prev_ai.t_start < p.issued_t:
+    if prev_ai is None or prev_ai.t_start < p.issued_t or prev_ai.readback_id not in (None, p.id):
         return GateResult(False, "CONFIRM_BEFORE_READBACK_END")                       # G3
+    heard_to_end = customer.start_ms >= prev_ai.end_ms - policy.confirm.answer_after_readback_tolerance_ms
     if answer.choice == "proceed":
-        # 명시적인 접수 지시는 이번 택배의 되읽기가 시작된 뒤에만 중간 확정에 쓴다.
-        if p.kind != "parcel" or not PARCEL_READBACK_START.match("".join(prev_ai.text.split())):
-            return GateResult(False, "CONFIRM_BEFORE_READBACK_END")
-    elif customer.start_ms < prev_ai.end_ms - policy.confirm.answer_after_readback_tolerance_ms \
-            or (prev_ai.text and not asks(prev_ai.text)):
+        valid = p.kind == "parcel" and (prev_ai.readback_id == p.id and bool(prev_ai.text.strip())
+                                       or heard_to_end and asks_parcel_confirmation(prev_ai.text))
+    else:
+        valid = heard_to_end and (not prev_ai.text or asks(prev_ai.text))
+    if not valid:
         return GateResult(False, "CONFIRM_BEFORE_READBACK_END")
     if not _same_snapshot(state, policy, p):
         return GateResult(False, "CONFIRM_SNAPSHOT_CHANGED")                          # G2

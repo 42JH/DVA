@@ -115,7 +115,12 @@ def test_item_restriction_from_transcript_without_a_model_tool_call(tmp_path):
     run(scenario())
 
 
-def test_order_flow_end_to_end(tmp_path):
+@pytest.mark.parametrize(("readback", "answer", "answer_at"), [
+    ("받는 분 이영희님, 연락처 공일공 구팔칠육 오사삼이. 맞으세요?", "네 맞아요", 7000),
+    ("변경된 받는 분은 이영희님입니다. 이대로 접수할까요?", "어 접수해 주세요", 7000),
+    ("변경된 받는 분은 이영희님이고, 연락처는", "어 접수해 주세요", 5300),
+])
+def test_order_flow_end_to_end(tmp_path, readback, answer, answer_at):
     svc, client = flow(tmp_path)
 
     async def scenario():
@@ -138,10 +143,13 @@ def test_order_flow_end_to_end(tmp_path):
         await until(lambda: "response.create" in sent_types(conn))
         out = json.loads(next(e for e in conn.sent if e["type"] == "response.item.create")["item"]["output"])
         assert out["status"] == "ok" and out["can_proceed"] and "readback" in out["facts"]  # N1: 확인 내용
+        assert "readback_id" not in out["facts"]
         conn.push({"type": "response.event", "delegation_id": "d1", "event": {"type": "response.completed"}})
-        await ai(conn, "받는 분 이영희님, 연락처 공일공 구팔칠육 오사삼이. 맞으세요?", 5000)   # 되읽기(pending 발급 뒤)
-        await say(conn, "네 맞아요", 7000)                            # confirm=yes → 관문 → 확정 지연
+        await ai(conn, readback, 5000)
+        assert s.rt.ai[-1].readback_id == s.state.pending.id
+        await say(conn, answer, answer_at)
         await until(lambda: s.state.parcels)
+        assert not any(event["kind"] == "확인 다시 묻기" for event in s.events)
         await until(lambda: "session.commentary.append" in sent_types(conn))   # N2: 담기 완료
         await ai(conn, "담아 두었어요. 더 보내실 택배 있으세요?", 9000)
         await say(conn, "아니요 없어요", 11000)                       # more=no_more → 접수 완료 단계 → 결과 뒤 마무리
@@ -279,8 +287,9 @@ def test_proceed_request_without_question_reasks_confirmation_then_yes_commits(t
         await until(lambda: any(e["type"] == "session.commentary.append" and "ask_again" in e["content"]
                                 for e in conn.sent))
         assert s.state.parcels == [] and s.state.pending
-        await ai(conn, "받는 분 이영희님, 이대로 접수할까요?", 9000)
-        await say(conn, "네 해주세요", 10500)                          # 이제 확인 질문의 답 → 확정
+        await ai(conn, "다시 확인할 내용은 받는 분 이영희님이고,", 9000)
+        assert s.rt.ai[-1].readback_id == s.state.pending.id
+        await say(conn, "어 접수해 주세요", 9300)                     # 서버가 다시 준 되읽기 도중 명확한 접수 요청
         await until(lambda: s.state.parcels)
         conn.push({"type": "session.closed", "reason": "remote_hangup"})
         await task
