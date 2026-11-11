@@ -17,6 +17,7 @@ export const Label = ({ children }: { children: ReactNode }) => (
 
 export function TextInput({
   label,
+  labelClassName,
   value,
   onChange,
   error,
@@ -27,6 +28,7 @@ export function TextInput({
   invalid,
 }: {
   label: string
+  labelClassName?: string // 칸 이름을 제목처럼 크게 (TextAreaInput과 같음, 07 상담가 등록 · 수정)
   value: string
   onChange: (v: string) => void
   error?: string
@@ -38,7 +40,7 @@ export function TextInput({
 }) {
   return (
     <label className="flex min-w-0 flex-col gap-1">
-      <Label>{label}</Label>
+      {labelClassName ? <span className={labelClassName}>{label}</span> : <Label>{label}</Label>}
       <span className={`${box(error || invalid)} ${readOnly ? 'bg-ops-paper! text-ops-sub' : ''}`}>
         <input
           value={value}

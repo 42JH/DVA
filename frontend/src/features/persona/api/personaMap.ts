@@ -69,6 +69,7 @@ export type VersionStatus = 'SAVED' | 'PENDING' | 'ACTIVE' | 'APPLIED' | 'PAST'
 export interface PersonaVersion {
   seq: number // aiPersonaVersionSeq — 적용 요청에 씀
   version: number
+  name: string // 버전마다 이름이 있음 — 초안에서 바꾼 이름은 확정 전까지 여기에만
   status: VersionStatus
   isHead: boolean // 서버 HEAD(확정 버전 중 최신)
   isDraft: boolean // 초안 줄 — 번호는 화면이 붙인 HEAD + 1, 서버 버전 기록엔 없음
@@ -180,6 +181,7 @@ export function toVersions(
     return {
       seq: v.aiPersonaVersionSeq,
       version: v.version,
+      name: v.name,
       status: isDraft
         ? 'SAVED'
         : v.status !== 'INACTIVE'

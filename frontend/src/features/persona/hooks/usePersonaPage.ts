@@ -210,7 +210,7 @@ export function usePersonaPage() {
     persona && latest
       ? {
           personaSeq: persona.personaSeq,
-          personaName: persona.name,
+          personaName: latest.name, // 초안에서 바꾼 이름부터 (카드는 확정 이름)
           prompt: latest.prompt,
           voice: latest.voice,
           basedOn: persona.head.version,
