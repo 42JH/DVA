@@ -20,6 +20,6 @@ import { CustomerContextClient } from './customer-context.client';
     CallScopeController,
   ],
   providers: [OrderReferenceScopes, CustomersService, CustomerContextClient],
-  exports: [CustomerContextClient],
+  exports: [CustomerContextClient, OrderReferenceScopes],
 })
 export class CustomersModule {}

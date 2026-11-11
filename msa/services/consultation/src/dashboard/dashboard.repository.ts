@@ -7,6 +7,7 @@ import {
   LATENCY_PROCESS_TYPES,
 } from '../call-insights/call-dashboard-metrics.types';
 import { DashboardCustomerType } from './dto/dashboard-query.dto';
+import type { HomeAiPerformanceDto } from './dto/home-response.dto';
 import {
   ComplaintCallsDto,
   DASHBOARD_COMPLAINT_TYPES,
@@ -38,6 +39,20 @@ export class DashboardRepository {
     return (
       await (client ?? this.database.pool).query<{ data: T }>(sql, values)
     ).rows[0].data;
+  }
+
+  todayCallCount(observedAt: Date, client: PoolClient): Promise<number> {
+    return this.read(
+      `WITH day AS (SELECT ($1::timestamptz AT TIME ZONE 'Asia/Seoul')::date AS date),
+       bounds AS (SELECT date::timestamp AT TIME ZONE 'Asia/Seoul' AS from_at,
+        (date+1)::timestamp AT TIME ZONE 'Asia/Seoul' AS to_at FROM day)
+       SELECT to_jsonb(count(*)) AS data ${FROM_CALLS} CROSS JOIN bounds b
+       WHERE COALESCE(c.started_at,a.ai_started_at,c.incoming_at)>=b.from_at
+        AND COALESCE(c.started_at,a.ai_started_at,c.incoming_at)<b.to_at AND c.deleted_at IS NULL
+        AND (c.incoming_at IS NULL OR c.incoming_at>transaction_timestamp()-interval '5 years')`,
+      [observedAt],
+      client,
+    );
   }
 
   stageDropoffs(
@@ -79,7 +94,8 @@ export class DashboardRepository {
   }
 
   private registrationTimeSql(shared = false): string {
-    return `WITH persona_references AS (SELECT * FROM jsonb_to_recordset($2::jsonb) AS r(ai_persona_seq integer,ai_persona_version_seq integer,name text,version integer,status text,previous_active_version_seq integer)), calls AS (
+    const personaParameter = shared ? '$5' : '$2';
+    return `WITH persona_references AS (SELECT * FROM jsonb_to_recordset(${personaParameter}::jsonb) AS r(ai_persona_seq integer,ai_persona_version_seq integer,name text,version integer,status text,previous_active_version_seq integer)), calls AS (
       ${shared ? 'SELECT is_new_customer,ai_persona_version_seq,registered_parcel_count,duration_ms FROM dashboard_calls' : `SELECT a.is_new_customer,a.ai_persona_version_seq,a.registered_parcel_count,${CALL_DURATION_MS} AS duration_ms ${FROM_CALLS} ${CALL_FILTER}`}
      ), summary AS (
       SELECT count(*) AS total,count(*) FILTER(WHERE is_new_customer IS NULL) AS unknown_customer,
@@ -180,5 +196,30 @@ export class DashboardRepository {
        'totalLatencyMs',COALESCE(p.latency,0),'averageLatencyMs',p.latency/NULLIF(p.samples,0)) ORDER BY position)
        FROM unnest(${types}::text[]) WITH ORDINALITY AS keys(code,position) LEFT JOIN processes p ON p.type=code)) AS data
      FROM summary s CROSS JOIN totals t`;
+  }
+
+  async performance(
+    customerType: DashboardCustomerType,
+    client: PoolClient,
+  ): Promise<HomeAiPerformanceDto> {
+    return this.read(
+      `WITH dashboard_calls AS MATERIALIZED (
+       SELECT c.call_session_seq,a.is_new_customer,a.ai_persona_version_seq,a.registered_parcel_count,
+        a.has_complaint,a.complaints,${CALL_DURATION_MS} AS duration_ms,
+        m.dropoff_stage,m.total_wait_ms,m.latency_stats,m.response_wait_received_at
+       ${FROM_CALLS} LEFT JOIN call_dashboard_metrics m USING(call_session_seq) ${CALL_FILTER}
+      ) SELECT jsonb_build_object('stageDropoffs',(${this.stageDropoffsSql(true)}),
+       'registrationTime',(${this.registrationTimeSql(true)}),
+       'complaintCalls',(${this.complaintCallsSql(true)}),
+       'responseWait',(${this.responseWaitSql(true)})) AS data`,
+      [
+        customerType,
+        DROPOFF_STAGES.filter((stage) => stage !== 'NONE'),
+        [...DASHBOARD_COMPLAINT_TYPES],
+        [...LATENCY_PROCESS_TYPES],
+        JSON.stringify(await this.personas.read()),
+      ],
+      client,
+    );
   }
 }

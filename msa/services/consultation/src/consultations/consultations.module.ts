@@ -33,6 +33,11 @@ import { OrderIntakeService } from './order-intake.service';
     CallReadReferencesClient,
     OrderIntakeService,
   ],
-  exports: [ConsultationsService, CallEndRepository, CallReadReferencesClient],
+  exports: [
+    ConsultationsService,
+    ConsultationsRepository,
+    CallEndRepository,
+    CallReadReferencesClient,
+  ],
 })
 export class ConsultationsModule {}

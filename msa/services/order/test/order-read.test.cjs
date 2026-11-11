@@ -8,6 +8,23 @@ const { validateEnvironment } = require('../dist/config/environment');
 const { OrdersService } = require('../dist/orders/orders.service');
 const token = 'order-read-test-only-'.padEnd(48, 't');
 
+test('home order snapshots validate the owner query, bounded previews and counters', () => {
+  const {validateHomeOrdersQuery,validateHomeOrdersResult,requestHomeOrders}=require('@dva/events/call-read-references.cjs');
+  const event={eventId:randomUUID(),source:'consultation',eventType:'HomeOrdersReadRequested',
+    payload:{observedAt:new Date().toISOString(),consultationAddress:null}};
+  validateHomeOrdersQuery(event);
+  for(const changed of [{...event,source:'order'},{...event,payload:{...event.payload,observedAt:'invalid'}},
+    {...event,payload:{...event.payload,consultationAddress:'169.254.169.254'}},
+    {...event,payload:{...event.payload,customerSeq:1}}])
+    assert.throws(()=>validateHomeOrdersQuery(changed));
+  const value={todayOrderCount:0,notPaid:2,submissionFailed:1,drafts:{data:[],total_count:0,hasNext:false}};
+  validateHomeOrdersResult(value);
+  for(const changed of [{...value,todayOrderCount:-1},{...value,notPaid:0.5},
+    {...value,drafts:{...value.drafts,data:Array(12).fill({})}}])
+    assert.throws(()=>validateHomeOrdersResult(changed));
+  assert.throws(()=>requestHomeOrders('http://owner/internal',token,event.payload.observedAt,null,'invalid'));
+});
+
 test('metrics coalesce scrapes, preserve attention gauges and report database failures', async () => {
   const {ObservabilityService}=require('../dist/observability/observability.service');
   const queries=[],statistics={count:3,failures:1,seconds:0.4,maxSeconds:0.2,connectionWaitSeconds:0.01};

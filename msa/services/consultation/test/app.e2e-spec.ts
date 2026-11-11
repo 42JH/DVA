@@ -123,6 +123,7 @@ describe('Consultation PBX and active calls (e2e)', () => {
           '/api/calls/{id}/processing-results',
           '/api/calls/{id}/transcript',
           '/api/dashboard/complaint-calls',
+          '/api/dashboard/home',
           '/api/dashboard/registration-time',
           '/api/dashboard/response-wait',
           '/api/dashboard/stage-dropoffs',

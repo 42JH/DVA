@@ -22,5 +22,6 @@ import { UnansweredQuestionsReadController } from './unanswered-questions-read.c
     UnansweredQuestionsReadController,
   ],
   providers: [UnansweredQuestionsRepository, UnansweredQuestionsService],
+  exports: [UnansweredQuestionsRepository],
 })
 export class UnansweredQuestionsModule {}
