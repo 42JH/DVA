@@ -4,6 +4,7 @@ import { ApiError } from '@/shared/api/client'
 import {
   createFaq,
   deleteFaq,
+  FAQ_CATEGORIES,
   faqQueries,
   updateFaq,
   type Faq,
@@ -16,8 +17,8 @@ import {
   type UnansweredQuestion,
 } from '@/features/faq/api/unansweredApi'
 
-/** 09 FAQ 인라인 추가 · 수정 (Figma 'FAQ 등록' · 'FAQ 수정' 11/06 — 목록 줄 안에서 질문 · 답변만, 분류 고르기 없음)
- * 분류: 수정 = 그 FAQ 분류 그대로 · 추가 = 왼쪽에서 고른 분류(글을 쓰다 분류를 바꿔도 따라감). 공백만 입력 불가 · 서버 칸별 오류 · 저장
+/** 09 FAQ 인라인 추가 · 수정 (Figma 'FAQ 등록' · 'FAQ 수정' 11/06 + 분류 고르기 11/11 — 서버는 분류 필수인데 고를 칸이 없어 '전체' · 미답변에서 만들면 늘 '접수'로 저장되던 것)
+ * 분류: 처음 값 = 수정은 그 FAQ 분류, 추가는 왼쪽에서 고른 분류(전체 · 미답변이면 없음 → 골라야 저장). 공백만 입력 불가 · 서버 칸별 오류 · 저장
  * AI 미답변 [+]로 연 추가(from)는 질문 = 고객이 한 말 그대로 미리 채움, 저장은 API-27 하나로 (FAQ 생성 + 그 질문 처리됨을 서버가 한 번에) */
 export function useFaqForm({
   faq = null,
@@ -27,11 +28,11 @@ export function useFaqForm({
 }: {
   faq?: Faq | null
   from?: UnansweredQuestion
-  category?: FaqCategory // 추가할 때 넣을 분류
+  category?: FaqCategory | null // 추가 칸의 처음 분류 (없으면 직접 고름)
   onSaved: (category: FaqCategory) => void // 저장(추가 · 수정)에 성공하면 그 분류
 }) {
   const qc = useQueryClient()
-  const category = faq?.category ?? picked
+  const [category, setCategory] = useState<FaqCategory | null>(faq?.category ?? picked ?? null)
   const [question, setQuestion] = useState(faq?.question ?? from?.question ?? '')
   const [answer, setAnswer] = useState(faq?.answer ?? '')
 
@@ -47,7 +48,10 @@ export function useFaqForm({
         else await createFaq(input)
         return
       }
-      const changed = input.question !== faq.question || input.answer !== faq.answer
+      const changed =
+        input.category !== faq.category ||
+        input.question !== faq.question ||
+        input.answer !== faq.answer
       if (changed) await updateFaq(faq.faqEntrySeq, input) // 세 칸 다 보냄 (부분 수정 없음). 안 바뀌었으면 요청 없이 닫음
     },
     onSuccess: async () => {
@@ -86,6 +90,9 @@ export function useFaqForm({
           : err.message))
 
   return {
+    categories: FAQ_CATEGORIES.map((c) => ({ value: c.name, label: c.name })), // 분류 고르기 (10개 고정)
+    category,
+    setCategory,
     question,
     answer,
     setQuestion,

@@ -4,6 +4,7 @@ import type { ReactNode } from 'react'
 import { Link } from 'react-router'
 import { Markdown } from '@/shared/ui/Markdown'
 import type { Faq, FaqCategory } from '@/features/faq/api/faqApi'
+import { Choice } from '@/shared/ui/Field'
 import type { UnansweredQuestion } from '@/features/faq/api/unansweredApi'
 import { useFaqDelete, useFaqForm } from '@/features/faq/hooks/useFaqForm'
 import { PageHead } from '@/shared/ui'
@@ -67,7 +68,7 @@ export function FaqsPage() {
               category={vm.addCategory}
               from={vm.from}
               onDone={vm.finishAdd}
-              title={vm.from ? '미답변 질문으로 FAQ 만들기' : `새 FAQ (${vm.addCategory})`}
+              title={vm.from ? '미답변 질문으로 FAQ 만들기' : '새 FAQ'}
             />
           )}
           {vm.q && (
@@ -123,12 +124,7 @@ function Item({ f, vm }: { f: Faq; vm: FaqsVm }) {
   const [editing, setEditing] = useState(false)
   if (editing)
     return (
-      <FaqForm
-        faq={f}
-        category={f.category}
-        onDone={() => setEditing(false)}
-        title={`FAQ 수정 (${f.category})`}
-      />
+      <FaqForm faq={f} category={f.category} onDone={() => setEditing(false)} title="FAQ 수정" />
     )
   return (
     <article
@@ -244,7 +240,7 @@ function Opened({ f, open, onEdit }: { f: Faq; open: boolean; onEdit: () => void
   )
 }
 
-/** 추가 · 수정 칸 (질문 · 답변). 분류는 추가 = 고른 분류, 수정 = 그 FAQ 분류 */
+/** 추가 · 수정 칸 (분류 · 질문 · 답변). 분류 처음 값은 추가 = 왼쪽에서 고른 분류(전체 · 미답변이면 없음), 수정 = 그 FAQ 분류 */
 function FaqForm({
   faq,
   from,
@@ -254,7 +250,7 @@ function FaqForm({
 }: {
   faq?: Faq
   from?: UnansweredQuestion
-  category: FaqCategory
+  category: FaqCategory | null
   onDone: () => void
   title: string
 }) {
@@ -268,6 +264,7 @@ function FaqForm({
       className="flex flex-col gap-3 rounded-lg border border-ops-route bg-white p-4"
     >
       <p className="text-[12px] font-semibold text-ops-route">{title}</p>
+      <Choice label="분류" value={f.category} onChange={f.setCategory} options={f.categories} />
       <Field label="질문">
         <input
           value={f.question}
