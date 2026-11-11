@@ -1,6 +1,7 @@
 // AI 상담가 (11/06) — 가운데 시스템 프롬프트 | 오른쪽 상담가 카드
 // 11/11: 저장 = 새 버전, [적용] 없음. 오른쪽 위 탭([AI 상담가 유형] · [버전 히스토리]) → 버전 히스토리는 고른 상담가의 버전 기록(저장 시각 · 수정한 사람), 고른 버전이 가운데
 // 데이터 · 규칙은 usePersonaPage. 등록 · 수정 · 시험 통화 창은 기존 부품을 그대로 씀
+import { useLocation } from 'react-router'
 import { usePersonaPage, type PersonaItem } from '@/features/persona/hooks/usePersonaPage'
 import { AddPersona } from './AddPersona'
 import { PromptEditor } from './PromptEditor'
@@ -12,7 +13,13 @@ import { Markdown } from '@/shared/ui/Markdown'
 
 type Vm = ReturnType<typeof usePersonaPage>
 
+// 사이드바의 [AI 상담가]를 다시 눌러도 location.key가 새로 생김 → 화면 상태를 통째로 버리고 처음(상담가 유형 탭)으로.
+// 수정 중이면 PromptEditor의 useLeaveGuard가 그 이동을 먼저 막아 확인을 물음
 export function PersonasPage() {
+  return <PersonasView key={useLocation().key} />
+}
+
+function PersonasView() {
   const vm = usePersonaPage()
   return (
     <>
