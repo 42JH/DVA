@@ -1,3 +1,4 @@
+import { DeleteQuestionsDto } from '../common/dto/delete-request.dto';
 import { Body, Controller, Delete, HttpCode, Param, Post, Req, Res } from '@nestjs/common';
 import {
   ApiCookieAuth,
@@ -10,7 +11,6 @@ import { Response } from 'express';
 import { AuditOperation } from '../audit/audit-operation';
 import { AuthRequest, Roles } from '../auth/auth.guard';
 import { ErrorResponseDto } from '../common/dto/api-response.dto';
-import { ApiException } from '../common/errors/api.exception';
 import { CreateFaqDto } from '../faqs/dto/faq-request.dto';
 import { UnansweredQuestionIdDto } from './dto/unanswered-question-id.dto';
 import { UnansweredQuestionsService } from './unanswered-questions.service';
@@ -67,12 +67,13 @@ export class UnansweredQuestionsManagementController {
     response.location(`/api/faqs/${id}`);
   }
 
-  @Delete(':id')
+  @Delete()
   @HttpCode(204)
   @AuditOperation({
     action: 'UNANSWERED_QUESTION_DELETED',
     targetType: 'UNANSWERED_QUESTION',
-    target: 'id',
+    target: 'ids',
+    idsField: 'unansweredQuestionSeqs',
   })
   @ApiOperation({
     summary: '미처리 미답변 질문 삭제',
@@ -80,19 +81,11 @@ export class UnansweredQuestionsManagementController {
       'OPEN 질문 원문을 비우고 DELETED로 변경합니다. 발생 식별자·해시·통화 기록은 보존합니다. 이미 삭제했으면 204, FAQ 전환했으면 409입니다.',
   })
   @ApiNoContentResponse({ description: '삭제 완료 또는 이미 삭제됨. 본문 없음.' })
-  async delete(
-    @Param() params: UnansweredQuestionIdDto,
-    @Req() request: AuthRequest,
-  ): Promise<void> {
-    const body: unknown = request.body;
-    if (
-      body !== undefined &&
-      (body === null ||
-        typeof body !== 'object' ||
-        Array.isArray(body) ||
-        Object.keys(body).length > 0)
-    )
-      throw new ApiException(400, 'INVALID_REQUEST', '삭제 요청에는 본문 필드를 보내지 않습니다.');
-    await this.questions.delete(params.id, request.admin.adminUserSeq, request.requestId);
+  async delete(@Body() input: DeleteQuestionsDto, @Req() request: AuthRequest) {
+    await this.questions.delete(
+      input.unansweredQuestionSeqs,
+      request.admin.adminUserSeq,
+      request.requestId,
+    );
   }
 }

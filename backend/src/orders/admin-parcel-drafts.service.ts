@@ -111,36 +111,50 @@ export class AdminParcelDraftsService {
     };
   }
 
-  async delete(id: number, adminId: number, requestId: string): Promise<void> {
+  async delete(id: number | number[], adminId: number, requestId: string): Promise<void> {
+    const ids = (Array.isArray(id) ? [...id] : [id]).sort((a, b) => a - b);
     await writeOrder(this.database, async (client) => {
-      const hint = await this.drafts.draft(client, id);
-      if (!hint) throw new ApiException(404, 'NOT_FOUND', '배송 초안을 찾을 수 없습니다.');
-      const call =
-        hint.callSessionSeq === null
-          ? undefined
-          : await this.drafts.call(client, hint.callSessionSeq);
-      const row = await this.drafts.draft(client, id, true);
-      if (!row) throw new ApiException(404, 'NOT_FOUND', '배송 초안을 찾을 수 없습니다.');
-      if (call && !call.finalizedAt && ['READY', 'EDITING'].includes(row.status))
-        throw new ApiException(
-          409,
-          'INVALID_STATE',
-          '통화 주문 확정 전에는 초안을 삭제할 수 없습니다.',
+      const hints = [];
+      for (const id of ids) hints.push(await this.drafts.draft(client, id));
+      if (hints.some((row) => !row))
+        throw new ApiException(404, 'NOT_FOUND', '배송 초안을 찾을 수 없습니다.');
+      const calls = [
+        ...new Set(
+          hints.flatMap((row) => (row!.callSessionSeq === null ? [] : [row!.callSessionSeq])),
+        ),
+      ].sort((a, b) => a - b);
+      for (const callId of calls) await this.drafts.call(client, callId);
+
+      for (const id of ids) {
+        const hint = await this.drafts.draft(client, id);
+        if (!hint) throw new ApiException(404, 'NOT_FOUND', '배송 초안을 찾을 수 없습니다.');
+        const call =
+          hint.callSessionSeq === null
+            ? undefined
+            : await this.drafts.call(client, hint.callSessionSeq);
+        const row = await this.drafts.draft(client, id, true);
+        if (!row) throw new ApiException(404, 'NOT_FOUND', '배송 초안을 찾을 수 없습니다.');
+        if (call && !call.finalizedAt && ['READY', 'EDITING'].includes(row.status))
+          throw new ApiException(
+            409,
+            'INVALID_STATE',
+            '통화 주문 확정 전에는 초안을 삭제할 수 없습니다.',
+          );
+        await client.query(
+          'UPDATE order_parcel_drafts SET deleted_at=clock_timestamp(),version=version+1,updated_at=clock_timestamp() WHERE draft_seq=$1',
+          [id],
         );
-      await client.query(
-        'UPDATE order_parcel_drafts SET deleted_at=clock_timestamp(),version=version+1,updated_at=clock_timestamp() WHERE draft_seq=$1',
-        [id],
-      );
-      await this.audit.recordSuccess(
-        {
-          actorId: adminId,
-          targetId: id,
-          targetType: 'ORDER_PARCEL_DRAFT',
-          action: 'PARCEL_DRAFT_DELETED',
-          requestId,
-        },
-        client,
-      );
+        await this.audit.recordSuccess(
+          {
+            actorId: adminId,
+            targetId: id,
+            targetType: 'ORDER_PARCEL_DRAFT',
+            action: 'PARCEL_DRAFT_DELETED',
+            requestId,
+          },
+          client,
+        );
+      }
     });
   }
 }

@@ -34,7 +34,7 @@ const write = (method, path, input, actor = 0, base = f.base, headers = {}) =>
 const convert = (id, input, actor = 0, base = f.base) =>
   write('POST', `/api/unanswered-questions/${id}/faqs`, input, actor, base);
 const remove = (id, actor = 0, base = f.base) =>
-  write('DELETE', `/api/unanswered-questions/${id}`, undefined, actor, base);
+  write('DELETE', '/api/unanswered-questions', { unansweredQuestionSeqs: [id] }, actor, base);
 async function noContent(response) {
   assert.equal(response.status, 204, await response.clone().text());
   assert.equal(await response.text(), '');
@@ -91,7 +91,7 @@ test('management requires administrator session and allowed Origin; every active
   const q = await question();
   for (const [method, path, input] of [
     ['POST', `/api/unanswered-questions/${q.id}/faqs`, body()],
-    ['DELETE', `/api/unanswered-questions/${q.id}`, undefined],
+    ['DELETE', '/api/unanswered-questions', { unansweredQuestionSeqs: [q.id] }],
   ]) {
     await f.error(await write(method, path, input, 0, f.base, { Cookie: '' }), 401, 'UNAUTHORIZED');
     await f.error(await write(method, path, input, 0, f.base, { Origin: '' }), 403, 'FORBIDDEN');
@@ -400,7 +400,10 @@ test('deletion rejects body fields and rolls back soft deletion when its audit c
   const q = await question(),
     original = await row(q.id);
   await f.error(
-    await write('DELETE', '/api/unanswered-questions/' + q.id, { all: true }),
+    await write('DELETE', '/api/unanswered-questions', {
+      ...{ all: true },
+      unansweredQuestionSeqs: [q.id],
+    }),
     400,
     'INVALID_REQUEST',
   );

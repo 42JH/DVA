@@ -66,24 +66,27 @@ export class UnansweredQuestionsService {
     });
   }
 
-  async delete(id: number, adminId: number, requestId: string): Promise<void> {
+  async delete(id: number | number[], adminId: number, requestId: string): Promise<void> {
+    const ids = (Array.isArray(id) ? [...id] : [id]).sort((a, b) => a - b);
     await this.database.transaction(async (client) => {
-      const question = await this.repository.findForUpdate(client, id);
-      if (!question) throw new ApiException(404, 'NOT_FOUND', '미답변 질문을 찾을 수 없습니다.');
-      if (question.status === 'REGISTERED')
-        throw new ApiException(409, 'INVALID_STATE', 'FAQ로 전환한 질문은 삭제할 수 없습니다.');
-      if (question.status === 'DELETED') return;
-      await this.repository.delete(client, id);
-      await this.audit.recordSuccess(
-        {
-          actorId: adminId,
-          action: 'UNANSWERED_QUESTION_DELETED',
-          targetType: 'UNANSWERED_QUESTION',
-          targetId: id,
-          requestId,
-        },
-        client,
-      );
+      for (const id of ids) {
+        const question = await this.repository.findForUpdate(client, id);
+        if (!question) throw new ApiException(404, 'NOT_FOUND', '미답변 질문을 찾을 수 없습니다.');
+        if (question.status === 'REGISTERED')
+          throw new ApiException(409, 'INVALID_STATE', 'FAQ로 전환한 질문은 삭제할 수 없습니다.');
+        if (question.status === 'DELETED') continue;
+        await this.repository.delete(client, id);
+        await this.audit.recordSuccess(
+          {
+            actorId: adminId,
+            action: 'UNANSWERED_QUESTION_DELETED',
+            targetType: 'UNANSWERED_QUESTION',
+            targetId: id,
+            requestId,
+          },
+          client,
+        );
+      }
     });
   }
 

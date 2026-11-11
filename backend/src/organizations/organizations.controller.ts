@@ -164,7 +164,7 @@ export class OrganizationsController {
   @ApiOperation({
     summary: '기업 단건·다건 삭제',
     description:
-      'organizationSeqs 배열 1~100개. 모두 존재해야 하며 한 건이라도 실패하면 전체를 롤백합니다. 기존 단건 삭제와 같은 권한·soft delete·감사·보관 기준입니다.',
+      '단건·다건 모두 organizationSeqs 배열 1~100개로 요청합니다. 모든 활성 관리자 세션·허용 Origin이 필요하며, 모두 존재해야 하고 한 건이라도 실패하면 전체를 롤백합니다. soft delete·감사·보관 기준을 유지합니다.',
   })
   @ApiNoContentResponse({ description: '모두 삭제 완료. 응답 본문 없음.' })
   @ApiNotFoundResponse({ type: ErrorResponseDto })
@@ -176,20 +176,5 @@ export class OrganizationsController {
       request.admin.adminUserSeq,
       request.requestId,
     );
-  }
-
-  @Delete(':id')
-  @HttpCode(204)
-  @AuditOperation({ action: 'ORGANIZATION_DELETED', targetType: 'ORGANIZATION', target: 'id' })
-  @ApiOperation({
-    summary: '기업 삭제',
-    description:
-      '모든 활성 관리자. 기업·소속·부서·기업 PIN을 하나의 트랜잭션에서 soft delete합니다. 개인 회원·개인 PIN·주문·통화·녹취·과거 청구 총액은 각각의 보관 기준을 유지합니다. 삭제한 기준 정보는 5년 후 실제 폐기합니다.',
-  })
-  @ApiNoContentResponse({ description: '삭제 완료. 응답 본문 없음.' })
-  @ApiNotFoundResponse({ type: ErrorResponseDto })
-  @ApiConflictResponse({ type: ErrorResponseDto })
-  remove(@Param() params: OrganizationIdParamsDto, @Req() request: AuthRequest) {
-    return this.deletion.remove(params.id, false, request.admin.adminUserSeq, request.requestId);
   }
 }

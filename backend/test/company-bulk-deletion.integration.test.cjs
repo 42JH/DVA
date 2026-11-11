@@ -236,10 +236,10 @@ test('all administrator roles can delete arrays while session and Origin checks 
     const row = await company();
     await success(await remove([row.organizationSeq], actor));
   }
-  await success(await f.write('DELETE', `/api/companies/${kept.organizationSeq}`));
+  await success(await remove([kept.organizationSeq]));
 });
 
-test('the documented 100-company limit succeeds atomically and both delete contracts remain in Swagger', async () => {
+test('the documented 100-company limit succeeds atomically', async () => {
   const ids = (
     await f.pool.query(
       "INSERT INTO organizations(name,status) SELECT $1::text||n,'ACTIVE' FROM generate_series(1,100) AS n RETURNING organization_seq",
@@ -256,4 +256,26 @@ test('the documented 100-company limit succeeds atomically and both delete contr
     ).rowCount,
     100,
   );
+});
+
+test('only the array deletion route remains in Swagger and the retired route cannot delete data', async () => {
+  const { SwaggerModule, DocumentBuilder } = require('@nestjs/swagger');
+  const schema = SwaggerModule.createDocument(f.app, new DocumentBuilder().build());
+  assert.ok(schema.paths['/api/companies'].delete);
+  assert.equal(schema.paths['/api/companies/{id}'].delete, undefined);
+  assert.ok(schema.paths['/api/companies/{id}'].get);
+  assert.ok(schema.paths['/api/companies/{id}'].patch);
+  const kept = await company(),
+    before = await state([kept]);
+  const requestId = randomUUID();
+  await f.error(
+    await f.write('DELETE', `/api/companies/${kept.organizationSeq}`, undefined, 0, {
+      'X-Request-Id': requestId,
+    }),
+    404,
+    'NOT_FOUND',
+  );
+  assert.deepEqual(await state([kept]), before);
+  await noSuccessfulAudits(requestId);
+  await success(await remove([kept.organizationSeq]));
 });

@@ -1420,7 +1420,7 @@ test('admin soft deletion retains accounts, hides every allowed role/status and 
         target.id,
         status,
       ]);
-      const response = await call('DELETE', '/api/admins/' + target.id, undefined, cookie);
+      const response = await call('DELETE', '/api/admins', { adminUserSeqs: [target.id] }, cookie);
       assert.equal(response.status, 204, response.text);
       assert.equal(
         (
@@ -1448,7 +1448,7 @@ test('admin soft deletion retains accounts, hides every allowed role/status and 
       assert.equal((await call('GET', '/api/auth/me', undefined, session)).status, 401);
       assert.equal((await login(target)).status, 401);
       assert.equal(
-        (await call('DELETE', '/api/admins/' + target.id, undefined, cookie)).status,
+        (await call('DELETE', '/api/admins', { adminUserSeqs: [target.id] }, cookie)).status,
         404,
       );
       const logs = (
@@ -1485,23 +1485,35 @@ test('admin deletion rejects other roles, missing sessions, system targets and m
   for (const role of ['OPERATOR', 'SUPERVISOR']) {
     const actor = await account('deniedDel' + role[0], role);
     assert.equal(
-      (await call('DELETE', '/api/admins/' + target.id, undefined, (await login(actor)).session))
-        .status,
+      (
+        await call(
+          'DELETE',
+          '/api/admins',
+          { adminUserSeqs: [target.id] },
+          (await login(actor)).session,
+        )
+      ).status,
       403,
     );
   }
-  assert.equal((await call('DELETE', '/api/admins/' + target.id)).status, 401);
-  assert.equal((await call('DELETE', '/api/admins/' + system.id, undefined, cookie)).status, 403);
+  assert.equal((await call('DELETE', '/api/admins', { adminUserSeqs: [target.id] })).status, 401);
+  assert.equal(
+    (await call('DELETE', '/api/admins', { adminUserSeqs: [system.id] }, cookie)).status,
+    403,
+  );
   const otherSystem = await account('otherDelSystem', 'SYSTEM_ADMIN', 'PENDING');
   assert.equal(
-    (await call('DELETE', '/api/admins/' + otherSystem.id, undefined, cookie)).status,
+    (await call('DELETE', '/api/admins', { adminUserSeqs: [otherSystem.id] }, cookie)).status,
     403,
   );
   for (const id of ['0', '-1', '1.5', 'bad', '2147483648'])
-    assert.equal((await call('DELETE', '/api/admins/' + id, undefined, cookie)).status, 400);
+    assert.equal(
+      (await call('DELETE', '/api/admins', { adminUserSeqs: [id] }, cookie)).status,
+      400,
+    );
   assert.equal(
     (
-      await call('DELETE', '/api/admins/' + target.id, undefined, cookie, {
+      await call('DELETE', '/api/admins', { adminUserSeqs: [target.id] }, cookie, {
         Origin: 'https://untrusted.invalid',
       })
     ).status,
@@ -1529,7 +1541,7 @@ test('admin deletion and success audit roll back together on audit or account de
     };
     let response;
     try {
-      response = await call('DELETE', '/api/admins/' + target.id, undefined, cookie);
+      response = await call('DELETE', '/api/admins', { adminUserSeqs: [target.id] }, cookie);
       assert.equal(response.status, 500);
     } finally {
       instance[method] = original;
@@ -1570,7 +1582,7 @@ test('a login already in progress cannot leave a usable session after admin dele
   try {
     const loggingIn = login(target);
     await entered;
-    const deleting = call('DELETE', '/api/admins/' + target.id, undefined, cookie);
+    const deleting = call('DELETE', '/api/admins', { adminUserSeqs: [target.id] }, cookie);
     unblock();
     const [signedIn, deleted] = await Promise.all([loggingIn, deleting]);
     assert.equal(signedIn.status, 200);
@@ -1600,7 +1612,10 @@ test('audit snapshots survive later deletion and in-flight work can retain the d
     target.id,
     '변경 후 이름',
   ]);
-  assert.equal((await call('DELETE', '/api/admins/' + target.id, undefined, cookie)).status, 204);
+  assert.equal(
+    (await call('DELETE', '/api/admins', { adminUserSeqs: [target.id] }, cookie)).status,
+    204,
+  );
   await db.transaction((client) =>
     audit.recordSuccess({ ...event, requestId: randomUUID() }, client),
   );

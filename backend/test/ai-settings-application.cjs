@@ -354,7 +354,7 @@ module.exports = function registerAiSettingsApplication(suite) {
         .createdByAdminUserName,
       '삭제 전 작성자',
     );
-    assert.equal((await call('DELETE', `/api/admins/${creator}`)).status, 204);
+    assert.equal((await call('DELETE', '/api/admins', { adminUserSeqs: [creator] })).status, 204);
     assert.equal(
       (
         await pool.query(

@@ -208,7 +208,16 @@ test('patch updates name/status with no response body and preserves memberships/
   const filtered = await (await request('?status=INACTIVE')).json();
   assert.ok(filtered.data.some((row) => row.organizationSeq === id));
   assert.equal((await patch(id, { status: 'ACTIVE' })).status, 204);
-  assert.equal((await request('/' + id, { method: 'DELETE' })).status, 204);
+  assert.equal(
+    (
+      await request('', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ organizationSeqs: [id] }),
+      })
+    ).status,
+    204,
+  );
   assert.equal((await request('/' + id)).status, 404);
 });
 

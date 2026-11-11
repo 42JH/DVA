@@ -1,3 +1,5 @@
+import { DeleteCallsDto } from '../common/dto/delete-request.dto';
+import { Body } from '@nestjs/common';
 import { Controller, Delete, Get, Header, HttpCode, Param, Query, Req, Sse } from '@nestjs/common';
 import { ApiCookieAuth, ApiOkResponse, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { AuthRequest, Roles } from '../auth/auth.guard';
@@ -28,9 +30,14 @@ export class ConsultationsController {
     private readonly activeCalls: ActiveCallCountService,
   ) {}
 
-  @Delete(':id')
+  @Delete()
   @HttpCode(204)
-  @AuditOperation({ action: 'CALL_DELETED', targetType: 'CALL_SESSION', target: 'id' })
+  @AuditOperation({
+    action: 'CALL_DELETED',
+    targetType: 'CALL_SESSION',
+    target: 'ids',
+    idsField: 'callSessionSeqs',
+  })
   @ApiOperation({
     summary: '통화 soft delete',
     description:
@@ -43,8 +50,12 @@ export class ConsultationsController {
     type: ErrorResponseDto,
     description: '통화 종료 전 또는 녹취 대기·실패·업로드 중.',
   })
-  delete(@Param() params: CallIdParamsDto, @Req() request: AuthRequest) {
-    return this.consultations.delete(params.id, request.admin.adminUserSeq, request.requestId);
+  delete(@Body() input: DeleteCallsDto, @Req() request: AuthRequest) {
+    return this.consultations.delete(
+      input.callSessionSeqs,
+      request.admin.adminUserSeq,
+      request.requestId,
+    );
   }
 
   @Get('active-count')

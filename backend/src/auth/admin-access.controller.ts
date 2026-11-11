@@ -1,3 +1,4 @@
+import { DeleteAdminsDto } from '../common/dto/delete-request.dto';
 import { AuditOperation } from '../audit/audit-operation';
 import {
   Body,
@@ -79,22 +80,22 @@ export class AdminAccessController {
   async list(@Query() query: AdminQueryDto) {
     return new ListResponse(await this.admins.list(query), query.limit);
   }
-  @Delete(':id')
+  @Delete()
   @HttpCode(204)
-  @AuditOperation({ action: 'ADMIN_DELETED', targetType: 'ADMIN_USER', target: 'id' })
+  @AuditOperation({
+    action: 'ADMIN_DELETED',
+    targetType: 'ADMIN_USER',
+    target: 'ids',
+    idsField: 'adminUserSeqs',
+  })
   @ApiOperation({
     summary: '관리자 삭제',
     description:
       'SYSTEM_ADMIN 전용. OPERATOR·SUPERVISOR를 상태와 관계없이 soft delete하고 모든 세션을 즉시 종료합니다. SYSTEM_ADMIN은 삭제할 수 없습니다. 계정은 삭제 후 5년 보관하며 감사 로그는 7일, 페르소나 작성자 이름은 별도 스냅샷으로 보관합니다.',
   })
-  @ApiParam({
-    name: 'id',
-    description: '삭제할 관리자 번호(adminUserSeq).',
-    schema: { type: 'integer', minimum: 1 },
-  })
   @ApiNoContentResponse({ description: '계정·세션 삭제 완료. 응답 본문 없음.' })
-  remove(@Param('id') id: string, @Req() request: AuthRequest) {
-    return this.auth.deleteAdmin(request.sessionToken, adminId(id), request.requestId);
+  remove(@Body() input: DeleteAdminsDto, @Req() request: AuthRequest) {
+    return this.auth.deleteAdmin(request.sessionToken, input.adminUserSeqs, request.requestId);
   }
   @AuditOperation({ action: 'ADMIN_ACCESS_CHANGED', targetType: 'ADMIN_USER', target: 'id' })
   @Patch(':id')

@@ -333,7 +333,7 @@ test('call soft deletion and the real call purge null the call link while preser
   const snapshots = await examples(id);
   assert.equal((await f.get(`/api/calls/${c.id}`)).status, 200);
   await f.error(await f.get(`/api/calls/${c.id}`, 0, { Cookie: undefined }), 401, 'UNAUTHORIZED');
-  await success(await f.write('DELETE', `/api/calls/${c.id}`, undefined, 2));
+  await success(await f.write('DELETE', '/api/calls', { callSessionSeqs: [c.id] }, 2));
   await f.error(await f.get(`/api/calls/${c.id}`), 404, 'NOT_FOUND');
   assert.deepEqual((await detail(id)).recentQuestions, withoutCall);
   assert.deepEqual(await examples(id), snapshots);

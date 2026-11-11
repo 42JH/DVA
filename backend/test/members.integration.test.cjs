@@ -109,7 +109,16 @@ function patch(id, input, session = cookie) {
   );
 }
 function remove(id, session = cookie) {
-  return request('/members/' + id, { method: 'DELETE' }, base, session);
+  return request(
+    '/members',
+    {
+      method: 'DELETE',
+      body: JSON.stringify({ membershipSeqs: [id] }),
+      headers: { 'Content-Type': 'application/json' },
+    },
+    base,
+    session,
+  );
 }
 async function company(status = 'ACTIVE') {
   const id = (
