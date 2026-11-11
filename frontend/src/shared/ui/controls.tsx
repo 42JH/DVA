@@ -48,6 +48,7 @@ export function Btn({
   return (
     <button
       type="button"
+      data-kind={kind} // 창(Modal)이 Enter로 누를 확정 버튼(primary · dangerSolid)을 찾는 표시
       {...rest}
       className={`${kind.endsWith('Badge') ? ACTION_BADGE_SIZE : 'inline-flex h-8 items-center justify-center rounded-md px-3 text-[13px] leading-none font-semibold'} shrink-0 gap-1.5 whitespace-nowrap outline-none focus-visible:ring-2 focus-visible:ring-ops-route disabled:pointer-events-none disabled:opacity-40 ${BTN[kind]} ${className}`}
     />
