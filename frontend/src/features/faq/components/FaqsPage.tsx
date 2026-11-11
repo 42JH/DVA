@@ -21,7 +21,7 @@ const ymd = (iso: string | null) => {
   const two = (n: number) => String(n).padStart(2, '0')
   return `${d.getFullYear()}.${two(d.getMonth() + 1)}.${two(d.getDate())}`
 }
-import { Confirm } from '@/shared/ui/Modal'
+import { Confirm, Modal } from '@/shared/ui/Modal'
 
 export function FaqsPage() {
   const vm = useFaqs()
@@ -67,14 +67,7 @@ export function FaqsPage() {
               />
             ))}
           </nav>
-          {vm.adding && (
-            <FaqForm
-              category={vm.addCategory}
-              from={vm.from}
-              onDone={vm.finishAdd}
-              title={vm.from ? '미답변 질문으로 FAQ 만들기' : '새 FAQ'}
-            />
-          )}
+          {vm.adding && <FaqForm category={vm.addCategory} onDone={vm.finishAdd} title="새 FAQ" />}
           {vm.q && (
             <p className="text-[13px] text-ops-sub">
               “{vm.q}” 검색 결과 {vm.rows.length}건
@@ -247,18 +240,16 @@ function Opened({ f, open, onEdit }: { f: Faq; open: boolean; onEdit: () => void
 /** 추가 · 수정 칸 (분류 · 질문 · 답변). 분류 처음 값은 추가 = 왼쪽에서 고른 분류(전체 · 미답변이면 없음), 수정 = 그 FAQ 분류 */
 function FaqForm({
   faq,
-  from,
   category,
   onDone,
   title,
 }: {
   faq?: Faq
-  from?: UnansweredQuestion
   category: FaqCategory | null
   onDone: () => void
   title: string
 }) {
-  const f = useFaqForm({ faq, from, category, onSaved: onDone })
+  const f = useFaqForm({ faq, category, onSaved: onDone })
   return (
     <form
       onSubmit={(e) => {
@@ -293,6 +284,56 @@ function FaqForm({
         </Btn>
       </div>
     </form>
+  )
+}
+
+/** 미답변 문의의 [FAQ 등록] 창 — 질문 칸은 고객이 한 말, 분류는 직접 고름. 저장하면 FAQ 생성 + 그 질문 처리됨(API-27) */
+export function FaqAddModal({ from, onClose }: { from: UnansweredQuestion; onClose: () => void }) {
+  const f = useFaqForm({ from, onSaved: onClose })
+  return (
+    <Modal
+      title="FAQ 등록"
+      width={760} // 분류 10개가 한 줄에
+      onClose={onClose}
+      footer={
+        <>
+          {f.error && <span className="text-[12px] text-ops-stop">{f.error}</span>}
+          <Btn className="ml-auto" onClick={onClose}>
+            취소
+          </Btn>
+          <Btn kind="primary" type="submit" form="faq-add" disabled={!f.canSubmit}>
+            저장
+          </Btn>
+        </>
+      }
+    >
+      <form
+        id="faq-add"
+        onSubmit={(e) => {
+          e.preventDefault()
+          if (f.canSubmit) f.submit()
+        }}
+        className="flex flex-col gap-3"
+      >
+        <Choice label="분류" value={f.category} onChange={f.setCategory} options={f.categories} />
+        <Field label="질문">
+          <input
+            value={f.question}
+            onChange={(e) => f.setQuestion(e.target.value)}
+            className="h-10 w-full rounded-md px-3 text-[15px] font-semibold ring-1 ring-ops-line outline-none ring-inset focus:ring-ops-route"
+          />
+        </Field>
+        <Field label="답변">
+          <textarea
+            value={f.answer}
+            onChange={(e) => f.setAnswer(e.target.value)}
+            autoFocus
+            rows={6}
+            className="w-full resize-y rounded-md px-3 py-2 text-[14px] leading-6 ring-1 ring-ops-line outline-none ring-inset focus:ring-ops-route"
+          />
+        </Field>
+      </form>
+    </Modal>
   )
 }
 
