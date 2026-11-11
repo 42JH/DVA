@@ -1048,5 +1048,204 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
     } finally {await delivery.end();}
     t.diagnostic('approval HTTP pairs: '+requests.length+'; provider idempotency, approval recovery, paid state and shipments');
   });
+  await t.test('parcel draft writes preserve call and customer scope, versions, reservations and committed-call recovery', async () => {
+    const customer=92101, other=92102, withdrawn=92103, pin=92101, oldDraft=28100;
+    const call=18101, unknown=18103, faultCall=18107, requests=[], histories=[new Map(),new Map()];
+    const ownSides=[{...sides[0],orders:reference,calls:reference,customers:reference,audit:reference},
+      {...sides[1],orders:databases.order,calls:databases.consultation,customers:databases.customer,audit:databases.operations}];
+    const at=new Date((await reference.query('SELECT clock_timestamp() AS at')).rows[0].at).getTime();
+    const oldCreated=new Date(at-7200000).toISOString(), oldRetention=new Date(at-3600000).toISOString();
+    const address=name=>({name,phoneNumber:'01011112222',roadAddress:'도로',jibunAddress:'지번',detailAddress:'',
+      dongName:'동',postalCode:'12345'});
+    const ready={origin:address('발송인'),destination:address('수령인'),originPin:{scope:'PERSONAL',pinSeq:pin},
+      documentCount:1,smallBoxCount:0,mediumBoxCount:0,bigBoxCount:0,otherItemDescription:'',clientComment:'',
+      itemPrice:1000,notifiedPrice:5000};
+    for(const side of ownSides) {
+      for(const [id,phone,status] of [[customer,'01011112222','ACTIVE'],[other,'01011112223','ACTIVE'],[withdrawn,'01011112224','WITHDRAWN']])
+        await side.customers.query("INSERT INTO customers(customer_seq,name,phone_number,status) OVERRIDING SYSTEM VALUE VALUES($1,'초안 고객',$2,$3)",[id,phone,status]);
+      await side.customers.query('INSERT INTO personal_pins(personal_pin_seq,customer_seq,address_data,version) OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,1)',
+        [pin,customer,ready.origin]);
+      for(const [id,phone,enabled,incoming,deleted] of [
+        [18100,'01011112222',true,oldCreated,null],[call,'01011112222',true,new Date(at).toISOString(),null],
+        [18102,'01011112223',true,new Date(at).toISOString(),null],[unknown,'01011112226',true,new Date(at).toISOString(),null],
+        [18104,'01011112222',false,new Date(at).toISOString(),null],[18105,'01011112222',true,'2000-01-01T00:00:00Z',null],
+        [18106,'01011112222',true,new Date(at).toISOString(),oldRetention],[faultCall,'01011112222',true,new Date(at).toISOString(),null],
+      ]) await side.calls.query(
+        'INSERT INTO call_sessions(call_session_seq,provider_call_id,caller_phone_number,incoming_at,registered_at,order_intake_enabled,deleted_at) '+
+        "OVERRIDING SYSTEM VALUE VALUES($1,'write-call-'||$1::int::text,$2,$3,$3,$4,$5)",
+        [id,phone,incoming,enabled,deleted]);
+      const guard=await side.calls.connect();await guard.query('BEGIN');
+      await guard.query('SELECT 1 FROM call_sessions WHERE call_session_seq=18105 FOR KEY SHARE');retention.push(guard);
+      await side.orders.query(
+        'INSERT INTO order_parcel_drafts(draft_seq,reserved_order_seq,call_session_seq,customer_seq,caller_phone_number,'+
+        'client_parcel_id,creation_payload,parcel_data,status,version,created_at,updated_at,retention_started_at) '+
+        "OVERRIDING SYSTEM VALUE VALUES($1,38000,18100,$2,'01011112222',$3,'{}',$4,'INCOMPLETE',1,$5,$5,$6)",
+        [oldDraft,customer,'00000000-0000-4000-8000-000000028100',
+          {...ready,originPin:{scope:'COMPANY',pinSeq:99013}},oldCreated,oldRetention]);
+      await side.orders.query("SELECT setval('order_parcel_drafts_draft_seq_seq',28101,false),setval('orders_order_seq_seq',38001,false)");
+    }
+    for(const history of histories) history.set(oldDraft,{createdAt:oldCreated,updatedAt:oldCreated,retentionStartedAt:oldRetention,
+      retentionTag:'retention:'+oldDraft,version:1});
+    const windows=new Map();
+    function bounded(value,start,end,label) {
+      const time=Date.parse(value);
+      assert.ok(Number.isFinite(time)&&time>=start-1000&&time<=end+1000,label+' '+value);
+    }
+    function normalize(data,side,start,end) {
+      const old=histories[side].get(data.draftSeq), source=histories[side].get(data.sourceDraftSeq);
+      if(old) {
+        assert.equal(data.createdAt,old.createdAt,'created snapshot');
+        assert.equal(data.retentionStartedAt,old.retentionStartedAt,'retention snapshot');
+        if(data.version===old.version)assert.equal(data.updatedAt,old.updatedAt,'idempotent update timestamp');
+        else {
+          const range=windows.get(data.draftSeq)??{start,end};
+          bounded(data.updatedAt,range.start,range.end,'updated timestamp');
+        }
+      } else {
+        bounded(data.createdAt,start,end,'created timestamp');
+        bounded(data.updatedAt,start,end,'initial updated timestamp');
+        if(source)assert.equal(data.retentionStartedAt,source.retentionStartedAt,'resumed retention');
+        else bounded(data.retentionStartedAt,start,end,'initial retention');
+      }
+      const retentionTag=old?.retentionTag??source?.retentionTag??('retention:'+data.draftSeq);
+      histories[side].set(data.draftSeq,{createdAt:data.createdAt,updatedAt:data.updatedAt,retentionStartedAt:data.retentionStartedAt,
+        retentionTag,version:data.version});
+      return {...data,createdAt:'created:'+data.draftSeq,updatedAt:'updated:'+data.draftSeq+':'+data.version,retentionStartedAt:retentionTag};
+    }
+    let writes=0;
+    async function send(side,method,path,input,expected,requestId,options={}) {
+      const response=await fetch(side.base+path,{method,signal:AbortSignal.timeout(25000),headers:{
+        'X-Request-Id':requestId,...(input===undefined?{}:{'Content-Type':'application/json'}),
+        ...(options.admin===undefined?{Authorization:'Bearer '+process.env.PGPASSWORD,
+          ...(options.noCall?{}:{call_session_seq:String(options.call??call)})}:
+          {Cookie:'dva_session='+tokens[options.admin-1],Origin:'http://localhost:5173'}),
+        ...options.headers,
+      },...(input===undefined?{}:{body:JSON.stringify(input)})});
+      const body=await response.json();
+      assert.equal(response.status,expected,side.name+' '+method+' '+path+' '+JSON.stringify(body));
+      assert.equal(response.headers.get('cache-control'),'no-store');
+      assert.equal(response.headers.get('x-request-id'),requestId);
+      return body;
+    }
+    async function pair(method,path,input,expected,options={}) {
+      const requestId=randomUUID(),start=Date.now(),bodies=[];
+      requests.push(requestId);
+      for(const side of ownSides)bodies.push(await send(side,method,path,input,expected,requestId,options));
+      const end=Date.now();
+      if(input?.sourceDraftSeq)windows.set(input.sourceDraftSeq,{start,end});
+      const normalized=bodies.map((body,index)=>expected<300?{...body,data:normalize(body.data,index,start,end)}:body);
+      assert.deepEqual(normalized[1],normalized[0],method+' '+path);writes++;
+      return bodies[0].data;
+    }
+    const create=input=>pair('POST','/api/parcel-drafts',input,201);
+    const edit=(id,input,status=200)=>pair('PATCH','/api/parcel-drafts/'+id,input,status);
+    const draftInput={clientParcelId:randomUUID(),status:'EDITING',parcel:{origin:{name:'초안 발송인'},documentCount:1}};
+    await pair('POST','/api/parcel-drafts',draftInput,401,{headers:{Authorization:''}});
+    await pair('POST','/api/parcel-drafts',draftInput,400,{noCall:true});
+    await pair('POST','/api/parcel-drafts',{clientParcelId:randomUUID(),status:'EDITING'},400,{noCall:true});
+    await pair('POST','/api/parcel-drafts',{...draftInput,unexpected:1},400);
+    for(const [id,status] of [[999999,404],[18104,409],[18105,404],[18106,404]])
+      await pair('POST','/api/parcel-drafts',draftInput,status,{call:id});
+    await pair('POST','/api/parcel-drafts',{...draftInput,customerSeq:other},403);
+    const first=await create(draftInput);
+    assert.equal(first.customerSeq,customer);assert.equal(first.intakeVersion,2);
+    assert.deepEqual(await create(draftInput),first);
+    await pair('POST','/api/parcel-drafts',{...draftInput,parcel:{documentCount:2}},409);
+    await edit(first.draftSeq,{expectedVersion:1,action:'SAVE',status:'READY',parcel:{...ready,originPin:{scope:'PERSONAL',pinSeq:2}}},403);
+    await edit(first.draftSeq,{expectedVersion:1,action:'SAVE',status:'READY'},422);
+    const saved=await edit(first.draftSeq,{expectedVersion:1,action:'SAVE',status:'READY',parcel:ready});
+    assert.equal(saved.version,2);assert.equal(saved.intakeVersion,3);
+    await edit(first.draftSeq,{expectedVersion:1,action:'SAVE',status:'READY',parcel:ready},409);
+    const cleared=await edit(first.draftSeq,{expectedVersion:2,action:'START_EDIT',clearFields:['origin','items','itemPrice']});
+    assert.equal(cleared.version,3);assert.equal(cleared.intakeVersion,4);
+    assert.ok(Object.values(cleared.parcel.origin).every(value=>value===null));
+    assert.equal(cleared.parcel.originPin,null);assert.equal(cleared.parcel.notifiedPrice,null);
+    assert.equal(cleared.parcel.documentCount,0);assert.equal(cleared.parcel.itemPrice,null);
+    await edit(first.draftSeq,{expectedVersion:3,action:'SAVE',status:'READY',parcel:ready});
+    const cancelled=await edit(first.draftSeq,{expectedVersion:4,action:'CANCEL'});
+    assert.equal(cancelled.status,'CANCELLED');assert.equal(cancelled.intakeVersion,6);
+    await edit(first.draftSeq,{expectedVersion:5,action:'CANCEL'},409);
+    await pair('POST','/api/parcel-drafts',{...draftInput,clientParcelId:randomUUID(),status:'READY',parcel:ready},403,{call:unknown});
+    const anonymous=await pair('POST','/api/parcel-drafts',{...draftInput,clientParcelId:randomUUID()},201,{call:unknown});
+    assert.equal(anonymous.customerSeq,null);assert.equal(anonymous.intakeVersion,2);
+    const standalone={clientParcelId:randomUUID(),customerSeq:customer,status:'READY',parcel:ready};
+    const manual=await pair('POST','/api/parcel-drafts',standalone,201,{admin:1});
+    assert.equal(manual.intakeVersion,null);assert.equal(manual.callSessionSeq,null);
+    await pair('POST','/api/parcel-drafts',standalone,403,{admin:2});
+    await pair('POST','/api/parcel-drafts',{...standalone,clientParcelId:randomUUID(),customerSeq:withdrawn},404,{admin:1});
+    await pair('PATCH','/api/parcel-drafts/'+first.draftSeq,{expectedVersion:5,action:'CANCEL'},409,{admin:1});
+    await pair('GET','/api/parcel-drafts/'+oldDraft,undefined,200);
+    const resumed=await create({clientParcelId:randomUUID(),sourceDraftSeq:oldDraft,status:'READY'});
+    assert.equal(resumed.reservedOrderSeq,38000);
+    assert.equal(resumed.parcel.originPin.scope,'COMPANY');
+    assert.equal((await pair('GET','/api/parcel-drafts/'+oldDraft,undefined,200)).status,'RESUMED');
+
+    const {createServer}=require('node:http'),{networkInterfaces}=require('node:os');
+    const addressIp=Object.values(networkInterfaces()).flat().find(row=>row.family==='IPv4'&&!row.internal)?.address;
+    assert.ok(addressIp);
+    let committed;
+    const proxy=createServer(async(req,res)=>{
+      try {
+        assert.equal(req.url,'/internal/parcel-draft-write');
+        const chunks=[];for await(const chunk of req)chunks.push(chunk);
+        const response=await fetch('http://order-app:3002'+req.url,{method:'POST',
+          headers:{Authorization:req.headers.authorization,'Content-Type':'application/json'},body:Buffer.concat(chunks)});
+        committed=await response.json();
+        assert.equal(response.status,200,JSON.stringify(committed));
+        res.destroy();
+      } catch(error) {res.writeHead(500).end(String(error));}
+    });
+    await new Promise(resolve=>proxy.listen(3002,'0.0.0.0',resolve));
+    const faultInput={clientParcelId:randomUUID(),status:'EDITING',parcel:{origin:{name:'응답 유실 초안'}}};
+    const requestId=randomUUID(),start=Date.now();requests.push(requestId);
+    try {
+      const expected=await send(ownSides[0],'POST','/api/parcel-drafts',faultInput,201,requestId,{call:faultCall});
+      const packet={eventId:randomUUID(),source:'order',eventType:'ParcelDraftWriteRequested',payload:{
+        orderAddress:addressIp,command:{operation:'ParcelDraftCreated',id:null,adminId:null,callSessionSeq:faultCall,input:faultInput,requestId}}};
+      const response=await fetch('http://consultation-app:3004/internal/parcel-draft-write',{method:'POST',signal:AbortSignal.timeout(25000),
+        headers:{Authorization:'Bearer '+process.env.CUSTOMER_AUTH_TOKEN,'Content-Type':'application/json'},body:JSON.stringify(packet)});
+      assert.equal(response.status,503,JSON.stringify(await response.json()));
+      assert.ok(committed?.payload?.receipt,'the order committed a durable call mutation');
+      const end=Date.now();
+      assert.deepEqual(normalize(committed.payload.data,1,start,end),normalize(expected.data,0,start,end));
+      const incomplete=(await databases.consultation.query('SELECT customer_seq,order_intake_version FROM call_sessions WHERE call_session_seq=$1',[faultCall])).rows[0];
+      assert.deepEqual(incomplete,{customer_seq:null,order_intake_version:1});
+      await pair('POST','/api/parcel-drafts',faultInput,201,{call:faultCall});
+      const {ParcelDraftWriteWorker}=require('../dist/orders/parcel-draft-write.worker');
+      const {DatabaseService}=require('../dist/database/database.service');
+      const config={get:key=>({NODE_ENV:'test',DB_HOST:'order-db',DB_PORT:5432,DB_USER:'order_app',DB_PASSWORD:process.env.PGPASSWORD,
+        DB_NAME:process.env.PGDATABASE,CONSULTATION_URL:'http://consultation-app:3004',CUSTOMER_AUTH_TOKEN:process.env.CUSTOMER_AUTH_TOKEN})[key]};
+      const db=new DatabaseService(config),worker=new ParcelDraftWriteWorker(db,config);
+      try {
+        const current=worker.run();assert.equal(worker.run(),current);await current;
+        for(let count=0;count<30;count++){if(!(await worker.run()))break;assert.ok(count<29,'draft relay did not drain');}
+        await worker.onModuleDestroy();
+      } finally{await db.onModuleDestroy();}
+      const marker=await databases.order.query('SELECT delivered_at IS NOT NULL AS delivered FROM outbox_events WHERE event_id=$1',[committed.payload.receipt.eventId]);
+      assert.deepEqual(marker.rows,[{delivered:true}]);
+    } finally{proxy.closeAllConnections();await new Promise(resolve=>proxy.close(resolve));}
+    const callRows=async db=>(await db.query(
+      'SELECT call_session_seq,customer_seq,order_intake_version FROM call_sessions WHERE call_session_seq IN (18101,18103,18107) ORDER BY call_session_seq',
+    )).rows;
+    assert.deepEqual(await callRows(databases.consultation),await callRows(reference));
+    const auditRows=async db=>(await db.query(
+      'SELECT request_id,action,result,target_type,target_seq,actor_type,actor_seq,metadata FROM audit_logs '+
+      'WHERE request_id=ANY($1::uuid[]) ORDER BY request_id,action,target_seq',[requests],
+    )).rows;
+    assert.deepEqual(await auditRows(databases.operations),await auditRows(reference));
+    const docs=await Promise.all(sides.map(async side=>(await fetch(side.base+'/api/docs-json')).json()));
+    for(const [path,method] of [['/api/parcel-drafts','post'],['/api/parcel-drafts/{id}','patch']]) {
+      assert.deepEqual(docs[1].paths[path][method],docs[0].paths[path][method]);
+      const visit=(value,seen=new Set())=>{
+        for(const match of JSON.stringify(value).matchAll(/"\$ref":"#\/components\/schemas\/([^"]+)"/g)) {
+          const name=match[1];if(seen.has(name))continue;seen.add(name);
+          assert.deepEqual(docs[1].components.schemas[name],docs[0].components.schemas[name],name);
+          visit(docs[0].components.schemas[name],seen);
+        }
+      };
+      visit(docs[0].paths[path][method]);
+    }
+    t.diagnostic('draft write HTTP pairs: '+writes+'; call/customer/PIN locks, stored versions and order-commit response loss recovered');
+  });
   console.log('Compared HTTP requests: '+compared);
 });

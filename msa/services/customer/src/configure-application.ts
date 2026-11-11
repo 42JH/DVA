@@ -20,7 +20,11 @@ export function configureApplication(app: INestApplication, logger = new Logger(
   const scopeParser = json({ limit: '256kb' });
   // Keep Nest's default public parser; only the authenticated internal envelope needs extra space.
   app.use(
-    ['/internal/call-scope', '/internal/order-cancellation/call'],
+    [
+      '/internal/call-scope',
+      '/internal/order-cancellation/call',
+      '/internal/call-read-references/parcel-draft-write',
+    ],
     (request: Request, response: Response, next: NextFunction) => {
       scopeParser(request, response, next);
     },
@@ -50,6 +54,11 @@ export function configureApplication(app: INestApplication, logger = new Logger(
     exclude: [
       { path: 'customer/health', method: RequestMethod.ALL },
       { path: 'customer/health/ready', method: RequestMethod.ALL },
+      { path: 'internal/call-read-references/parcel-draft-write', method: RequestMethod.ALL },
+      {
+        path: 'internal/call-read-references/parcel-draft-write/reference',
+        method: RequestMethod.ALL,
+      },
       { path: 'internal/caller-context', method: RequestMethod.ALL },
       { path: 'internal/call-read-references', method: RequestMethod.ALL },
       { path: 'internal/call-read-references/for-orders', method: RequestMethod.ALL },

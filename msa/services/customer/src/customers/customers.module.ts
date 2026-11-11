@@ -1,3 +1,5 @@
+import { ParcelDraftWriteController } from './parcel-draft-write.controller';
+import { OrderReferenceScopes } from './order-reference-scopes.service';
 import { OrderReadScopeController } from './order-read-scope.controller';
 import { OrganizationBillingService } from '../organizations/organization-billing.service';
 import { CallReadReferencesController } from './call-read-references.controller';
@@ -13,12 +15,19 @@ import { CustomersService } from './customers.service';
 @Module({
   imports: [DatabaseModule, CallScopeModule],
   controllers: [
+    ParcelDraftWriteController,
     OrderReadScopeController,
     CustomersController,
     CallerContextQueryController,
     CallReadReferencesController,
   ],
-  providers: [CustomersService, CustomersRepository, CallContextClient, OrganizationBillingService],
+  providers: [
+    OrderReferenceScopes,
+    CustomersService,
+    CustomersRepository,
+    CallContextClient,
+    OrganizationBillingService,
+  ],
   exports: [CustomersService],
 })
 export class CustomersModule {}

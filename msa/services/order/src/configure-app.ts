@@ -21,7 +21,7 @@ export function configureApp(app: INestApplication, logger = new Logger('Http'))
   const scopeParser = json({ limit: '256kb' });
   // Nest detects parsers by function name; keep its default public JSON parser.
   app.use(
-    '/internal/order-cancellation',
+    ['/internal/order-cancellation', '/internal/parcel-draft-write'],
     (request: Request, response: Response, next: NextFunction) => {
       scopeParser(request, response, next);
     },
@@ -51,6 +51,8 @@ export function configureApp(app: INestApplication, logger = new Logger('Http'))
     exclude: [
       { path: 'order/health', method: RequestMethod.ALL },
       { path: 'order/health/ready', method: RequestMethod.ALL },
+      { path: 'internal/parcel-draft-write', method: RequestMethod.ALL },
+      { path: 'internal/parcel-draft-write/reference', method: RequestMethod.ALL },
       { path: 'internal/billing/read', method: RequestMethod.ALL },
       { path: 'internal/billing/customer', method: RequestMethod.ALL },
       { path: 'internal/billing/initialize', method: RequestMethod.ALL },

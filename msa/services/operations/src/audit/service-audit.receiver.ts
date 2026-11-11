@@ -81,6 +81,15 @@ function auditInput(
     service === 'order' && object(audit) && audit.action === 'BILLING_MONTH_INITIALIZED';
   const paymentCompleted =
     service === 'order' && object(audit) && audit.action === 'ORDER_PAYMENT_COMPLETED';
+  const draftMutation =
+    service === 'order' &&
+    object(audit) &&
+    [
+      'PARCEL_DRAFT_CREATED',
+      'PARCEL_DRAFT_RESUMED',
+      'PARCEL_DRAFT_UPDATED',
+      'PARCEL_DRAFT_CANCELLED',
+    ].includes(audit.action as string);
   const submission =
     service === 'order' &&
     object(audit) &&
@@ -127,7 +136,8 @@ function auditInput(
     !(service === 'customer'
       ? actions.has(audit.action as string)
       : service === 'order'
-        ? submission ||
+        ? draftMutation ||
+          submission ||
           paymentCompleted ||
           [
             'BILLING_MONTH_INITIALIZED',
@@ -146,7 +156,7 @@ function auditInput(
         ? audit.targetType ===
           (billingInitialization
             ? 'ORGANIZATION'
-            : audit.action === 'PARCEL_DRAFT_DELETED'
+            : draftMutation || audit.action === 'PARCEL_DRAFT_DELETED'
               ? 'ORDER_PARCEL_DRAFT'
               : audit.action === 'ORDER_PARCEL_CANCELLED' && payload.result === 'SUCCESS'
                 ? 'ORDER_PARCEL'

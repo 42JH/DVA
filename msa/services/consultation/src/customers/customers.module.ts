@@ -1,3 +1,5 @@
+import { ParcelDraftWriteController } from './parcel-draft-write.controller';
+import { OrderReferenceScopes } from './order-reference-scopes.service';
 import { OrderDeletionCheckController } from './order-deletion-check.controller';
 import { OrderReadScopeController } from './order-read-scope.controller';
 import { CallScopeController } from './call-scope.controller';
@@ -11,12 +13,13 @@ import { CustomerContextClient } from './customer-context.client';
 @Module({
   imports: [DatabaseModule, ConsultationsModule],
   controllers: [
+    ParcelDraftWriteController,
     OrderReadScopeController,
     OrderDeletionCheckController,
     CallerContextCommandController,
     CallScopeController,
   ],
-  providers: [CustomersService, CustomerContextClient],
+  providers: [OrderReferenceScopes, CustomersService, CustomerContextClient],
   exports: [CustomerContextClient],
 })
 export class CustomersModule {}

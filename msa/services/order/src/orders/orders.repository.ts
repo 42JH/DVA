@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { Injectable } from '@nestjs/common';
 import { Pool, PoolClient } from 'pg';
 import type { IntakeOrderResult } from '@dva/events/order-read.cjs';
@@ -337,5 +338,13 @@ export class OrdersRepository {
         [id, customerId],
       )
     ).rows[0]?.detail;
+  }
+  async lockCreation(client: PoolClient, key: string): Promise<boolean> {
+    const hash = createHash('sha256').update(`orders.create:${key}`).digest();
+    const result = await client.query<{ acquired: boolean }>(
+      'SELECT pg_try_advisory_xact_lock($1::int, $2::int) AS acquired',
+      [hash.readInt32BE(0), hash.readInt32BE(4)],
+    );
+    return result.rows[0].acquired;
   }
 }

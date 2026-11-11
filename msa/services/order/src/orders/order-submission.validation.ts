@@ -15,11 +15,10 @@ export type OrderSubmissionSnapshot = Pick<
   OrderDetailDto,
   'pickupRequestedAt' | 'paymentMethodType'
 > & {
-  parcels: Pick<
+  parcels: (Pick<
     OrderDetailDto['parcels'][number],
     | 'origin'
     | 'destination'
-    | 'status'
     | 'documentCount'
     | 'smallBoxCount'
     | 'mediumBoxCount'
@@ -28,7 +27,7 @@ export type OrderSubmissionSnapshot = Pick<
     | 'notifiedPrice'
     | 'itemPrice'
     | 'clientComment'
-  >[];
+  > & { status?: 'ACTIVE' | 'CANCELLED' })[];
 };
 
 export function assertOrderSubmissionReady(

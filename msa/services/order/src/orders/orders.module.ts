@@ -11,6 +11,11 @@ import { CallDraftDeletionController } from './call-draft-deletion.controller';
 import { OrderDeletionCheckClient } from './order-deletion-check.client';
 import { OrderCancellationController } from './order-cancellation.controller';
 import { OrderShipmentCheckClient } from './order-shipment-check.client';
+import { ParcelDraftWriteController } from './parcel-draft-write.controller';
+import { ParcelDraftWritesService } from './parcel-draft-writes.service';
+import { ParcelDraftWritesRepository } from './parcel-draft-writes.repository';
+import { ParcelDraftWriteScope } from './parcel-draft-write-scope.service';
+import { ParcelDraftWriteWorker } from './parcel-draft-write.worker';
 import { Module } from '@nestjs/common';
 import { DatabaseModule } from '../database/database.module';
 import { OrdersService } from './orders.service';
@@ -27,6 +32,7 @@ import { OrderSubmissionWorker } from './order-submission.worker';
 @Module({
   imports: [DatabaseModule],
   controllers: [
+    ParcelDraftWriteController,
     AdminParcelDraftsController,
     ParcelDraftsController,
     CallReadReferencesController,
@@ -39,6 +45,10 @@ import { OrderSubmissionWorker } from './order-submission.worker';
     OrderReadController,
   ],
   providers: [
+    ParcelDraftWritesService,
+    ParcelDraftWritesRepository,
+    ParcelDraftWriteScope,
+    ParcelDraftWriteWorker,
     AdminParcelDraftsService,
     ParcelDraftReadsService,
     ParcelDraftReadsRepository,

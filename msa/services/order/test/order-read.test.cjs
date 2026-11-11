@@ -7,6 +7,41 @@ const { validateOrderRead, requestOrderRead, OrderReadError } = require('@dva/ev
 const { validateEnvironment } = require('../dist/config/environment');
 const { OrdersService } = require('../dist/orders/orders.service');
 const token = 'order-read-test-only-'.padEnd(48, 't');
+
+test('draft write scopes bind owners, calls, reply versions and authenticated reference queries', async () => {
+  const {validateDraftWrite,validateWriteReference,validateCallMutation,requestWriteReference}=require('@dva/events/parcel-draft-write.cjs');
+  const input={eventId:randomUUID(),source:'order',eventType:'ParcelDraftWriteRequested',payload:{
+    command:{operation:'ParcelDraftCreated',id:null,adminId:null,callSessionSeq:1,
+      input:{clientParcelId:randomUUID(),status:'EDITING',parcel:{}},requestId:'draft-write-test'},
+    orderAddress:null,
+  }};
+  validateDraftWrite(input,'order');
+  for(const mutate of [
+    e=>e.source='customer',e=>e.payload.actorId=1,e=>e.payload.orderAddress='169.254.169.254',
+    e=>e.payload.command.adminId=1,e=>e.payload.command.callSessionSeq=null,
+    e=>e.payload.command.input=[],e=>e.payload.command.requestId='',
+  ]) {
+    const changed=structuredClone(input);mutate(changed);
+    assert.throws(()=>validateDraftWrite(changed,'order'));
+  }
+  const scoped={...input,source:'consultation',payload:{...input.payload,consultationAddress:null,
+    call:{callSessionSeq:1,customerSeq:null,intakeVersion:1}}};
+  validateDraftWrite(scoped,'consultation');
+  for(const call of [null,{callSessionSeq:2,customerSeq:null,intakeVersion:1},{callSessionSeq:1,customerSeq:null,intakeVersion:0}])
+    assert.throws(()=>validateDraftWrite({...scoped,payload:{...scoped.payload,call}},'consultation'));
+  validateDraftWrite({...scoped,source:'customer',payload:{...scoped.payload,customerAddress:null}},'customer');
+  const mutation={callSessionSeq:1,beforeVersion:1,afterVersion:2,customerSeq:2};
+  validateCallMutation(mutation);
+  for(const changed of [{...mutation,afterVersion:3},{...mutation,customerSeq:0},{...mutation,actorId:1}])
+    assert.throws(()=>validateCallMutation(changed));
+  const reference={eventId:randomUUID(),source:'order',eventType:'ParcelDraftWriteReferenceRequested',
+    payload:{operation:'CustomerRead',input:{id:1}}};
+  validateWriteReference(reference);
+  assert.throws(()=>validateWriteReference({...reference,source:'customer'}));
+  assert.throws(()=>requestWriteReference('http://owner/private',token,reference));
+  await assert.rejects(requestWriteReference('http://user:secret@owner/private',token,reference,input.eventId));
+});
+
 const event = () => ({ eventId: randomUUID(), source: 'order', eventType: 'OrderReadRequested',
   payload: { command: { operation: 'OrdersListed', id: null, callSessionSeq: 1, query: {} } } });
 let server, url, mode;
