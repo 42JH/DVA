@@ -11,7 +11,7 @@ import { ApiError } from '@/shared/api/client'
 import {
   companyQueries,
   createDepartment,
-  deleteCompany,
+  deleteCompanies,
   deleteDepartment,
   removeMember,
   renameCompany,
@@ -210,7 +210,7 @@ export function useCompanyDetail(id: number, size = PAGE_SIZE) {
 
     renameCompany: (name: string) => run(() => renameCompany(id, name)),
     deleteCompany: () =>
-      act.mutate(() => deleteCompany(id), {
+      act.mutate(() => deleteCompanies([id]), {
         onSuccess: () => navigate('/companies', { replace: true }),
       }),
     deleteMember: (m: Member) => run(() => removeMember(m.membership.membershipSeq)),
