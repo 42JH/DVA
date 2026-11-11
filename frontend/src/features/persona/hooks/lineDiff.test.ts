@@ -1,6 +1,6 @@
 // 실행: npx tsx src/features/persona/hooks/lineDiff.test.ts  (프레임워크 없이 assert만)
 import assert from 'node:assert/strict'
-import { lineDiff } from './lineDiff'
+import { inlineDiff, lineDiff } from './lineDiff'
 
 const kinds = (a: string[], b: string[]) =>
   lineDiff(a, b)
@@ -52,3 +52,12 @@ assert.deepEqual(
 )
 
 console.log('lineDiff.test ok')
+
+// 글자 단위: ㅇㅇㅇㅇ → ㅇㅇㄴㄴㅇㅇ 는 ㄴㄴ만 더함
+assert.deepEqual(inlineDiff(['ㅇㅇㅇㅇ'], ['ㅇㅇㄴㄴㅇㅇ']).blocks, [
+  [
+    { kind: 'same', text: 'ㅇㅇ' },
+    { kind: 'add', text: 'ㄴㄴ' },
+    { kind: 'same', text: 'ㅇㅇ' },
+  ],
+])
