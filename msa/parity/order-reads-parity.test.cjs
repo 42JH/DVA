@@ -913,7 +913,7 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
             assert.deepEqual(await makeService().retry(1005,1,submitId),{status:'SUBMITTING'});
             assert.equal((await orderResult(databases.order)).status,'SUBMITTING');
             assert.deepEqual(await shipment(delivery),await shipment(reference),'shipment transaction survived acknowledgement loss');
-            const worker=new OrderSubmissionWorker(makeService(),config,database,repository,audit,{run:async()=>{}});
+            const worker=new OrderSubmissionWorker(makeService(),config,database,repository,audit,{run:async()=>{}},{recoverPending:async()=>{}});
             await worker.run();
             await worker.run();
             assert.equal((await orderResult(databases.order)).status,'ACCEPTED');
@@ -1565,6 +1565,7 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
               repository,
               audit,
               { run: async () => jobs.push('billing') },
+              {recoverPending:async()=>jobs.push('intake')},
             );
           }
           worker.onApplicationBootstrap();
@@ -1582,10 +1583,8 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
               expectedBatches,
             );
             assert.deepEqual(
-              item.jobs.slice(0, item.owner === 'monolith' ? 3 : 2),
-              item.owner === 'monolith'
-                ? ['intake', 'pending', 'billing']
-                : ['pending', 'billing'],
+              item.jobs.slice(0,3),
+              ['intake','pending','billing'],
             );
             assert.ok(
               item.jobs.lastIndexOf('paid') > item.jobs.lastIndexOf('billing'),
@@ -2011,6 +2010,591 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
             'DELETE FROM organizations WHERE organization_seq=6200',
           );
       }
+    },
+  );
+  await t.test(
+    'intake completion preserves sealing, PBX waits, conversion, payment policy and retries',
+    async () => {
+      const started = Date.now(),
+        requests = [],
+        uuidMaps = [new Map(), new Map()];
+      let pairs = 0;
+      const intakeSides = [
+        {
+          ...sides[0],
+          calls: reference,
+          orders: reference,
+          customers: reference,
+          audit: reference,
+        },
+        {
+          ...sides[1],
+          base: 'http://consultation-app:3004',
+          calls: databases.consultation,
+          orders: databases.order,
+          customers: databases.customer,
+          audit: databases.operations,
+        },
+      ];
+      const sourceSpec=await(await fetch(sides[0].base+'/api/docs-json')).json();
+      const candidateSpec=await(await fetch('http://consultation-app:3004/consultation/docs-json')).json();
+      const {schema}=require('./final-parity.cjs');
+      const completePath='/api/calls/{id}/order-intake/complete';
+      assert.deepEqual(schema(candidateSpec.paths[completePath].post,candidateSpec),schema(sourceSpec.paths[completePath].post,sourceSpec));
+      const at = new Date().toISOString();
+      for (const side of intakeSides) {
+        for (let n = 0; n < 10; n++)
+          await side.calls.query(
+            'INSERT INTO call_sessions(call_session_seq,provider_call_id,caller_phone_number,customer_seq,incoming_at,registered_at,order_intake_enabled,ended_at,started_at) ' +
+              "OVERRIDING SYSTEM VALUE VALUES($1,'intake-current-'||$1::int::text,'01000000006',6,$2,$2,$3,$4,$4)",
+            [53000 + n, at, n !== 6, [1, 3, 4, 7, 8].includes(n) ? at : null],
+          );
+        await side.orders.query(
+          "SELECT setval('order_parcel_drafts_draft_seq_seq',54000,false),setval('orders_order_seq_seq',55000,false),setval('order_parcels_order_parcel_seq_seq',56000,false)",
+        );
+      }
+      const ready = {
+        origin: {
+          name: '발송인',
+          phoneNumber: '01000000006',
+          roadAddress: '서울 도로',
+          jibunAddress: '서울 지번',
+          detailAddress: '1층',
+          dongName: '동',
+          postalCode: '12345',
+        },
+        destination: {
+          name: '수령인',
+          phoneNumber: '01011112222',
+          roadAddress: '부산 도로',
+          jibunAddress: '부산 지번',
+          detailAddress: '2층',
+          dongName: '동',
+          postalCode: '45678',
+        },
+        documentCount: 1,
+        smallBoxCount: 0,
+        mediumBoxCount: 0,
+        bigBoxCount: 0,
+        otherItemDescription: '',
+        clientComment: '',
+        itemPrice: 1000,
+        notifiedPrice: 5000,
+      };
+      const normalize = (value, side, key = '') => {
+        if (value === null) return null;
+        if (value instanceof Date) value = value.toISOString();
+        if (
+          [
+            'paymentRequestId',
+            'payment_request_id',
+            'creation_request_id',
+          ].includes(key)
+        ) {
+          assert.match(value, /^[0-9a-f-]{36}$/i);
+          const map = uuidMaps[side];
+          if (!map.has(value)) map.set(value, 'generated-uuid-' + map.size);
+          return map.get(value);
+        }
+        if (
+          [
+            'paymentDueAt',
+            'expiresAt',
+            'payment_due_at',
+            'expires_at',
+          ].includes(key)
+        ) {
+          assert.ok(
+            Date.parse(value) >= started + 86400000 - 2000 &&
+              Date.parse(value) <= Date.now() + 86400000 + 2000,
+          );
+          return '<new deadline>';
+        }
+        if (
+          [
+            'createdAt',
+            'updatedAt',
+            'retentionStartedAt',
+            'completionReceivedAt',
+            'finalizedAt',
+            'created_at',
+            'updated_at',
+            'paid_at',
+            'order_completion_received_at',
+            'order_finalized_at',
+            'order_finalization_attempted_at',
+            'submission_first_attempt_at','submission_last_attempt_at','closed_at',
+          ].includes(key)
+        ) {
+          const time = Date.parse(value);
+          assert.ok(
+            time >= started - 1000 && time <= Date.now() + 1000,
+            key + ' ' + value,
+          );
+          return '<generated ' + key + '>';
+        }
+        if(value&&typeof value==='object'&&value.paid_at&&value.pickup_requested_at&&Date.parse(value.pickup_requested_at)<started+259200000) {
+        const paid=Date.parse(value.paid_at),local=new Date(paid+32400000);
+        const day=Date.UTC(local.getUTCFullYear(),local.getUTCMonth(),local.getUTCDate())-32400000;
+        const expected=paid+3600000>day+17*3600000?day+33*3600000:Math.max(paid+3600000,day+9*3600000);
+        assert.equal(Date.parse(value.pickup_requested_at),expected,'source paid pickup policy');
+        value={...value,pickup_requested_at:'<validated paid pickup>'};
+      }
+      if (Array.isArray(value))
+          return value.map((item) => normalize(item, side));
+        if (typeof value === 'object')
+          return Object.fromEntries(
+            Object.entries(value).map(([key, item]) => [
+              key,
+              normalize(item, side, key),
+            ]),
+          );
+        return value;
+      };
+      async function pair(method, path, input, status, options = {}) {
+        const requestId = randomUUID(),
+          bodies = [];
+        requests.push(requestId);
+        for (const [index, side] of intakeSides.entries()) {
+          const base =
+            index === 1 && !path.startsWith('/api/calls')
+              ? 'http://order-app:3002'
+              : side.base;
+          const response = await fetch(base + path, {
+            method,
+            signal: AbortSignal.timeout(30000),
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Request-Id': requestId,
+              Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN,
+              ...options.headers,
+            },
+            ...(input === undefined ? {} : { body: JSON.stringify(input) }),
+          });
+          const body = await response.json();
+          assert.equal(
+            response.status,
+            status,
+            index + ' ' + method + ' ' + path + ' ' + JSON.stringify(body),
+          );
+          assert.equal(response.headers.get('cache-control'), 'no-store');
+          bodies.push(require('./final-parity.cjs').envelope(body, requestId));
+        }
+        assert.deepEqual(
+          normalize(bodies[1], 1),
+          normalize(bodies[0], 0),
+          method + ' ' + path,
+        );
+        pairs++;
+        return bodies[0].data;
+      }
+      const complete = (id, input, status = 200, options) =>
+        pair(
+          'POST',
+          '/api/calls/' + id + '/order-intake/complete',
+          input,
+          status,
+          options,
+        );
+      const detail = (id) =>
+        pair('GET', '/api/calls/' + id + '/order-intake', undefined, 200);
+      const draft = (id, status = 'READY', parcel = ready) =>
+        pair(
+          'POST',
+          '/api/parcel-drafts',
+          { clientParcelId: randomUUID(), customerSeq: 6, status, parcel },
+          201,
+          { headers: { call_session_seq: String(id) } },
+        );
+      const end = async (id) => {
+        for (const side of intakeSides)
+          await side.calls.query(
+            'UPDATE call_sessions SET ended_at=$2,started_at=$2 WHERE call_session_seq=$1',
+            [id, at],
+          );
+      };
+      await complete(53000, { expectedIntakeVersion: 1 }, 401, {
+        headers: { Authorization: '', ...headers },
+      });
+      for (const input of [
+        {},
+        { expectedIntakeVersion: 0 },
+        { expectedIntakeVersion: '1' },
+        { expectedIntakeVersion: 1, paymentMethodType: null },
+        { expectedIntakeVersion: 1, pickupRequestedAt: '2026-02-30T12:00:00Z' },
+        { expectedIntakeVersion: 1, actorId: 1 },
+      ])
+        await complete(53000, input, 400);
+      await complete(999999, { expectedIntakeVersion: 1 }, 404);
+      await complete(53006, { expectedIntakeVersion: 1 }, 409);
+      assert.equal(
+        (await complete(53000, { expectedIntakeVersion: 1 })).status,
+        'WAITING_PBX',
+      );
+      await end(53000);
+      assert.equal(
+        (await complete(53000, { expectedIntakeVersion: 1 })).status,
+        'NO_ORDER',
+      );
+      await complete(53000, { expectedIntakeVersion: 2 }, 409);
+      const editing = await draft(53001, 'EDITING', {
+        origin: { name: '입력 중' },
+        documentCount: 1,
+      });
+      assert.equal(
+        (
+          await complete(53001, {
+            expectedIntakeVersion: editing.intakeVersion,
+          })
+        ).status,
+        'NO_ORDER',
+      );
+      const first = await draft(53002);
+      await complete(
+        53002,
+        { expectedIntakeVersion: 1, paymentMethodType: 'billing' },
+        409,
+      );
+      await complete(
+        53002,
+        { expectedIntakeVersion: first.intakeVersion },
+        422,
+      );
+      await complete(
+        53002,
+        {
+          expectedIntakeVersion: first.intakeVersion,
+          paymentMethodType: 'credit',
+        },
+        403,
+      );
+      const billing = {
+        expectedIntakeVersion: first.intakeVersion,
+        paymentMethodType: 'billing',
+        pickupRequestedAt: '2030-02-01T10:00:00+09:00',
+      };
+      assert.equal(
+        (
+          await complete(53002, billing, 200, {
+            headers: { call_session_seq: 'invalid' },
+          })
+        ).status,
+        'WAITING_PBX',
+      );
+      await pair(
+        'PATCH',
+        '/api/parcel-drafts/' + first.draftSeq,
+        { expectedVersion: first.version, action:'CANCEL' },
+        409,
+        { headers: { call_session_seq: '53002' } },
+      );
+      await end(53002);
+      const bill = await complete(53002, billing);
+      assert.equal(bill.status, 'FINALIZED');
+      assert.equal(bill.order.status, 'notPaid');
+      assert.equal(bill.order.totalAmount, 5000);
+      assert.equal(bill.parcelMappings.length, 1);
+      const before = [];
+      for (const side of intakeSides)
+        before.push(
+          (
+            await side.calls.query(
+              'SELECT to_jsonb(c) AS data FROM call_sessions c WHERE call_session_seq=53002',
+            )
+          ).rows[0].data,
+        );
+      await complete(53002, {
+        ...billing,
+        pickupRequestedAt: '2030-02-01T01:00:00Z',
+      });
+      for (const [index, side] of intakeSides.entries())
+        assert.deepEqual(
+          (
+            await side.calls.query(
+              'SELECT to_jsonb(c) AS data FROM call_sessions c WHERE call_session_seq=53002',
+            )
+          ).rows[0].data,
+          before[index],
+        );
+      const multi1 = await draft(53003),
+        multi2 = await draft(53003, 'READY', { ...ready, notifiedPrice: 7000 }),
+        multi3 = await draft(53003, 'EDITING', { documentCount: 1 });
+      const multi = await complete(53003, {
+        expectedIntakeVersion: multi3.intakeVersion,
+        paymentMethodType: 'billing',
+      });
+      assert.deepEqual(
+        multi.parcelMappings.map((row) => row.draftSeq),
+        [multi1.draftSeq, multi2.draftSeq],
+      );
+      assert.equal(multi.order.totalAmount, 12000);
+      for (const side of intakeSides)
+        await side.customers.query(
+          'UPDATE customers SET monthly_billing_enabled=true WHERE customer_seq=6',
+        );
+      const personal = await draft(53007);
+      const paid = await complete(53007, {
+        expectedIntakeVersion: personal.intakeVersion,
+        paymentMethodType: 'credit',
+      });
+      assert.equal(paid.order.status, 'ACCEPTED');
+      for (const side of intakeSides) {
+        await side.customers.query(
+          "INSERT INTO organizations(organization_seq,name,status,monthly_billing_enabled) OVERRIDING SYSTEM VALUE VALUES(6500,'접수 기업','ACTIVE',true)",
+        );
+        await side.customers.query(
+          "INSERT INTO departments(department_seq,organization_seq,name,group_billing_enabled) OVERRIDING SYSTEM VALUE VALUES(6500,6500,'접수 부서',true)",
+        );
+        await side.customers.query(
+          "INSERT INTO memberships(membership_seq,customer_seq,organization_seq,department_seq,employee_no,status) OVERRIDING SYSTEM VALUE VALUES(6500,6,6500,6500,'intake','ACTIVE')",
+        );
+      }
+      const group = await draft(53008);
+      const grouped = await complete(53008, {
+        expectedIntakeVersion: group.intakeVersion,
+        paymentMethodType: 'groupBilling',
+      });
+      assert.equal(grouped.order.status, 'ACCEPTED');
+      const late = await draft(53009);
+      const lateInput = {
+        expectedIntakeVersion: late.intakeVersion,
+        paymentMethodType: 'credit',
+      };
+      assert.equal((await complete(53009, lateInput)).status, 'WAITING_PBX');
+      for (const side of intakeSides)
+        await side.customers.query(
+          "UPDATE memberships SET status='INACTIVE' WHERE membership_seq=6500",
+        );
+      await end(53009);
+      const failed = await complete(53009, lateInput);
+      assert.equal(failed.status, 'FAILED');
+      assert.equal(failed.errorCode, 'FORBIDDEN');
+      assert.equal(failed.orderSeq, null);
+      for (const side of intakeSides)
+        await side.customers.query(
+          "UPDATE memberships SET status='ACTIVE' WHERE membership_seq=6500",
+        );
+      const recovered = await complete(53009, lateInput);
+      assert.equal(recovered.order.status, 'ACCEPTED');
+      await detail(53009);
+      const stored = async (side) => ({
+        calls: (
+          await side.calls.query(
+            'SELECT call_session_seq,customer_seq,order_seq,order_intake_version,order_completion_received_at,order_completion_payload,order_finalized_at,order_finalization_result,order_finalization_error_code,order_finalization_attempted_at ' +
+              'FROM call_sessions WHERE call_session_seq BETWEEN 53000 AND 53009 ORDER BY call_session_seq',
+          )
+        ).rows,
+        orders: (
+          await side.orders.query(
+            'SELECT to_jsonb(o) AS data FROM orders o WHERE order_seq BETWEEN 55000 AND 55020 ORDER BY order_seq',
+          )
+        ).rows,
+        parcels: (
+          await side.orders.query(
+            'SELECT to_jsonb(p) AS data FROM order_parcels p WHERE order_seq BETWEEN 55000 AND 55020 ORDER BY order_parcel_seq',
+          )
+        ).rows,
+        drafts: (
+          await side.orders.query(
+            'SELECT draft_seq,status,version,order_seq,order_parcel_seq FROM order_parcel_drafts WHERE draft_seq>=54000 ORDER BY draft_seq',
+          )
+        ).rows,
+        charges: (
+          await side.orders.query(
+            'SELECT order_seq,organization_seq,customer_seq,billing_month::text,payment_method_type,amount FROM order_billing_charges WHERE order_seq BETWEEN 55000 AND 55020 ORDER BY order_seq',
+          )
+        ).rows,
+        months: (
+          await side.orders.query(
+            'SELECT organization_seq,billing_month::text,organization_name,monthly_amount::text,group_billing_amount::text FROM organization_billing_months WHERE organization_seq=6500',
+          )
+        ).rows,
+      });
+      const source = await stored(intakeSides[0]),
+        candidate = await stored(intakeSides[1]);
+      assert.deepEqual(normalize(candidate, 1), normalize(source, 0));
+      const logs = async (db) =>
+        (
+          await db.query(
+            'SELECT request_id,action,result,target_type,target_seq,actor_type,actor_seq,metadata FROM audit_logs WHERE request_id=ANY($1::uuid[]) ORDER BY audit_log_seq',
+            [requests],
+          )
+        ).rows;
+      const expected = await logs(reference);
+      for (let n = 0; n < 100; n++) {
+        if ((await logs(databases.operations)).length === expected.length)
+          break;
+        await pause(25);
+      }
+      assert.deepEqual(await logs(databases.operations), expected);
+  await complete(53005, { expectedIntakeVersion: 1 });
+  await end(53005);
+  for (const side of intakeSides)
+    await side.calls.query(
+      'UPDATE call_sessions SET order_finalization_attempted_at=clock_timestamp() WHERE call_session_seq=53005',
+    );
+  const {
+    OrderIntakeRepository,
+  } = require('./monolith-runtime/orders/order-intake.repository');
+  const originalCandidates = new OrderIntakeRepository({ pool: reference });
+  assert.ok(!(await originalCandidates.candidates()).includes(53005));
+  const recoverEvent = () => ({
+    eventId: randomUUID(),
+    source: 'order',
+    eventType: 'OrderIntakeRecoveryRequested',
+    payload: {},
+  });
+  const recover = async () => {
+    const response = await fetch(
+      'http://consultation-app:3004/internal/parcel-draft-write/recover',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN,
+        },
+        body: JSON.stringify(recoverEvent()),
+      },
+    );
+    assert.equal(response.status, 200, await response.text());
+  };
+  await recover();
+  assert.equal((await detail(53005)).status, 'FINALIZING');
+  for (const side of intakeSides)
+    await side.calls.query(
+      "UPDATE call_sessions SET order_finalization_attempted_at=clock_timestamp()-interval '61 seconds' WHERE call_session_seq=53005",
+    );
+  assert.ok((await originalCandidates.candidates()).includes(53005));
+  const sourceRecovery = await fetch(
+    sides[0].base + '/api/calls/53005/order-intake/complete',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN,
+      },
+      body: JSON.stringify({ expectedIntakeVersion: 1 }),
+    },
+  );
+  assert.equal(sourceRecovery.status, 200);
+  await recover();
+  assert.equal((await detail(53005)).status, 'NO_ORDER');
+  await databases.consultation.query(
+    "INSERT INTO call_sessions(call_session_seq,provider_call_id,caller_phone_number,customer_seq,incoming_at,registered_at,order_intake_enabled,started_at,ended_at) OVERRIDING SYSTEM VALUE VALUES(53010,'intake-recovery','01000000006',6,$1,$1,true,$1,$1)",
+    [at],
+  );
+  const aiHeaders = {
+    'Content-Type': 'application/json',
+    Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN,
+  };
+  const createdResponse = await fetch(
+    'http://order-app:3002/api/parcel-drafts',
+    {
+      method: 'POST',
+      headers: { ...aiHeaders, call_session_seq: '53010' },
+      body: JSON.stringify({
+        clientParcelId: randomUUID(),
+        customerSeq: 6,
+        status: 'READY',
+        parcel: ready,
+      }),
+    },
+  );
+  assert.equal(createdResponse.status, 201);
+  const createdDraft = (await createdResponse.json()).data;
+  const faultInput = {
+      expectedIntakeVersion: createdDraft.intakeVersion,
+      paymentMethodType: 'billing',
+    },
+    faultRequest = randomUUID();
+  await databases.consultation.query(
+    "CREATE FUNCTION intake_owner_fixture_failure() RETURNS trigger LANGUAGE plpgsql AS $fixture$ BEGIN IF NEW.call_session_seq=53010 AND NEW.order_finalized_at IS DISTINCT FROM OLD.order_finalized_at THEN RAISE EXCEPTION 'test-only owner finalization failure'; END IF; RETURN NEW; END $fixture$",
+  );
+  await databases.consultation.query(
+    'CREATE TRIGGER intake_owner_fixture_failure BEFORE UPDATE ON call_sessions FOR EACH ROW EXECUTE FUNCTION intake_owner_fixture_failure()',
+  );
+  let committed;
+  try {
+    const response = await fetch(
+      'http://consultation-app:3004/api/calls/53010/order-intake/complete',
+      {
+        method: 'POST',
+        headers: { ...aiHeaders, 'X-Request-Id': faultRequest },
+        body: JSON.stringify(faultInput),
+      },
+    );
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).data.status, 'FAILED');
+    const { finalizationId } = require('@dva/events/order-intake-write.cjs');
+    committed = (
+      await databases.order.query(
+        "SELECT payload->'result'->'data'->'finalization' AS data FROM inbox_events WHERE event_id=$1",
+        [finalizationId(53010)],
+      )
+    ).rows[0].data;
+    assert.equal(committed.requestId, faultRequest);
+    assert.equal(committed.parcelMappings.length, 1);
+    assert.equal(
+      (
+        await databases.order.query(
+          'SELECT status FROM order_parcel_drafts WHERE draft_seq=$1',
+          [createdDraft.draftSeq],
+        )
+      ).rows[0].status,
+      'CONVERTED',
+    );
+    assert.equal(
+      (
+        await databases.consultation.query(
+          'SELECT order_finalized_at FROM call_sessions WHERE call_session_seq=53010',
+        )
+      ).rows[0].order_finalized_at,
+      null,
+    );
+  } finally {
+    await databases.consultation.query(
+      'DROP TRIGGER intake_owner_fixture_failure ON call_sessions',
+    );
+    await databases.consultation.query(
+      'DROP FUNCTION intake_owner_fixture_failure()',
+    );
+  }
+  const retry = await fetch(
+    'http://consultation-app:3004/api/calls/53010/order-intake/complete',
+    { method: 'POST', headers: aiHeaders, body: JSON.stringify(faultInput) },
+  );
+  assert.equal(retry.status, 200);
+  const repaired = (await retry.json()).data;
+  assert.equal(repaired.status, 'FINALIZED');
+  assert.equal(repaired.orderSeq, committed.orderSeq);
+  assert.deepEqual(repaired.parcelMappings, committed.parcelMappings);
+  const receipt = {
+    eventId: committed.eventId,
+    source: 'order',
+    eventType: 'OrderIntakeFinalized',
+    payload: { callSessionSeq: 53010 },
+  };
+  const duplicate = await fetch(
+    'http://consultation-app:3004/internal/parcel-draft-write/events',
+    { method: 'POST', headers: aiHeaders, body: JSON.stringify(receipt) },
+  );
+  assert.equal(duplicate.status, 200);
+  assert.equal((await duplicate.json()).status, 'duplicate');
+  const finalized = (
+    await databases.operations.query(
+      "SELECT request_id FROM audit_logs WHERE action='ORDER_INTAKE_FINALIZED' AND target_seq=53010",
+    )
+  ).rows;
+  assert.deepEqual(finalized, [{ request_id: faultRequest }]);
+  t.diagnostic(
+    'intake recovery preserves committed order and mapping after a real owner rollback; duplicate receipt has one original-request audit',
+  );
+
+      t.diagnostic(
+        'intake completion HTTP pairs: ' +
+          pairs +
+          '; READY conversion, immutable sealing, PBX wait, all payment methods and policy repair',
+      );
     },
   );
   console.log('Compared HTTP requests: '+compared);

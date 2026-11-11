@@ -1,3 +1,4 @@
+import { OrderIntakeWritesService } from './order-intake-writes.service';
 import { Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
@@ -21,6 +22,7 @@ export class OrderSubmissionWorker implements OnApplicationBootstrap, OnModuleDe
     private readonly repository: OrdersRepository,
     private readonly audit: AuditService,
     private readonly billing: BillingWorker,
+    private readonly intake: OrderIntakeWritesService,
   ) {}
 
   onApplicationBootstrap() {
@@ -47,6 +49,7 @@ export class OrderSubmissionWorker implements OnApplicationBootstrap, OnModuleDe
   }
 
   private async work(now: Date) {
+    await this.intake.recoverPending();
     await this.submissions.recoverPending();
     await this.billing.run(now);
     await this.expireUnpaid(now);

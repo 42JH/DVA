@@ -1,3 +1,5 @@
+import { OrderIntakeWritesService } from './order-intake-writes.service';
+import { PaymentsRepository } from '../payments/payments.repository';
 import { AdminParcelDraftsController } from './admin-parcel-drafts.controller';
 import { AdminParcelDraftsService } from './admin-parcel-drafts.service';
 import { ParcelDraftsController } from './parcel-draft-reads.controller';
@@ -48,6 +50,8 @@ import { OrderSubmissionWorker } from './order-submission.worker';
     OrderReadController,
   ],
   providers: [
+    OrderIntakeWritesService,
+    PaymentsRepository,
     ParcelDraftWritesService,
     ParcelDraftWritesRepository,
     ParcelDraftWriteScope,

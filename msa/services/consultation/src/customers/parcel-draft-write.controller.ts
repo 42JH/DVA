@@ -1,3 +1,5 @@
+import { OrderIntakeService } from '../consultations/order-intake.service';
+import { randomUUID } from 'node:crypto';
 import {
   Body,
   Controller,
@@ -10,13 +12,14 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ApiExcludeController } from '@nestjs/swagger';
-import { randomUUID } from 'node:crypto';
+import { ParcelDraftWriteService } from './parcel-draft-write.service';
+import { AuditService } from '../audit/audit.service';
+import { applyIntakeFinalization } from './order-intake-finalization';
+import type { IntakeFinalization } from '@dva/events/order-intake-write.cjs';
 import type { PoolClient } from 'pg';
 import { validateEvent } from '@dva/events';
 import {
-  requestDraftWrite,
   requestWriteReference,
-  validateDraftWrite,
   validateWriteReference,
   validateCallMutation,
   type CallWriteReceipt,
@@ -30,18 +33,14 @@ import { DatabaseService } from '../database/database.service';
 import { OrderReferenceScopes } from './order-reference-scopes.service';
 import { applyDraftCallWrite } from './parcel-draft-call-write';
 
-type DraftCallSnapshot = Pick<
-  DraftWriteCall,
-  'callSessionSeq' | 'customerSeq' | 'intakeVersion'
->;
-
 @ApiExcludeController()
 @SetMetadata('auth:internal-customer', true)
 @Controller('internal/parcel-draft-write')
 export class ParcelDraftWriteController {
-  private readonly activeCalls = new Map<string, number | null>();
-
   constructor(
+    private readonly intake: OrderIntakeService,
+    private readonly executor: ParcelDraftWriteService,
+    private readonly audit: AuditService,
     private readonly database: DatabaseService,
     private readonly config: ConfigService<Environment, true>,
     private readonly scopes: OrderReferenceScopes,
@@ -50,81 +49,8 @@ export class ParcelDraftWriteController {
   @Post()
   @HttpCode(200)
   @Header('Cache-Control', 'no-store')
-  async execute(@Body() event: unknown) {
-    try {
-      validateDraftWrite(event, 'order');
-    } catch {
-      throw new HttpException({ error: 'INVALID_DRAFT_WRITE' }, 422);
-    }
-    try {
-      return await this.database.transaction(async (client) => {
-        await client.query("SET LOCAL lock_timeout='2s'");
-        const id = event.payload.command.callSessionSeq;
-        let call: DraftCallSnapshot | null = null;
-        if (id !== null) {
-          call =
-            (
-              await client.query<DraftCallSnapshot>(
-                `SELECT call_session_seq AS "callSessionSeq",customer_seq AS "customerSeq",order_intake_version AS "intakeVersion"
-               FROM call_sessions WHERE call_session_seq=$1 AND deleted_at IS NULL
-               AND incoming_at>statement_timestamp()-interval '5 years' FOR UPDATE`,
-                [id],
-              )
-            ).rows[0] ?? null;
-          if (!call)
-            throw new ApiException(
-              404,
-              'NOT_FOUND',
-              '통화를 찾을 수 없습니다.',
-            );
-          const pending = await requestWriteReference<CallWriteReceipt[]>(
-            this.config.get('ORDER_URL', { infer: true }) +
-              '/internal/parcel-draft-write/reference',
-            this.config.get('CUSTOMER_AUTH_TOKEN', { infer: true }),
-            {
-              eventId: randomUUID(),
-              source: 'consultation',
-              eventType: 'ParcelDraftWriteReferenceRequested',
-              payload: { operation: 'PendingCallWritesRead', input: { id } },
-            },
-          );
-          for (const receipt of pending) {
-            if ((await applyDraftCallWrite(client, receipt)) === 'processed') {
-              call.intakeVersion = receipt.payload.afterVersion;
-              call.customerSeq =
-                receipt.payload.customerSeq ?? call.customerSeq;
-            }
-          }
-        }
-        return this.scopes.run(event.eventId, client, async () => {
-          this.activeCalls.set(event.eventId, id);
-          try {
-            const payload = await requestDraftWrite(
-              this.config.get('CUSTOMER_URL', { infer: true }) +
-                '/internal/call-read-references/parcel-draft-write',
-              this.config.get('CONSULTATION_AUTH_TOKEN', { infer: true }),
-              {
-                ...event,
-                source: 'consultation',
-                payload: {
-                  ...event.payload,
-                  call,
-                  consultationAddress:
-                    this.config.get('MSA_INSTANCE_IP', { infer: true }) ?? null,
-                },
-              },
-            );
-            if (payload.receipt)
-              await applyDraftCallWrite(client, payload.receipt, true);
-            return { eventId: event.eventId, status: 'processed', payload };
-          } finally {
-            this.activeCalls.delete(event.eventId);
-          }
-        });
-      });
-    } catch (error) {
-      this.failure(error);
-    }
+  execute(@Body() event: unknown) {
+    return this.executor.execute(event);
   }
 
   @Post('reference')
@@ -139,16 +65,20 @@ export class ParcelDraftWriteController {
       validateReadScope(scopeId);
       if (
         event.source !== 'order' ||
-        !['CallRead', 'CallBumped', 'CallCustomerResolved'].includes(
-          event.payload.operation,
-        )
+        ![
+          'CallRead',
+          'CallBumped',
+          'CallCustomerResolved',
+          'IntakeCallRead',
+          'IntakeCallSealed',
+        ].includes(event.payload.operation)
       )
         throw new Error('Invalid draft call reference');
     } catch {
       throw new HttpException({ error: 'INVALID_DRAFT_REFERENCE' }, 422);
     }
     const id = event.payload.input.id;
-    if (this.activeCalls.get(scopeId) !== id)
+    if (this.executor.activeCalls.get(scopeId)?.id !== id)
       throw new ApiException(
         503,
         'DEPENDENCY_UNAVAILABLE',
@@ -156,6 +86,29 @@ export class ParcelDraftWriteController {
       );
     try {
       const payload = await this.scopes.use(scopeId, async (client) => {
+        if (
+          event.payload.operation === 'IntakeCallRead' ||
+          event.payload.operation === 'IntakeCallSealed'
+        ) {
+          if (event.payload.operation === 'IntakeCallSealed') {
+            await client.query(
+              'UPDATE call_sessions SET order_completion_received_at=clock_timestamp(),order_completion_payload=$2::jsonb WHERE call_session_seq=$1',
+              [id, JSON.stringify(event.payload.input.payload)],
+            );
+            await this.audit.recordSuccess(
+              {
+                actorId: null,
+                actorType: 'AI',
+                targetId: Number(id),
+                targetType: 'CALL_SESSION',
+                action: 'ORDER_INTAKE_COMPLETED',
+                requestId: this.executor.activeCalls.get(scopeId)!.requestId,
+              },
+              client,
+            );
+          }
+          return this.call(client, id, true, true);
+        }
         if (event.payload.operation === 'CallBumped')
           return (
             await client.query<{ version: number }>(
@@ -180,6 +133,7 @@ export class ParcelDraftWriteController {
     client: PoolClient,
     id: unknown,
     active: boolean,
+    intake = false,
   ): Promise<DraftWriteCall | null> {
     return (
       (
@@ -187,7 +141,7 @@ export class ParcelDraftWriteController {
           `SELECT call_session_seq AS "callSessionSeq",caller_phone_number AS "callerPhoneNumber",
          customer_seq AS "customerSeq",to_jsonb(ended_at)#>>'{}' AS "endedAt",order_seq AS "orderSeq",
          order_intake_enabled AS enabled,order_intake_version AS "intakeVersion",
-         to_jsonb(order_completion_received_at)#>>'{}' AS "completionReceivedAt" FROM call_sessions WHERE call_session_seq=$1` +
+         to_jsonb(order_completion_received_at)#>>'{}' AS "completionReceivedAt"${intake ? `,order_completion_payload AS "completionPayload",to_jsonb(order_finalized_at)#>>'{}' AS "finalizedAt"` : ''} FROM call_sessions WHERE call_session_seq=$1` +
             (active
               ? " AND deleted_at IS NULL AND incoming_at>statement_timestamp()-interval '5 years'"
               : ''),
@@ -197,10 +151,66 @@ export class ParcelDraftWriteController {
     );
   }
 
+  @Post('recover')
+  @HttpCode(200)
+  async recover(@Body() event: unknown) {
+    try {
+      validateEvent(event);
+      if (
+        event.source !== 'order' ||
+        event.eventType !== 'OrderIntakeRecoveryRequested' ||
+        Object.keys(event.payload).length
+      )
+        throw new Error('Invalid intake recovery');
+    } catch {
+      throw new HttpException({ error: 'INVALID_INTAKE_RECOVERY' }, 422);
+    }
+    await this.intake.recoverPending();
+    return { eventId: event.eventId, status: 'processed' };
+  }
   @Post('events')
   @HttpCode(200)
   @Header('Cache-Control', 'no-store')
   async receive(@Body() event: unknown) {
+    try {
+      validateEvent(event);
+    } catch {
+      throw new HttpException({ error: 'INVALID_DRAFT_CALL_WRITE' }, 422);
+    }
+    if (
+      event.source === 'order' &&
+      event.eventType === 'OrderIntakeFinalized'
+    ) {
+      const id = event.payload.callSessionSeq;
+      if (
+        Object.keys(event.payload).join(',') !== 'callSessionSeq' ||
+        !Number.isInteger(id) ||
+        Number(id) < 1 ||
+        Number(id) > 2147483647
+      )
+        throw new HttpException({ error: 'INVALID_INTAKE_FINALIZATION' }, 422);
+      const data = await requestWriteReference<IntakeFinalization | null>(
+        this.config.get('ORDER_URL', { infer: true }) +
+          '/internal/parcel-draft-write/reference',
+        this.config.get('CUSTOMER_AUTH_TOKEN', { infer: true }),
+        {
+          eventId: randomUUID(),
+          source: 'consultation',
+          eventType: 'ParcelDraftWriteReferenceRequested',
+          payload: { operation: 'IntakeFinalizationRead', input: { id } },
+        },
+      );
+      if (!data || data.eventId !== event.eventId)
+        throw new ApiException(
+          503,
+          'DEPENDENCY_UNAVAILABLE',
+          '서비스를 일시적으로 사용할 수 없습니다.',
+        );
+      const status = await this.database.transaction((client) =>
+        applyIntakeFinalization(client, data, this.audit),
+      );
+      return { eventId: event.eventId, status };
+    }
     try {
       validateEvent(event);
       if (

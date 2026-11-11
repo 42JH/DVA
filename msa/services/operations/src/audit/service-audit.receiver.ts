@@ -62,6 +62,8 @@ const targets = new Set([
 ]);
 const consultationActions = new Set([
   'CALL_STARTED',
+  'ORDER_INTAKE_COMPLETED',
+  'ORDER_INTAKE_FINALIZED',
   'CALL_DELETED',
   'UNANSWERED_QUESTION_RECORDED',
   'UNANSWERED_QUESTION_DELETED',
@@ -81,6 +83,8 @@ function auditInput(
     service === 'order' && object(audit) && audit.action === 'BILLING_AMOUNT_INCREASED';
   const billingInitialization =
     service === 'order' && object(audit) && audit.action === 'BILLING_MONTH_INITIALIZED';
+  const paymentPending =
+    service === 'order' && object(audit) && audit.action === 'ORDER_PAYMENT_PENDING';
   const paymentCompleted =
     service === 'order' && object(audit) && audit.action === 'ORDER_PAYMENT_COMPLETED';
   const paymentExpiration =
@@ -147,8 +151,10 @@ function auditInput(
           billingIncrease ||
           submission ||
           paymentCompleted ||
+          paymentPending ||
           [
             'BILLING_MONTH_INITIALIZED',
+            'ORDER_CREATED',
             'ORDER_DELETED',
             'PARCEL_DRAFT_DELETED',
             'ORDER_CANCELLED',
@@ -195,7 +201,9 @@ function auditInput(
           audit.action as string,
         )
           ? 'ADMIN'
-          : 'AI') ||
+          : audit.action === 'ORDER_INTAKE_FINALIZED'
+            ? 'SYSTEM'
+            : 'AI') ||
         audit.targetId === null)) ||
     (service === 'order' &&
       ((billingInitialization || billingIncrease
@@ -217,9 +225,11 @@ function auditInput(
               Number(audit.metadata.amountAfter) > Number(audit.metadata.amountBefore) &&
               Number(audit.metadata.amountAfter) - Number(audit.metadata.amountBefore) <=
                 2147483647)
-        : paymentCompleted
+        : paymentCompleted || paymentPending
           ? payload.result !== 'SUCCESS' ||
-            audit.actorType !== 'SYSTEM' ||
+            !(paymentCompleted
+              ? audit.actorType === 'SYSTEM'
+              : ['AI', 'ADMIN'].includes(audit.actorType as string)) ||
             !object(audit.metadata) ||
             Object.keys(audit.metadata).join(',') !== 'amountAfter' ||
             !integer(audit.metadata.amountAfter)

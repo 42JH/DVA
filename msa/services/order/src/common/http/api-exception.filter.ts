@@ -77,6 +77,7 @@ export class ApiExceptionFilter implements ExceptionFilter {
         '/internal/order-cancellation',
         '/internal/parcel-draft-write',
         '/internal/parcel-draft-write/reference',
+        '/internal/parcel-draft-write/submit',
       ].includes(request.path.replace(/\/$/, ''))
     ) {
       // Keep the established health/PBX response contract while redacting unknown failures.

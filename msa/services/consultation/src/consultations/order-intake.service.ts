@@ -1,3 +1,12 @@
+import { Logger } from '@nestjs/common';
+import {
+  finalizationId,
+  validateFinalization,
+} from '@dva/events/order-intake-write.cjs';
+import type { DraftWriteCommand } from '@dva/events/parcel-draft-write.cjs';
+import { ParcelDraftWriteService } from '../customers/parcel-draft-write.service';
+import { CompleteOrderIntakeDto } from './dto/complete-order-intake.dto';
+import { sendEvent } from '@dva/events';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
@@ -30,10 +39,109 @@ type IntakeCall = Pick<
 
 @Injectable()
 export class OrderIntakeService {
+  private readonly logger = new Logger(OrderIntakeService.name);
   constructor(
+    private readonly writes: ParcelDraftWriteService,
     private readonly database: DatabaseService,
     private readonly config: ConfigService<Environment, true>,
   ) {}
+
+  async complete(id: number, input: CompleteOrderIntakeDto, requestId: string) {
+    await this.request({
+      operation: 'OrderIntakeSealed',
+      id,
+      adminId: null,
+      callSessionSeq: id,
+      input: { ...input },
+      requestId,
+    });
+    await this.finalize(id, requestId);
+    return this.detail(id, null);
+  }
+  async finalize(id: number, requestId: string): Promise<void> {
+    let orderSeq: number | null = null;
+    let originalRequestId = requestId;
+    try {
+      const result = await this.request({
+        operation: 'OrderIntakeFinalized',
+        id,
+        adminId: null,
+        callSessionSeq: id,
+        input: {},
+        requestId,
+      });
+      if (result.finalization) {
+        validateFinalization(result.finalization);
+        orderSeq = result.finalization.orderSeq;
+        originalRequestId = result.finalization.requestId;
+      }
+    } catch (error) {
+      const code =
+        error instanceof ApiException
+          ? (error.getResponse() as { code: string }).code
+          : 'INTERNAL_ERROR';
+      await this.database.pool.query(
+        `UPDATE call_sessions SET order_finalization_attempted_at=clock_timestamp(),order_finalization_error_code=$2
+        WHERE call_session_seq=$1 AND order_finalized_at IS NULL AND order_completion_received_at IS NOT NULL`,
+        [id, code],
+      );
+      this.logger.error({
+        event: 'order_intake_finalization_deferred',
+        callSessionSeq: id,
+        code,
+        requestId,
+      });
+      return;
+    }
+    if (orderSeq !== null)
+      try {
+        await sendEvent(
+          this.config.get('ORDER_URL', { infer: true }) +
+            '/internal/parcel-draft-write/submit',
+          this.config.get('CUSTOMER_AUTH_TOKEN', { infer: true }),
+          {
+            eventId: randomUUID(),
+            source: 'consultation',
+            eventType: 'OrderIntakeSubmissionRequested',
+            payload: {
+              callSessionSeq: id,
+              orderSeq,
+              requestId: originalRequestId,
+            },
+          },
+        );
+      } catch {
+        this.logger.error({
+          event: 'paid_order_submission_deferred',
+          orderSeq,
+          requestId,
+        });
+      }
+  }
+  async recoverPending() {
+    const rows = (
+      await this.database.pool.query<{
+        id: number;
+      }>(`SELECT call_session_seq AS id FROM call_sessions
+      WHERE order_intake_enabled AND deleted_at IS NULL AND incoming_at>statement_timestamp()-interval '5 years'
+       AND order_completion_received_at IS NOT NULL AND ended_at IS NOT NULL AND order_finalized_at IS NULL
+       AND (order_finalization_attempted_at IS NULL OR order_finalization_attempted_at<=statement_timestamp()-interval '1 minute')
+      ORDER BY order_finalization_attempted_at NULLS FIRST,call_session_seq LIMIT 20`)
+    ).rows;
+    await Promise.all(rows.map(({ id }) => this.finalize(id, randomUUID())));
+  }
+  private async request(command: DraftWriteCommand) {
+    const result = await this.writes.execute({
+      eventId:
+        command.operation === 'OrderIntakeFinalized'
+          ? finalizationId(command.id!)
+          : randomUUID(),
+      source: 'order',
+      eventType: 'ParcelDraftWriteRequested',
+      payload: { command, orderAddress: null },
+    });
+    return result.payload.data;
+  }
 
   detail(
     id: number,

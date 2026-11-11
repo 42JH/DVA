@@ -115,6 +115,7 @@ describe('Consultation PBX and active calls (e2e)', () => {
           '/api/calls/{id}',
           '/api/calls/{id}/actions',
           '/api/calls/{id}/order-intake',
+          '/api/calls/{id}/order-intake/complete',
           '/api/calls/{id}/processing-results',
           '/api/calls/{id}/transcript',
           '/api/dashboard/complaint-calls',

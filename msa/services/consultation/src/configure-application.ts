@@ -83,6 +83,10 @@ export function configureApplication(
       },
       { path: 'internal/parcel-draft-write', method: RequestMethod.ALL },
       {
+        path: 'internal/parcel-draft-write/recover',
+        method: RequestMethod.ALL,
+      },
+      {
         path: 'internal/parcel-draft-write/reference',
         method: RequestMethod.ALL,
       },

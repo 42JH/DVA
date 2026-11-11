@@ -16,6 +16,7 @@ import {
   validateWriteReference,
   type CustomerReference,
 } from '@dva/events/parcel-draft-write.cjs';
+import type { PoolClient } from 'pg';
 import { OrderReadError } from '@dva/events/order-read.cjs';
 import { readCallbackUrl, validateReadScope } from '@dva/events/read-scope.cjs';
 import { ApiException, type ErrorCode } from '../common/errors/api.exception';
@@ -87,7 +88,9 @@ export class ParcelDraftWriteController {
       validateReadScope(scopeId);
       if (
         event.source !== 'order' ||
-        !['CustomerRead', 'CustomerPhoneRead', 'PinChecked'].includes(event.payload.operation)
+        !['CustomerRead', 'CustomerPhoneRead', 'PinChecked', 'CustomerPaymentPolicyRead'].includes(
+          event.payload.operation,
+        )
       )
         throw new Error('Invalid customer write reference');
     } catch {
@@ -102,6 +105,8 @@ export class ParcelDraftWriteController {
     try {
       const payload = await this.scopes.use(scopeId, async (client) => {
         const input = event.payload.input;
+        if (event.payload.operation === 'CustomerPaymentPolicyRead')
+          return this.paymentPolicy(client, Number(input.id));
         if (event.payload.operation === 'PinChecked')
           return (
             (
@@ -129,6 +134,59 @@ export class ParcelDraftWriteController {
     } catch (error) {
       this.failure(error);
     }
+  }
+
+  private async paymentPolicy(client: PoolClient, customerId: number) {
+    const customer = (
+      await client.query<{ monthlyBillingEnabled: boolean }>(
+        `SELECT monthly_billing_enabled AS "monthlyBillingEnabled" FROM customers WHERE customer_seq=$1 AND status='ACTIVE' AND deleted_at IS NULL FOR SHARE`,
+        [customerId],
+      )
+    ).rows[0];
+    const member = (
+      await client.query<{
+        organizationSeq: number;
+        organizationName: string;
+        departmentSeq: number | null;
+        membershipStatus: string;
+        organizationStatus: string;
+        monthlyBillingEnabled: boolean;
+      }>(
+        `SELECT o.name AS "organizationName",m.organization_seq AS "organizationSeq",m.department_seq AS "departmentSeq",m.status AS "membershipStatus",o.status AS "organizationStatus",
+       o.monthly_billing_enabled AS "monthlyBillingEnabled"
+       FROM memberships m JOIN organizations o USING(organization_seq)
+       WHERE m.customer_seq=$1 AND m.deleted_at IS NULL AND o.deleted_at IS NULL FOR SHARE OF m,o`,
+        [customerId],
+      )
+    ).rows[0];
+    const department =
+      member?.departmentSeq != null
+        ? (
+            await client.query<{
+              groupBillingEnabled: boolean;
+              name: string;
+              deletedAt: string | null;
+            }>(
+              'SELECT name,deleted_at AS "deletedAt",group_billing_enabled AS "groupBillingEnabled" FROM departments WHERE department_seq=$1 FOR SHARE',
+              [member.departmentSeq],
+            )
+          ).rows[0]
+        : undefined;
+    const active = member?.membershipStatus === 'ACTIVE' && member.organizationStatus === 'ACTIVE';
+    return {
+      monthly:
+        !!customer &&
+        (member ? active && member.monthlyBillingEnabled : customer.monthlyBillingEnabled),
+      group:
+        !!customer &&
+        !!active &&
+        department?.deletedAt === null &&
+        department.groupBillingEnabled === true,
+      organizationName: active ? member.organizationName : null,
+      departmentName: active ? (department?.name ?? null) : null,
+      organizationSeq: active ? member.organizationSeq : null,
+      departmentSeq: active ? member.departmentSeq : null,
+    };
   }
 
   private failure(error: unknown): never {

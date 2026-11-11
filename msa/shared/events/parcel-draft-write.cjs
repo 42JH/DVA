@@ -1,4 +1,5 @@
 'use strict';
+const { validateCompletion,validateFinalization,validatePolicy } = require('./order-intake-write.cjs');
 const { validateEvent } = require('./index.cjs');
 const { privateAddress } = require('./call-event-reference.cjs');
 const { validateReadScope } = require('./read-scope.cjs');
@@ -30,13 +31,18 @@ function validateDraftWrite(event, source) {
   if (!['order','consultation','customer'].includes(source) || event.source !== source ||
       event.eventType !== 'ParcelDraftWriteRequested' || !keys(p, fields) ||
       !keys(c,'adminId,callSessionSeq,id,input,operation,requestId') ||
-      !['ParcelDraftCreated','ParcelDraftUpdated'].includes(c.operation) ||
+      !['ParcelDraftCreated','ParcelDraftUpdated','OrderIntakeSealed','OrderIntakeFinalized'].includes(c.operation) ||
       !(c.operation === 'ParcelDraftCreated' ? c.id === null : id(c.id)) ||
       !nullableId(c.adminId) || !(c.adminId === null ? id(c.callSessionSeq) : c.callSessionSeq === null) ||
       !object(c.input) || typeof c.requestId !== 'string' || c.requestId.length < 1 || c.requestId.length > 128 ||
       !address(p.orderAddress) || source !== 'order' && !address(p.consultationAddress) ||
       source === 'customer' && !address(p.customerAddress))
     throw new Error('Invalid draft write');
+  if (c.operation.startsWith('OrderIntake')) {
+    if (c.adminId!==null || c.id!==c.callSessionSeq) throw new Error('Invalid intake scope');
+    if(c.operation==='OrderIntakeSealed') validateCompletion(c.input);
+    else if(!keys(c.input,'')) throw new Error('Invalid finalization input');
+  }
   if (source !== 'order') {
     if (p.call !== null && (!keys(p.call,'callSessionSeq,customerSeq,intakeVersion') ||
         !id(p.call.callSessionSeq) || !nullableId(p.call.customerSeq) || !id(p.call.intakeVersion)))
@@ -61,6 +67,19 @@ function validateReceipt(value) {
 
 function validateWriteResult(value, command) {
   if (!keys(value,'data,receipt')) throw new Error('Invalid draft write result');
+  if (command.operation.startsWith('OrderIntake')) {
+    if(value.receipt!==null) throw new Error('Invalid intake receipt');
+    if(command.operation==='OrderIntakeSealed') {
+      if(!keys(value.data,'sealed') || value.data.sealed!==true) throw new Error('Invalid intake seal');
+    } else {
+      if(!keys(value.data,'finalization')) throw new Error('Invalid intake result');
+      if(value.data.finalization!==null) {
+        validateFinalization(value.data.finalization);
+        if(value.data.finalization.callSessionSeq!==command.id) throw new Error('Intake result mismatch');
+      }
+    }
+    return;
+  }
   validateDraftReadResult(value.data, { operation: 'ParcelDraftDetailRead', id: value.data?.draftSeq, query: {} });
   if (value.data.callSessionSeq !== command.callSessionSeq ||
       (command.callSessionSeq === null ? value.data.intakeVersion !== null : !id(value.data.intakeVersion)))
@@ -83,6 +102,7 @@ function validateWriteReference(event) {
   const v = p.input;
   let valid = false;
   switch (p.operation) {
+    case 'CustomerPaymentPolicyRead':
     case 'CustomerRead':
       valid = event.source === 'order' && keys(v,'id') && id(v.id);
       break;
@@ -92,6 +112,7 @@ function validateWriteReference(event) {
     case 'PinChecked':
       valid = event.source === 'order' && keys(v,'customerSeq,pinSeq') && id(v.customerSeq) && id(v.pinSeq);
       break;
+    case 'IntakeCallRead':
     case 'CallRead':
     case 'CallBumped':
       valid = event.source === 'order' && keys(v,'id') && id(v.id);
@@ -99,6 +120,11 @@ function validateWriteReference(event) {
     case 'CallCustomerResolved':
       valid = event.source === 'order' && keys(v,'customerSeq,id') && id(v.id) && id(v.customerSeq);
       break;
+    case 'IntakeCallSealed':
+      valid=event.source==='order' && keys(v,'id,payload') && id(v.id);
+      if(valid) validateCompletion(v.payload);
+      break;
+    case 'IntakeFinalizationRead':
     case 'PendingCallWritesRead':
       valid = event.source === 'consultation' && keys(v,'id') && id(v.id);
       break;
@@ -108,6 +134,20 @@ function validateWriteReference(event) {
 
 function validateReferenceResult(value, event) {
   const op = event.payload.operation, input = event.payload.input;
+  if (op==='CustomerPaymentPolicyRead') { validatePolicy(value); return; }
+  if (op==='IntakeFinalizationRead') {
+    if(value!==null) {validateFinalization(value); if(value.callSessionSeq!==input.id) throw new Error('Intake receipt mismatch');}
+    return;
+  }
+  if (op==='IntakeCallRead' || op==='IntakeCallSealed') {
+    if(value===null) return;
+    if(!keys(value,'callSessionSeq,callerPhoneNumber,completionPayload,completionReceivedAt,customerSeq,enabled,endedAt,finalizedAt,intakeVersion,orderSeq') ||
+      !(value.finalizedAt===null || instant(value.finalizedAt))) throw new Error('Invalid intake call');
+    if(value.completionPayload!==null) validateCompletion(value.completionPayload);
+    const {completionPayload,finalizedAt,...call}=value; validateWriteCall(call);
+    if(call.callSessionSeq!==input.id) throw new Error('Intake call mismatch');
+    return;
+  }
   if (op === 'CallRead' || op === 'CallCustomerResolved') {
     validateWriteCall(value);
     if (value !== null && value.callSessionSeq !== input.id) throw new Error('Draft call reference mismatch');
@@ -174,7 +214,7 @@ function requestDraftWrite(url, token, event) {
 }
 function requestWriteReference(url, token, event, scopeId) {
   validateWriteReference(event);
-  if (event.payload.operation !== 'PendingCallWritesRead' && scopeId === undefined)
+  if (!['PendingCallWritesRead','IntakeFinalizationRead'].includes(event.payload.operation) && scopeId === undefined)
     throw new Error('A draft write scope is required');
   return exchange(url,token,event,scopeId,value=>validateReferenceResult(value,event));
 }

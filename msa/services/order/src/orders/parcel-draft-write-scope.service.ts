@@ -23,6 +23,11 @@ import { AuditService } from '../audit/audit.service';
 import { ApiException, type ErrorCode } from '../common/errors/api.exception';
 import type { Environment } from '../config/environment';
 import { DatabaseService } from '../database/database.service';
+import type {
+  IntakeCall,
+  IntakeCompletion,
+  PaymentPolicy,
+} from '@dva/events/order-intake-write.cjs';
 import { writeOrder } from './order-write';
 
 type ActiveWrite = {
@@ -83,7 +88,11 @@ export class ParcelDraftWriteScope {
   ): Promise<T> {
     const state = this.active;
     const event = state.event;
-    const hash = commandHash(event.payload.command);
+    const command = event.payload.command;
+    if (command.operation === 'OrderIntakeSealed') return writeOrder(this.database, work);
+    const hash = commandHash(
+      command.operation === 'OrderIntakeFinalized' ? { ...command, requestId: '' } : command,
+    );
     let replay = false;
     const result = await writeOrder(this.database, async (client) => {
       const inserted = await client.query(
@@ -115,6 +124,10 @@ export class ParcelDraftWriteScope {
         return existing.payload.result.data as T;
       }
       const data = await work(client);
+      if (command.operation === 'OrderIntakeFinalized' && data.finalization === null) {
+        await client.query('DELETE FROM inbox_events WHERE event_id=$1', [event.eventId]);
+        return data;
+      }
       if (
         state.before &&
         state.call &&
@@ -186,6 +199,15 @@ export class ParcelDraftWriteScope {
     return this.reference<boolean>('customer', 'PinChecked', { customerSeq, pinSeq });
   }
 
+  paymentPolicy(id: number) {
+    return this.reference<PaymentPolicy>('customer', 'CustomerPaymentPolicyRead', { id });
+  }
+  intakeCall(id: number) {
+    return this.reference<IntakeCall | null>('consultation', 'IntakeCallRead', { id });
+  }
+  sealIntake(id: number, payload: IntakeCompletion) {
+    return this.reference<IntakeCall | null>('consultation', 'IntakeCallSealed', { id, payload });
+  }
   async call(id: number) {
     const call = await this.reference<DraftWriteCall | null>('consultation', 'CallRead', { id });
     this.active.call = call;

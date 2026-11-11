@@ -166,3 +166,150 @@ test('draft deletion binds owner, actor, scope and phase and preserves source lo
     const before=calls;await assert.rejects(requestDraftDeletion('http://user:pass@order/private',token,deletion));assert.equal(calls,before);
   } finally {global.fetch=oldFetch;}
 });
+
+test('intake writes bind call, completion policy and durable finalization mappings', () => {
+  const {
+    validateDraftWrite,
+    validateWriteReference,
+  } = require('../parcel-draft-write.cjs');
+  const {
+    validateFinalization,
+    validatePolicy,
+    finalizationId,
+  } = require('../order-intake-write.cjs');
+  const event = {
+    eventId: randomUUID(),
+    source: 'order',
+    eventType: 'ParcelDraftWriteRequested',
+    payload: {
+      orderAddress: null,
+      command: {
+        operation: 'OrderIntakeSealed',
+        id: 1,
+        adminId: null,
+        callSessionSeq: 1,
+        input: { expectedIntakeVersion: 1 },
+        requestId: randomUUID(),
+      },
+    },
+  };
+  validateDraftWrite(event, 'order');
+  for (const change of [
+    (e) => (e.payload.command.adminId = 1),
+    (e) => (e.payload.command.id = 2),
+    (e) => (e.payload.command.input.expectedIntakeVersion = 0),
+    (e) => (e.payload.command.input.paymentMethodType = null),
+    (e) => (e.payload.command.input.actorId = 1),
+  ]) {
+    const bad = structuredClone(event);
+    change(bad);
+    assert.throws(() => validateDraftWrite(bad, 'order'));
+  }
+  event.payload.command.operation = 'OrderIntakeFinalized';
+  event.payload.command.input = {};
+  validateDraftWrite(event, 'order');
+  assert.equal(finalizationId(1), finalizationId(1));
+  assert.notEqual(finalizationId(1), finalizationId(2));
+  const result = {
+    eventId: randomUUID(),
+    callSessionSeq: 1,
+    expectedIntakeVersion: 1,
+    finalizedAt: new Date().toISOString(),
+    orderSeq: 2,
+    parcelMappings: [{ draftSeq: 3, orderParcelSeq: 4 }],
+    requestId: randomUUID(),
+  };
+  validateFinalization(result);
+  for (const change of [
+    (e) => e.parcelMappings.push(e.parcelMappings[0]),
+    (e) => (e.orderSeq = null),
+    (e) => (e.expectedIntakeVersion = 0),
+    (e) => (e.parcelMappings[0].orderParcelSeq = 0),
+    (e) => (e.finalizedAt = 'invalid'),
+    (e) => (e.actorId = 1),
+  ]) {
+    const bad = structuredClone(result);
+    change(bad);
+    assert.throws(() => validateFinalization(bad));
+  }
+  validateFinalization({ ...result, orderSeq: null, parcelMappings: [] });
+  const policy = {
+    monthly: true,
+    group: false,
+    organizationSeq: null,
+    departmentSeq: null,
+    organizationName: null,
+    departmentName: null,
+  };
+  validatePolicy(policy);
+  assert.throws(() => validatePolicy({ ...policy, group: true }));
+  assert.throws(() => validatePolicy({ ...policy, actorId: 1 }));
+  const reference = {
+    eventId: randomUUID(),
+    source: 'consultation',
+    eventType: 'ParcelDraftWriteReferenceRequested',
+    payload: { operation: 'IntakeFinalizationRead', input: { id: 1 } },
+  };
+  validateWriteReference(reference);
+  assert.throws(() =>
+    validateWriteReference({ ...reference, source: 'order' }),
+  );
+});
+
+test('durable intake receipts are read without a live write scope while mutation references require one', async () => {
+  const { requestWriteReference } = require('../parcel-draft-write.cjs');
+  const saved = global.fetch;
+  let seen = 0,
+    payload = null;
+  global.fetch = async (url, options) => {
+    seen++;
+    const event = JSON.parse(options.body);
+    return Response.json({
+      eventId: event.eventId,
+      status: 'processed',
+      payload,
+    });
+  };
+  const event = {
+    eventId: randomUUID(),
+    source: 'consultation',
+    eventType: 'ParcelDraftWriteReferenceRequested',
+    payload: { operation: 'IntakeFinalizationRead', input: { id: 1 } },
+  };
+  try {
+    assert.equal(
+      await requestWriteReference('http://order/private', token, event),
+      null,
+    );
+    assert.equal(seen, 1);
+    payload = {
+      eventId: randomUUID(),
+      callSessionSeq: 1,
+      expectedIntakeVersion: 1,
+      finalizedAt: new Date().toISOString(),
+      orderSeq: 2,
+      requestId: randomUUID(),
+      parcelMappings: Array.from({ length: 20000 }, (_, i) => ({
+        draftSeq: i + 1,
+        orderParcelSeq: i + 1,
+      })),
+    };
+    assert.ok(Buffer.byteLength(JSON.stringify(payload)) > 256 * 1024);
+    assert.equal(
+      (await requestWriteReference('http://order/private', token, event))
+        .parcelMappings.length,
+      20000,
+    );
+    const mutation = {
+      ...event,
+      source: 'order',
+      payload: { operation: 'IntakeCallRead', input: { id: 1 } },
+    };
+    assert.throws(() =>
+      requestWriteReference('http://consultation/private', token, mutation),
+    );
+    assert.equal(seen, 2);
+  } finally {
+    global.fetch = saved;
+  }
+});

@@ -1,3 +1,7 @@
+import { ORDER_ADDRESS_FIELDS, type OrderDraft } from './order-draft';
+import type { OrderAddressPatchDto } from './dto/create-order.dto';
+import type { OriginPinDto } from './dto/origin-pin.dto';
+import type { OrderCreationSource } from './orders.types';
 import { createHash } from 'node:crypto';
 import { Injectable } from '@nestjs/common';
 import { Pool, PoolClient } from 'pg';
@@ -346,5 +350,108 @@ export class OrdersRepository {
       [hash.readInt32BE(0), hash.readInt32BE(4)],
     );
     return result.rows[0].acquired;
+  }
+  async parcelReferences(client: PoolClient, id: number) {
+    return (
+      await client.query<{
+        orderParcelSeq: number;
+        parcelPosition: number;
+        status: 'ACTIVE' | 'CANCELLED';
+        originPin: OriginPinDto | null;
+        origin: Required<OrderAddressPatchDto>;
+      }>(
+        `SELECT order_parcel_seq AS "orderParcelSeq",parcel_position AS "parcelPosition",status,
+          CASE WHEN origin_pin_seq IS NULL THEN NULL
+            ELSE jsonb_build_object('scope',origin_pin_scope,'pinSeq',origin_pin_seq) END AS "originPin",
+          jsonb_build_object('name',origin_name,'phoneNumber',origin_phone_number,
+            'roadAddress',origin_road_address,'jibunAddress',origin_jibun_address,
+            'detailAddress',origin_detail_address,'dongName',origin_dong_name,'postalCode',origin_postal_code) AS origin
+         FROM order_parcels WHERE order_seq=$1 ORDER BY parcel_position`,
+        [id],
+      )
+    ).rows;
+  }
+
+  async insert(
+    client: PoolClient,
+    draft: OrderDraft,
+    customerId: number | null,
+    key: string,
+    creationSource: OrderCreationSource,
+    adminId: number | null = null,
+    reservedOrderSeq: number | null = null,
+  ) {
+    const id = (
+      await client.query<{ id: number }>(
+        `INSERT INTO orders(customer_seq,payment_method_type,pickup_requested_at,status,creation_request_id,creation_source,total_amount,created_by_admin_user_seq,order_seq)
+         OVERRIDING SYSTEM VALUE
+         VALUES($1,$2,$3,'COLLECTING',$4::uuid,$5,$6,$7,COALESCE($8::int,nextval('orders_order_seq_seq'::regclass))) RETURNING order_seq AS id`,
+        [
+          customerId,
+          draft.paymentMethodType,
+          draft.pickupRequestedAt,
+          key,
+          creationSource,
+          draft.totalAmount,
+          adminId,
+          reservedOrderSeq,
+        ],
+      )
+    ).rows[0].id;
+    await this.insertParcels(client, id, 1, draft.parcels);
+    // 상세 추가 트리거가 버전을 올리므로 초기값이나 상세 수로 추정하지 않는다.
+    return {
+      orderSeq: id,
+      ...(
+        await client.query<{ version: number }>('SELECT version FROM orders WHERE order_seq=$1', [
+          id,
+        ])
+      ).rows[0],
+    };
+  }
+
+  async insertParcels(
+    client: PoolClient,
+    id: number,
+    position: number,
+    parcels: OrderDraft['parcels'],
+  ) {
+    const columns = `order_seq,parcel_position,
+          origin_name,origin_phone_number,origin_road_address,origin_jibun_address,origin_detail_address,
+          origin_dong_name,origin_postal_code,
+          destination_name,destination_phone_number,destination_road_address,destination_jibun_address,destination_detail_address,
+          destination_dong_name,destination_postal_code,
+          origin_pin_scope,origin_pin_seq,document_count,small_box_count,medium_box_count,big_box_count,
+          other_item_description,client_comment,item_price,notified_price`;
+    // 행 트리거 비용을 문장별 timeout 안에 나누되 요청 전체는 같은 트랜잭션에 둔다.
+    for (let offset = 0; offset < parcels.length; offset += 200) {
+      const rows = parcels.slice(offset, offset + 200).map((parcel, index) => ({
+        order_seq: id,
+        parcel_position: position + offset + index,
+        ...Object.fromEntries(
+          (['origin', 'destination'] as const).flatMap((side) =>
+            ORDER_ADDRESS_FIELDS.map((field) => [
+              `${side}_${field.replace(/[A-Z]/g, (letter) => '_' + letter.toLowerCase())}`,
+              parcel[side][field],
+            ]),
+          ),
+        ),
+        origin_pin_scope: parcel.originPin?.scope ?? null,
+        origin_pin_seq: parcel.originPin?.pinSeq ?? null,
+        document_count: parcel.documentCount,
+        small_box_count: parcel.smallBoxCount,
+        medium_box_count: parcel.mediumBoxCount,
+        big_box_count: parcel.bigBoxCount,
+        other_item_description: parcel.otherItemDescription,
+        client_comment: parcel.clientComment,
+        item_price: parcel.itemPrice,
+        notified_price: parcel.notifiedPrice,
+      }));
+      await client.query(
+        `INSERT INTO order_parcels (${columns}) SELECT ${columns}
+         FROM jsonb_populate_recordset(NULL::order_parcels,$1::jsonb) ORDER BY parcel_position`,
+        [JSON.stringify(rows)],
+      );
+    }
   }
 }

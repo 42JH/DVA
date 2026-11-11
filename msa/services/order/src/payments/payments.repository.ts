@@ -1,3 +1,4 @@
+import type { PaymentPolicy } from '@dva/events/order-intake-write.cjs';
 import type { PoolClient } from 'pg';
 import { Injectable } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
@@ -130,7 +131,7 @@ export class PaymentsRepository {
     return result.rowCount === 1;
   }
 
-  async markPaid(client: PoolClient, id: number, approvedAt?: string) {
+  async markPaid(client: PoolClient, id: number, approvedAt?: string, policy?: PaymentPolicy) {
     await client.query(
       `WITH paid AS (SELECT COALESCE($2::timestamptz,clock_timestamp()) AS at),
        pickup AS (SELECT at,date_trunc('day',at AT TIME ZONE 'Asia/Seoul') AS local_day FROM paid)
@@ -139,10 +140,17 @@ export class PaymentsRepository {
          WHEN pickup.at+interval '1 hour'>(pickup.local_day+interval '17 hours') AT TIME ZONE 'Asia/Seoul'
            THEN (pickup.local_day+interval '1 day 9 hours') AT TIME ZONE 'Asia/Seoul'
          ELSE GREATEST(pickup.at+interval '1 hour',(pickup.local_day+interval '9 hours') AT TIME ZONE 'Asia/Seoul') END,
-       billing_organization_seq=NULL,billing_department_seq=NULL,
-       billing_organization_name=NULL,billing_department_name=NULL
+       billing_organization_seq=$3,billing_department_seq=$4,
+       billing_organization_name=$5,billing_department_name=$6
        FROM pickup WHERE order_seq=$1`,
-      [id, approvedAt ?? null],
+      [
+        id,
+        approvedAt ?? null,
+        policy?.organizationSeq ?? null,
+        policy?.departmentSeq ?? null,
+        policy?.organizationName ?? null,
+        policy?.departmentName ?? null,
+      ],
     );
   }
 

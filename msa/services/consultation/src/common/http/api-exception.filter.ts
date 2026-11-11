@@ -88,6 +88,7 @@ export class ApiExceptionFilter implements ExceptionFilter {
         '/internal/order-cancellation',
         '/internal/parcel-draft-write',
         '/internal/parcel-draft-write/reference',
+        '/internal/parcel-draft-write/recover',
         '/internal/parcel-draft-write/events',
       ].includes(request.path.replace(/\/$/, ''))
     ) {

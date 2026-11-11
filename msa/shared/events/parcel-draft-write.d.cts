@@ -1,7 +1,7 @@
 import type { Event } from './index.cjs';
 
 export interface DraftWriteCommand {
-  operation: 'ParcelDraftCreated' | 'ParcelDraftUpdated';
+  operation: 'ParcelDraftCreated' | 'ParcelDraftUpdated' | 'OrderIntakeSealed' | 'OrderIntakeFinalized';
   id: number | null;
   adminId: number | null;
   callSessionSeq: number | null;
@@ -45,7 +45,7 @@ export interface WriteReferenceEvent extends Event {
   source: 'order' | 'customer' | 'consultation';
   eventType: 'ParcelDraftWriteReferenceRequested';
   payload: {
-    operation: 'CustomerRead' | 'CustomerPhoneRead' | 'PinChecked' | 'CallRead' |
+    operation: 'IntakeCallRead' | 'IntakeCallSealed' | 'IntakeFinalizationRead' | 'CustomerPaymentPolicyRead' | 'CustomerRead' | 'CustomerPhoneRead' | 'PinChecked' | 'CallRead' |
       'CallBumped' | 'CallCustomerResolved' | 'PendingCallWritesRead';
     input: Record<string, unknown>;
   };

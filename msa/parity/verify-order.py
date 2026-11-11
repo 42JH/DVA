@@ -141,6 +141,7 @@ def main():
                command=('node', '--test', 'test/order-reads-parity.test.cjs'))
         run('docker', 'cp', str(ROOT/'msa/parity/order-reads-parity.test.cjs'), name+':/app/service/test/order-reads-parity.test.cjs', label='differential-copy')
         run('docker', 'cp', str(runtime), name+':/app/service/test/monolith-runtime', label='differential-source-copy')
+        run('docker', 'cp', str(ROOT/'msa/parity/final-parity.cjs'), name+':/app/service/test/final-parity.cjs', label='differential-helper-copy')
         complete(name)
         for side in ('monolith', 'order'):
             run('docker', 'stop', '--time=5', RUN+'-'+side+'-payment-peer', label=side+'-payment-peer-finish')
