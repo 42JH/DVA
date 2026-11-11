@@ -115,6 +115,8 @@ class CallConfig(_Strict):
     utterance_gap_ms: int = Field(800, gt=0)         # 마지막 입력 delta 뒤 무 delta → 발화 끝(S0c·S0d)
     decision_budget_sec: float = Field(1.0, gt=0)    # S0d API p95 943ms — 넘으면 판단 없음
     decision_min_confidence: float = Field(0.6, gt=0, le=1)  # task·switch·pick·pay 적용 하한
+    turn_mode: Literal["legacy", "server"] = "legacy"
+    server_turn_timeout_sec: float = Field(10.0, gt=0, le=30)
     turn_shadow_enabled: bool = False
     turn_shadow_timeout_sec: float = Field(7.0, gt=0, le=30)
     turn_shadow_max_concurrent: int = Field(2, ge=1, le=10)

@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock
 from openai.types.responses import ResponseFunctionToolCall
 
 from app.calls.backend_turn import BackendTurn
-from app.calls.live import LiveFlow
+from app.calls.live import LiveFlow, Spoken
 from app.calls.session import Phase
 from app.calls.turn import TurnInput, TurnPipeline
 from app.domain.candidates import offer
@@ -184,3 +184,111 @@ def test_report_compares_observed_questions_and_marks_unobserved_turns(tmp_path)
     assert report["field_differences"] == {"sender_address": 1}
     assert report["legacy_spoken_ms"]["p95"] == 1400 and report["shadow_ready_ms"]["p95"] == 30
     assert "private address" not in str(report)
+
+
+def test_server_mode_owns_first_turn_and_ignores_hosted_tool_events():
+    client = _client(choice("task", "chit_chat"))
+    svc = service(client, turn_mode="server", turn_shadow_enabled=True, utterance_gap_ms=40, notify_quiet_ms=30)
+    svc.d.backend.api.add_customer(CALLER, "테스트", default_origin=BackendPlace(
+        name="테스트", phone=CALLER, address="서울 강남구 가람9길 24", address_detail="101호"))
+    flow = LiveFlow(svc)
+
+    async def scenario():
+        task = asyncio.create_task(svc.on_incoming(incoming()))
+        await until(lambda: client.conns)
+        conn = client.conns[0]
+        conn.push(started())
+        s = svc.registry.calls["live_1"]
+        await until(lambda: s.phase == Phase.ACTIVE)
+        assert svc.session_config(s, None)["delegation"] == {"type": "client"}
+        await ai(conn, "안녕하세요, 테스트님, 서울 강남구 가람구길 이십사에서 발송하시는 택배 접수 도와드릴까요?", 0)
+        await ai(conn, "네", 1100)
+        conn.push({"type": "session.delegation.created", "offset_ms": 2300,
+                   "delegation": {"id": "client_d1", "target": "client"}})
+        conn.push({"type": "response.event", "delegation_id": "client_d1", "event": {
+            "type": "response.output_item.done", "item": {"type": "function_call", "call_id": "wrong_path",
+                                                         "name": "record_fields",
+                                                         "arguments": '{"big_box_count":3}'}}})
+        await say(conn, "어… 네", 2200)
+        await until(lambda: any('"next_question": "receiver_name"' in e.get("content", "") for e in conn.sent))
+        assert s.state.intent == "order" and s.state.current["sender_address_detail"].value == "101호"
+        assert not s.state.current["items"].valid and not s.tool_calls
+        assert not flow.shadow and client.decisions.create.await_count == 0
+        announcements = [e for e in conn.sent if e["type"] == "session.commentary.append"]
+        assert len(announcements) == 2  # greeting and server next question
+        assert any(e["type"] == "session.thinking.append" and e["delegation_id"] == "client_d1" for e in conn.sent)
+        conn.push({"type": "session.closed", "reason": "remote_hangup"})
+        await task
+
+    run(scenario())
+
+
+def test_server_mode_final_yes_uses_existing_commit_gate():
+    client = _client(choice("confirm", "yes", 0.97), choice("switch", "none", 0.97))
+    svc = service(client, turn_mode="server", utterance_gap_ms=40, notify_quiet_ms=30, commit_delay_ms=20)
+    flow = LiveFlow(svc)
+
+    async def scenario():
+        task = asyncio.create_task(svc.on_incoming(incoming()))
+        await until(lambda: client.conns)
+        conn = client.conns[0]
+        conn.push(started())
+        s = svc.registry.calls["live_1"]
+        await until(lambda: s.phase == Phase.ACTIVE)
+        async with s.lock:
+            s.tools.state = filled()
+            pending = issue_parcel_confirmation(s.state, s.tools.policy, s.tools.clock())
+        await flow.commit(s, pending.id, only_turn=Spoken(1, "네", 0, 100, 0.0, 0.1))
+        assert s.state.pending is pending and not s.state.parcels
+        await ai(conn, "이대로 접수할까요?", 0)
+        await say(conn, "네", 1600)
+        await until(lambda: len(s.state.parcels) == 1)
+        assert s.state.pending is None and s.state.parcels[0].confirmed_snapshot == pending.snapshot
+        await until(lambda: any("parcel_added" in e.get("content", "") for e in conn.sent))
+        conn.push({"type": "session.closed", "reason": "remote_hangup"})
+        await task
+
+    run(scenario())
+
+
+def test_server_mode_lookup_opens_cancel_confirmation_before_existing_cancel_execution():
+    client = _client()
+
+    async def decide(*, model, input, questions):
+        names = {q["name"] for q in questions}
+        answers = [choice("task", "cancel", 0.97)] if "task" in names else [
+            choice("confirm", "yes", 0.97), choice("switch", "none", 0.97)]
+        return SimpleNamespace(answers=answers)
+
+    client.decisions.create.side_effect = decide
+    client.responses.create.side_effect = [
+        SimpleNamespace(status="completed", output=[ResponseFunctionToolCall(
+            type="function_call", call_id="lookup", name="lookup_orders", arguments="{}")]),
+        SimpleNamespace(status="completed", output=[]),
+    ]
+    svc = service(client, turn_mode="server", utterance_gap_ms=40, notify_quiet_ms=30, commit_delay_ms=20)
+    svc.d.backend.api.add_customer(CALLER, "테스트")
+    svc.d.backend.api.add_order(CALLER, "COLLECTING", [("이영희", "서울 가람9길 24")])
+    LiveFlow(svc)
+
+    async def scenario():
+        task = asyncio.create_task(svc.on_incoming(incoming()))
+        await until(lambda: client.conns)
+        conn = client.conns[0]
+        conn.push(started())
+        s = svc.registry.calls["live_1"]
+        await until(lambda: s.phase == Phase.ACTIVE)
+        await say(conn, "보낸 택배를 취소해 주세요", 1000)
+        await until(lambda: s.rt.server_task is not None and s.rt.server_task.done(), timeout=12.0)
+        await until(lambda: sum(e.get("type") == "session.commentary.append" for e in conn.sent) >= 2)
+        assert any('"next_question": "cancel_confirmation"' in e.get("content", "") for e in conn.sent), [
+            (e["text"], e.get("data")) for e in s.events if e["kind"] == "Server turn"]
+        assert s.state.pending.kind == "cancel" and not s.state.cancel_done
+        await ai(conn, "이 택배를 취소할까요?", 3000)
+        await say(conn, "네", 5000)
+        await until(lambda: s.state.cancel_done)
+        assert s.state.pending is None
+        conn.push({"type": "session.closed", "reason": "remote_hangup"})
+        await task
+
+    run(scenario())

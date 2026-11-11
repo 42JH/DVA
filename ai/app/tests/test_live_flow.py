@@ -434,7 +434,8 @@ def test_no_answer_waits_for_fix_without_rereading_then_fix_reopens(tmp_path):
         conn.push({"type": "session.delegation.created", "delegation": {"id": "d3"}, "offset_ms": 8000})
         conn.push({"type": "response.event", "delegation_id": "d3", "event": {
             "type": "response.output_item.done", "item": {"type": "function_call", "call_id": "call_3", "name": "record_fields",
-                                                         "arguments": json.dumps({"receiver_name": "박영희"})}}})
+                                                         "arguments": json.dumps({"receiver_name": "박영희",
+                                                                                  "keep_receiver_destination": True})}}})
         conn.push({"type": "response.event", "delegation_id": "d3", "event": {"type": "response.completed"}})
         await until(lambda: s.state.pending)
         conn.push({"type": "session.closed", "reason": "remote_hangup"})
