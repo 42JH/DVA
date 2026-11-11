@@ -757,9 +757,114 @@ def test_registered_greeting_answer_preserves_address_scope_without_model(greeti
         assert cur.sender_geo is not None and cur["sender_address_detail"].value == "1201호"
     else:
         assert facts["summary"]["missing"][0] == "receiver_name" and "sender_address" in facts["summary"]["missing"]
+        if expected == "name_only":
+            assert facts["summary"]["sender_change_next"] == "sender_address"
         assert not cur["sender_address"].valid
         assert ("origin_confirm" in facts) == (expected == "ask_origin")
         assert s.state.origin_answer is (False if expected == "name_only" else None)
+
+
+@pytest.mark.parametrize(("scope", "address_answer", "save_answer", "name_in_greeting"), [
+    ("once", "yes", None, True),
+    ("once", "provided", None, True),
+    ("not_answer", "yes", "save", True),
+    ("not_answer", "no", "once", False),
+])
+def test_greeting_sender_name_change_asks_only_for_unanswered_choices(scope, address_answer, save_answer, name_in_greeting):
+    from app.domain.address_book import save_offer
+    from backend_client.order import Geo as BGeo, Place as BPlace
+
+    svc, client = flow()
+    db = svc.d.backend.api
+    db.add_customer(CALLER, "김철수", default_origin=BPlace(
+        name="김철수", phone=CALLER, address="서울특별시 강남구 가람9길 212", address_detail="1201호",
+        geo=BGeo(jibun_address="서울 강남구 역삼동 737", dong_name="역삼동", postal_code="06236")))
+
+    async def decide(model, input, questions):
+        names = {q["name"] for q in questions}
+        if "sender_change" in names:
+            change = "both" if address_answer == "provided" else "name"
+            return SimpleNamespace(answers=[choice("task", "order"), choice("sender_change", change),
+                                            choice("origin", "not_answer"), choice("sender_name_scope", scope)])
+        if "등록 이름도" in input:
+            assert "sender_name_scope" in names
+            return SimpleNamespace(answers=[choice("sender_name_scope", save_answer)])
+        return SimpleNamespace(answers=[choice("origin", address_answer if "발송 주소도" in input else "not_answer")])
+
+    client.decisions.create = decide
+
+    async def scenario():
+        task = asyncio.create_task(svc.on_incoming(incoming()))
+        await until(lambda: client.conns)
+        conn = client.conns[0]
+        conn.push(started())
+        await until(lambda: svc.registry.calls["live_1"].phase == Phase.ACTIVE)
+        s = svc.registry.calls["live_1"]
+
+        async def record(call_id, offset, args):
+            resumes = sent_types(conn).count("response.create")
+            conn.push({"type": "session.delegation.created", "delegation": {"id": call_id}, "offset_ms": offset})
+            conn.push({"type": "response.event", "delegation_id": call_id, "event": {
+                "type": "response.output_item.done", "item": {"type": "function_call", "call_id": call_id,
+                                                             "name": "record_fields", "arguments": json.dumps(args)}}})
+            conn.push({"type": "response.event", "delegation_id": call_id, "event": {"type": "response.completed"}})
+            await until(lambda: sent_types(conn).count("response.create") > resumes)
+            conn.push({"type": "response.event", "delegation_id": call_id, "event": {"type": "response.completed"}})
+            return json.loads(next(e["item"]["output"] for e in conn.sent if e.get("item", {}).get("call_id") == call_id))
+
+        await ai(conn, "안녕하세요, 김철수님, 서울 강남구 가람구길 이백십이에서 보내시는 택배 접수 도와드릴까요?", 0)
+        if name_in_greeting:
+            reply = "이번 택배만 박영희 이름으로 보낼게요" if scope == "once" else "박영희 이름으로 보낼게요"
+            fields = {"sender_name": "박영희"}
+            if address_answer == "provided":
+                reply += " 서울 강남구 테헤란로 212에서 보낼게요"
+                fields["sender_address"] = FULL["sender_address"]
+            customer = asyncio.create_task(say(conn, reply, 1500))
+            await until(lambda: s.rt.cust is not None)
+            out = await record("sender-name", 1500, fields)
+            await customer
+            assert not any('"greeting_confirmation"' in e.get("content", "") for e in conn.sent)
+        else:
+            await say(conn, "보내는 분 성함을 바꿀게요", 1500)
+            await until(lambda: any('"sender_change_next": "sender_name"' in e.get("content", "") for e in conn.sent))
+            assert not s.state.current["sender_name"].valid
+            await ai(conn, "보내는 분 성함을 알려주시겠어요?", 2200)
+            await say(conn, "박영희요", 3100)
+            out = await record("sender-name", 3100, {"sender_name": "박영희"})
+        expected_next = None if address_answer == "provided" else "ask_address_change"
+        assert out.get("sender_change_next") == expected_next
+        assert "origin_confirm" not in out and s.state.current["sender_name"].value == "박영희"
+        assert s.state.customer.name == "김철수"
+
+        if address_answer != "provided":
+            await ai(conn, "발송 주소도 바꾸시겠어요?", 4000)
+            await say(conn, "아니요" if address_answer == "yes" else "네", 4900)
+        if address_answer == "yes":
+            assert s.state.current["sender_address_detail"].value == "1201호"
+        elif address_answer == "no":
+            await until(lambda: any('"sender_change_next": "sender_address"' in e.get("content", "") for e in conn.sent))
+            assert not s.state.current["sender_address"].valid
+            await ai(conn, "어떤 주소에서 보내시나요?", 5300)
+            await say(conn, "서울 강남구 테헤란로 212에서 보낼게요", 6200)
+            out = await record("sender-address", 6200, {"sender_address": FULL["sender_address"]})
+            assert out["sender_change_next"] == "ask_name_save"
+        else:
+            assert s.state.current["sender_address"].value == FULL["sender_address"]
+
+        if save_answer:
+            if address_answer == "yes":
+                await until(lambda: any('"sender_change_next": "ask_name_save"' in e.get("content", "") for e in conn.sent))
+            await ai(conn, "등록 이름도 바꿔드릴까요?", 7500)
+            await say(conn, "네" if save_answer == "save" else "아니요", 8500)
+            await until(lambda: not s.state.current.ask_customer_name_save)
+        else:
+            assert not s.state.current.ask_customer_name_save
+        assert ("name" in save_offer(s.state)) == (save_answer == "save")
+        assert s.state.customer.name == "김철수"
+        conn.push({"type": "session.closed", "reason": "remote_hangup"})
+        await task
+
+    run(scenario())
 
 
 def test_unclear_greeting_timeout_asks_only_for_intent():
