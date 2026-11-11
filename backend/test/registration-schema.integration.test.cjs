@@ -53,6 +53,16 @@ async function verify(changes = [], message = 'Registration dates schema or migr
 test('deployment verification accepts the complete current schema and migration checksums', () =>
   verify());
 
+test('deployment verification requires persona deletion fields and the inactive-only guard', async () => {
+  for (const sql of [
+    "DELETE FROM db_migrations.applied_versions WHERE version='065-persona-soft-delete.sql'",
+    'ALTER TABLE ai_personas DROP COLUMN deleted_at',
+    'ALTER TABLE ai_persona_drafts DROP COLUMN deleted_at',
+    'ALTER TABLE ai_persona_versions DROP CONSTRAINT ai_persona_deleted_inactive_check',
+  ])
+    await verify([sql], 'Persona soft deletion schema or migration missing');
+});
+
 test('deployment verification requires employee policy and usable card uniqueness', async () => {
   await verify(
     ["DELETE FROM db_migrations.applied_versions WHERE version='063-member-payment-policy.sql'"],

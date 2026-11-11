@@ -280,7 +280,14 @@ BEGIN
    AND indisvalid AND indisunique)<>2
   OR to_regclass('public.payment_card_requests_pending') IS NULL THEN
   RAISE EXCEPTION 'Registered payment card schema or migration missing'; END IF;
- RAISE NOTICE 'PASS: 31 public tables, 28 FKs, 10 triggers including employee policy and registered cards';
+ IF NOT EXISTS(SELECT 1 FROM db_migrations.applied_versions WHERE version='065-persona-soft-delete.sql')
+  OR (SELECT count(*) FROM information_schema.columns WHERE table_schema='public'
+   AND table_name IN ('ai_personas','ai_persona_versions','ai_persona_drafts') AND column_name='deleted_at'
+   AND udt_name='timestamptz' AND is_nullable='YES' AND column_default IS NULL)<>3
+  OR NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='public.ai_persona_versions'::regclass
+   AND conname='ai_persona_deleted_inactive_check' AND convalidated) THEN
+  RAISE EXCEPTION 'Persona soft deletion schema or migration missing'; END IF;
+ RAISE NOTICE 'PASS: 31 public tables, 28 FKs, 10 triggers including employee policy, registered cards and persona soft deletion';
 END $$;
 SELECT version,sha256,applied_at FROM db_migrations.applied_versions ORDER BY version;
 SELECT schemaname,tablename FROM pg_tables

@@ -6,3 +6,4 @@ require('./ai-settings-publishing.cjs')(suite);
 require('./ai-settings-drafts.cjs')(suite);
 require('./ai-settings-predecessor.cjs')(suite);
 require('./ai-settings-prompt-fields.cjs')(suite);
+require('./ai-settings-deletion.cjs')(suite);

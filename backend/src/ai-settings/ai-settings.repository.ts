@@ -23,7 +23,8 @@ const VERSION_SELECT = `SELECT v.ai_persona_version_seq AS "aiPersonaVersionSeq"
  v.application_id AS "applicationId", v.requested_by_admin_user_seq AS "requestedByAdminUserSeq",
  v.requested_at AS "requestedAt", v.applied_at AS "appliedAt", v.last_notified_at AS "lastNotifiedAt",
  v.apply_error_code AS "applyErrorCode"
- FROM ai_persona_versions v JOIN ai_personas identity USING(ai_persona_seq)`;
+ FROM ai_persona_versions v JOIN ai_personas identity ON identity.ai_persona_seq=v.ai_persona_seq
+ AND identity.deleted_at IS NULL AND v.deleted_at IS NULL`;
 
 const DRAFT_SELECT = `SELECT ai_persona_seq AS "aiPersonaSeq",draft_revision AS "draftRevision",
  base_version AS "baseVersion",name,prompt_text AS "promptText",voice_id AS "voiceId",
@@ -38,6 +39,37 @@ const DRAFT_SELECT = `SELECT ai_persona_seq AS "aiPersonaSeq",draft_revision AS 
 export class AiSettingsRepository {
   constructor(private readonly database: DatabaseService) {}
 
+  async deletionTargets(ids: number[], client: PoolClient) {
+    return (
+      await client.query<{ id: number; active: boolean }>(
+        `SELECT p.ai_persona_seq AS id,EXISTS(SELECT 1 FROM ai_persona_versions v
+       WHERE v.ai_persona_seq=p.ai_persona_seq AND v.status='ACTIVE' AND v.deleted_at IS NULL) AS active
+       FROM ai_personas p WHERE p.ai_persona_seq=ANY($1::int[]) AND p.deleted_at IS NULL
+       ORDER BY p.ai_persona_seq FOR UPDATE OF p`,
+        [ids],
+      )
+    ).rows;
+  }
+
+  async removeMany(ids: number[], client: PoolClient) {
+    const versions = await client.query<{ id: number }>(
+      `UPDATE ai_persona_versions SET deleted_at=transaction_timestamp(),status='INACTIVE'
+       WHERE ai_persona_seq=ANY($1::int[]) AND deleted_at IS NULL RETURNING ai_persona_version_seq AS id`,
+      [ids],
+    );
+    const drafts = await client.query<{ id: number }>(
+      `UPDATE ai_persona_drafts SET deleted_at=transaction_timestamp()
+       WHERE ai_persona_seq=ANY($1::int[]) AND deleted_at IS NULL RETURNING ai_persona_seq AS id`,
+      [ids],
+    );
+    await client.query(
+      `UPDATE ai_personas SET deleted_at=transaction_timestamp()
+       WHERE ai_persona_seq=ANY($1::int[]) AND deleted_at IS NULL`,
+      [ids],
+    );
+    return { versions: versions.rows.map((r) => r.id), drafts: drafts.rows.map((r) => r.id) };
+  }
+
   async authorNames(ids: number[], client?: PoolClient): Promise<Map<number, string | null>> {
     const result = await (client ?? this.database.pool).query<{ id: number; name: string | null }>(
       `SELECT ai_persona_version_seq AS id,CASE WHEN created_at>clock_timestamp()-interval '5 years'
@@ -48,15 +80,17 @@ export class AiSettingsRepository {
   }
 
   async cancelPending(client: PoolClient): Promise<void> {
-    await client.query("UPDATE ai_persona_versions SET status='INACTIVE' WHERE status='PENDING'");
+    await client.query(
+      "UPDATE ai_persona_versions SET status='INACTIVE' WHERE status='PENDING' AND deleted_at IS NULL",
+    );
   }
 
   async apply(versionId: number, client: PoolClient): Promise<void> {
     const previous = await client.query<{ id: number }>(
-      "UPDATE ai_persona_versions SET status='INACTIVE' WHERE status='ACTIVE' RETURNING ai_persona_version_seq AS id",
+      "UPDATE ai_persona_versions SET status='INACTIVE' WHERE status='ACTIVE' AND deleted_at IS NULL RETURNING ai_persona_version_seq AS id",
     );
     await client.query(
-      "UPDATE ai_persona_versions SET status='ACTIVE',applied_at=clock_timestamp(),apply_error_code=NULL,previous_active_version_seq=$2 WHERE ai_persona_version_seq=$1",
+      "UPDATE ai_persona_versions SET status='ACTIVE',applied_at=clock_timestamp(),apply_error_code=NULL,previous_active_version_seq=$2 WHERE ai_persona_version_seq=$1 AND deleted_at IS NULL",
       [versionId, previous.rows[0]?.id ?? null],
     );
   }
@@ -69,7 +103,7 @@ export class AiSettingsRepository {
   ): Promise<void> {
     await (client ?? this.database.pool).query(
       `UPDATE ai_persona_versions SET apply_error_code=$3
-     WHERE ai_persona_version_seq=$1 AND application_id=$2 AND status='PENDING'
+     WHERE ai_persona_version_seq=$1 AND application_id=$2 AND status='PENDING' AND deleted_at IS NULL
      AND ($3<>'AI_UNAVAILABLE' OR apply_error_code IS NULL OR apply_error_code='AI_UNAVAILABLE')`,
       [versionId, applicationId, code],
     );
@@ -82,7 +116,7 @@ export class AiSettingsRepository {
       await this.database.pool.query<
         Pick<PersonaVersion, 'aiPersonaVersionSeq' | 'applicationId'>
       >(`UPDATE ai_persona_versions SET last_notified_at=clock_timestamp()
-     WHERE status='PENDING' AND (last_notified_at IS NULL OR last_notified_at<clock_timestamp()-interval '30 seconds')
+     WHERE status='PENDING' AND deleted_at IS NULL AND (last_notified_at IS NULL OR last_notified_at<clock_timestamp()-interval '30 seconds')
      RETURNING ai_persona_version_seq AS "aiPersonaVersionSeq",application_id AS "applicationId"`)
     ).rows[0];
   }
@@ -90,7 +124,7 @@ export class AiSettingsRepository {
   async notificationRecovered(versionId: number, applicationId: string): Promise<void> {
     await this.database.pool.query(
       `UPDATE ai_persona_versions SET apply_error_code=NULL
-     WHERE ai_persona_version_seq=$1 AND application_id=$2 AND status='PENDING' AND apply_error_code='AI_UNAVAILABLE'`,
+     WHERE ai_persona_version_seq=$1 AND application_id=$2 AND status='PENDING' AND deleted_at IS NULL AND apply_error_code='AI_UNAVAILABLE'`,
       [versionId, applicationId],
     );
   }
@@ -121,7 +155,7 @@ export class AiSettingsRepository {
   async draft(id: number, client?: PoolClient): Promise<PersonaDraft | undefined> {
     return (
       await (client ?? this.database.pool).query<{ draft: PersonaDraft }>(
-        `SELECT row_to_json(draft) AS draft FROM (${DRAFT_SELECT} WHERE ai_persona_seq=$1) draft`,
+        `SELECT row_to_json(draft) AS draft FROM (${DRAFT_SELECT} WHERE ai_persona_seq=$1 AND deleted_at IS NULL) draft`,
         [id],
       )
     ).rows[0]?.draft;
@@ -192,8 +226,8 @@ export class AiSettingsRepository {
     >(
       this.database.pool,
       `SELECT p.ai_persona_seq AS "aiPersonaSeq",p.code FROM ai_personas p
-       WHERE ($1::int IS NULL OR p.ai_persona_seq=$1)
-        AND EXISTS(SELECT 1 FROM ai_persona_versions v WHERE v.ai_persona_seq=p.ai_persona_seq)`,
+       WHERE p.deleted_at IS NULL AND ($1::int IS NULL OR p.ai_persona_seq=$1)
+        AND EXISTS(SELECT 1 FROM ai_persona_versions v WHERE v.ai_persona_seq=p.ai_persona_seq AND v.deleted_at IS NULL)`,
       [id ?? null],
       query,
       '"aiPersonaSeq" DESC',
@@ -209,7 +243,7 @@ export class AiSettingsRepository {
         WHERE v.ai_persona_seq=page."aiPersonaSeq" AND v.status='ACTIVE') active ON true
        LEFT JOIN LATERAL (${VERSION_SELECT}
         WHERE v.ai_persona_seq=page."aiPersonaSeq" AND v.status='PENDING') pending ON true
-       LEFT JOIN LATERAL (${DRAFT_SELECT} WHERE ai_persona_seq=page."aiPersonaSeq") draft ON true
+       LEFT JOIN LATERAL (${DRAFT_SELECT} WHERE ai_persona_seq=page."aiPersonaSeq" AND deleted_at IS NULL) draft ON true
       ) details) AS details`,
     );
     return {
@@ -280,7 +314,7 @@ export class AiSettingsRepository {
     await client.query(
       `UPDATE ai_persona_versions SET status='PENDING',application_id=$2,
      requested_by_admin_user_seq=$3,requested_at=clock_timestamp(),applied_at=NULL,last_notified_at=NULL,apply_error_code=NULL
-     WHERE ai_persona_version_seq=$1`,
+     WHERE ai_persona_version_seq=$1 AND deleted_at IS NULL`,
       [versionId, applicationId, actorId],
     );
   }

@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   Param,
@@ -15,6 +16,7 @@ import {
   ApiCookieAuth,
   ApiAcceptedResponse,
   ApiCreatedResponse,
+  ApiNoContentResponse,
   ApiOkResponse,
   ApiOperation,
   ApiResponse,
@@ -28,6 +30,7 @@ import { PersonaApplicationService } from './persona-application.service';
 import { ActivatePersonaDto } from './dto/persona-application.dto';
 import {
   CreatePersonaDto,
+  DeletePersonasDto,
   CommitPersonaDraftDto,
   PersonaIdDto,
   PersonaListQueryDto,
@@ -63,6 +66,24 @@ export class PersonasController {
     private readonly personas: AiSettingsService,
     private readonly applications: PersonaApplicationService,
   ) {}
+
+  @Delete()
+  @HttpCode(204)
+  @AuditOperation({ action: 'PERSONA_DELETED', targetType: 'AI_PERSONA', target: 'none' })
+  @ApiOperation({
+    summary: '페르소나 분류 단건·다건 삭제',
+    description:
+      '배열의 모든 분류와 소속 버전·초안을 함께 soft delete합니다. ACTIVE 버전이 있는 분류는 HEAD와 무관하게 삭제할 수 없습니다. 한 항목이라도 실패하면 전체 롤백합니다.',
+  })
+  @ApiNoContentResponse({ description: '모든 대상 분류·버전·초안 삭제 완료.' })
+  @ApiResponse({
+    status: 409,
+    description: '현재 AI가 사용하는 ACTIVE 분류 포함.',
+    type: ErrorResponseDto,
+  })
+  remove(@Body() input: DeletePersonasDto, @Req() request: AuthRequest) {
+    return this.personas.remove(input.aiPersonaSeqs, request.admin.adminUserSeq, request.requestId);
+  }
 
   @Post(':id/activate')
   @HttpCode(202)
