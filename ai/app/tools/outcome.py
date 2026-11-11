@@ -11,6 +11,11 @@ from app.domain.state import ConversationState, FieldStatus, Items, Place, Sourc
 from app.policy.model import Policy
 
 Status = Literal["ok", "needs_input", "needs_choice", "needs_confirmation", "rejected", "unavailable", "unknown"]
+DESTINATION_CHANGE_QUESTIONS = {
+    "recipient": "받는 분은 주소록에 있는 그분이 맞으세요?",
+    "address": "받는 곳은 주소록에 있는 주소가 맞으세요?",
+    "candidate": "어느 후보의 어떤 정보를 그대로 쓰실까요?",
+}
 
 
 @dataclass
@@ -55,8 +60,14 @@ def state_summary(state: ConversationState, policy: Policy) -> dict:
         if "sender_name" not in a.missing and (destination or state.current.deferred_destination):
             summary.update(stage="address", missing=list(missing), can_proceed=False)
     elif state.intent == "order" and destination:
-        summary["destination_choices"] = list(destination.labels)
+        if destination.destination_clarification:
+            summary["destination_change_question"] = DESTINATION_CHANGE_QUESTIONS[destination.destination_clarification]
+            summary["missing"] = []
+        else:
+            summary["destination_choices"] = list(destination.labels)
         summary["can_proceed"] = False
+    if state.intent == "order" and state.current and state.current.destination_partial_change:
+        summary["destination_partial_change"] = state.current.destination_partial_change
     if summary["missing"][:1] in (["sender_address_detail"], ["receiver_address_detail"]):
         summary["address_detail_question"] = "상세주소를 알려주시겠어요?"
     if state.current and state.current.box_size_pending:

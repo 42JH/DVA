@@ -61,6 +61,11 @@ async def find_destination(ctx: ToolContext, args: DestinationArgs) -> ToolOutco
     async with ctx.lock:
         ctx.state.field_of("sender_name")
         draft = ctx.state.current
+        if draft.destination_partial_change:
+            return ToolOutcome("needs_input", "DEST_CHANGE_USE_RECORD", {
+                "guidance": "받는 곳에서 바꾸기로 한 항목에 이미 들은 값이 있으면 record_fields로 바로 기록한다. "
+                            "값을 아직 듣지 않았으면 missing의 첫 항목만 묻는다."},
+                summary=state_summary(ctx.state, ctx.policy))
         draft.deferred_destination = None  # 새 검색은 같은 택배의 앞선 검색을 대신한다.
         draft.destination_search_id += 1
         search = (draft, draft.destination_search_id)

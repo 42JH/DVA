@@ -397,6 +397,31 @@ def test_ordinary_order_offers_destination_only_after_sender_address(address, to
     assert c.state.current["receiver_address_detail"].value == "5층"
 
 
+def test_partial_destination_address_retry_preserves_recipient_and_uses_new_address(address):
+    from app.domain.candidates import apply_destination_change
+
+    c = ctx(address=address)
+    complete_sender_address(c)
+    original = place("이영희", "서울특별시 강남구 테헤란로 212")
+    other_pin = place("이영희", "서울특별시 강남구 테헤란로 211", detail="4층")
+    c.state.customer.places = (original, other_pin)
+    offer(c.state, "destination", ("이영희",), (original,))
+    apply_destination_change(c.state, 0, "address")
+
+    out = call(c, "record_fields", {"receiver_address": "서울 강남구 없는로 12"})
+    assert out["code"] == "ADDRESS_NOT_FOUND" and out["missing"][0] == "receiver_address"
+    assert out["fields"]["receiver_name"] == out["fields"]["receiver_phone"] == "valid"
+    assert c.state.current.receiver_geo is None
+    assert call(c, "find_destination", {"place": other_pin.address})["code"] == "DEST_CHANGE_USE_RECORD"
+
+    out = call(c, "record_fields", {"receiver_address": other_pin.address, "receiver_address_detail": ""})
+    assert out["status"] == "ok" and "destination_choices" not in out
+    draft = c.state.current
+    assert draft["receiver_name"].value == original.name and draft["receiver_phone"].value == original.phone
+    assert draft["receiver_address"].value == other_pin.address and draft["receiver_address_detail"].value == ""
+    assert draft.receiver_geo is not None and draft.destination_partial_change is None
+
+
 def test_no_destination_match_keeps_early_receiver_name(address):
     c = ctx(address=address)
     call(c, "record_fields", {"receiver_phone": CALLER, "sender_address": "서울 강남구 테헤란로 211"})

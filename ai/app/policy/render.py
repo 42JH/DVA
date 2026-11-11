@@ -6,7 +6,9 @@ Backend 지시문 = policy/backend_rules.md. 문장은 파일에 두고 코드�
 """
 
 from app.config import ROOT
+from app.domain.candidates import destination_changes
 from app.domain.pickup import describe, rule_of
+from app.domain.state import CandidateSet
 from app.policy.model import Policy
 
 POLICY_DIR = ROOT / "policy"
@@ -94,7 +96,7 @@ def render_policy(policy: Policy) -> str:
              "- 접수 정보를 수집할 때만 현재 택배의 최신 서버 결과(또는 summary)에 있는 missing의 첫 항목을 하나만 묻습니다. "
              "fields에서 valid인 항목은 건너뛰고, missing이 비어 있으면 새 수집 질문을 하지 않습니다. "
              "origin_confirm이나 sender_change_next가 있으면 그 확인 또는 질문만 먼저 합니다. 발송 기본주소와 상세주소가 기록된 뒤 최신 결과에 "
-             "destination_choices가 있으면 missing보다 먼저 확인합니다.",
+             "destination_change_question이 있으면 그 질문만 합니다. 그 외에는 destination_choices가 있으면 missing보다 먼저 확인합니다.",
              "- 서버가 needs, 선택 확인, 되읽기를 요청하면 수집 질문보다 먼저 처리합니다. "
              "발송 주소 변경 중에는 발송 주소의 재질문을 먼저 처리하고 받는 분 질문과 주소록 확인은 발송 주소 수집 뒤에 합니다.",
              "- 순서 밖의 값이나 한 번에 말한 값도 함께 맡기고, 결과를 기다리는 동안 같은 값을 다시 묻지 않습니다."]
@@ -136,6 +138,7 @@ def render_backend(policy: Policy) -> str:
 
 def decision_questions(policy: Policy, stage_id: str, *, pending: bool = False,
                        pick_labels: tuple[str, ...] = (),
+                       destination_candidates: CandidateSet | None = None,
                        callback: bool = False, origin: bool = False, sender_change: bool = False,
                        sender_name_scope: bool = False, cancel_current: bool = False,
                        box_label: str | None = None) -> list[dict]:
@@ -173,7 +176,27 @@ def decision_questions(policy: Policy, stage_id: str, *, pending: bool = False,
                                              "이미 담은 다른 택배를 취소하거나 대상이 불분명하면 cancel을 고른다.")
             out.append(item)
     if pick_labels:
-        out.append({"type": "choice", "name": "pick", "instructions":
-                    "직전 AI 발화가 후보 중 하나를 고르라고 했고 고객이 골랐으면 그 후보를, 모두 아니라고 하면 none, 답이 아니면 not_answer.",
-                    "choices": [{"value": v} for v in (*pick_labels, "none", "not_answer")]})
+        instructions = "직전 AI 발화가 후보 중 하나를 고르라고 했고 고객이 골랐으면 그 후보를, 모두 아니라고 하면 none, 답이 아니면 not_answer."
+        changes = destination_changes(destination_candidates)
+        clarifications = ()
+        if changes:
+            clarifications = ("clarify_recipient", "clarify_address") if len(pick_labels) == 1 else ("clarify_candidate",)
+            instructions += (
+                " 받는 곳 후보는 사람과 주소를 구분한다. 사람과 주소를 모두 그대로 쓸 때만 후보 이름표를 직접 고른다. "
+                "'그분 맞고 주소만 바꿀게요'는 아래 주소 변경 선택지, '주소는 맞고 받는 분만 바꿀게요'는 아래 받는 분 변경 선택지다. "
+                "새 주소나 새 성함을 같은 답에서 말해도 그대로 둘 항목이 명확하면 해당 변경 선택지를 고른다. "
+                "사람과 주소를 모두 바꾸거나 후보와 무관한 새 배송지라고 하면 none이다. "
+                "후보가 한 명이고 '다른 주소예요'만으로 같은 사람인지 불분명하면 clarify_recipient, "
+                "'다른 사람이에요'만으로 같은 주소인지 불분명하면 clarify_address다. "
+                "후보가 여럿이고 어느 후보의 정보를 유지할지 불분명하면 clarify_candidate다. "
+                "조회·취소·종료나 다른 질문의 답은 not_answer다. 변경 선택지: "
+                + " / ".join(f"{key} = '{pick_labels[index]}'의 {'주소만' if change == 'address' else '받는 분만'} 변경"
+                             for key, (index, change) in changes.items())
+            )
+            if destination_candidates.destination_clarification == "recipient":
+                instructions += " 지금은 주소가 다르다는 답을 받아 받는 분만 확인 중이다. 그 질문에 동의하면 new_address_1, 거절하면 none이다."
+            elif destination_candidates.destination_clarification == "address":
+                instructions += " 지금은 받는 분이 다르다는 답을 받아 주소만 확인 중이다. 그 질문에 동의하면 new_recipient_1, 거절하면 none이다."
+        out.append({"type": "choice", "name": "pick", "instructions": instructions,
+                    "choices": [{"value": v} for v in (*pick_labels, *changes, *clarifications, "none", "not_answer")]})
     return out

@@ -21,6 +21,7 @@ from app.domain.address_book import (begin_sender_name_change, origin_confirmati
                                      request_sender_address_change, save_offer, sender_change_available,
                                      sender_change_next)
 from app.domain.assess import area_label, readback_facts
+from app.domain.candidates import DESTINATION_CHANGE_FIELDS
 from app.domain.confirm import issue_parcel_confirmation
 from app.domain.parcel_items import (ItemIssue, contextual_keyword, excluded_evidence, measurements, mentions,
                                      size_issues, supported_box_correction, unclassified_mentions)
@@ -249,6 +250,9 @@ async def record_fields(ctx: ToolContext, args: RecordArgs, *, expected_box: Box
             return ToolOutcome("ok", "NOTHING_CHANGED", summary=state_summary(s, policy))
         next_sender = sender_change_next(s)
         address_pending = next_sender in ("sender_address", "sender_address_detail")
+        partial_change = s.current.destination_partial_change if s.current else None
+        if partial_change and all(s.current[name].valid for name in DESTINATION_CHANGE_FIELDS[partial_change]):
+            s.current.destination_partial_change = None
         address_completed = (sender_address_pending and s.current is draft and
                              all(draft[name].valid for name in ("sender_address", "sender_address_detail")))
         receiver_keys = {"receiver_name", "receiver_address"}
@@ -263,7 +267,7 @@ async def record_fields(ctx: ToolContext, args: RecordArgs, *, expected_box: Box
             return resumed
         # 받는 분 성함·주소는 자동으로 주소록과 대조한다. 발송 주소가 덜 채워졌으면 후보는 보류한다.
         # 핀에서 고른 받는 곳이면 다시 찾지 않는다.
-        if (not needs and not s.pending and s.customer.places
+        if (not partial_change and not needs and not s.pending and s.customer.places
                 and (receiver_keys.intersection(facts["recorded"])
                      or address_completed and not s.candidates)
                 and s.field_of("receiver_address").source not in (Source.PIN, Source.HISTORY, Source.COMPANY)):
@@ -275,7 +279,7 @@ async def record_fields(ctx: ToolContext, args: RecordArgs, *, expected_box: Box
                 if out.status == "needs_choice":
                     out.facts |= {k: v for k, v in facts.items() if v}
                     out.facts["guidance"] = ("주소록에 같은 받는 분이나 같은 주소가 있음. 그분(그곳)께 보내는지 확인한다. "
-                                             "아니라고 하면 들은 값 그대로 진행한다.")
+                                             "답을 받은 뒤에는 최신 서버 결과의 확인 질문이나 빠진 항목을 따른다.")
                     out.summary = state_summary(s, policy)
                     return out
         # 같은 값을 다시 말했는데 확인 대기가 풀려 있으면(no·change 뒤) 되읽기로 다시 연다(운영 통화 56c133c8)

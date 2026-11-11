@@ -6,6 +6,8 @@
 
 **결과 형식** `ToolOutcome.to_output()`: `{status, code?, facts?, needs?: [{field, reason}], stage?, fields?, missing?, can_proceed?, parcels?}`. `status` ∈ ok · needs_input · needs_choice · needs_confirmation · rejected · unavailable · unknown(`error-recovery.md` §1). 값 기록 결과에는 상태 요약(fields = 필드별 상태, 값은 없음)을 붙인다.
 
+**받는 곳 부분 변경**: 개인 주소록·이전 도착지 후보 확인에서 서버가 `destination_change_question`을 보내면 그대로 확인한다. `destination_partial_change`가 `address`이면 기존 이름·연락처를 유지하고 새 주소를 받는다. `recipient`이면 기존 주소·상세주소를 유지하고 새 이름·연락처를 받는다. 이미 들은 새 값은 `record_fields`에 넣는다. 부분 변경 중 `find_destination`은 `DEST_CHANGE_USE_RECORD`와 현재 누락 항목을 반환한다.
+
 **실행기** `run_tool(ctx, name, arguments, call_id, allowed=None)`: 같은 `call_id` 재수신은 처음 결과 그대로 → 허용 확인(`TOOL_NOT_ALLOWED`, 인수 검증보다 먼저) → strict 인수 검증(`TOOL_ARGS_INVALID` + needs에 필드 경로) → 예산 안 실행(도구 3초·RAG 12초 → `TOOL_TIMEOUT`/`KB_TIMEOUT`) → BE 실패는 `BackendFailure.code`, 그 밖 예외는 `INTERNAL_ERROR`(모두 unavailable).
 
 | 모델 도구(strict) | 인수 | 결과 |
