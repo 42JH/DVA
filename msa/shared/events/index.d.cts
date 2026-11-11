@@ -16,5 +16,5 @@ export function createRelay(options: {
   pool: { connect(): Promise<unknown> }; source: string;
   destinations: Record<string, {url: string; token: string}>; timeoutMs?: number;
 }): () => Promise<boolean>;
-export function sendEvent(url: string, token: string, event: Event): Promise<void>;
+export function sendEvent(url: string, token: string, event: Event, signal?: AbortSignal | null): Promise<void>;
 export function validateEvent(event: unknown): asserts event is Event;

@@ -170,11 +170,11 @@ function createRelay({ pool, source, destinations, timeoutMs = 5000 }) {
   });
 }
 
-async function sendEvent(url, token, event) {
+async function sendEvent(url, token, event, signal = AbortSignal.timeout(5000)) {
   validateEvent(event);
   checkToken(token);
   url = endpoint(url);
-  const response = await fetch(url, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(5000),
+  const response = await fetch(url, { method: 'POST', redirect: 'error', signal,
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(event) });
   if (!await acknowledged(response, event.eventId)) throw new Error('Event acknowledgement unavailable');
 }

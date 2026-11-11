@@ -2332,12 +2332,17 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
         await side.customers.query(
           'UPDATE customers SET monthly_billing_enabled=true WHERE customer_seq=6',
         );
-      const personal = await draft(53007);
+      const personal = await draft(53007, 'READY', {
+        ...ready,
+        clientComment: 'intake-delayed-dver',
+      });
+      const submissionStarted=Date.now();
       const paid = await complete(53007, {
         expectedIntakeVersion: personal.intakeVersion,
         paymentMethodType: 'credit',
       });
       assert.equal(paid.order.status, 'ACCEPTED');
+      assert.ok(Date.now()-submissionStarted>=11000,'both servers await the six-second Dver response');
       for (const side of intakeSides) {
         await side.customers.query(
           "INSERT INTO organizations(organization_seq,name,status,monthly_billing_enabled) OVERRIDING SYSTEM VALUE VALUES(6500,'접수 기업','ACTIVE',true)",

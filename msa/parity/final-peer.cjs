@@ -53,6 +53,8 @@ createServer(async (request, response) => {
         speakingRate: { min: 0.8, max: 1.2 }, turnWaitLevels: ['SHORT', 'NORMAL', 'LONG'] });
     if (request.method === 'POST' && request.url === '/parcel') {
       assert.ok(Array.isArray(body.outboundParcels) && body.outboundParcels.length > 0);
+      if (body.outboundParcels.some(parcel => parcel.clientComment === 'intake-delayed-dver'))
+        await new Promise(resolve => setTimeout(resolve, 6000));
       return json(response, { ok: true, parcelNo: 'TEST0052',
         receivedAt: tossSecret ? '2030-03-02T00:01:00Z' : new Date().toISOString() });
     }

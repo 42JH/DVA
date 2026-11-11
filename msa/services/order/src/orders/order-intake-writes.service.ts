@@ -65,6 +65,7 @@ export class OrderIntakeWritesService {
         eventType: 'OrderIntakeRecoveryRequested',
         payload: {},
       },
+      null,
     );
   }
   async submitPaidOrder(id: number, requestId: string) {

@@ -178,7 +178,8 @@ async function exchange(url, token, event, scopeId, validate) {
     throw new Error('Invalid draft write endpoint');
   if (scopeId !== undefined) validateReadScope(scopeId);
   const response = await fetch(endpoint, {
-    method: 'POST', redirect: 'error', signal: AbortSignal.timeout(30000),
+    // A write can process an unbounded set of persisted drafts; each owner query keeps its own timeout.
+    method: 'POST', redirect: 'error', signal: event.eventType === 'ParcelDraftWriteRequested' ? null : AbortSignal.timeout(30000),
     headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token,
       ...(scopeId === undefined ? {} : { 'X-Msa-Read-Scope': scopeId }) },
     body: JSON.stringify(event),

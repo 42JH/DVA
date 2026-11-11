@@ -109,6 +109,7 @@ export class OrderIntakeService {
               requestId: originalRequestId,
             },
           },
+          null,
         );
       } catch {
         this.logger.error({

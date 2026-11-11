@@ -320,3 +320,15 @@ test('read snapshots retry only rolled-back PostgreSQL serialization conflicts',
   attempts=0;const failure=Object.assign(new Error('connection failed'),{code:'08006'});
   await assert.rejects(retryReadSnapshot(async()=>{attempts++;throw failure;}),error=>error===failure);assert.equal(attempts,1);
 });
+
+test('event senders retain the default deadline and forward explicit synchronous signals',async()=>{
+  const saved=global.fetch,signals=[];
+  global.fetch=async(url,options)=>{signals.push(options.signal);const input=JSON.parse(options.body);return Response.json({eventId:input.eventId,status:'processed'});};
+  try {
+    const custom=new AbortController();
+    await sendEvent('http://owner/internal/events',token,event());
+    await sendEvent('http://owner/internal/events',token,event(),custom.signal);
+    await sendEvent('http://owner/internal/events',token,event(),null);
+    assert.ok(signals[0] instanceof AbortSignal);assert.equal(signals[1],custom.signal);assert.equal(signals[2],null);
+  } finally {global.fetch=saved;}
+});

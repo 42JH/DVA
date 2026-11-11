@@ -313,3 +313,18 @@ test('durable intake receipts are read without a live write scope while mutation
     global.fetch = saved;
   }
 });
+
+test('write hops await source transactions while individual reference requests keep a deadline',async()=>{
+  const {requestDraftWrite,requestWriteReference}=require('../parcel-draft-write.cjs');
+  const signals=[],saved=global.fetch;
+  global.fetch=async(url,options)=>{signals.push(options.signal);const input=JSON.parse(options.body);
+    return Response.json({eventId:input.eventId,status:'processed',payload:input.eventType==='ParcelDraftWriteRequested'?{data:{sealed:true},receipt:null}:null});};
+  try {
+    const input={eventId:randomUUID(),source:'order',eventType:'ParcelDraftWriteRequested',payload:{orderAddress:null,
+      command:{operation:'OrderIntakeSealed',id:1,adminId:null,callSessionSeq:1,input:{expectedIntakeVersion:1},requestId:randomUUID()}}};
+    assert.deepEqual(await requestDraftWrite('http://consultation/private',token,input),{data:{sealed:true},receipt:null});
+    assert.equal(signals[0],null);
+    await requestWriteReference('http://order/private',token,{eventId:randomUUID(),source:'consultation',eventType:'ParcelDraftWriteReferenceRequested',payload:{operation:'IntakeFinalizationRead',input:{id:1}}});
+    assert.ok(signals[1] instanceof AbortSignal);
+  } finally {global.fetch=saved;}
+});
