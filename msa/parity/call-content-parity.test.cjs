@@ -688,4 +688,143 @@ test('call reference owners and public APIs preserve original joins, filters and
   }
   for(const db of [customer,orders,ops])assert.equal((await db.query("SELECT count(*)::int n FROM inbox_events WHERE event_type='CallReadReferencesRequested'")).rows[0].n,0);
   t.diagnostic(`call, unanswered and dashboard HTTP pairs: ${apiPairs}; current owner joins, FAQ deletion, pagination and all four original metric SQL paths including actual ACTIVE/previous persona selection`);
+
+  const intakePath = '/api/calls/{id}/order-intake';
+  assert.deepEqual(docs[1].paths[intakePath].get, docs[0].paths[intakePath].get);
+  for (const name of ['OrderIntakeResponseDto', 'ParcelConversionDto', 'OrderResultDto',
+    'OrderPaymentRequestDto', 'RequestMetaDto', 'ErrorResponseDto']) {
+    assert.deepEqual(docs[1].components.schemas[name], docs[0].components.schemas[name], name);
+  }
+
+  const intakeCases = [
+    { status: 'COLLECTING' },
+    { status: 'WAITING_AI', ended: true },
+    { status: 'WAITING_PBX', sealed: true },
+    { status: 'FINALIZING', ended: true, sealed: true },
+    { status: 'FAILED', ended: true, sealed: true, error: 'DEPENDENCY_UNAVAILABLE' },
+    { status: 'NO_ORDER', ended: true, sealed: true, orderSeq: null },
+    { status: 'FINALIZED', ended: true, sealed: true, orderSeq: orderIds[0] },
+    { status: 'FINALIZED', ended: true, sealed: true, orderSeq: orderIds[3] },
+    { status: 'FINALIZED', ended: true, sealed: true, orderSeq: orderIds[4] },
+    { status: 'FINALIZED', ended: true, sealed: true, orderSeq: 2147483647 },
+    { enabled: false },
+  ].map((value, index) => ({
+    ...value, id: callIds[20 + index], version: index + 7,
+    mappings: value.orderSeq ? [{ draftSeq: 111, orderParcelSeq: 222 }] : [],
+  }));
+  const payment = randomUUID(), live = intakeCases[6];
+  const endedAt = '2026-11-01T01:03:00.000Z', sealedAt = '2026-11-01T01:02:00.000Z';
+  const finalizedAt = '2026-11-01T01:04:00.000Z', dueAt = '2032-01-03T00:00:00.000Z';
+  const intakeStart = apiPairs;
+  const pathFor = id => '/api/calls/' + id + '/order-intake';
+  const ai = { Cookie: '', Authorization: 'Bearer ' + process.env.PGPASSWORD };
+  for (const db of [mono,cons]) for (const value of intakeCases) {
+    const result = value.orderSeq === undefined
+      ? null : JSON.stringify({ orderSeq: value.orderSeq, parcelMappings: value.mappings });
+    await db.query(`UPDATE call_sessions SET order_intake_enabled=$2,order_intake_version=$3,
+      started_at=CASE WHEN $4::timestamptz IS NULL THEN NULL ELSE incoming_at END,ended_at=$4,
+      order_completion_received_at=$5,order_completion_payload=CASE WHEN $5::timestamptz IS NULL THEN NULL ELSE '{}'::jsonb END,
+      order_finalization_result=$6::jsonb,order_finalized_at=$7,order_finalization_error_code=$8,
+      order_finalization_attempted_at=clock_timestamp()+interval '1 day' WHERE call_session_seq=$1`,
+    [value.id, value.enabled !== false, value.version, value.ended ? endedAt : null,
+      value.sealed ? sealedAt : null, result, result === null ? null : finalizedAt, value.error ?? null]);
+  }
+  const snapshotIntake = async () => (await Promise.all([
+    ...[mono,cons].map(db => db.query('SELECT to_jsonb(c) AS row FROM call_sessions c WHERE call_session_seq=ANY($1::int[]) ORDER BY call_session_seq', [intakeCases.map(value => value.id)])),
+    ...[mono,orders].map(db => db.query('SELECT to_jsonb(o) AS row FROM orders o WHERE order_seq=$1', [live.orderSeq])),
+    ...[mono,orders].map(db => db.query('SELECT to_jsonb(r) AS row FROM order_payment_requests r WHERE payment_request_id=$1', [payment])),
+  ])).map(result => result.rows);
+  try {
+    for (const db of [mono,orders]) {
+      await db.query('UPDATE orders SET payment_due_at=$2 WHERE order_seq=$1', [live.orderSeq,dueAt]);
+      await db.query("INSERT INTO order_payment_requests(payment_request_id,order_seq,amount,expires_at,notification_status) VALUES($1,$2,12000,$3,'UNKNOWN')",
+        [payment,live.orderSeq,dueAt]);
+    }
+    const before = await snapshotIntake();
+    for (const value of intakeCases) {
+      const body = await get(pathFor(value.id), value.enabled === false ? 409 : 200);
+      if (value.enabled === false) continue;
+      const data = body.data;
+      assert.equal(data.status,value.status);
+      assert.equal(data.intakeVersion,value.version);
+      assert.equal(data.endedAt,value.ended ? endedAt : null);
+      assert.equal(data.completionReceivedAt,value.sealed ? sealedAt : null);
+      assert.equal(data.finalizedAt,value.orderSeq === undefined ? null : finalizedAt);
+      assert.equal(data.errorCode,value.error ?? null);
+      assert.equal(data.orderSeq,value.orderSeq ?? null);
+      assert.deepEqual(data.parcelMappings,value.mappings);
+      if (value !== live) assert.equal(data.order,null);
+      else {
+        assert.equal(data.order.callSessionSeq,live.id);
+        assert.equal(data.order.status,'notPaid');
+        assert.equal(data.order.paymentDueAt,dueAt);
+        assert.equal(data.order.paymentRequest.paymentRequestId,payment);
+        assert.equal(data.order.paymentRequest.notificationStatus,'UNKNOWN');
+      }
+    }
+    await get(pathFor(live.id),200,ai);
+    await get(pathFor(live.id),200,{...ai,call_session_seq:'0'+live.id});
+    await get(pathFor(live.id),200,{call_session_seq:'ignored for admin'});
+    for (const authorization of ['', 'Bearer wrong'])
+      await get(pathFor(live.id),401,{Cookie:'',Authorization:authorization});
+    await get(pathFor(live.id),401,{...ai,Cookie:'dva_session=bad'});
+    await get(pathFor(live.id),403,{...ai,call_session_seq:String(intakeCases[0].id)});
+    for (const header of ['', '0', 'invalid', '2147483648'])
+      await get(pathFor(live.id),400,{...ai,call_session_seq:header});
+    for (const id of [callIds[5],callIds[528],callIds[529],2147483647])
+      await get(pathFor(id),404);
+    await get(pathFor('invalid'),400,ai);
+
+    const orderLock = await orders.connect();
+    let pending;
+    try {
+      await orderLock.query('BEGIN');
+      await orderLock.query("SET LOCAL lock_timeout='2s'");
+      await orderLock.query('LOCK TABLE order_payment_requests IN ACCESS EXCLUSIVE MODE');
+      pending = get(pathFor(live.id),200,ai);
+      pending.catch(() => {});
+      let waiting = false;
+      for (let i = 0; i < 100 && !waiting; i++) {
+        waiting = (await orders.query(`SELECT EXISTS(SELECT 1 FROM pg_stat_activity
+          WHERE wait_event_type='Lock' AND query LIKE 'SELECT order_seq AS "orderSeq",version,status,%') AS waiting`)).rows[0].waiting;
+        if (!waiting) await delay(20);
+      }
+      assert.ok(waiting,'intake request did not reach the locked order read');
+      await assert.rejects(cons.query('SELECT 1 FROM call_sessions WHERE call_session_seq=$1 FOR UPDATE NOWAIT',[live.id]),
+        error => error.code === '55P03');
+    } finally {
+      await orderLock.query('ROLLBACK');
+      orderLock.release();
+      if (pending) await pending;
+    }
+    assert.deepEqual(await snapshotIntake(),before);
+
+    for (const db of [mono,orders]) {
+      await db.query('UPDATE order_payment_requests SET invalidated_at=$2 WHERE payment_request_id=$1',[payment,finalizedAt]);
+      await db.query("UPDATE orders SET status='ACCEPTED',parcel_no='INTAKE01',dver_received_at=$2,pickup_requested_at=$2,version=version+1 WHERE order_seq=$1",
+        [live.orderSeq,finalizedAt]);
+    }
+    const accepted = (await get(pathFor(live.id))).data;
+    assert.equal(accepted.order.status,'ACCEPTED');
+    assert.equal(accepted.order.parcelNo,'INTAKE01');
+    assert.equal(accepted.order.paymentRequest,null);
+    assert.deepEqual(accepted.parcelMappings,live.mappings);
+
+    const event = { eventId:randomUUID(), source:'consultation', eventType:'OrderIntakeResultReadRequested',
+      payload:{orderSeq:live.orderSeq,callSessionSeq:live.id} };
+    const privateRead = (body, token) => fetch(endpoints.order[0]+'/internal/order-intake-result',
+      {method:'POST',headers:{'Content-Type':'application/json',Authorization:token},body:JSON.stringify(body)});
+    assert.equal((await privateRead(event,'Bearer wrong')).status,403);
+    for (const invalid of [{...event,source:'customer'}, {...event,payload:{...event.payload,orderSeq:0}},
+      {...event,payload:{...event.payload,extra:true}}]) {
+      assert.equal((await privateRead(invalid,'Bearer '+endpoints.order[1])).status,422);
+    }
+    const replay = await privateRead(event,'Bearer '+endpoints.order[1]);
+    assert.equal(replay.status,200);
+    assert.deepEqual(await replay.json(),{eventId:event.eventId,status:'processed',payload:accepted.order});
+    assert.equal((await orders.query("SELECT count(*)::int AS n FROM inbox_events WHERE event_type='OrderIntakeResultReadRequested'")).rows[0].n,0);
+  } finally {
+    for (const db of [mono,orders]) await db.query('DELETE FROM order_payment_requests WHERE payment_request_id=$1',[payment]);
+  }
+  t.diagnostic(`order intake HTTP pairs: ${apiPairs-intakeStart}; seven states, request authentication, retention, payment and held call lock`);
 });

@@ -41,6 +41,10 @@ export class OrdersService {
     private readonly shipmentCheck: OrderShipmentCheckClient,
   ) {}
 
+  intakeResult(id: number, callId: number) {
+    return this.repository.result(this.database.pool, id, callId);
+  }
+
   async delete(id: number, adminId: number, requestId: string): Promise<void> {
     await writeOrder(this.database, async (client) => {
       const order = await this.repository.lockOrder(client, id);

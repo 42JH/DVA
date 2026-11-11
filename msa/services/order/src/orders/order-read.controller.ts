@@ -8,7 +8,11 @@ import {
   SetMetadata,
 } from '@nestjs/common';
 import { ApiExcludeController } from '@nestjs/swagger';
-import { validateOrderRead, validateAdminOrderRead } from '@dva/events/order-read.cjs';
+import {
+  validateOrderRead,
+  validateAdminOrderRead,
+  validateOrderIntakeResultRead,
+} from '@dva/events/order-read.cjs';
 import { AdminParcelDraftsService } from './admin-parcel-drafts.service';
 import { validateDraftRead, validateDraftDeletion } from '@dva/events/parcel-drafts.cjs';
 import { ApiException } from '../common/errors/api.exception';
@@ -24,6 +28,28 @@ export class OrderReadController {
     private readonly drafts: ParcelDraftReadsService,
     private readonly adminDrafts: AdminParcelDraftsService,
   ) {}
+
+  @Post('order-intake-result')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  async intakeResult(@Body() event: unknown) {
+    try {
+      validateOrderIntakeResultRead(event);
+    } catch {
+      throw new HttpException({ error: 'INVALID_ORDER_INTAKE_RESULT_READ' }, 422);
+    }
+    try {
+      const { orderSeq, callSessionSeq } = event.payload;
+      const payload = (await this.orders.intakeResult(orderSeq, callSessionSeq)) ?? null;
+      return { eventId: event.eventId, status: 'processed', payload };
+    } catch {
+      throw new HttpException(
+        { error: { code: 'INTERNAL_ERROR', message: '서버 오류가 발생했습니다.', details: [] } },
+        500,
+      );
+    }
+  }
+
   @Post('parcel-draft-delete')
   @HttpCode(200)
   @Header('Cache-Control', 'no-store')

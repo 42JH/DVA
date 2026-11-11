@@ -35,3 +35,26 @@ export function requestAdminOrderRead(url:string,token:string,event:AdminOrderRe
 export function requestDraftRead(url:string,token:string,event:import('./parcel-drafts.cjs').DraftReadEvent):Promise<unknown>;
 
 export function requestDraftDeletion(url:string,token:string,event:import('./parcel-drafts.cjs').DraftDeletionEvent):Promise<import('./parcel-drafts.cjs').DraftDeletionResult>;
+
+export interface OrderIntakeResultReadEvent extends Event {
+  source: 'consultation';
+  eventType: 'OrderIntakeResultReadRequested';
+  payload: { orderSeq: number; callSessionSeq: number };
+}
+export interface IntakeOrderResult {
+  orderSeq: number;
+  callSessionSeq: number;
+  version: number;
+  status: OrderStatus;
+  totalAmount: number | null;
+  parcelNo: string | null;
+  paymentDueAt: string | null;
+  paymentRequest: {
+    paymentRequestId: string;
+    amount: number;
+    expiresAt: string;
+    notificationStatus: string;
+  } | null;
+}
+export function validateOrderIntakeResultRead(event: unknown): asserts event is OrderIntakeResultReadEvent;
+export function requestOrderIntakeResult(url: string, token: string, event: OrderIntakeResultReadEvent): Promise<IntakeOrderResult | null>;

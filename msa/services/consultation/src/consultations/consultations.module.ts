@@ -12,12 +12,15 @@ import { CallEndRepository } from './call-end.repository';
 import { ActiveCallCountService } from './active-call-count.service';
 import { RecordingPlaybackService } from './recording-playback.service';
 import { CallReadReferencesClient } from './call-read-references.client';
+import { OrderIntakeController } from './order-intake.controller';
+import { OrderIntakeService } from './order-intake.service';
 @Module({
   imports: [DatabaseModule, AuthModule],
   controllers: [
     LegacyDraftCallBindingsController,
     ConsultationsController,
     FaqCallSourcesController,
+    OrderIntakeController,
   ],
   providers: [
     CallDraftDeletionClient,
@@ -28,6 +31,7 @@ import { CallReadReferencesClient } from './call-read-references.client';
     ActiveCallCountService,
     RecordingPlaybackService,
     CallReadReferencesClient,
+    OrderIntakeService,
   ],
   exports: [ConsultationsService, CallEndRepository, CallReadReferencesClient],
 })

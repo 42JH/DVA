@@ -36,6 +36,11 @@ const text = value => typeof value === 'string';
 const instant = value => text(value) && Number.isFinite(Date.parse(value));
 const ORDER_STATUSES = ['COLLECTING','notPaid','PAID','SUBMITTING','SUBMITTING_FAILED','ACCEPTED','SUBMISSION_FAILED','CANCELLED'];
 const amount = value => Number.isSafeInteger(value) && value >= 0;
+const paymentRequest = request =>
+  keys(request, 'amount,expiresAt,notificationStatus,paymentRequestId') &&
+  id(request.amount) && instant(request.expiresAt) &&
+  text(request.paymentRequestId) && /^[0-9a-f-]{36}$/i.test(request.paymentRequestId) &&
+  ['PENDING','SENDING','SENT','FAILED','UNKNOWN'].includes(request.notificationStatus);
 const addressKeys = 'detailAddress,dongName,jibunAddress,name,phoneNumber,postalCode,roadAddress';
 const address = value => keys(value,addressKeys) && Object.values(value).every(field=>nullable(field,text));
 const summaryKeys = 'createdAt,creationSource,customerSeq,orderSeq,paidAt,parcelCount,paymentDueAt,paymentMethodType,pickupRequestedAt,status,totalAmount';
@@ -57,9 +62,23 @@ function detail(value, orderId) {
     ['billingOrganizationSeq','billingDepartmentSeq'].every(key=>nullable(value[key],id)) &&
     ['billingOrganizationName','billingDepartmentName'].every(key=>nullable(value[key],text)) &&
     Array.isArray(value.parcels) && value.parcels.every(row=>parcel(row,orderId)) &&
-    nullable(value.paymentRequest,request=>keys(request,'amount,expiresAt,notificationStatus,paymentRequestId') && id(request.amount) &&
-      instant(request.expiresAt) && text(request.paymentRequestId) && /^[0-9a-f-]{36}$/i.test(request.paymentRequestId) &&
-      ['PENDING','SENDING','SENT','FAILED','UNKNOWN'].includes(request.notificationStatus));
+    nullable(value.paymentRequest,paymentRequest);
+}
+
+function validateOrderIntakeResultRead(event) {
+  validateEvent(event);
+  const payload = event.payload;
+  if (event.source !== 'consultation' || event.eventType !== 'OrderIntakeResultReadRequested' ||
+      !keys(payload, 'callSessionSeq,orderSeq') || !id(payload.callSessionSeq) || !id(payload.orderSeq))
+    throw new Error('Invalid order intake result read');
+}
+
+function orderIntakeResult(value, payload) {
+  return keys(value, 'callSessionSeq,orderSeq,parcelNo,paymentDueAt,paymentRequest,status,totalAmount,version') &&
+    value.orderSeq === payload.orderSeq && value.callSessionSeq === payload.callSessionSeq &&
+    id(value.version) && ORDER_STATUSES.includes(value.status) &&
+    nullable(value.totalAmount, amount) && nullable(value.parcelNo, text) &&
+    nullable(value.paymentDueAt, instant) && nullable(value.paymentRequest, paymentRequest);
 }
 
 function validateAdminOrderRead(event, source) {
@@ -88,14 +107,21 @@ async function requestOrderRead(url,token,event){return requestRead(url,token,ev
 async function requestAdminOrderRead(url,token,event){validateAdminOrderRead(event,event.source);return requestRead(url,token,event,'admin');}
 async function requestDraftRead(url,token,event){require('./parcel-drafts.cjs').validateDraftRead(event,event.source);return requestRead(url,token,event,'draft');}
 async function requestDraftDeletion(url,token,event){require('./parcel-drafts.cjs').validateDraftDeletion(event,event.source);return requestRead(url,token,event,'draft-delete');}
+async function requestOrderIntakeResult(url, token, event) {
+  validateOrderIntakeResultRead(event);
+  return requestRead(url, token, event, 'intake-result');
+}
 async function requestRead(url, token, event, mode) {
   const admin=mode==='admin';
   if (typeof token !== 'string' || !/^[\x21-\x7e]{32,256}$/.test(token)) throw new Error('Invalid read credentials');
   const endpoint = new URL(url);
   if (!['http:', 'https:'].includes(endpoint.protocol) || endpoint.username || endpoint.password || endpoint.search || endpoint.hash)
     throw new Error('Invalid read endpoint');
+  const timeout = mode === 'order' || mode === 'intake-result'
+    ? event.source === 'order' ? 15000 : event.source === 'consultation' ? 10000 : 5000
+    : 30000;
   const response = await fetch(endpoint, {
-    method: 'POST', redirect: 'error', signal: AbortSignal.timeout(mode!=='order' ? 30000 : event.source === 'order' ? 15000 : event.source === 'consultation' ? 10000 : 5000),
+    method: 'POST', redirect: 'error', signal: AbortSignal.timeout(timeout),
     headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token }, body: JSON.stringify(event),
   });
   if (!/^application\/json(?:\s*;|$)/i.test(response.headers.get('content-type') ?? '')) {
@@ -121,6 +147,11 @@ async function requestRead(url, token, event, mode) {
   if (!keys(result, 'eventId,payload,status') || result.eventId !== event.eventId || result.status !== 'processed')
     throw new Error('Invalid read acknowledgement');
   const value = result.payload;
+  if (mode === 'intake-result') {
+    if (value !== null && !orderIntakeResult(value, event.payload))
+      throw new Error('Invalid order intake result');
+    return value;
+  }
   if(mode==='draft-delete'){require('./parcel-drafts.cjs').validateDraftDeletionResult(value,event);return value;}
   if(mode==='draft'){require('./parcel-drafts.cjs').validateDraftReadResult(value,event.payload.command);return value;}
   if (admin ? !adminPage(value,event.payload.query.limit) : event.payload.command.operation === 'OrderDetailRead'
@@ -134,4 +165,8 @@ async function requestRead(url, token, event, mode) {
     throw new Error('Invalid order read result');
   return value;
 }
-module.exports = { validateOrderRead, requestOrderRead, OrderReadError, ORDER_STATUSES, validateAdminOrderRead, requestAdminOrderRead, requestDraftRead, requestDraftDeletion };
+module.exports = {
+  validateOrderRead, requestOrderRead, OrderReadError, ORDER_STATUSES,
+  validateAdminOrderRead, requestAdminOrderRead, requestDraftRead, requestDraftDeletion,
+  validateOrderIntakeResultRead, requestOrderIntakeResult,
+};
