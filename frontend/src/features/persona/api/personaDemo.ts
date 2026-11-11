@@ -68,8 +68,8 @@ export async function demoSaveDraft(personaSeq: number, body: PersonaBody) {
   }
 }
 
-/** [적용] — 초안이 있으면 새 버전으로 확정하고, 그 버전을 바로 통화에 쓰는 것으로 (시연이라 적용 대기 없이) */
-export async function demoApply(personaSeq: number) {
+/** 확정 — 초안을 새 버전(HEAD)으로. 통화엔 안 씀 */
+export async function demoConfirm(personaSeq: number) {
   const p = await find(personaSeq)
   if (!versions.has(personaSeq)) await demoVersions(personaSeq)
   const list = versions.get(personaSeq)!
@@ -92,6 +92,13 @@ export async function demoApply(personaSeq: number) {
     p.headVersion = v
     p.draft = null
   }
+}
+
+/** [적용] — 초안이 있으면 새 버전으로 확정하고, 그 버전을 바로 통화에 쓰는 것으로 (시연이라 적용 대기 없이) */
+export async function demoApply(personaSeq: number) {
+  await demoConfirm(personaSeq)
+  const p = await find(personaSeq)
+  const list = versions.get(personaSeq)!
   // 통화에 쓰는 상담가는 서비스 전체에 하나
   for (const other of personas!) {
     other.activeVersion = null

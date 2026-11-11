@@ -1,12 +1,13 @@
-// AI 상담가 (11/06) — 가운데 시스템 프롬프트(또는 버전 비교) | 오른쪽 상담가 카드 (11/10: 왼쪽 목록 · 버전 기록을 카드 + 히스토리 드롭다운으로 합침)
-// 데이터 · 적용 · 시험 통화 · 수정 규칙은 기존 usePersonaPage 그대로. 프롬프트 수정 · 추가 · 시험 통화 창은 기존 부품을 그대로 씀
+// AI 상담가 (11/06) — 가운데 시스템 프롬프트(또는 비교) | 오른쪽 상담가 카드
+// 11/11: 저장 = 새 버전, [적용] 없음. 카드 케밥(⋮) → 오른쪽이 그 상담가의 버전 기록(저장 시각 · 수정한 사람), 고른 버전이 가운데
+// 데이터 · 규칙은 usePersonaPage. 등록 · 수정 · 시험 통화 창은 기존 부품을 그대로 씀
 import { usePersonaPage, type PersonaItem } from '@/features/persona/hooks/usePersonaPage'
 import { AddPersona } from './AddPersona'
 import { PromptEditor } from './PromptEditor'
 import { TestCallModal } from './TestCallModal'
 import { VoiceEditor } from './VoiceEditor'
 import { PageHead } from '@/shared/ui'
-import { Badge, Btn, Icon, SelectField } from '@/shared/ui'
+import { Badge, Btn, Icon } from '@/shared/ui'
 import { Confirm } from '@/shared/ui/Modal'
 import { Markdown } from '@/shared/ui/Markdown'
 
@@ -30,8 +31,8 @@ export function PersonasPage() {
           role="note"
           className="shrink-0 border-b border-ops-wait/20 bg-ops-wait-soft px-6 py-2 text-[13px] text-ops-wait"
         >
-          시연 모드입니다. 여기서 저장 · 적용한 내용은 실제 AI 상담가에 반영되지 않고, 새로고침하면
-          원래대로 돌아갑니다.
+          시연 모드입니다. 여기서 저장 · 통화에 사용한 내용은 실제 AI 상담가에 반영되지 않고,
+          새로고침하면 원래대로 돌아갑니다.
         </p>
       )}
       {vm.adding ? (
@@ -44,7 +45,7 @@ export function PersonasPage() {
           {vm.error ?? (vm.isLoading ? '불러오는 중…' : '상담가가 없습니다.')}
         </p>
       ) : vm.editing && vm.editTarget ? (
-        // 수정 — 기존 편집기 그대로 (저장 안 한 내용 확인 · 음성 세부 조절 포함)
+        // 수정 — 등록과 같은 편집 화면 (저장 안 한 내용 확인 · 음성 세부 조절 포함)
         <div className="flex min-h-0 flex-1 flex-col px-6 py-4">
           <PromptEditor target={vm.editTarget} onDone={vm.finishEdit} />
         </div>
@@ -54,7 +55,7 @@ export function PersonasPage() {
             aria-label="시스템 프롬프트"
             className="flex min-w-0 flex-1 flex-col gap-3 px-6 py-4"
           >
-            {/* 오른쪽 카드는 그대로 두고 가운데만 로딩 */}
+            {/* 오른쪽은 그대로 두고 가운데만 로딩 */}
             {vm.promptLoading || !vm.prompt ? (
               <p className="flex flex-1 items-center justify-center text-[14px] text-ops-sub">
                 불러오는 중…
@@ -65,19 +66,19 @@ export function PersonasPage() {
               <Prompt vm={vm} />
             )}
           </section>
-          <Personas vm={vm} />
+          {vm.historyOpen ? <History vm={vm} /> : <Personas vm={vm} />}
         </div>
       )}
-      {vm.applyConfirm && (
+      {vm.confirm && (
         <Confirm
-          title={vm.applyConfirm.title}
-          ok={vm.applyConfirm.okLabel}
-          busy={vm.isApplying}
-          error={vm.applyError}
-          onOk={vm.confirmApply}
-          onClose={vm.cancelApply}
+          title={vm.confirm.title}
+          ok={vm.confirm.okLabel}
+          busy={vm.confirmBusy}
+          error={vm.confirmError}
+          onOk={vm.confirmOk}
+          onClose={vm.confirmCancel}
         >
-          {vm.applyConfirm.note}
+          {vm.confirm.note}
         </Confirm>
       )}
       {vm.voiceOnly && vm.editTarget && (
@@ -94,12 +95,13 @@ export function PersonasPage() {
   )
 }
 
+// 오른쪽 패널 틀 — 카드 목록 · 버전 기록이 같은 자리 · 같은 폭
+const ASIDE =
+  'flex w-96 shrink-0 [scrollbar-width:thin] flex-col gap-2 overflow-y-auto border-l border-ops-line bg-white p-4 max-xl:w-80'
+
 function Personas({ vm }: { vm: Vm }) {
   return (
-    <aside
-      aria-label="상담가"
-      className="flex w-96 shrink-0 [scrollbar-width:thin] flex-col gap-2 overflow-y-auto border-l border-ops-line bg-white p-4 max-xl:w-80"
-    >
+    <aside aria-label="상담가" className={ASIDE}>
       {vm.personas.map((p) => (
         <PersonaCard key={p.personaSeq} p={p} vm={vm} />
       ))}
@@ -107,17 +109,16 @@ function Personas({ vm }: { vm: Vm }) {
   )
 }
 
-// 와이어프레임 11/10: 이름(가운데 헤더 버전 글씨 크기) · 태그 → 음성 · 적용 버전 → (고른 카드만) 히스토리 드롭다운 → 그 아래 [시험 통화] [적용] → [통화에 사용하기]
+// 이름 · 태그 → 음성 → (사용 중인데 새 버전이 있으면) 안내 → [통화에 사용하기]. 오른쪽 위 ⋮ = 버전 기록 (11/11)
 function PersonaCard({ p, vm }: { p: PersonaItem; vm: Vm }) {
-  const h = p.history
   return (
     <div
-      className={`rounded-xl px-5 py-4 ${p.selected ? 'bg-ops-route-soft' : 'hover:bg-ops-paper'}`}
+      className={`relative rounded-xl px-5 py-4 ${p.selected ? 'bg-ops-route-soft' : 'hover:bg-ops-paper'}`}
     >
       <button
         type="button"
         onClick={() => vm.selectPersona(p.personaSeq)}
-        className="w-full text-left"
+        className="w-full pr-8 text-left"
       >
         <span className="flex flex-wrap items-center gap-2">
           <span className={`text-[15px] font-bold ${p.selected ? 'text-ops-route' : ''}`}>
@@ -131,41 +132,75 @@ function PersonaCard({ p, vm }: { p: PersonaItem; vm: Vm }) {
             {l}
           </span>
         ))}
-        <span className="block text-[13px] text-ops-sub">{p.versionLine}</span>
+        {p.note && <span className="mt-1 block text-[13px] text-ops-wait">{p.note}</span>}
       </button>
-      {h && (
-        <div className="mt-3 flex flex-col gap-2">
-          {/* 통일 전 모양(SelectField)이 낫다는 사용자 결정 (11/10), 크기만 ops 칸과 같게 */}
-          <SelectField
-            compact
-            label="히스토리"
-            value={h.value}
-            onChange={vm.selectVersion}
-            options={h.options}
-          />
-          <span className="flex gap-2">
-            <Btn kind="plainBadge" onClick={vm.startTestCall}>
-              시험 통화
-            </Btn>
-            {h.canApply && (
-              <Btn
-                kind="lineBadge"
-                disabled={!h.canApplyNow}
-                title={h.canApplyNow ? undefined : '시험 통화를 끝낸 버전만 적용할 수 있습니다'}
-                onClick={vm.askApply}
-              >
-                적용
-              </Btn>
-            )}
-          </span>
-        </div>
-      )}
-      {p.canUse && (
+      <button
+        type="button"
+        aria-label={`${p.name} 버전 기록`}
+        title="버전 기록"
+        onClick={() => vm.openHistory(p.personaSeq)}
+        className="absolute top-3 right-3 grid size-8 place-items-center rounded-md text-ops-sub hover:bg-ops-line/60 hover:text-ops-ink"
+      >
+        <Icon name="kebab" className="size-5" />
+      </button>
+      {p.useLabel && (
         <Btn kind="lineBadge" className="mt-3" onClick={() => vm.askUse(p.personaSeq)}>
-          통화에 사용하기
+          {p.useLabel}
         </Btn>
       )}
     </div>
+  )
+}
+
+// 버전 기록 (11/11, Notion 버전 기록처럼) — 저장 시각 · 태그 → 그 버전의 음성 → 수정한 사람(모르면 줄 숨김). 누르면 가운데에 그 버전
+function History({ vm }: { vm: Vm }) {
+  return (
+    <aside aria-label="버전 기록" className={ASIDE}>
+      <header className="flex items-start gap-2 px-1 pb-2">
+        <button
+          type="button"
+          aria-label="버전 기록 닫기"
+          onClick={vm.closeHistory}
+          className="grid size-8 shrink-0 place-items-center rounded-md text-ops-sub hover:bg-ops-paper hover:text-ops-ink"
+        >
+          <Icon name="arrowLeft" />
+        </button>
+        <span className="min-w-0">
+          <span className="block text-[12px] text-ops-sub">버전 기록</span>
+          <span className="block truncate text-[16px] font-bold">{vm.historyTitle}</span>
+        </span>
+      </header>
+      <ol className="flex flex-col gap-1">
+        {vm.history.map((h) => (
+          <li key={h.version}>
+            <button
+              type="button"
+              aria-current={h.selected || undefined}
+              onClick={() => vm.selectVersion(h.version)}
+              className={`w-full rounded-xl px-4 py-3 text-left ${h.selected ? 'bg-ops-route-soft' : 'hover:bg-ops-paper'}`}
+            >
+              <span className="flex flex-wrap items-center gap-2">
+                <span className={`text-[15px] ${h.selected ? 'font-bold text-ops-route' : ''}`}>
+                  {h.time}
+                </span>
+                {h.badges.map((b) => (
+                  <Badge key={b.label} tone={b.tone}>
+                    {b.label}
+                  </Badge>
+                ))}
+              </span>
+              <span className="mt-1 block text-[13px] text-ops-sub">{h.voice}</span>
+              {h.author && (
+                <span className="mt-1 flex items-center gap-1.5 text-[13px] text-ops-sub">
+                  <span aria-hidden className="size-2 rounded-full bg-ops-route" />
+                  {h.author}
+                </span>
+              )}
+            </button>
+          </li>
+        ))}
+      </ol>
+    </aside>
   )
 }
 
@@ -174,12 +209,30 @@ function Prompt({ vm }: { vm: Vm }) {
   return (
     <article className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-ops-line bg-white">
       <header className="flex flex-wrap items-center gap-3 border-b border-ops-line px-5 py-3">
-        <span className="text-[15px] font-bold">{p.tag}</span>
-        <span className="text-[13px] text-ops-sub">{p.subtitle}</span>
-        <span className="ml-auto flex gap-2">
-          {p.compareLabel && (
+        <span className="text-[15px] font-bold">{p.time}</span>
+        {p.badges.map((b) => (
+          <Badge key={b.label} tone={b.tone}>
+            {b.label}
+          </Badge>
+        ))}
+        {p.author && <span className="text-[13px] text-ops-sub">{p.author}</span>}
+        <span className="ml-auto flex flex-wrap gap-2">
+          <Btn kind="plainBadge" onClick={vm.startTestCall}>
+            시험 통화
+          </Btn>
+          {p.past && (
             <Btn kind="plainBadge" onClick={vm.startCompare}>
-              {p.compareLabel}
+              현재 버전과 비교
+            </Btn>
+          )}
+          {p.reuse && (
+            <Btn
+              kind="editBadge"
+              disabled={p.reuse.disabled}
+              title={p.reuse.hint}
+              onClick={vm.askReuse}
+            >
+              이 버전 다시 쓰기
             </Btn>
           )}
           {p.canEdit && (

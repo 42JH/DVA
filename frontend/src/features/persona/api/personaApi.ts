@@ -1,7 +1,7 @@
 // 07 페르소나 관리 Model — 페르소나(AI 상담사 말투 · 목소리 묶음)와 버전(프롬프트 + 음성 설정 기록). React를 모르는 데이터 층
-// 실서버 /api/personas (develop-backend 11/02 초안 계약): 저장(PATCH) = 페르소나마다 하나인 초안을 덮어씀(버전 안 늘어남)
-// [적용] = 초안 확정(POST versions → 새 HEAD) + 적용 요청(activate → PENDING → AI가 확인하면 ACTIVE, 서비스 전체에 하나)
-// 서버 모양 → 화면 모양은 personaMap.ts(순수 함수, 테스트). 초안 삭제 · 지난 버전으로 되돌리기는 하지 않음 (11/02 사용자)
+// 실서버 /api/personas (develop-backend 11/02 초안 계약): 초안(PATCH) · 확정(POST versions → 새 HEAD) · 적용 요청(activate → PENDING → ACTIVE, 서비스 전체에 하나)
+// 11/11: [저장] = 초안 + 바로 확정(saveVersion), [통화에 사용하기] = 적용 요청(requestApply). [적용] 버튼 없음
+// 서버 모양 → 화면 모양은 personaMap.ts(순수 함수, 테스트). 초안 삭제는 하지 않음. 지난 버전 [이 버전 다시 쓰기] = 그 내용을 saveVersion으로 (11/11)
 import { queryOptions } from '@tanstack/react-query'
 import { api, type ApiItem } from '@/shared/api/client'
 import { fetchAll } from '@/shared/api/paging'
@@ -17,6 +17,7 @@ import {
 } from './personaMap'
 import {
   demoApply,
+  demoConfirm,
   demoCreate,
   demoPersonas,
   demoSaveDraft,
@@ -102,9 +103,13 @@ async function fetchAiOptions(signal?: AbortSignal): Promise<AiOptions> {
   }
 }
 
-/** 수정 저장 (PATCH /personas/{id}) — 초안을 만들거나 덮어씀. 버전 번호 · 통화는 그대로. 바뀐 칸만 보냄(생략 = 유지 → 서버의 정확한 숫자 속도를 안 건드림)
+/** 초안 저장은 됐는데 새 버전 확정만 실패 — 내용은 초안에 남아 있음. 다시 받은 뒤 [저장]하면 확정만 다시 감 (usePromptEditor) */
+export class ConfirmError extends Error {}
+
+/** 수정 저장 (11/11 — 저장 = 바로 새 버전, [적용] 없음): 초안 덮어쓰기(PATCH /personas/{id}) → 그 초안을 확정(POST versions → 새 HEAD)
+ * 통화엔 안 씀 — 통화는 [통화에 사용하기](activate)로만. 바뀐 칸만 보냄(생략 = 유지 → 서버의 정확한 숫자 속도를 안 건드림)
  * expectedDraftRevision: 초안이 없으면 null(생략 불가). 그새 누가 저장 · 확정했으면 409 */
-export async function saveDraft(
+export async function saveVersion(
   personaSeq: number,
   input: {
     expectedVersion: number // HEAD 번호
@@ -123,14 +128,31 @@ export async function saveDraft(
     ...(speed !== undefined && { speakingRate: toRate(speed, input.rateRange) }),
     ...(waitTime !== undefined && { turnWaitLevel: waitTime }),
   }
-  if (PERSONA_DEMO) return demoSaveDraft(personaSeq, changed) // 시연 모드: 실서버에 안 보냄
-  await api.patch<ApiItem<PersonaDraftDto>>(`/personas/${personaSeq}`, {
-    body: {
-      expectedVersion: input.expectedVersion,
-      expectedDraftRevision: input.expectedDraftRevision,
-      ...changed,
-    },
-  })
+  if (PERSONA_DEMO) {
+    // 시연 모드: 실서버에 안 보냄
+    await demoSaveDraft(personaSeq, changed)
+    return demoConfirm(personaSeq)
+  }
+  // 바뀐 칸이 없으면(남아 있던 초안 · 확정만 실패한 뒤 다시 저장) PATCH 없이 그 초안을 확정 — 서버는 빈 PATCH를 400으로 거절
+  const revision =
+    Object.keys(changed).length === 0 && input.expectedDraftRevision
+      ? input.expectedDraftRevision
+      : (
+          await api.patch<ApiItem<PersonaDraftDto>>(`/personas/${personaSeq}`, {
+            body: {
+              expectedVersion: input.expectedVersion,
+              expectedDraftRevision: input.expectedDraftRevision,
+              ...changed,
+            },
+          })
+        ).data.draftRevision
+  try {
+    await api.post(`/personas/${personaSeq}/versions`, {
+      body: { expectedVersion: input.expectedVersion, expectedDraftRevision: revision },
+    })
+  } catch {
+    throw new ConfirmError()
+  }
 }
 
 /** 적용 요청 (POST /personas/{id}/activate) — HEAD만 받음(아니면 409). 202 = 적용 대기, 그동안 지금 버전이 계속 통화에 쓰임
@@ -144,21 +166,6 @@ export const requestApply = (
     : api.post(`/personas/${personaSeq}/activate`, {
         body: { aiPersonaVersionSeq: head.seq, expectedVersion: head.version },
       })
-
-/** [적용] — 초안이 있으면 확정(POST versions → 새 HEAD)한 뒤 그 HEAD를 적용 요청. 초안이 없으면 HEAD를 바로 적용 요청
- * 확정 뒤 적용 요청만 실패하면 새 HEAD가 '저장됨'으로 남고, [적용]을 다시 누르면 적용 요청만 다시 감 */
-export async function applyLatest(
-  personaSeq: number,
-  head: { seq: number; version: number },
-  draftRevision: string | null,
-): Promise<void> {
-  if (PERSONA_DEMO) return demoApply(personaSeq) // 시연 모드: 실서버 AI에 적용 요청을 안 보냄
-  if (draftRevision === null) return requestApply(personaSeq, head)
-  const { data } = await api.post<ApiItem<PersonaVersionDto>>(`/personas/${personaSeq}/versions`, {
-    body: { expectedVersion: head.version, expectedDraftRevision: draftRevision },
-  })
-  await requestApply(personaSeq, { seq: data.aiPersonaVersionSeq, version: data.version })
-}
 
 /** 페르소나 추가 (POST /personas) — v1 저장(아직 적용 안 함). 코드는 바꿀 수 없고 겹치면 409. 만든 페르소나 번호를 돌려줌 */
 export async function createPersona(input: {

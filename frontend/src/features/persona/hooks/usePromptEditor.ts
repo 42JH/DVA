@@ -10,7 +10,8 @@ import {
 import {
   personaQueries,
   PROMPT_KEYS,
-  saveDraft,
+  ConfirmError,
+  saveVersion,
   type PromptFields,
   type PromptKey,
   type VoiceSettings,
@@ -30,7 +31,7 @@ export interface EditTarget {
 }
 
 /** 07 프롬프트 수정 · 음성 세부 조절 훅 (와이어프레임 07_페르소나관리_수정 · _음성세부조절, 10/31 · 11/02 실서버)
- * 화면엔 바로 'v5 · 작성 중'. [저장] = PATCH(바뀐 칸만) → 초안 덮어쓰기('v5 저장됨', 통화엔 아직 안 씀). 다시 고쳐 저장해도 v5
+ * 화면엔 바로 'v5 · 작성 중'. [저장] = PATCH(바뀐 칸만) + 바로 확정 → 새 버전 v5 (11/11, 통화엔 [통화에 사용하기]로만)
  * 음성 세부 조절 창은 저장 버튼 없이 바로 반영(작성 중에) → 수정 화면 [저장]으로 같이 저장
  * 저장 안 한 내용이 있으면 [취소] · 다른 화면 이동 · 탭 닫기를 한 번 막음 */
 export function usePromptEditor(target: EditTarget, onDone: (savedVersion?: number) => void) {
@@ -49,7 +50,7 @@ export function usePromptEditor(target: EditTarget, onDone: (savedVersion?: numb
   const mutation = useMutation({
     // 바뀐 칸만 보냄 — 안 바꾼 음성 값(서버의 정확한 숫자 속도 등)은 그대로 둠
     mutationFn: () =>
-      saveDraft(target.personaSeq, {
+      saveVersion(target.personaSeq, {
         expectedVersion: target.basedOn,
         expectedDraftRevision: target.draftRevision,
         ...(nameChanged && { name: name.trim() }),
@@ -64,6 +65,10 @@ export function usePromptEditor(target: EditTarget, onDone: (savedVersion?: numb
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: personaQueries.all() })
       onDone(target.saveTo)
+    },
+    // 확정만 실패하면 초안이 바뀌었으니 다시 받음 → target이 새 초안이 되어 [저장]을 다시 누르면 확정만 감
+    onError: (e) => {
+      if (e instanceof ConfirmError) void qc.invalidateQueries({ queryKey: personaQueries.all() })
     },
   })
 
@@ -89,7 +94,7 @@ export function usePromptEditor(target: EditTarget, onDone: (savedVersion?: numb
 
     saveLabel: mutation.isPending ? '저장 중…' : `저장 → v${target.saveTo}`,
     canSave:
-      dirty &&
+      (dirty || target.draftRevision !== null) && // 남은 초안은 고치지 않아도 확정할 수 있게
       name.trim() !== '' &&
       !emptyNotice &&
       !voiceDraft.optionsPending &&
@@ -97,10 +102,12 @@ export function usePromptEditor(target: EditTarget, onDone: (savedVersion?: numb
     save: () => mutation.mutate(),
     saveError: !mutation.error
       ? null
-      : (unsupportedText(mutation.error) ??
-        (mutation.error instanceof ApiError && mutation.error.status === 409
-          ? '그새 다른 관리자가 이 상담가를 저장 · 적용했습니다. 고친 글을 복사해 두고 [취소] 후 최신 버전에서 다시 수정해 주세요.'
-          : '저장하지 못했습니다. 잠시 뒤 다시 시도해 주세요.')),
+      : mutation.error instanceof ConfirmError
+        ? '내용은 저장됐지만 새 버전으로 올리지 못했습니다. [저장]을 다시 눌러 주세요.'
+        : (unsupportedText(mutation.error) ??
+          (mutation.error instanceof ApiError && mutation.error.status === 409
+            ? '그새 다른 관리자가 이 상담가를 저장 · 적용했습니다. 고친 글을 복사해 두고 [취소] 후 최신 버전에서 다시 수정해 주세요.'
+            : '저장하지 못했습니다. 잠시 뒤 다시 시도해 주세요.')),
 
     ...guard, // [취소] · 나가기 확인 창
   }

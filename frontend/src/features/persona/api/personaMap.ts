@@ -2,7 +2,6 @@
 // 규칙 (11/02 사용자 결정): 수정은 최신 버전에서만 · 적용 전까지 새 버전 없음 · 지난 버전은 보기 + 시험 통화만 · 비교 = 적용본 ↔ 수정 중
 // 서버 칸 → 화면: draft(초안, 페르소나마다 1개) = 'v(HEAD+1) 저장됨' · headVersion = 적용본(통화에 안 쓰는 페르소나도) · activeVersion = 지금 통화에 쓰는 버전
 // appliedAt은 'AI가 적용에 성공한 시각'이라 적용본을 찾는 기준이 아님 (백엔드 11/02 답)
-import { ymd } from '@/shared/lib/dateRange'
 
 export type Speed = 'SLOW' | 'NORMAL' | 'FAST' // 발화 속도 3단계 칩 (서버는 숫자 · null = 기본)
 export type WaitTime = 'SHORT' | 'NORMAL' | 'LONG' // 고객 말 끝을 기다리는 시간
@@ -76,7 +75,7 @@ export interface PersonaVersion {
   voiceOnly: boolean // 바로 앞 버전과 프롬프트는 같고 음성만 다름 ('음성 설정' 태그)
   changes: VersionChange // 바로 앞 버전과 무엇이 다른지 (요약 문장은 화면 층에서)
   author: string // 확인할 수 없는 옛 작성자는 ''
-  savedAt: string // 'YYYY-MM-DD' (화면 시간대)
+  savedAt: string // 서버 ISO 그대로 — 화면 형식은 fmtVersionTime (버전 기록은 분까지, 11/11)
   prompt: PromptFields
   voice: VoiceSettings
 }
@@ -197,7 +196,7 @@ export function toVersions(
         !changes.first && !changes.prompt && !!(changes.voice || changes.speed || changes.waitTime),
       changes,
       author: v.createdByAdminUserName ?? '',
-      savedAt: ymd(new Date(v.createdAt)),
+      savedAt: v.createdAt,
       prompt: toPrompt(v),
       voice,
     }
