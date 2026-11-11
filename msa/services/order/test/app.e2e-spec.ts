@@ -59,22 +59,32 @@ describe('Order read API (e2e)', () => {
       .expect(({ body }: { body: { paths: Record<string, Record<string, unknown>> } }) => {
         expect(Object.keys(body.paths).sort()).toEqual([
           '/api/admin/orders',
+          '/api/admin/orders/{id}/retry',
+          '/api/admin/parcel-drafts/{id}/submit',
           '/api/customers/{id}/addresses',
           '/api/orders',
           '/api/orders/{id}',
           '/api/orders/{id}/cancel',
           '/api/orders/{id}/parcels/cancel',
+          '/api/orders/{id}/submit',
           '/api/parcel-drafts',
           '/api/parcel-drafts/{id}',
+          '/api/payments/notifications/{id}/completion/retry',
+          '/api/payments/notifications/{id}/retry',
           '/api/payments/requests/{id}',
+          '/api/payments/requests/{id}/confirm',
+          '/api/payments/requests/{id}/reconcile',
           '/order/health',
           '/order/health/ready',
         ]);
         expect(Object.keys(body.paths['/api/parcel-drafts/{id}']).sort()).toEqual([
           'delete',
           'get',
+          'patch',
         ]);
+        expect(Object.keys(body.paths['/api/parcel-drafts']).sort()).toEqual(['get', 'post']);
         expect(Object.keys(body.paths['/api/orders/{id}/cancel'])).toEqual(['post']);
+        expect(Object.keys(body.paths['/api/admin/orders/{id}/retry'])).toEqual(['post']);
         expect(Object.keys(body.paths['/api/orders/{id}/parcels/cancel'])).toEqual(['post']);
         for (const path of [
           '/api/admin/orders',
@@ -83,7 +93,11 @@ describe('Order read API (e2e)', () => {
           '/api/orders/{id}',
         ])
           expect(Object.keys(body.paths[path]).sort()).toEqual(
-            path === '/api/orders/{id}' ? ['delete', 'get'] : ['get'],
+            path === '/api/orders/{id}'
+              ? ['delete', 'get', 'patch']
+              : path === '/api/orders'
+                ? ['get', 'post']
+                : ['get'],
           );
       });
   });

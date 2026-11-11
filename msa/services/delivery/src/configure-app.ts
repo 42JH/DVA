@@ -15,6 +15,7 @@ export function configureApp(app: INestApplication) {
   app.setGlobalPrefix('delivery', {
     exclude: [
       { path: 'internal/order-shipment-check', method: RequestMethod.ALL },
+      { path: 'internal/order-accepted', method: RequestMethod.ALL },
     ],
   });
   const config = new DocumentBuilder()

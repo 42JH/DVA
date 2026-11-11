@@ -1,3 +1,7 @@
+import { Body, Post, HttpCode } from '@nestjs/common';
+import { AiBusinessAccess } from '../auth/auth.guard';
+import { CompleteOrderIntakeDto } from './dto/complete-order-intake.dto';
+import { AuditOperation } from '../audit/audit-operation';
 import { Controller, Get, Headers, Param, Req } from '@nestjs/common';
 import {
   ApiExtraModels,
@@ -46,6 +50,28 @@ import { OrderIntakeService } from './order-intake.service';
 @Controller('calls/:id/order-intake')
 export class OrderIntakeController {
   constructor(private readonly intake: OrderIntakeService) {}
+
+  @Post('complete')
+  @HttpCode(200)
+  @AiBusinessAccess()
+  @AuditOperation({
+    action: 'ORDER_INTAKE_COMPLETED',
+    targetType: 'CALL_SESSION',
+    target: 'id',
+  })
+  @ApiOperation({
+    summary: 'AI 주문 데이터 전송 완료 확정',
+    security: [{ bearer: [] }],
+    description:
+      '초안·미완료·수정 요청을 모두 저장한 후 한 번 호출합니다. PBX 종료와 이 신호가 모두 있어야 READY만 실제 주문 하나로 변환합니다. 먼저 도착한 신호는 기다리며, 동일 본문 재전송은 현재 결과를 반환합니다. 확정 후 내용 변경 불가. NO_ORDER는 완성 상세 없음, FINALIZED는 로컬 확정이며 order.status=ACCEPTED만 디버 접수 성공입니다. 실패는 봉인과 초안을 보존하고 워커가 재시도합니다.',
+  })
+  complete(
+    @Param() params: CallIdParamsDto,
+    @Body() input: CompleteOrderIntakeDto,
+    @Req() request: AuthRequest,
+  ) {
+    return this.intake.complete(params.id, input, request.requestId);
+  }
 
   @Get()
   @AiOrAdminAccess()

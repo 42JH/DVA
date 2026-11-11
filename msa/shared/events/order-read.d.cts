@@ -27,7 +27,7 @@ export interface AdminOrderReadEvent extends Event {
 }
 export interface AdminOrderReadResult {
   data:{orderSeq:number;customerSeq:number|null;draftSeq:number|null;organizationName:string|null;createdAt:string;pickupRequestedAt:string|null;status:OrderStatus;parcels:unknown[]}[];
-  total_count:number;hasNext:boolean;statusCounts:{all:number;incomplete:number;notPaid:number;paid:number;submissionFailed:number;cancelled:number};
+  total_count:number;hasNext:boolean;statusCounts:{all:number;incomplete:number;notPaid:number;paid:number;accepted:number;submissionFailed:number;cancelled:number};
 }
 export function validateAdminOrderRead(event:unknown,source:AdminOrderReadEvent['source']):asserts event is AdminOrderReadEvent;
 export function requestAdminOrderRead(url:string,token:string,event:AdminOrderReadEvent):Promise<AdminOrderReadResult>;
@@ -58,3 +58,5 @@ export interface IntakeOrderResult {
 }
 export function validateOrderIntakeResultRead(event: unknown): asserts event is OrderIntakeResultReadEvent;
 export function requestOrderIntakeResult(url: string, token: string, event: OrderIntakeResultReadEvent): Promise<IntakeOrderResult | null>;
+
+export function orderIntakeResult(value:unknown,payload:{orderSeq:number;callSessionSeq:number|null}):boolean;

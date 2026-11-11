@@ -31,7 +31,7 @@ describe('Consultation PBX and active calls (e2e)', () => {
   beforeAll(async () => {
     const module = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(DatabaseService)
-      .useValue({ pool })
+      .useValue({ pool, referencePool: pool })
       .overrideProvider(AuthService)
       .useValue(auth)
       .overrideProvider(AuditService)
@@ -76,22 +76,17 @@ describe('Consultation PBX and active calls (e2e)', () => {
       offsetSeconds: 0,
       utteranceOrders: [1],
     };
+    await expect(
+      validation.transform(complaint, {
+        type: 'body',
+        metatype: CallComplaintDto,
+      }),
+    ).resolves.toMatchObject(complaint);
     for (const fields of [
-      {},
       { target: null, level: null },
       { target: 'ai_service', level: 'mild' },
       { target: 'price_policy', level: 'explicit' },
       { target: 'delivery_other', level: 'mild' },
-    ]) {
-      const input = { ...complaint, ...fields };
-      await expect(
-        validation.transform(input, {
-          type: 'body',
-          metatype: CallComplaintDto,
-        }),
-      ).resolves.toMatchObject(input);
-    }
-    for (const fields of [
       { target: 'external' },
       { level: 'severe' },
       { target: 1 },
@@ -120,9 +115,11 @@ describe('Consultation PBX and active calls (e2e)', () => {
           '/api/calls/{id}',
           '/api/calls/{id}/actions',
           '/api/calls/{id}/order-intake',
+          '/api/calls/{id}/order-intake/complete',
           '/api/calls/{id}/processing-results',
           '/api/calls/{id}/transcript',
           '/api/dashboard/complaint-calls',
+          '/api/dashboard/home',
           '/api/dashboard/registration-time',
           '/api/dashboard/response-wait',
           '/api/dashboard/stage-dropoffs',

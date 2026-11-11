@@ -94,4 +94,26 @@ async function requestSnapshot(url,token,eventType,validate,source='consultation
   validate(rows);
   return rows;
 }
-module.exports={validateReferenceQuery,validateReferenceRows,requestReferences,validatePersonaComparisonQuery,validatePersonaComparisonRows,requestPersonaComparison,validateComplaintFaqQuery,validateComplaintFaqRows,requestComplaintFaqs,validateOrderOrganizationQuery,validateOrderOrganizationRows,requestOrderOrganization};
+function validateHomeOrdersQuery(event) {
+  validateEvent(event);
+  const p=event.payload;
+  if(event.source!=='consultation'||event.eventType!=='HomeOrdersReadRequested'||
+     !keys(p,'consultationAddress,observedAt')||typeof p.observedAt!=='string'||
+     !/^\d{4}-\d{2}-\d{2}T.*Z$/.test(p.observedAt)||!Number.isFinite(Date.parse(p.observedAt))||
+     !(p.consultationAddress===null||require('./call-event-reference.cjs').privateAddress(p.consultationAddress)))
+    throw new Error('Invalid home orders query');
+}
+function validateHomeOrdersResult(value) {
+  if(!keys(value,'drafts,notPaid,submissionFailed,todayOrderCount')||
+     !['notPaid','submissionFailed','todayOrderCount'].every(key=>Number.isSafeInteger(value[key])&&value[key]>=0))
+    throw new Error('Invalid home orders counts');
+  require('./parcel-drafts.cjs').validateDraftReadResult(value.drafts,{
+    operation:'ParcelDraftsListed',id:null,callSessionSeq:null,query:{limit:11},
+  });
+}
+function requestHomeOrders(url,token,observedAt,consultationAddress,readScopeId) {
+  require('./read-scope.cjs').validateReadScope(readScopeId);
+  return requestSnapshot(url,token,'HomeOrdersReadRequested',validateHomeOrdersResult,'consultation',
+    {observedAt,consultationAddress},readScopeId);
+}
+module.exports={validateReferenceQuery,validateReferenceRows,requestReferences,validatePersonaComparisonQuery,validatePersonaComparisonRows,requestPersonaComparison,validateComplaintFaqQuery,validateComplaintFaqRows,requestComplaintFaqs,validateOrderOrganizationQuery,validateOrderOrganizationRows,requestOrderOrganization,validateHomeOrdersQuery,validateHomeOrdersResult,requestHomeOrders};

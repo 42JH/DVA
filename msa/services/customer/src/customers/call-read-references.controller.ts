@@ -1,3 +1,4 @@
+import { OrderReferenceScopes } from './order-reference-scopes.service';
 import {
   Body,
   Controller,
@@ -12,12 +13,7 @@ import { ConfigService } from '@nestjs/config';
 import { Pool, PoolClient } from 'pg';
 import { validateDraftRead, requestDraftReadCall } from '@dva/events/parcel-drafts.cjs';
 import { requestDraftRead } from '@dva/events/order-read.cjs';
-import {
-  ReadScopes,
-  retryReadSnapshot,
-  validateReadScope,
-  readCallbackUrl,
-} from '@dva/events/read-scope.cjs';
+import { retryReadSnapshot, validateReadScope, readCallbackUrl } from '@dva/events/read-scope.cjs';
 import {
   validateAdminOrderRead,
   requestAdminOrderRead,
@@ -37,13 +33,10 @@ import { DatabaseService } from '../database/database.service';
 @SetMetadata('auth:internal-consultation', true)
 @Controller('internal/call-read-references')
 export class CallReadReferencesController {
-  private readonly reads = new ReadScopes<PoolClient>(
-    () =>
-      new ApiException(503, 'DEPENDENCY_UNAVAILABLE', '서비스를 일시적으로 사용할 수 없습니다.'),
-  );
   constructor(
     private readonly database: DatabaseService,
     private readonly config: ConfigService<Environment, true>,
+    private readonly reads: OrderReferenceScopes,
   ) {}
 
   @Post('parcel-drafts')

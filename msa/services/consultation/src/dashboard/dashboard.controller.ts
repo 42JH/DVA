@@ -9,6 +9,8 @@ import {
 import { Roles } from '../auth/auth.guard';
 import { ErrorResponseDto } from '../common/dto/api-response.dto';
 import { DashboardService } from './dashboard.service';
+import { HomeService } from './home.service';
+import { HomeResponseDto } from './dto/home-response.dto';
 import { DashboardQueryDto } from './dto/dashboard-query.dto';
 import {
   ComplaintCallsResponseDto,
@@ -26,7 +28,21 @@ import {
 @ApiResponse({ status: 500, type: ErrorResponseDto })
 @Controller('dashboard')
 export class DashboardController {
-  constructor(private readonly dashboard: DashboardService) {}
+  constructor(
+    private readonly dashboard: DashboardService,
+    private readonly homeService: HomeService,
+  ) {}
+
+  @Get('home')
+  @ApiOperation({
+    summary: '홈 처리할 일·미리보기·AI 성능 요약',
+    description:
+      '한국시간 오늘의 주문·통화 수와 전체 보관 기간의 처리할 일·미리보기·AI 성능을 조회합니다. 기존 목록·통계 기준과 같은 읽기 전용 DB 스냅샷을 사용하며 미리보기는 영역별 최대 11개입니다.',
+  })
+  @ApiOkResponse({ type: HomeResponseDto })
+  home() {
+    return this.homeService.home();
+  }
 
   @Get('stage-dropoffs')
   @ApiOperation({
@@ -54,7 +70,7 @@ export class DashboardController {
   @ApiOperation({
     summary: '고객 불편 표현 통화율·유형별 집계',
     description:
-      '판정 완료 통화가 분모입니다. AI 응대 오류 4유형과 ai_service 고객 불만만 품질 비율·5유형 도넛에 포함합니다. 같은 통화·같은 유형은 한 번 집계합니다. 다른 책임의 불만·근거 없는 답변은 통화 목록/상세 참고이며 과거 유형 건수도 운영 참고로 제공합니다. RAG/미답변 사유와 독립적입니다.',
+      '판정 완료 통화가 분모입니다. 같은 통화·같은 유형은 한 번, 서로 다른 유형은 각각 집계합니다. 도넛은 화면 6개 유형, 과거 유형은 별도 건수로 제공합니다. RAG/미답변 사유와 독립적입니다.',
   })
   @ApiOkResponse({ type: ComplaintCallsResponseDto })
   complaintCalls(@Query() query: DashboardQueryDto) {

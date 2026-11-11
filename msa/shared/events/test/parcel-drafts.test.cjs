@@ -166,3 +166,752 @@ test('draft deletion binds owner, actor, scope and phase and preserves source lo
     const before=calls;await assert.rejects(requestDraftDeletion('http://user:pass@order/private',token,deletion));assert.equal(calls,before);
   } finally {global.fetch=oldFetch;}
 });
+
+test('intake writes bind call, completion policy and durable finalization mappings', () => {
+  const {
+    validateDraftWrite,
+    validateWriteReference,
+  } = require('../parcel-draft-write.cjs');
+  const {
+    validateFinalization,
+    validatePolicy,
+    finalizationId,
+  } = require('../order-intake-write.cjs');
+  const event = {
+    eventId: randomUUID(),
+    source: 'order',
+    eventType: 'ParcelDraftWriteRequested',
+    payload: {
+      orderAddress: null,
+      command: {
+        operation: 'OrderIntakeSealed',
+        id: 1,
+        adminId: null,
+        callSessionSeq: 1,
+        input: { expectedIntakeVersion: 1 },
+        requestId: randomUUID(),
+      },
+    },
+  };
+  validateDraftWrite(event, 'order');
+  for (const change of [
+    (e) => (e.payload.command.adminId = 1),
+    (e) => (e.payload.command.id = 2),
+    (e) => (e.payload.command.input.expectedIntakeVersion = 0),
+    (e) => (e.payload.command.input.paymentMethodType = null),
+    (e) => (e.payload.command.input.actorId = 1),
+  ]) {
+    const bad = structuredClone(event);
+    change(bad);
+    assert.throws(() => validateDraftWrite(bad, 'order'));
+  }
+  event.payload.command.operation = 'OrderIntakeFinalized';
+  event.payload.command.input = {};
+  validateDraftWrite(event, 'order');
+  assert.equal(finalizationId(1), finalizationId(1));
+  assert.notEqual(finalizationId(1), finalizationId(2));
+  const result = {
+    eventId: randomUUID(),
+    callSessionSeq: 1,
+    expectedIntakeVersion: 1,
+    finalizedAt: new Date().toISOString(),
+    orderSeq: 2,
+    parcelMappings: [{ draftSeq: 3, orderParcelSeq: 4 }],
+    requestId: randomUUID(),
+  };
+  validateFinalization(result);
+  for (const change of [
+    (e) => e.parcelMappings.push(e.parcelMappings[0]),
+    (e) => (e.orderSeq = null),
+    (e) => (e.expectedIntakeVersion = 0),
+    (e) => (e.parcelMappings[0].orderParcelSeq = 0),
+    (e) => (e.finalizedAt = 'invalid'),
+    (e) => (e.actorId = 1),
+  ]) {
+    const bad = structuredClone(result);
+    change(bad);
+    assert.throws(() => validateFinalization(bad));
+  }
+  validateFinalization({ ...result, orderSeq: null, parcelMappings: [] });
+  const policy = {
+    monthly: true,
+    group: false,
+    organizationSeq: null,
+    departmentSeq: null,
+    organizationName: null,
+    departmentName: null,
+  };
+  validatePolicy(policy);
+  assert.throws(() => validatePolicy({ ...policy, group: true }));
+  assert.throws(() => validatePolicy({ ...policy, actorId: 1 }));
+  const reference = {
+    eventId: randomUUID(),
+    source: 'consultation',
+    eventType: 'ParcelDraftWriteReferenceRequested',
+    payload: { operation: 'IntakeFinalizationRead', input: { id: 1 } },
+  };
+  validateWriteReference(reference);
+  assert.throws(() =>
+    validateWriteReference({ ...reference, source: 'order' }),
+  );
+});
+
+test('durable intake receipts are read without a live write scope while mutation references require one', async () => {
+  const { requestWriteReference } = require('../parcel-draft-write.cjs');
+  const saved = global.fetch;
+  let seen = 0,
+    payload = null;
+  global.fetch = async (url, options) => {
+    seen++;
+    const event = JSON.parse(options.body);
+    return Response.json({
+      eventId: event.eventId,
+      status: 'processed',
+      payload,
+    });
+  };
+  const event = {
+    eventId: randomUUID(),
+    source: 'consultation',
+    eventType: 'ParcelDraftWriteReferenceRequested',
+    payload: { operation: 'IntakeFinalizationRead', input: { id: 1 } },
+  };
+  try {
+    assert.equal(
+      await requestWriteReference('http://order/private', token, event),
+      null,
+    );
+    assert.equal(seen, 1);
+    payload = {
+      eventId: randomUUID(),
+      callSessionSeq: 1,
+      expectedIntakeVersion: 1,
+      finalizedAt: new Date().toISOString(),
+      orderSeq: 2,
+      requestId: randomUUID(),
+      parcelMappings: Array.from({ length: 20000 }, (_, i) => ({
+        draftSeq: i + 1,
+        orderParcelSeq: i + 1,
+      })),
+    };
+    assert.ok(Buffer.byteLength(JSON.stringify(payload)) > 256 * 1024);
+    assert.equal(
+      (await requestWriteReference('http://order/private', token, event))
+        .parcelMappings.length,
+      20000,
+    );
+    const mutation = {
+      ...event,
+      source: 'order',
+      payload: { operation: 'IntakeCallRead', input: { id: 1 } },
+    };
+    assert.throws(() =>
+      requestWriteReference('http://consultation/private', token, mutation),
+    );
+    assert.equal(seen, 2);
+  } finally {
+    global.fetch = saved;
+  }
+});
+
+test('write hops await source transactions while individual reference requests keep a deadline',async()=>{
+  const {requestDraftWrite,requestWriteReference}=require('../parcel-draft-write.cjs');
+  const signals=[],saved=global.fetch;
+  global.fetch=async(url,options)=>{signals.push(options.signal);const input=JSON.parse(options.body);
+    return Response.json({eventId:input.eventId,status:'processed',payload:input.eventType==='ParcelDraftWriteRequested'?{data:{sealed:true},receipt:null}:null});};
+  try {
+    const input={eventId:randomUUID(),source:'order',eventType:'ParcelDraftWriteRequested',payload:{orderAddress:null,
+      command:{operation:'OrderIntakeSealed',id:1,adminId:null,callSessionSeq:1,input:{expectedIntakeVersion:1},requestId:randomUUID()}}};
+    assert.deepEqual(await requestDraftWrite('http://consultation/private',token,input),{data:{sealed:true},receipt:null});
+    assert.equal(signals[0],null);
+    await requestWriteReference('http://order/private',token,{eventId:randomUUID(),source:'consultation',eventType:'ParcelDraftWriteReferenceRequested',payload:{operation:'IntakeFinalizationRead',input:{id:1}}});
+    assert.ok(signals[1] instanceof AbortSignal);
+  } finally {global.fetch=saved;}
+});
+
+test('order updates bind durable call links and preserve the original customer association',async()=>{
+  const {validateDraftWrite,validateReceipt,validateOrderCallLink,requestDraftWrite,requestWriteReference}=require('../parcel-draft-write.cjs');
+  const mutation={callSessionSeq:1,beforeOrderSeq:null,beforeCustomerSeq:null,orderSeq:42,customerSeq:3};
+  const receipt={eventId:randomUUID(),payload:mutation};validateReceipt(receipt);
+  for(const changed of [{...mutation,beforeOrderSeq:2},{...mutation,beforeCustomerSeq:2},{...mutation,orderSeq:0},{...mutation,afterVersion:1}])assert.throws(()=>validateOrderCallLink(changed));
+  validateOrderCallLink({...mutation,beforeCustomerSeq:3});
+  const input={eventId:randomUUID(),source:'order',eventType:'ParcelDraftWriteRequested',payload:{orderAddress:null,
+    command:{operation:'OrderUpdated',id:42,adminId:null,callSessionSeq:1,input:{expectedVersion:1,pickupRequestedAt:null},requestId:randomUUID()}}};
+  validateDraftWrite(input,'order');
+  const adminCommand={...input,payload:{...input.payload,command:{...input.payload.command,adminId:1}}};
+  validateDraftWrite(adminCommand,'order');
+  validateDraftWrite({...adminCommand,payload:{...adminCommand.payload,command:{...adminCommand.payload.command,callSessionSeq:null}}},'order');
+  assert.throws(()=>validateDraftWrite({...adminCommand,payload:{...adminCommand.payload,command:{...adminCommand.payload.command,operation:'ParcelDraftUpdated'}}},'order'));
+  const saved=global.fetch;let mode='update';
+  global.fetch=async(url,options)=>{const event=JSON.parse(options.body);return Response.json({eventId:event.eventId,status:'processed',
+    payload:mode==='update'?{data:{version:4},receipt}:mode==='customer'?{customerSeq:3,phone:'01011112222',active:false}:
+    {callSessionSeq:1,customerSeq:3,orderSeq:mode==='wrong-order'?43:42,callerPhoneNumber:'01011112222',enabled:false,endedAt:null,intakeVersion:1,completionReceivedAt:null}});};
+  try {
+    assert.deepEqual(await requestDraftWrite('http://consultation/private',token,input),{data:{version:4},receipt});
+    const reference={eventId:randomUUID(),source:'order',eventType:'ParcelDraftWriteReferenceRequested',payload:{operation:'CallOrderLinked',input:{id:1,orderSeq:42,customerSeq:3}}};
+    mode='call';assert.equal((await requestWriteReference('http://consultation/private',token,reference,randomUUID())).orderSeq,42);
+    mode='wrong-order';await assert.rejects(requestWriteReference('http://consultation/private',token,reference,randomUUID()));
+    mode='customer';assert.equal((await requestWriteReference('http://customer/private',token,{...reference,payload:{operation:'OrderCustomerRead',input:{id:3}}},randomUUID())).active,false);
+  } finally {global.fetch=saved;}
+});
+
+test('order submission receipts bind recipients to the command and preserve unbounded stored address reads', async () => {
+  const {
+    validateRecipientAddresses,
+    validateRecipientPins,
+    validateRecipientReceipt,
+  } = require('../order-recipient-pins.cjs');
+  const {
+    validateDraftWrite,
+    requestDraftWrite,
+    requestWriteReference,
+  } = require('../parcel-draft-write.cjs');
+  const address = {
+    name: '수령인',
+    phoneNumber: '01012345678',
+    roadAddress: '도로',
+    jibunAddress: '지번',
+    detailAddress: '',
+    dongName: '동',
+    postalCode: '12345',
+  };
+  const pin = {
+    personalPinSeq: 4,
+    label: address.name,
+    address,
+  };
+  validateRecipientAddresses([address]);
+  validateRecipientPins([pin]);
+  for (const value of [
+    [{ ...address, name: null }],
+    [{ ...address, detailAddress: '\u0000' }],
+    [{ ...address, extra: true }],
+  ])
+    assert.throws(() => validateRecipientAddresses(value));
+  assert.throws(() => validateRecipientPins([pin, pin]));
+  assert.throws(() => validateRecipientPins([{ ...pin, label: 'changed' }]));
+  const requestId = randomUUID(),
+    writeEventId = randomUUID(),
+    receipt = {
+      eventId: randomUUID(),
+      payload: {
+        orderSeq: 42,
+        customerSeq: 3,
+        adminId: 1,
+        requestId,
+        pins: [pin],
+        writeEventId,
+      },
+    };
+  validateRecipientReceipt(receipt);
+  assert.throws(() =>
+    validateRecipientReceipt({
+      ...receipt,
+      payload: { ...receipt.payload, adminId: 0 },
+    }),
+  );
+  const input = {
+    eventId: writeEventId,
+    source: 'order',
+    eventType: 'ParcelDraftWriteRequested',
+    payload: {
+      orderAddress: null,
+      command: {
+        operation: 'OrderSubmitted',
+        id: 42,
+        adminId: 1,
+        callSessionSeq: 5,
+        input: { expectedVersion: 1 },
+        requestId,
+      },
+    },
+  };
+  validateDraftWrite(
+    {
+      ...input,
+      source: 'consultation',
+      payload: { ...input.payload, consultationAddress: null, call: null },
+    },
+    'consultation',
+  );
+  assert.throws(() =>
+    validateDraftWrite(
+      {
+        ...input,
+        source: 'consultation',
+        payload: {
+          ...input.payload,
+          command: { ...input.payload.command, adminId: null },
+          consultationAddress: null,
+          call: null,
+        },
+      },
+      'consultation',
+    ),
+  );
+  const addresses = Array.from({ length: 20000 }, () => address),
+    saved = global.fetch;
+  let mode = 'submission';
+  assert.ok(Buffer.byteLength(JSON.stringify(addresses)) > 256 * 1024);
+  global.fetch = async (url, options) => {
+    const event = JSON.parse(options.body);
+    return Response.json({
+      eventId: event.eventId,
+      status: 'processed',
+      payload:
+        mode === 'addresses'
+          ? addresses
+          : mode === 'receipt'
+            ? receipt
+            : {
+                data: { status: 'notPaid' },
+                receipt: null,
+                customerReceipt:
+                  mode === 'forged'
+                    ? {
+                        ...receipt,
+                        payload: { ...receipt.payload, orderSeq: 43 },
+                      }
+                    : mode === 'forgedScope'
+                      ? {
+                          ...receipt,
+                          payload: {
+                            ...receipt.payload,
+                            writeEventId: randomUUID(),
+                          },
+                        }
+                      : receipt,
+              },
+    });
+  };
+  try {
+    assert.equal(
+      (await requestDraftWrite('http://consultation/private', token, input))
+        .customerReceipt.eventId,
+      receipt.eventId,
+    );
+    mode = 'forged';
+    await assert.rejects(
+      requestDraftWrite('http://consultation/private', token, input),
+    );
+    mode = 'forgedScope';
+    await assert.rejects(
+      requestDraftWrite('http://consultation/private', token, input),
+    );
+    const event = {
+      eventId: randomUUID(),
+      source: 'customer',
+      eventType: 'ParcelDraftWriteReferenceRequested',
+      payload: { operation: 'OrderRecipientsRead', input: { id: 42 } },
+    };
+    mode = 'addresses';
+    assert.equal(
+      (
+        await requestWriteReference(
+          'http://order/private',
+          token,
+          event,
+          randomUUID(),
+        )
+      ).length,
+      20000,
+    );
+    mode = 'receipt';
+    assert.deepEqual(
+      await requestWriteReference('http://order/private', token, {
+        ...event,
+        payload: {
+          operation: 'RecipientReceiptRead',
+          input: { eventId: receipt.eventId },
+        },
+      }),
+      receipt,
+    );
+  } finally {
+    global.fetch = saved;
+  }
+});
+
+
+test('administrator draft submissions bind the draft and separately reserved order to their receipt', async () => {
+  const {
+    validateDraftWrite,
+    requestDraftWrite,
+  } = require('../parcel-draft-write.cjs');
+  const event = {
+    eventId: randomUUID(),
+    source: 'order',
+    eventType: 'ParcelDraftWriteRequested',
+    payload: {
+      orderAddress: null,
+      command: {
+        operation: 'AdminParcelDraftSubmitted',
+        id: 5,
+        adminId: 1,
+        callSessionSeq: null,
+        input: { expectedVersion: 1, paymentMethodType: 'billing' },
+        requestId: randomUUID(),
+      },
+    },
+  };
+  validateDraftWrite(event, 'order');
+  for (const change of [{ adminId: null }, { callSessionSeq: 1 }])
+    assert.throws(() =>
+      validateDraftWrite(
+        {
+          ...event,
+          payload: {
+            ...event.payload,
+            command: { ...event.payload.command, ...change },
+          },
+        },
+        'order',
+      ),
+    );
+  const receipt = {
+    eventId: randomUUID(),
+    payload: {
+      writeEventId: event.eventId,
+      orderSeq: 42,
+      customerSeq: 3,
+      adminId: 1,
+      requestId: event.payload.command.requestId,
+      pins: [],
+    },
+  };
+  const result = {
+    data: {
+      orderSeq: 42,
+      callSessionSeq: null,
+      version: 2,
+      status: 'notPaid',
+      totalAmount: 5000,
+      parcelNo: null,
+      paymentDueAt: null,
+      paymentRequest: null,
+      draftSeq: 5,
+      orderParcelSeq: 9,
+    },
+    receipt: null,
+    customerReceipt: receipt,
+  };
+  const saved = global.fetch;
+  let response = result;
+  global.fetch = async (_url, options) =>
+    Response.json({
+      eventId: JSON.parse(options.body).eventId,
+      status: 'processed',
+      payload: response,
+    });
+  try {
+    assert.deepEqual(
+      await requestDraftWrite('http://consultation/private', token, event),
+      result,
+    );
+    for (const data of [
+      { draftSeq: 6 },
+      { callSessionSeq: 1 },
+      { orderParcelSeq: 0 },
+      { status: 'other' },
+    ]) {
+      response = { ...result, data: { ...result.data, ...data } };
+      await assert.rejects(
+        requestDraftWrite('http://consultation/private', token, event),
+      );
+    }
+    response = {
+      ...result,
+      customerReceipt: {
+        ...receipt,
+        payload: { ...receipt.payload, orderSeq: 5 },
+      },
+    };
+    await assert.rejects(
+      requestDraftWrite('http://consultation/private', token, event),
+    );
+  } finally {
+    global.fetch = saved;
+  }
+});
+
+
+test('order customer preparation keeps a stable phone intent and binds the committed owner outcome', async () => {
+  const {
+    customerPreparationId,
+    validateCreatedCustomer,
+    validateCustomerPreparationOutcome,
+  } = require('../order-customer-write.cjs');
+  const { requestWriteReference } = require('../parcel-draft-write.cjs');
+  assert.equal(
+    customerPreparationId('01012345678'),
+    customerPreparationId('01012345678'),
+  );
+  assert.notEqual(
+    customerPreparationId('01012345678'),
+    customerPreparationId('01012345679'),
+  );
+  assert.throws(() => customerPreparationId('010-1234-5678'));
+  const customer = {
+    customerSeq: 3,
+    name: '생성 고객',
+    phoneNumber: '01012345678',
+    status: 'ACTIVE',
+    monthlyBillingEnabled: false,
+    address: null,
+  };
+  validateCreatedCustomer(customer);
+  for (const changed of [
+    { monthlyBillingEnabled: true },
+    { address: {} },
+    { status: 'WITHDRAWN' },
+    { customerSeq: 0 },
+    { phoneNumber: 'invalid' },
+  ])
+    assert.throws(() => validateCreatedCustomer({ ...customer, ...changed }));
+  const writeEventId = randomUUID(),
+    customerCreationReceipt = {
+      eventId: randomUUID(),
+      payload: { writeEventId, customer, adminId: 1, requestId: randomUUID() },
+    };
+  const outcome = {
+    status: 'COMMITTED',
+    customerCreationReceipt,
+    recipientReceipt: null,
+  };
+  validateCustomerPreparationOutcome(outcome);
+  validateCustomerPreparationOutcome({ status: 'PENDING' });
+  validateCustomerPreparationOutcome({ status: 'ABORTED' });
+  assert.throws(() =>
+    validateCustomerPreparationOutcome({
+      status: 'ABORTED',
+      customerCreationReceipt,
+    }),
+  );
+  assert.throws(() =>
+    validateCustomerPreparationOutcome({
+      ...outcome,
+      recipientReceipt: {
+        eventId: randomUUID(),
+        payload: {
+          writeEventId,
+          orderSeq: 5,
+          customerSeq: 4,
+          adminId: 1,
+          requestId: customerCreationReceipt.payload.requestId,
+          pins: [],
+        },
+      },
+    }),
+  );
+  const event = {
+    eventId: randomUUID(),
+    source: 'customer',
+    eventType: 'ParcelDraftWriteReferenceRequested',
+    payload: {
+      operation: 'CustomerPreparationOutcomeRead',
+      input: { writeEventId },
+    },
+  };
+  const saved = global.fetch;
+  let response = outcome;
+  global.fetch = async (_url, options) =>
+    Response.json({
+      eventId: JSON.parse(options.body).eventId,
+      status: 'processed',
+      payload: response,
+    });
+  try {
+    assert.deepEqual(
+      await requestWriteReference('http://order/private', token, event),
+      outcome,
+    );
+    response = {
+      ...outcome,
+      customerCreationReceipt: {
+        ...customerCreationReceipt,
+        payload: {
+          ...customerCreationReceipt.payload,
+          writeEventId: randomUUID(),
+        },
+      },
+    };
+    await assert.rejects(
+      requestWriteReference('http://order/private', token, event),
+    );
+    await assert.rejects(async () =>
+      requestWriteReference('http://order/private', token, {
+        ...event,
+        source: 'order',
+      }),
+    );
+  } finally {
+    global.fetch = saved;
+  }
+});
+
+test('order creation binds customer and legacy call receipts to the original command', async () => {
+  const {
+    validateDraftWrite,
+    requestDraftWrite,
+    requestWriteReference,
+    validateLegacyCallWrite,
+  } = require('../parcel-draft-write.cjs');
+  const { randomUUID } = require('node:crypto');
+  const input = {
+    eventId: randomUUID(),
+    source: 'order',
+    eventType: 'ParcelDraftWriteRequested',
+    payload: {
+      orderAddress: null,
+      command: {
+        operation: 'OrderCreated',
+        id: null,
+        key: '00000000-0000-0000-0000-000000000000',
+        adminId: 1,
+        callSessionSeq: null,
+        input: { customer: { name: '생성 고객', phoneNumber: '01012345678' } },
+        requestId: randomUUID(),
+      },
+    },
+  };
+  validateDraftWrite(input, 'order');
+  const result = {
+    data: { result: { orderSeq: 42, version: 1 }, submit: false },
+    receipt: null,
+    customerReceipt: null,
+    customerCreationReceipt: {
+      eventId: randomUUID(),
+      payload: {
+        writeEventId: input.eventId,
+        customer: {
+          customerSeq: 7,
+          name: '생성 고객',
+          phoneNumber: '01012345678',
+          status: 'ACTIVE',
+          monthlyBillingEnabled: false,
+          address: null,
+        },
+        adminId: 1,
+        requestId: input.payload.command.requestId,
+      },
+    },
+  };
+  for (const command of [
+    { ...input.payload.command, key: undefined },
+    { ...input.payload.command, key: randomUUID(), unknown: true },
+    { ...input.payload.command, id: 42 },
+  ])
+    assert.throws(() =>
+      validateDraftWrite(
+        { ...input, payload: { ...input.payload, command } },
+        'order',
+      ),
+    );
+  let output = result;
+  const saved = global.fetch;
+  global.fetch = async (url, options) => {
+    const event = JSON.parse(options.body);
+    return Response.json({
+      eventId: event.eventId,
+      status: 'processed',
+      payload: output,
+    });
+  };
+  try {
+    assert.deepEqual(
+      await requestDraftWrite('http://consultation/private', token, input),
+      result,
+    );
+    for (const changes of [
+      { writeEventId: randomUUID() },
+      { adminId: 2 },
+      { requestId: randomUUID() },
+      {
+        customer: {
+          ...result.customerCreationReceipt.payload.customer,
+          phoneNumber: '01099999999',
+        },
+      },
+    ]) {
+      output = {
+        ...result,
+        customerCreationReceipt: {
+          ...result.customerCreationReceipt,
+          payload: { ...result.customerCreationReceipt.payload, ...changes },
+        },
+      };
+      await assert.rejects(
+        requestDraftWrite('http://consultation/private', token, input),
+      );
+    }
+    const legacy = {
+      creationKey: input.payload.command.key,
+      callSessionSeq: 1,
+      beforeCustomerSeq: null,
+      customerSeq: 7,
+      orderSeq: 42,
+      call: {
+        providerCallId: 'old-call',
+        callerPhoneNumber: '+821012345678',
+        incomingAt: '2026-11-11T00:00:00Z',
+      },
+      adminId: 1,
+      requestId: input.payload.command.requestId,
+    };
+    validateLegacyCallWrite(legacy);
+    validateLegacyCallWrite({ ...legacy, orderSeq: null, customerSeq: null });
+    assert.throws(() =>
+      validateLegacyCallWrite({ ...legacy, beforeCustomerSeq: 9 }),
+    );
+    input.payload.command.input.call=legacy.call;
+    input.payload.command.input.outcome='INCOMPLETE';
+    input.payload.command.input.parcels=[{documentCount:1}];
+    output = { ...result,data:{result:{orderSeq:42,version:1,status:'COLLECTING',callSessionSeq:1,totalAmount:null,parcelNo:null,paymentDueAt:null,paymentRequest:null},submit:false},receipt: { eventId: randomUUID(), payload: legacy } };
+    assert.deepEqual(
+      await requestDraftWrite('http://consultation/private', token, input),
+      output,
+    );
+    output = {
+      ...output,
+      receipt: {
+        ...output.receipt,
+        payload: { ...legacy, creationKey: randomUUID() },
+      },
+    };
+    await assert.rejects(
+      requestDraftWrite('http://consultation/private', token, input),
+    );
+    output={...output,receipt:{...output.receipt,payload:{...legacy,call:{...legacy.call,providerCallId:'another-call'}}}};
+    await assert.rejects(requestDraftWrite('http://consultation/private',token,input));
+    const reference = {
+      eventId: randomUUID(),
+      source: 'order',
+      eventType: 'ParcelDraftWriteReferenceRequested',
+      payload: {
+        operation: 'CallCustomerRead',
+        input: { phone: '01012345678' },
+      },
+    };
+    output = { customerSeq: 7, phone: '01012345678', active: false };
+    assert.deepEqual(
+      await requestWriteReference(
+        'http://customer/private',
+        token,
+        reference,
+        randomUUID(),
+      ),
+      output,
+    );
+    output = { ...output, phone: '01099999999' };
+    await assert.rejects(
+      requestWriteReference(
+        'http://customer/private',
+        token,
+        reference,
+        randomUUID(),
+      ),
+    );
+  } finally {
+    global.fetch = saved;
+  }
+});

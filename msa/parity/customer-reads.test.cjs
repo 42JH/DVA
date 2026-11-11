@@ -125,7 +125,8 @@ test('customer reads match monolith with independent operations sessions and imm
     const result = await request('GET',path,undefined,200);
     for (const item of result.data) for (const field of ['employeeNo','role','personalPins']) assert.equal(item[field], undefined);
   }
-  await request('GET','/api/companies/search?q=한빛','root',401,undefined,{ai:false});
+  for(const actor of ['root','operator','supervisor']) await request('GET','/api/companies/search?q=한빛',actor,200,undefined,{ai:false});
+  await request('GET','/api/companies/search?q=한빛',undefined,401,undefined,{ai:false});
   await request('GET','/api/customers/1',undefined,401,undefined,{ai:false});
   await request('GET','/api/customers/1',undefined,401,undefined,{token:'wrong'});
   await request('GET','/api/companies/members/search?q=김',undefined,401);
@@ -156,14 +157,14 @@ test('customer reads match monolith with independent operations sessions and imm
   await request('GET','/api/customers/1','operator',401,undefined,{ duplicate:true });
   await request('PATCH','/api/admins/2','root',204,{ status:'INACTIVE' });
   await request('GET','/api/customers','operator',401);
-  await request('GET','/api/companies/search?q=한빛','operator',200);
+  await request('GET','/api/companies/search?q=한빛','operator',401);
   await request('GET','/api/customers/1','operator',401);
   await request('PATCH','/api/admins/2','root',204,{ status:'ACTIVE' });
   await request('GET','/api/companies','operator',401);
   await login('operator');
   await request('GET','/api/companies','operator',200);
   await request('POST','/api/auth/logout','operator',204);
-  await request('GET','/api/companies/search?q=한빛','operator',200);
+  await request('GET','/api/companies/search?q=한빛','operator',401);
   await request('GET','/api/companies/search?q=한빛',undefined,200);
   await login('operator');
   await request('DELETE','/api/admins/2','root',204);

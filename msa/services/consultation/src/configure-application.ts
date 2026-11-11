@@ -38,7 +38,11 @@ export function configureApplication(
   const scopeParser = json({ limit: '256kb' });
   // Keep Nest's default public parser; only the authenticated internal envelope needs extra space.
   app.use(
-    ['/internal/call-scope', '/internal/order-cancellation'],
+    [
+      '/internal/call-scope',
+      '/internal/order-cancellation',
+      '/internal/parcel-draft-write',
+    ],
     (request: Request, response: Response, next: NextFunction) => {
       scopeParser(request, response, next);
     },
@@ -77,6 +81,16 @@ export function configureApplication(
         path: 'internal/legacy-draft-call-bindings/prune',
         method: RequestMethod.ALL,
       },
+      { path: 'internal/parcel-draft-write', method: RequestMethod.ALL },
+      {
+        path: 'internal/parcel-draft-write/recover',
+        method: RequestMethod.ALL,
+      },
+      {
+        path: 'internal/parcel-draft-write/reference',
+        method: RequestMethod.ALL,
+      },
+      { path: 'internal/parcel-draft-write/events', method: RequestMethod.ALL },
       { path: 'internal/faq-call-sources', method: RequestMethod.ALL },
       { path: 'internal/caller-context', method: RequestMethod.ALL },
       { path: 'internal/call-scope', method: RequestMethod.ALL },

@@ -7,6 +7,100 @@ const { validateOrderRead, requestOrderRead, OrderReadError } = require('@dva/ev
 const { validateEnvironment } = require('../dist/config/environment');
 const { OrdersService } = require('../dist/orders/orders.service');
 const token = 'order-read-test-only-'.padEnd(48, 't');
+
+test('home order snapshots validate the owner query, bounded previews and counters', () => {
+  const {validateHomeOrdersQuery,validateHomeOrdersResult,requestHomeOrders}=require('@dva/events/call-read-references.cjs');
+  const event={eventId:randomUUID(),source:'consultation',eventType:'HomeOrdersReadRequested',
+    payload:{observedAt:new Date().toISOString(),consultationAddress:null}};
+  validateHomeOrdersQuery(event);
+  for(const changed of [{...event,source:'order'},{...event,payload:{...event.payload,observedAt:'invalid'}},
+    {...event,payload:{...event.payload,consultationAddress:'169.254.169.254'}},
+    {...event,payload:{...event.payload,customerSeq:1}}])
+    assert.throws(()=>validateHomeOrdersQuery(changed));
+  const value={todayOrderCount:0,notPaid:2,submissionFailed:1,drafts:{data:[],total_count:0,hasNext:false}};
+  validateHomeOrdersResult(value);
+  for(const changed of [{...value,todayOrderCount:-1},{...value,notPaid:0.5},
+    {...value,drafts:{...value.drafts,data:Array(12).fill({})}}])
+    assert.throws(()=>validateHomeOrdersResult(changed));
+  assert.throws(()=>requestHomeOrders('http://owner/internal',token,event.payload.observedAt,null,'invalid'));
+});
+
+test('metrics coalesce scrapes, preserve attention gauges and report database failures', async () => {
+  const {ObservabilityService}=require('../dist/observability/observability.service');
+  const queries=[],statistics={count:3,failures:1,seconds:0.4,maxSeconds:0.2,connectionWaitSeconds:0.01};
+  let probes=0,transactions=0,release;
+  const gate=new Promise(resolve=>release=resolve);
+  const client={query:async sql=>{
+    queries.push(sql);
+    return {rows:sql.startsWith('SELECT status')?[{status:'notPaid',count:'2'}]:
+      sql.startsWith('SELECT count')?[{count:'1'}]:[]};
+  }};
+  const database={
+    pool:{totalCount:2,idleCount:1,waitingCount:0,query:async()=>{probes++;await gate;}},
+    transactionStatistics:statistics,
+    transaction:async work=>{transactions++;return work(client);},
+  };
+  const service=new ObservabilityService(database);
+  const pending=service.snapshot();
+  assert.equal(service.snapshot(),pending);release();
+  const text=await pending;
+  assert.equal(probes,1);assert.equal(transactions,1);
+  assert.deepEqual(queries.slice(0,2),[
+    'SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY',"SET LOCAL statement_timeout = '2s'",
+  ]);
+  assert.match(text,/^dva_database_up 1$/m);
+  assert.match(text,/^dva_order_metrics_success 1$/m);
+  assert.match(text,/^dva_orders_attention\{status="notPaid"\} 2$/m);
+  assert.match(text,/^dva_orders_attention\{status="PAID"\} 0$/m);
+  assert.match(text,/^dva_orders_stale_submitting 1$/m);
+  assert.match(text,/^dva_database_transactions_total 3$/m);
+  database.pool.query=async()=>{throw new Error('private connection details');};
+  const down=await service.snapshot();
+  assert.match(down,/^dva_database_up 0$/m);
+  assert.match(down,/^dva_order_metrics_success 0$/m);
+  assert.doesNotMatch(down,/dva_orders_attention|dva_orders_stale_submitting|private connection/);
+  database.pool.query=async()=>{};
+  database.transaction=async()=>{throw new Error('private SQL');};
+  const unavailable=await service.snapshot();
+  assert.match(unavailable,/^dva_database_up 1$/m);
+  assert.match(unavailable,/^dva_order_metrics_success 0$/m);
+  assert.doesNotMatch(unavailable,/dva_orders_attention|dva_orders_stale_submitting|private SQL/);
+});
+
+test('draft write scopes bind owners, calls, reply versions and authenticated reference queries', async () => {
+  const {validateDraftWrite,validateWriteReference,validateCallMutation,requestWriteReference}=require('@dva/events/parcel-draft-write.cjs');
+  const input={eventId:randomUUID(),source:'order',eventType:'ParcelDraftWriteRequested',payload:{
+    command:{operation:'ParcelDraftCreated',id:null,adminId:null,callSessionSeq:1,
+      input:{clientParcelId:randomUUID(),status:'EDITING',parcel:{}},requestId:'draft-write-test'},
+    orderAddress:null,
+  }};
+  validateDraftWrite(input,'order');
+  for(const mutate of [
+    e=>e.source='customer',e=>e.payload.actorId=1,e=>e.payload.orderAddress='169.254.169.254',
+    e=>e.payload.command.adminId=1,e=>e.payload.command.callSessionSeq=null,
+    e=>e.payload.command.input=[],e=>e.payload.command.requestId='',
+  ]) {
+    const changed=structuredClone(input);mutate(changed);
+    assert.throws(()=>validateDraftWrite(changed,'order'));
+  }
+  const scoped={...input,source:'consultation',payload:{...input.payload,consultationAddress:null,
+    call:{callSessionSeq:1,customerSeq:null,intakeVersion:1}}};
+  validateDraftWrite(scoped,'consultation');
+  for(const call of [null,{callSessionSeq:2,customerSeq:null,intakeVersion:1},{callSessionSeq:1,customerSeq:null,intakeVersion:0}])
+    assert.throws(()=>validateDraftWrite({...scoped,payload:{...scoped.payload,call}},'consultation'));
+  validateDraftWrite({...scoped,source:'customer',payload:{...scoped.payload,customerAddress:null}},'customer');
+  const mutation={callSessionSeq:1,beforeVersion:1,afterVersion:2,customerSeq:2};
+  validateCallMutation(mutation);
+  for(const changed of [{...mutation,afterVersion:3},{...mutation,customerSeq:0},{...mutation,actorId:1}])
+    assert.throws(()=>validateCallMutation(changed));
+  const reference={eventId:randomUUID(),source:'order',eventType:'ParcelDraftWriteReferenceRequested',
+    payload:{operation:'CustomerRead',input:{id:1}}};
+  validateWriteReference(reference);
+  assert.throws(()=>validateWriteReference({...reference,source:'customer'}));
+  assert.throws(()=>requestWriteReference('http://owner/private',token,reference));
+  await assert.rejects(requestWriteReference('http://user:secret@owner/private',token,reference,input.eventId));
+});
+
 const event = () => ({ eventId: randomUUID(), source: 'order', eventType: 'OrderReadRequested',
   payload: { command: { operation: 'OrdersListed', id: null, callSessionSeq: 1, query: {} } } });
 let server, url, mode;

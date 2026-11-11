@@ -38,7 +38,7 @@ import { UpdateOrganizationDto } from './dto/update-organization.dto';
 import { OrganizationsService } from './organizations.service';
 import { CreateOrganizationPipe } from './create-organization.pipe';
 import { AuditOperation } from '../audit/audit-operation';
-import { AiBusinessAccess } from '../auth/auth.guard';
+import { MvpAiCustomerAccess as AiOrAdminAccess } from '../auth/auth.guard';
 import { CompanyDirectoryEnvelopeDto, CompanyDirectoryQueryDto } from './dto/company-directory.dto';
 import { OrganizationDeletionService } from './organization-deletion.service';
 import { DeleteOrganizationsDto } from './dto/delete-organizations.dto';
@@ -78,12 +78,12 @@ export class OrganizationsController {
 
   // 정적 경로를 :id보다 먼저 등록하여 search를 기업 번호로 해석하지 않는다.
   @Get('search')
-  @AiBusinessAccess()
+  @AiOrAdminAccess()
   @ApiOperation({
     summary: '기업 공식 배송지 검색 (DIR-01)',
-    security: [{ bearer: [] }],
+    security: [{ adminSession: [] }, { bearer: [] }],
     description:
-      'AI_BUSINESS_TOKEN Bearer 필수. 활성 기업·활성 소속·활성 고객의 현재 기본 주소를 기업 간 공유 배송지로 검색합니다. 사번·역할·개인 PIN은 제공하지 않습니다. 관리자 검색은 GET /api/companies/members/search를 사용합니다.',
+      '활성 관리자 세션 또는 기존 AI_BUSINESS_TOKEN Bearer 필수. 활성 기업·활성 소속·활성 고객의 현재 기본 주소를 기업 간 공유 배송지로 검색합니다. 사번·역할·개인 PIN은 제공하지 않습니다. 사원 이름·사번 검색은 GET /api/companies/members/search를 사용합니다.',
   })
   @ApiOkResponse({ type: CompanyDirectoryEnvelopeDto })
   search(@Query() query: CompanyDirectoryQueryDto) {

@@ -1,3 +1,4 @@
+import { OrderCustomerWritesService } from './order-customer-writes.service';
 import { CallScopeService } from '../call-scope/call-scope.service';
 import { CallContextClient } from './call-context.client';
 import { CallerContextRequestDto } from './dto/caller-context.dto';
@@ -63,7 +64,12 @@ export class CustomersService {
     private readonly audit: AuditService,
     private readonly calls: CallContextClient,
     private readonly scope: CallScopeService,
+    private readonly orderWrites: OrderCustomerWritesService,
   ) {}
+
+  lockOrderPhones(client: PoolClient, phones: string[]) {
+    return this.orderWrites.lockPhones(client, phones);
+  }
 
   // 소속 충돌 검증과 고객 잠금을 마친 호출자의 같은 트랜잭션에 참여한다.
   async importEmployeeIdentities(client: PoolClient, rows: EmployeeCustomerIdentity[]) {
@@ -105,6 +111,7 @@ export class CustomersService {
     if (actorId === null && input.monthlyBillingEnabled === true)
       throw new ApiException(403, 'FORBIDDEN', '월결제 자격은 관리자만 설정할 수 있습니다.');
     return this.database.transaction(async (client) => {
+      await this.orderWrites.lockPhones(client, [input.phoneNumber]);
       const customerSeq = await this.repository.insert(client, input);
       await this.audit.recordSuccess(
         {

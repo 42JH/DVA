@@ -141,11 +141,12 @@ function createRelay({ pool, source, destinations, timeoutMs = 5000 }) {
   return () => transaction(pool, async client => {
     const { rows } = await client.query(
       `SELECT pending.* FROM outbox_events pending
-       WHERE delivered_at IS NULL AND next_attempt_at<=clock_timestamp()
+       WHERE destination=ANY($1::text[]) AND delivered_at IS NULL AND next_attempt_at<=clock_timestamp()
          AND NOT EXISTS (SELECT 1 FROM outbox_events earlier
            WHERE earlier.destination=pending.destination AND earlier.aggregate_seq=pending.aggregate_seq
              AND earlier.delivered_at IS NULL AND earlier.outbox_seq<pending.outbox_seq)
        ORDER BY outbox_seq FOR UPDATE OF pending SKIP LOCKED LIMIT 1`,
+      [[...endpoints.keys()]],
     );
     if (!rows.length) return false;
     const event = rows[0], endpoint = endpoints.get(event.destination);
@@ -169,11 +170,11 @@ function createRelay({ pool, source, destinations, timeoutMs = 5000 }) {
   });
 }
 
-async function sendEvent(url, token, event) {
+async function sendEvent(url, token, event, signal = AbortSignal.timeout(5000)) {
   validateEvent(event);
   checkToken(token);
   url = endpoint(url);
-  const response = await fetch(url, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(5000),
+  const response = await fetch(url, { method: 'POST', redirect: 'error', signal,
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(event) });
   if (!await acknowledged(response, event.eventId)) throw new Error('Event acknowledgement unavailable');
 }

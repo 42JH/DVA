@@ -28,3 +28,15 @@ export interface OrderOrganization {organization_seq:number;organization_name:st
 export function validateOrderOrganizationQuery(value:unknown):asserts value is Event & {payload:{organizationSeq:number}};
 export function validateOrderOrganizationRows(value:unknown,organizationSeq:number):asserts value is OrderOrganization;
 export function requestOrderOrganization(url:string,token:string,organizationSeq:number,readScopeId?:string):Promise<OrderOrganization>;
+
+export interface HomeOrdersQuery extends Event {
+  source:'consultation';eventType:'HomeOrdersReadRequested';
+  payload:{observedAt:string;consultationAddress:string|null};
+}
+export interface HomeOrdersResult {
+  todayOrderCount:number;notPaid:number;submissionFailed:number;
+  drafts:{data:Record<string,unknown>[];hasNext:boolean;total_count:number};
+}
+export function validateHomeOrdersQuery(value:unknown):asserts value is HomeOrdersQuery;
+export function validateHomeOrdersResult(value:unknown):asserts value is HomeOrdersResult;
+export function requestHomeOrders(url:string,token:string,observedAt:string,consultationAddress:string|null,readScopeId:string):Promise<HomeOrdersResult>;

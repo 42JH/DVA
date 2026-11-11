@@ -39,11 +39,13 @@ export class CallSessionRepository {
         id: number;
         startedAt: Date | null;
         endedAt: Date | null;
+        exact: boolean;
       }>(
-        `SELECT call_session_seq AS id,started_at AS "startedAt",ended_at AS "endedAt" FROM call_sessions
+        `SELECT call_session_seq AS id,started_at AS "startedAt",ended_at AS "endedAt",
+          incoming_at=$2::timestamptz AS exact FROM call_sessions
          WHERE caller_phone_number=$1 AND deleted_at IS NULL AND incoming_at>clock_timestamp()-interval '5 years'
            AND incoming_at BETWEEN $2::timestamptz-make_interval(secs=>$3) AND $2::timestamptz+make_interval(secs=>$3)
-         ORDER BY incoming_at,call_session_seq LIMIT 2 FOR UPDATE`,
+         ORDER BY (incoming_at=$2::timestamptz) DESC,incoming_at,call_session_seq LIMIT 2 FOR UPDATE`,
         [
           callerPhone(input.callerPhoneNumber),
           input.startedAt,
@@ -51,9 +53,11 @@ export class CallSessionRepository {
         ],
       )
     ).rows;
-    // 가장 가까운 후보라도 두 건 이상이면 추정 연결하지 않는다.
-    if (candidates.length !== 1) return null;
-    const call = candidates[0];
+    // 정확 일치가 없을 때만 범위 내 유일 후보를 사용하며 모호한 연결은 거절한다.
+    const exact = candidates.filter((call) => call.exact);
+    const matches = exact.length ? exact : candidates;
+    if (matches.length !== 1) return null;
+    const call = matches[0];
     if (
       (call.startedAt && call.startedAt.toISOString() !== input.startedAt) ||
       (call.endedAt && call.endedAt.toISOString() !== input.endedAt)
@@ -66,6 +70,7 @@ export class CallSessionRepository {
     await client.query("SELECT pg_notify('call_sessions_changed','')");
     return call.id;
   }
+
   async attachCustomer(
     client: PoolClient,
     callId: number,
@@ -90,6 +95,16 @@ export class CallSessionRepository {
        ON CONFLICT(provider_call_id) DO NOTHING`,
       [input.providerCallId, phone, input.incomingAt, customerId],
     );
+    const id = await this.existingCall(client, input);
+    if (inserted.rowCount === 1)
+      await client.query("SELECT pg_notify('call_sessions_changed','')");
+    return { id, created: inserted.rowCount === 1 };
+  }
+  async existingCall(
+    client: PoolClient,
+    input: CallIdentityDto & { callerPhoneNumber: string },
+  ): Promise<number> {
+    const phone = callerPhone(input.callerPhoneNumber);
     const call = (
       await client.query<{ id: number; matches: boolean; available: boolean }>(
         `SELECT call_session_seq AS id,
@@ -111,8 +126,6 @@ export class CallSessionRepository {
         'INVALID_STATE',
         '같은 세션의 발신번호·수신 이벤트 시각은 변경할 수 없습니다.',
       );
-    if (inserted.rowCount === 1)
-      await client.query("SELECT pg_notify('call_sessions_changed','')");
-    return { id: call.id, created: inserted.rowCount === 1 };
+    return call.id;
   }
 }

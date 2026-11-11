@@ -1,3 +1,4 @@
+import { OrderReferenceScopes } from './order-reference-scopes.service';
 import {
   validateOrderCancellation,
   requestOrderCancellation,
@@ -16,7 +17,6 @@ import {
 } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import {
-  ReadScopes,
   readCallbackUrl,
   retryReadSnapshot,
   validateReadScope,
@@ -264,15 +264,6 @@ export class OrderReadScopeController {
     return { eventId: event.eventId, status: 'processed', payload };
   }
 
-  private readonly reads = new ReadScopes<PoolClient>(
-    () =>
-      new ApiException(
-        503,
-        'DEPENDENCY_UNAVAILABLE',
-        '서비스를 일시적으로 사용할 수 없습니다.',
-      ),
-  );
-
   @Post('admin-order-read')
   @HttpCode(200)
   @Header('Cache-Control', 'no-store')
@@ -318,6 +309,7 @@ export class OrderReadScopeController {
   constructor(
     private readonly database: DatabaseService,
     private readonly config: ConfigService<Environment, true>,
+    private readonly reads: OrderReferenceScopes,
   ) {}
 
   @Post('order-draft-call-references')

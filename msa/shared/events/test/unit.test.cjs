@@ -280,9 +280,10 @@ test('administrator order read protocol preserves owner addresses, scopes and co
   const {requestDraftCallReferences}=require('../parcel-drafts.cjs');
   const input={eventId:randomUUID(),source:'order',eventType:'AdminOrdersReadRequested',payload:{query:{limit:20,offset:0,q:'_%'},orderAddress:null}};
   validateAdminOrderRead(input,'order');
+  validateAdminOrderRead({...input,payload:{...input.payload,query:{...input.payload.query,statusGroup:'ACCEPTED'}}},'order');
   for(const changed of [{...input,source:'customer'},{...input,payload:{...input.payload,orderAddress:'169.254.169.254'}},{...input,payload:{...input.payload,query:{limit:101,offset:0}}},{...input,payload:{...input.payload,query:{limit:20,offset:0,extra:true}}}])assert.throws(()=>validateAdminOrderRead(changed,'order'));
   const oldFetch=global.fetch;let mode='ok',seen=0;
-  const counts={all:0,incomplete:0,notPaid:0,paid:0,submissionFailed:0,cancelled:0};
+  const counts={all:0,incomplete:0,notPaid:0,paid:0,accepted:0,submissionFailed:0,cancelled:0};
   global.fetch=async(url,options)=>{
     const packet=JSON.parse(options.body);seen++;
     if(packet.eventType==='AdminOrdersReadRequested'){
@@ -318,4 +319,16 @@ test('read snapshots retry only rolled-back PostgreSQL serialization conflicts',
   assert.equal(await retryReadSnapshot(async()=>{if(++attempts===1)throw Object.assign(new Error('snapshot conflict'),{code:'40001'});return 'new state';}),'new state');assert.equal(attempts,2);
   attempts=0;const failure=Object.assign(new Error('connection failed'),{code:'08006'});
   await assert.rejects(retryReadSnapshot(async()=>{attempts++;throw failure;}),error=>error===failure);assert.equal(attempts,1);
+});
+
+test('event senders retain the default deadline and forward explicit synchronous signals',async()=>{
+  const saved=global.fetch,signals=[];
+  global.fetch=async(url,options)=>{signals.push(options.signal);const input=JSON.parse(options.body);return Response.json({eventId:input.eventId,status:'processed'});};
+  try {
+    const custom=new AbortController();
+    await sendEvent('http://owner/internal/events',token,event());
+    await sendEvent('http://owner/internal/events',token,event(),custom.signal);
+    await sendEvent('http://owner/internal/events',token,event(),null);
+    assert.ok(signals[0] instanceof AbortSignal);assert.equal(signals[1],custom.signal);assert.equal(signals[2],null);
+  } finally {global.fetch=saved;}
 });

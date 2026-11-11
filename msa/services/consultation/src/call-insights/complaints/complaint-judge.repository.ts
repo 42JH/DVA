@@ -2,10 +2,6 @@ import { Injectable } from '@nestjs/common';
 import { DatabaseService } from '../../database/database.service';
 import type { CallEvent } from './complaint-judge';
 import { ComplaintFaqClient } from './complaint-faq.client';
-import type {
-  CallComplaintTarget,
-  CallComplaintLevel,
-} from '../call-insights.types';
 
 export const MAX_TRIES = 3; // 모델 장애로 3번 실패하면 더 집지 않음 (has_complaint는 NULL = 미판정으로 남음)
 const GIVE_UP = 10; // 판정할 수 없는 통화(대본이 너무 김) — 다시 집지 않음
@@ -18,8 +14,8 @@ export interface StoredComplaint {
   evidenceText: string;
   offsetSeconds: number | null;
   utteranceOrders: number[];
-  target: CallComplaintTarget | null;
-  level: CallComplaintLevel | null;
+  target?: string | null;
+  level?: string | null;
 }
 
 /** 통화 불만 판정(후처리) 저장소 — AI 분석이 들어온 통화 중 아직 판정하지 않은(has_complaint IS NULL) 것을 집고, 결과로 바꾼다 */

@@ -25,7 +25,10 @@ export class OrderDeletionCheckController {
       validateEvent(event);
       if (
         event.source !== 'order' ||
-        event.eventType !== 'OrderDeletionCheckRequested' ||
+        ![
+          'OrderDeletionCheckRequested',
+          'OrderSubmissionCheckRequested',
+        ].includes(event.eventType) ||
         Object.keys(event.payload).join(',') !== 'orderSeq' ||
         !Number.isInteger(event.payload.orderSeq) ||
         Number(event.payload.orderSeq) < 1 ||
@@ -35,10 +38,15 @@ export class OrderDeletionCheckController {
     } catch {
       throw new HttpException({ error: 'INVALID_ORDER_DELETION_CHECK' }, 422);
     }
-    // Match the monolith predicate, including live calls older than the retention window.
-    const { rows } = await this.database.pool.query<{ blocked: boolean }>(
+    const predicate =
+      event.eventType === 'OrderSubmissionCheckRequested'
+        ? 'order_intake_enabled AND (ended_at IS NULL OR order_finalized_at IS NULL)'
+        : 'deleted_at IS NULL AND ended_at IS NULL';
+    const { rows } = await this.database.referencePool.query<{
+      blocked: boolean;
+    }>(
       `SELECT EXISTS(SELECT 1 FROM call_sessions
-       WHERE order_seq=$1 AND deleted_at IS NULL AND ended_at IS NULL) AS blocked`,
+       WHERE order_seq=$1 AND ${predicate}) AS blocked`,
       [event.payload.orderSeq],
     );
     return { eventId: event.eventId, status: 'processed', payload: rows[0] };

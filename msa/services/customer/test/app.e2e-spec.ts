@@ -25,7 +25,7 @@ describe('Customer read API (e2e)', () => {
   beforeAll(async () => {
     const module = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(DatabaseService)
-      .useValue({ pool })
+      .useValue({ pool, referencePool: pool })
       .overrideProvider(AuthService)
       .useValue(auth)
       .overrideProvider(AuditService)
@@ -143,6 +143,7 @@ describe('Customer read API (e2e)', () => {
           '/api/customers': ['delete', 'get', 'post'],
           '/api/customers/context': ['post'],
           '/api/customers/{id}': ['get', 'patch'],
+          '/api/customers/{id}/billing': ['get'],
           '/api/customers/{id}/pins': ['get', 'post'],
           '/api/pins/{id}': ['patch'],
           '/api/pins': ['delete'],
@@ -238,6 +239,10 @@ describe('Customer read API (e2e)', () => {
     await request(app.getHttpServer())
       .get('/api/companies/search?q=test')
       .set('Cookie', 'dva_session=stale')
+      .set('Authorization', 'Bearer ' + businessToken)
+      .expect(401);
+    await request(app.getHttpServer())
+      .get('/api/companies/search?q=test')
       .set('Authorization', 'Bearer ' + businessToken)
       .expect(200);
     await request(app.getHttpServer())

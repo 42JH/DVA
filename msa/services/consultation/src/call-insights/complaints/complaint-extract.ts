@@ -2,11 +2,7 @@
 // - 응답 지연: AI가 말할 차례의 침묵이 녹음으로 10초 이상, 또는 3초 이상이고 고객이 기다림을 드러냄
 // - 정보 인식 오류(코드): 고객이 부른 번호와 AI 복창 번호가 다름 · 인사에서 부른 이름 · 등록 출발지를 다시 물음
 // - 말 끊김: AI 말이 문장 중간에 잘리고 고객이 바로 말함(Utterance.cut)
-import {
-  CallComplaintType,
-  CallComplaintTarget,
-  CallComplaintLevel,
-} from '../call-insights.types';
+import { CallComplaintType } from '../call-insights.types';
 import { CallRecord, Judged, digitsOf } from './complaint-judge';
 import { longestSilence, textGap } from './complaint-timing';
 
@@ -24,6 +20,11 @@ const ASK_VERB = /알려|말씀|부탁|여쭤|어떻게 되/u;
 const GREET_NAME = /[가-힣]{2,4} ?(고객)?님/u;
 const GREET_ORIGIN = /에서 보내시는/u;
 const CHANGED = /바꾸|바꿀|다른|변경|아니|새로/u;
+const NAME_CHANGE =
+  /(이름|성함|보내는 ?(사람|분)).{0,12}(바꾸|바꿀|바꿔|변경|다른)|(바꾸|바꿀|바꿔|변경).{0,8}(이름|성함)/u;
+const ORIGIN_CHANGE =
+  /다른 ?(데|곳)에서|딴 ?데서|(보내는 ?(곳|주소)|출발).{0,12}(바꾸|바꿀|바꿔|변경|다른)/u;
+const SENTENCES = /(?<=[.?!])\s*|(?<=[다요까죠])\.?\s+/u;
 
 /** 응답 지연 [(앞 발화 번호, 뒤 발화 번호)]. 녹음 말소리 구간이 없으면 정하지 않는다 */
 export function slowTurns(rec: CallRecord): [number, number][] {
@@ -106,19 +107,21 @@ export function infoErrors(rec: CallRecord): [number, number, string][] {
           .map((x) => x.text)
           .join(' ')
       : '';
-  const checks: [RegExp, boolean, string][] = [
+  const checks: [RegExp, boolean, string, RegExp][] = [
     [
       ASK_SENDER_NAME,
       !!first && GREET_NAME.test(first.text),
       '인사에서 부른 이름을 다시 물음',
+      NAME_CHANGE,
     ],
     [
       ASK_ORIGIN,
       !!first && GREET_ORIGIN.test(first.text),
       '인사에서 말한 등록 출발지를 다시 물음',
+      ORIGIN_CHANGE,
     ],
   ];
-  for (const [ask, known, why] of checks) {
+  for (const [ask, known, why, field] of checks) {
     if (!known) continue;
     for (let k = 1; k < us.length; k++) {
       const u = us[k];
@@ -130,13 +133,18 @@ export function infoErrors(rec: CallRecord): [number, number, string][] {
           .filter((x) => x.customer)
           .map((x) => x.text)
           .join(' ');
-      if (
-        !u.customer &&
-        ask.test(u.text) &&
-        ASK_VERB.test(u.text) &&
-        !u.text.includes('성함은') &&
-        !CHANGED.test(before)
-      ) {
+      const changed =
+        CHANGED.test(before) ||
+        us.slice(1, k).some((x) => x.customer && field.test(x.text));
+      const asked = u.text
+        .split(SENTENCES)
+        .some(
+          (sentence) =>
+            ask.test(sentence) &&
+            ASK_VERB.test(sentence) &&
+            !sentence.includes('성함은'),
+        );
+      if (!u.customer && asked && !changed) {
         out.push([u.order, u.order, why]);
         break;
       }
@@ -171,16 +179,16 @@ export interface Complaint {
   evidenceText: string;
   offsetSeconds: number | null;
   utteranceOrders: number[];
-  target?: CallComplaintTarget | null;
-  level?: CallComplaintLevel | null;
+  target?: string | null;
+  level?: string | null;
 }
 
 type Mark = {
   t: number;
   issue: string | null;
   why: string;
-  complain_target?: CallComplaintTarget | null;
-  complain_level?: CallComplaintLevel | null;
+  complain_target?: string | null;
+  complain_level?: string | null;
   complain_quote?: string;
 };
 
@@ -278,17 +286,17 @@ export function backendComplaints(
     evidenceText: string;
     offsetSeconds: number | null;
     utteranceOrders: number[];
-    target: CallComplaintTarget | null;
-    level: CallComplaintLevel | null;
+    target: string | null;
+    level: string | null;
   }[];
 } {
   const found = complaints(analysis, rec)
     .filter((c) => c.type in BACKEND_TYPE)
     .map((c) => ({
       type: BACKEND_TYPE[c.type],
+      target: c.type === 'FRUSTRATION' ? (c.target ?? null) : null,
+      level: c.type === 'FRUSTRATION' ? (c.level ?? null) : null,
       evidenceText: c.evidenceText,
-      target: c.target ?? null,
-      level: c.level ?? null,
       offsetSeconds:
         c.offsetSeconds === null
           ? null

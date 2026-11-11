@@ -10,7 +10,7 @@ type ReadCalls = (input: {
   customerIds: number[];
   phones: string[];
 }) => Promise<DraftCallReferences>;
-const columns = `draft_seq AS "draftSeq",reserved_order_seq AS "reservedOrderSeq",call_session_seq AS "callSessionSeq",customer_seq AS "customerSeq",caller_phone_number AS "callerPhoneNumber",
+export const columns = `draft_seq AS "draftSeq",reserved_order_seq AS "reservedOrderSeq",call_session_seq AS "callSessionSeq",customer_seq AS "customerSeq",caller_phone_number AS "callerPhoneNumber",
  created_by_admin_user_seq AS "createdByAdminUserSeq",client_parcel_id AS "clientParcelId",
  parcel_data AS parcel,status,version,source_draft_seq AS "sourceDraftSeq",order_seq AS "orderSeq",order_parcel_seq AS "orderParcelSeq",
  legacy_order_seq AS "legacyOrderSeq",legacy_order_parcel_seq AS "legacyOrderParcelSeq",

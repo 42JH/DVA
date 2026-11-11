@@ -125,6 +125,10 @@ export class MembersService {
     const rows = items.filter((row): row is InlineMemberDto => !('customerSeq' in row));
     const references = items.filter((row): row is CreateMemberDto => 'customerSeq' in row);
     await this.write(async (client) => {
+      await this.customers.lockOrderPhones(
+        client,
+        rows.map((row) => row.phoneNumber),
+      );
       const before = await this.repository.candidates(companyId, rows, client);
       await this.repository.lockCustomers(
         [...before.map((row) => row.customerSeq), ...references.map((row) => row.customerSeq)],

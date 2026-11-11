@@ -14,6 +14,7 @@ import {
 export const DASHBOARD_COMPLAINT_TYPES = [
   'INFORMATION_RECOGNITION_ERROR',
   'INTENT_RECOGNITION_ERROR',
+  'UNSUPPORTED_ANSWER',
   'SLOW_RESPONSE',
   'INTERRUPTION',
   'DISSATISFACTION_EXPRESSION',
@@ -111,6 +112,10 @@ export class RegistrationTimeDto extends DashboardCoverageDto {
 }
 
 export class ComplaintTypeSummaryDto {
+  @ApiProperty({
+    description: 'UNSUPPORTED_ANSWER는 참고 표시이며 품질 비율에서 제외.',
+  })
+  referenceOnly!: boolean;
   @ApiProperty({ enum: DASHBOARD_COMPLAINT_TYPES })
   type!: (typeof DASHBOARD_COMPLAINT_TYPES)[number];
   @ApiProperty({
@@ -124,19 +129,23 @@ export class ComplaintTypeSummaryDto {
 export class ComplaintCallsDto extends DashboardCoverageDto {
   @ApiProperty({ minimum: 0 }) assessedCallCount!: number;
   @ApiProperty({ minimum: 0 }) unassessedCallCount!: number;
-  @ApiProperty({ minimum: 0 }) complaintCallCount!: number;
+  @ApiProperty({
+    minimum: 0,
+    description: 'AI 응대 오류 4유형 또는 ai_service 대상 불만이 있는 통화 수.',
+  })
+  complaintCallCount!: number;
   @ApiProperty({ type: Number, nullable: true, minimum: 0, maximum: 100 })
   complaintRatePercent!: number | null;
   @ApiProperty({
     minimum: 0,
     description:
-      'AI 응대 오류 4유형과 ai_service 고객 불만의 통화 수 합계. 한 통화의 여러 유형은 각각 포함.',
+      'AI 품질 대상 유형별 통화 수 합계. 참고 표시와 미상·업무 정책·배송 대상 불만은 제외.',
   })
   typeTotalCount!: number;
   @ApiProperty({
     minimum: 0,
     description:
-      '표준 분류 전의 기존 유형이 있는 통화 수. 운영 참고이며 AI 품질 비율에서 제외.',
+      '화면 6개 유형 외의 기존 분류가 있는 통화 수. AI 품질 비율과 별도로 제공.',
   })
   legacyTypeCallCount!: number;
   @ApiProperty({ type: [ComplaintTypeSummaryDto] })

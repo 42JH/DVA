@@ -62,6 +62,8 @@ const targets = new Set([
 ]);
 const consultationActions = new Set([
   'CALL_STARTED',
+  'ORDER_INTAKE_COMPLETED',
+  'ORDER_INTAKE_FINALIZED',
   'CALL_DELETED',
   'UNANSWERED_QUESTION_RECORDED',
   'UNANSWERED_QUESTION_DELETED',
@@ -77,8 +79,37 @@ function auditInput(
   service: 'customer' | 'consultation' | 'order',
 ) {
   const audit = payload.audit;
+  const billingIncrease =
+    service === 'order' && object(audit) && audit.action === 'BILLING_AMOUNT_INCREASED';
   const billingInitialization =
     service === 'order' && object(audit) && audit.action === 'BILLING_MONTH_INITIALIZED';
+  const paymentPending =
+    service === 'order' && object(audit) && audit.action === 'ORDER_PAYMENT_PENDING';
+  const paymentCompleted =
+    service === 'order' && object(audit) && audit.action === 'ORDER_PAYMENT_COMPLETED';
+  const paymentExpiration =
+    service === 'order' &&
+    object(audit) &&
+    audit.action === 'ORDER_CANCELLED' &&
+    audit.actorType === 'SYSTEM';
+  const draftMutation =
+    service === 'order' &&
+    object(audit) &&
+    [
+      'PARCEL_DRAFT_CREATED',
+      'PARCEL_DRAFT_RESUMED',
+      'PARCEL_DRAFT_UPDATED',
+      'PARCEL_DRAFT_CANCELLED',
+    ].includes(audit.action as string);
+  const submission =
+    service === 'order' &&
+    object(audit) &&
+    [
+      'ORDER_SUBMISSION_STARTED',
+      'ORDER_RESUBMISSION_STARTED',
+      'ORDER_SUBMISSION_ACCEPTED',
+      'ORDER_SUBMISSION_FAILED',
+    ].includes(audit.action as string);
   const personaReference =
     service === 'consultation' &&
     object(audit) &&
@@ -116,22 +147,34 @@ function auditInput(
     !(service === 'customer'
       ? actions.has(audit.action as string)
       : service === 'order'
-        ? [
+        ? draftMutation ||
+          billingIncrease ||
+          submission ||
+          paymentCompleted ||
+          paymentPending ||
+          [
             'BILLING_MONTH_INITIALIZED',
+            'ORDER_CREATED',
+            'ORDER_UPDATED',
+            'ORDER_SUBMITTED',
+            'PARCEL_DRAFT_CONVERTED',
             'ORDER_DELETED',
             'PARCEL_DRAFT_DELETED',
             'ORDER_CANCELLED',
             'ORDER_PARCEL_CANCELLED',
             'ORDER_AMOUNT_CHANGED',
+            'ORDER_PAYMENT_NOTIFICATION_RETRIED',
+            'ORDER_PAYMENT_COMPLETION_NOTIFICATION_RETRIED',
           ].includes(audit.action as string)
         : consultationActions.has(audit.action as string)) ||
     !(service === 'customer'
       ? targets.has(audit.targetType as string)
       : service === 'order'
         ? audit.targetType ===
-          (billingInitialization
+          (billingInitialization || billingIncrease
             ? 'ORGANIZATION'
-            : audit.action === 'PARCEL_DRAFT_DELETED'
+            : draftMutation ||
+                ['PARCEL_DRAFT_DELETED', 'PARCEL_DRAFT_CONVERTED'].includes(audit.action as string)
               ? 'ORDER_PARCEL_DRAFT'
               : audit.action === 'ORDER_PARCEL_CANCELLED' && payload.result === 'SUCCESS'
                 ? 'ORDER_PARCEL'
@@ -162,10 +205,12 @@ function auditInput(
           audit.action as string,
         )
           ? 'ADMIN'
-          : 'AI') ||
+          : audit.action === 'ORDER_INTAKE_FINALIZED'
+            ? 'SYSTEM'
+            : 'AI') ||
         audit.targetId === null)) ||
     (service === 'order' &&
-      ((billingInitialization
+      ((billingInitialization || billingIncrease
         ? payload.result !== 'SUCCESS' ||
           audit.actorType !== 'SYSTEM' ||
           audit.actorId !== null ||
@@ -176,30 +221,85 @@ function auditInput(
           typeof audit.metadata.billingMonth !== 'string' ||
           !/^(?!0000)[0-9]{4}-(0[1-9]|1[0-2])$/.test(audit.metadata.billingMonth) ||
           !['credit', 'groupBilling'].includes(audit.metadata.paymentMethodType as string) ||
-          !Number.isSafeInteger(audit.metadata.amountBefore) ||
+          !Number.isInteger(audit.metadata.amountBefore) ||
           Number(audit.metadata.amountBefore) < 0 ||
-          audit.metadata.amountAfter !== 0
-        : audit.action === 'ORDER_AMOUNT_CHANGED'
+          !(billingInitialization
+            ? audit.metadata.amountAfter === 0
+            : Number.isInteger(audit.metadata.amountAfter) &&
+              Number(audit.metadata.amountAfter) > Number(audit.metadata.amountBefore) &&
+              Number(audit.metadata.amountAfter) - Number(audit.metadata.amountBefore) <=
+                2147483647)
+        : paymentCompleted || paymentPending
           ? payload.result !== 'SUCCESS' ||
+            !(paymentCompleted
+              ? audit.actorType === 'SYSTEM'
+              : ['AI', 'ADMIN'].includes(audit.actorType as string)) ||
             !object(audit.metadata) ||
-            Object.keys(audit.metadata).sort().join(',') !==
-              'amountAfter,amountBefore,orderParcelSeqs' ||
-            ![audit.metadata.amountBefore, audit.metadata.amountAfter].every(
-              (value) =>
-                value === null ||
-                (Number.isInteger(value) && Number(value) >= 0 && Number(value) <= 2147483647),
-            ) ||
-            !Array.isArray(audit.metadata.orderParcelSeqs) ||
-            audit.metadata.orderParcelSeqs.length < 1 ||
-            !audit.metadata.orderParcelSeqs.every(integer) ||
-            new Set(audit.metadata.orderParcelSeqs).size !== audit.metadata.orderParcelSeqs.length
-          : audit.metadata !== undefined) ||
+            Object.keys(audit.metadata).join(',') !== 'amountAfter' ||
+            !integer(audit.metadata.amountAfter)
+          : paymentExpiration
+            ? payload.result !== 'SUCCESS' ||
+              audit.actorName !== undefined ||
+              !object(audit.metadata) ||
+              Object.keys(audit.metadata).sort().join(',') !== 'amountAfter,amountBefore,reason' ||
+              !(
+                audit.metadata.amountBefore === null ||
+                (Number.isInteger(audit.metadata.amountBefore) &&
+                  Number(audit.metadata.amountBefore) >= 0 &&
+                  Number(audit.metadata.amountBefore) <= 2147483647)
+              ) ||
+              audit.metadata.amountAfter !== 0 ||
+              audit.metadata.reason !== 'PAYMENT_EXPIRED'
+            : audit.action === 'ORDER_CANCELLED' && audit.metadata !== undefined
+              ? payload.result !== 'SUCCESS' ||
+                !object(audit.metadata) ||
+                Object.keys(audit.metadata).sort().join(',') !== 'amountAfter,amountBefore' ||
+                !(
+                  audit.metadata.amountBefore === null ||
+                  (Number.isInteger(audit.metadata.amountBefore) &&
+                    Number(audit.metadata.amountBefore) >= 0 &&
+                    Number(audit.metadata.amountBefore) <= 2147483647)
+                ) ||
+                audit.metadata.amountAfter !== 0
+              : audit.action === 'ORDER_AMOUNT_CHANGED'
+                ? payload.result !== 'SUCCESS' ||
+                  !object(audit.metadata) ||
+                  ![audit.metadata.amountBefore, audit.metadata.amountAfter].every(
+                    (value) =>
+                      value === null ||
+                      (Number.isInteger(value) &&
+                        Number(value) >= 0 &&
+                        Number(value) <= 2147483647),
+                  ) ||
+                  !(Object.hasOwn(audit.metadata, 'orderParcelSeqs')
+                    ? Object.keys(audit.metadata).sort().join(',') ===
+                        'amountAfter,amountBefore,orderParcelSeqs' &&
+                      Array.isArray(audit.metadata.orderParcelSeqs) &&
+                      audit.metadata.orderParcelSeqs.length > 0 &&
+                      audit.metadata.orderParcelSeqs.every(integer) &&
+                      new Set(audit.metadata.orderParcelSeqs).size ===
+                        audit.metadata.orderParcelSeqs.length
+                    : Object.keys(audit.metadata).sort().join(',') === 'amountAfter,amountBefore' &&
+                      audit.actorType === 'ADMIN')
+                : audit.metadata !== undefined) ||
         (payload.result === 'SUCCESS' &&
-          (!(billingInitialization
+          (!(billingInitialization || billingIncrease || paymentCompleted || paymentExpiration
             ? audit.actorType === 'SYSTEM'
-            : ['ORDER_DELETED', 'PARCEL_DRAFT_DELETED'].includes(audit.action as string)
-              ? audit.actorType === 'ADMIN'
-              : ['ADMIN', 'AI'].includes(audit.actorType as string)) ||
+            : submission
+              ? audit.actorType === 'SYSTEM' ||
+                (audit.actorType === 'ADMIN' &&
+                  ['ORDER_SUBMISSION_STARTED', 'ORDER_RESUBMISSION_STARTED'].includes(
+                    audit.action as string,
+                  ))
+              : [
+                    'ORDER_DELETED',
+                    'PARCEL_DRAFT_DELETED',
+                    'PARCEL_DRAFT_CONVERTED',
+                    'ORDER_PAYMENT_NOTIFICATION_RETRIED',
+                    'ORDER_PAYMENT_COMPLETION_NOTIFICATION_RETRIED',
+                  ].includes(audit.action as string)
+                ? audit.actorType === 'ADMIN'
+                : ['ADMIN', 'AI'].includes(audit.actorType as string)) ||
             audit.targetId === null)))) ||
     typeof payload.occurredAt !== 'string' ||
     !Number.isFinite(Date.parse(payload.occurredAt))

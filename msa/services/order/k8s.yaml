@@ -156,6 +156,10 @@ spec:
             pathType: Prefix
             backend:
               service: { name: order, port: { number: 3002 } }
+          - path: /api/admin/parcel-drafts
+            pathType: Prefix
+            backend:
+              service: { name: order, port: { number: 3002 } }
           - path: /api/admin/orders
             pathType: Prefix
             backend:

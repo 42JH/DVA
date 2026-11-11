@@ -22,6 +22,7 @@ import type { AuditActorType } from '../audit/audit.types';
 import { AuditService } from '../audit/audit.service';
 import type { AuthenticationType } from '../observability/security-events';
 export const SESSION_COOKIE = 'dva_session';
+export const AiBusinessAccess = () => SetMetadata('auth:ai-business', true);
 export const PublicAuth = () => SetMetadata('auth:public', true);
 export const MvpAiCustomerAccess = () =>
   SetMetadata('auth:mvp-ai-customer', true);
@@ -73,6 +74,12 @@ export class AuthGuard implements CanActivate {
   private async checkAccess(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<AuthRequest>();
     const targets = [context.getHandler(), context.getClass()];
+    if (
+      this.reflector.getAllAndOverride<boolean>('auth:ai-business', targets)
+    ) {
+      this.authenticateAi(request);
+      return true;
+    }
     const fromCustomer = this.reflector.getAllAndOverride<boolean>(
       'auth:internal-customer',
       targets,

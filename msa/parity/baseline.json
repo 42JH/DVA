@@ -1,5 +1,5 @@
 {
-  "commit": "864ccde5ea6235684341bbc1eea3fd045e16cf8c",
+  "commit": "b87007c4b95f4984d8e3910a706b8e3188403d33",
   "jira": "S15P31D109-160",
   "inventory": {
     "routes": [
@@ -242,6 +242,13 @@
         "file": "backend/src/consultations/consultations.controller.ts"
       },
       {
+        "method": "GET",
+        "path": "/api/customers/:id/billing",
+        "service": "customer",
+        "stream": false,
+        "file": "backend/src/customers/customers.controller.ts"
+      },
+      {
         "method": "DELETE",
         "path": "/api/customers",
         "service": "customer",
@@ -412,7 +419,7 @@
       {
         "method": "GET",
         "path": "/internal/metrics",
-        "service": "operations",
+        "service": "order",
         "stream": false,
         "file": "backend/src/observability/observability.controller.ts"
       },
@@ -461,7 +468,7 @@
       {
         "method": "POST",
         "path": "/api/calls/:id/order-intake/complete",
-        "service": "order",
+        "service": "consultation",
         "stream": false,
         "file": "backend/src/orders/order-intake.controller.ts"
       },
@@ -1003,6 +1010,14 @@
       {
         "file": "backend/migrations/060-persona-prompt-fields.sql",
         "sha256": "4e38b0540c16c7dd599412af6307f779b972c034fee43da046f14f586d8f20a7"
+      },
+      {
+        "file": "backend/migrations/061-customer-name-search.sql",
+        "sha256": "b26530851ca87bea88e0f39b281cbbc5451c07a0a4c8ef4fd6bb5df491ea2f24"
+      },
+      {
+        "file": "backend/migrations/062-customer-monthly-billing.sql",
+        "sha256": "3878260c42f540675b389d2eca55d724a76749be89c5388067def9dcee486954"
       }
     ],
     "workers": [

@@ -1,14 +1,21 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Controller, Get, HttpCode, Param, Post, Query, Req } from '@nestjs/common';
 import {
   ApiTags,
+  ApiExtraModels,
+  getSchemaPath,
   ApiCookieAuth,
   ApiOperation,
   ApiOkResponse,
   ApiBadRequestResponse,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
+import { AuditOperation } from '../audit/audit-operation';
+import type { AuthRequest } from '../auth/auth.guard';
+import { OrderSubmissionService } from './order-submission.service';
+import { OrderIdParamsDto } from './dto/order-query.dto';
+import { SubmittedOrderDto } from './dto/submit-order.dto';
 import { Roles } from '../auth/auth.guard';
-import { ErrorResponseDto } from '../common/dto/api-response.dto';
+import { ErrorResponseDto, RequestMetaDto } from '../common/dto/api-response.dto';
 import { AdminOrderListQueryDto, AdminOrderListResponseDto } from './dto/admin-order-list.dto';
 import { OrdersService } from './orders.service';
 
@@ -17,7 +24,10 @@ import { OrdersService } from './orders.service';
 @Roles('OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN')
 @Controller('admin/orders')
 export class AdminOrdersController {
-  constructor(private readonly orders: OrdersService) {}
+  constructor(
+    private readonly orders: OrdersService,
+    private readonly submissions: OrderSubmissionService,
+  ) {}
 
   @Get()
   @ApiOperation({
@@ -33,5 +43,27 @@ export class AdminOrdersController {
   @ApiUnauthorizedResponse({ type: ErrorResponseDto, description: '활성 관리자 세션 필요.' })
   list(@Query() query: AdminOrderListQueryDto) {
     return this.orders.adminList(query);
+  }
+
+  @Post(':id/retry')
+  @HttpCode(200)
+  @AuditOperation({ action: 'ORDER_RESUBMISSION_STARTED', targetType: 'ORDER', target: 'id' })
+  @ApiOperation({
+    summary: '디버 접수 실패 주문 재접수',
+    description:
+      '결제된 같은 주문의 미취소 상세를 수동 재전송합니다. 결제·월별 사용액을 다시 처리하지 않으며 자동 재시도 10분 기한을 연장하지 않습니다. 10초가 지난 미확정 SUBMITTING은 실패 상태로 복구하고 반환하며, 처리 중·완료 주문은 현재 상태만 반환합니다.',
+  })
+  @ApiExtraModels(SubmittedOrderDto)
+  @ApiOkResponse({
+    schema: {
+      type: 'object',
+      properties: {
+        data: { $ref: getSchemaPath(SubmittedOrderDto) },
+        meta: { $ref: getSchemaPath(RequestMetaDto) },
+      },
+    },
+  })
+  retry(@Param() params: OrderIdParamsDto, @Req() request: AuthRequest) {
+    return this.submissions.retry(params.id, request.admin.adminUserSeq, request.requestId);
   }
 }

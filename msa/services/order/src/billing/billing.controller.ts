@@ -16,6 +16,22 @@ import { BillingService } from './billing.service';
 @Controller('internal/billing')
 export class BillingController {
   constructor(private readonly billing: BillingService) {}
+  @Post('customer')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  async customer(@Body() event: unknown) {
+    try {
+      validateBilling(event, 'CustomerBillingReadRequested', 'customer');
+    } catch {
+      throw new HttpException({ error: 'INVALID_BILLING_COMMAND' }, 422);
+    }
+    return {
+      eventId: event.eventId,
+      status: 'processed',
+      payload: await this.billing.readCustomer(event.payload.id, event.payload.month),
+    };
+  }
+
   @Post('read')
   @HttpCode(200)
   @Header('Cache-Control', 'no-store')
