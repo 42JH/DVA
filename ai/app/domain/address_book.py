@@ -50,14 +50,26 @@ def sender_change_next(state: ConversationState) -> str | None:
         return None
     if draft.sender_name_for_parcel and not draft["sender_name"].valid:
         return "sender_name"
-    if draft.sender_address_change and not draft["sender_address"].valid:
-        return "sender_address"
+    if draft.sender_address_change:
+        for name in ("sender_address", "sender_address_detail"):
+            if not draft[name].valid:
+                return name
     address = draft["sender_address"]
     if (draft.sender_name_for_parcel and state.origin_answer is None
             and (not address.valid or address.source in (Source.PROFILE, Source.HISTORY))):
         return "ask_address_change"
     if draft.ask_customer_name_save and draft["sender_name"].value != state.customer.name:
         return "ask_name_save"
+    return None
+
+
+def origin_confirmation(state: ConversationState) -> str | None:
+    """아직 발송 주소를 고르지 않았다면 다음 응답에도 확인 질문을 남긴다."""
+    place, draft = state.customer.origin_place, state.current
+    if (state.intent == "order" and state.origin_offered and not state.origin_applied
+            and state.origin_answer is None and place
+            and not (draft and (draft.sender_name_for_parcel or draft["sender_address"].valid))):
+        return "registered" if state.origin_mentioned_in_greeting else place.address
     return None
 
 

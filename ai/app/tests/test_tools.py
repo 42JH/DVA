@@ -236,6 +236,47 @@ def test_changed_address_without_detail_clears_detail(corrector, address):
     assert "cleared" not in out["facts"] and c.state.field_of("sender_address_detail").value == "9층"
 
 
+@pytest.mark.parametrize(("has_pin", "receiver_provided"), [(False, True), (True, True), (True, False)])
+def test_sender_address_change_finishes_before_receiver_questions(address, has_pin, receiver_provided):
+    from app.domain.address_book import request_sender_address_change
+
+    c = ctx(address=address)
+    origin = Place("김철수", CALLER, "서울특별시 강남구 테헤란로 212", "1201호", source=Source.PROFILE)
+    c.state.customer.origin_place = origin
+    c.state.origin_offered = c.state.origin_mentioned_in_greeting = True
+    if has_pin:
+        c.state.customer.places = (Place("이영희", CALLER, origin.address, "5층", source=Source.PIN),)
+
+    out = call(c, "get_state", {})
+    assert out["origin_confirm"] == "registered" and out["missing"] == []
+    request_sender_address_change(c.state)
+    out = call(c, "get_state", {})
+    assert out["stage"] == "address" and out["missing"] == ["sender_address"]
+
+    out = call(c, "record_fields", {"sender_address": "서울 강남구 없는로 12"})
+    assert out["code"] == "ADDRESS_NOT_FOUND" and out["missing"] == ["sender_address"]
+
+    fields = {"sender_address": "서울 강남구 테헤란로 211"}
+    if receiver_provided:
+        fields.update(receiver_name="이영희", receiver_address=origin.address)
+    out = call(c, "record_fields", fields)
+    assert out["sender_change_next"] == "sender_address_detail"
+    assert out["missing"] == ["sender_address_detail"] and not c.state.candidates
+    assert "confirm_route" not in out["facts"]
+    assert (out["fields"]["receiver_name"] == "valid") is receiver_provided
+    assert call(c, "get_state", {})["missing"] == ["sender_address_detail"]
+
+    out = call(c, "record_fields", {"sender_address_detail": ""})
+    assert out["fields"]["sender_address_detail"] == "valid" and "sender_change_next" not in out
+    assert out["missing"][0] == ("receiver_phone" if receiver_provided else "receiver_name")
+    if has_pin and receiver_provided:
+        assert out["status"] == "needs_choice" and c.state.candidates
+    elif receiver_provided:
+        assert "confirm_route" in out["facts"]
+    else:
+        assert not c.state.candidates
+
+
 def test_server_splits_detail_from_heard_sentence_and_converts_numerals(corrector, address):
     c = ctx(address=address)
     s = c.state

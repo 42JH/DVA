@@ -17,8 +17,9 @@ from app.address.matcher import sido_aliases
 from app.address.parse import clean_text, parse, split_gil, unlink_gil
 from app.calls.session import CallSession, Phase
 from app.domain.rules import KST
-from app.domain.address_book import (begin_sender_name_change, prefill_sender, request_sender_address_change, save_offer,
-                                     sender_change_available, sender_change_next)
+from app.domain.address_book import (begin_sender_name_change, origin_confirmation, prefill_sender,
+                                     request_sender_address_change, save_offer, sender_change_available,
+                                     sender_change_next)
 from app.domain.assess import assess, readback_facts
 from app.domain.candidates import apply_pick, offer, reject_candidates
 from app.domain.claims import truth, unverified_claims, unverified_values
@@ -365,6 +366,7 @@ class LiveFlow:
             origin_answer = answers.get("origin")
             change = answers.get("sender_change")
             next_sender = sender_change_next(st)
+            origin_change = False
             sender_change = (sender_change_available(st)
                              and (st.intent == "order" or task and task[0] == "order" and task[1] >= th)
                              and (not switch or switch[1] < th or switch[0] in ("none", "edit_parcel"))
@@ -391,13 +393,15 @@ class LiveFlow:
                     and (st.origin_offered or greeting and og[0] == "no") \
                     and next_sender != "sender_name" \
                     and st.origin_answer is None:
-                st.origin_answer = og[0] == "yes"
+                origin_change = og[0] == "no" and (st.intent == "order" or bool(
+                    task and task[0] == "order" and task[1] >= th))
+                if origin_change:
+                    request_sender_address_change(st)
+                else:
+                    st.origin_answer = og[0] == "yes"
                 s.note("출발지", og[0])
-                if st.intent == "order":
-                    if st.current and st.current.sender_name_for_parcel and og[0] == "no":
-                        request_sender_address_change(st)
-                    if not sender_change:
-                        followups.append(("origin", utt))
+                if st.intent == "order" and not sender_change:
+                    followups.append(("origin", utt))
             if scope_resolved and st.intent == "order" and not sender_change and ("origin", utt) not in followups:
                 followups.append(("sender_name_scope", utt))
             if next_sender:
@@ -433,6 +437,7 @@ class LiveFlow:
             elif greeting:
                 followups.append(("clarify_greeting", utt))
             if (w := answers.get("switch")) and w[1] >= th and w[0] != "none" and not sender_change \
+                    and not (origin_change and w[0] == "edit_parcel") \
                     and not (picked_lookup and w[0] == "lookup"):
                 followups.append(("intent", w[0]))
             if (m := answers.get("more")) and m[1] >= th and m[0] == "no_more" and st.parcels:
@@ -627,7 +632,7 @@ class LiveFlow:
             async with s.lock:
                 facts = self._origin_step(st) if what != "sender_name_scope" else {}
                 facts["summary"] = state_summary(st, self.policy)
-                sender_change = st.current and st.current.sender_name_for_parcel
+                sender_change = st.current and (st.current.sender_name_for_parcel or st.current.sender_address_change)
                 if sender_change and not sender_change_next(st) and st.pending and st.pending.kind == "parcel":
                     facts["readback"] = readback_facts(st.pending.snapshot)
                     facts["readback_id"] = st.pending.id
@@ -780,11 +785,7 @@ class LiveFlow:
             return {}
         if st.origin_answer is None and c.origin_place and not st.field_of("sender_address").valid:
             st.origin_offered = True
-            if st.current.sender_name_for_parcel:
-                return {}  # 인사에서 발송 주소를 이미 읽었다. 이름을 받은 뒤 변경 여부만 묻는다.
-            if st.origin_mentioned_in_greeting:
-                return {"origin_confirm": "registered"}  # 주소 대조가 안 된 경우에도 전체 주소를 반복하지 않는다.
-            return {"origin_confirm": c.origin_place.address}
+            return {"origin_confirm": origin} if (origin := origin_confirmation(st)) else {}
         done = prefill_sender(st, full=st.origin_answer is True)
         st.origin_applied = True
         if "sender_address" in done:
@@ -955,7 +956,8 @@ class LiveFlow:
         if not d0.get("tool_t"):  # 위임 시작 → 첫 함수 호출 도착(Backend 판단 시간)
             d0["tool_t"] = time.time()
             s.timing("위임→도구 호출", (d0["tool_t"] - d0["t"]) * 1000)
-        if (s.state.intent is None and s.state.origin_offered) or sender_change_available(s.state):
+        st = s.state
+        if (st.origin_offered and st.origin_answer is None and not st.origin_applied) or sender_change_available(st):
             await self._customer_quiet(s)  # 고객 발화 끝에 보내는 분 변경을 판단한 뒤 그 발화의 값을 기록한다.
         await self._decided(s)
         if name in TOOL_INTENT:
