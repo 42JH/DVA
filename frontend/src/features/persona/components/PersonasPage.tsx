@@ -5,7 +5,6 @@ import { usePersonaPage, type PersonaItem } from '@/features/persona/hooks/usePe
 import { AddPersona } from './AddPersona'
 import { PromptEditor } from './PromptEditor'
 import { TestCallModal } from './TestCallModal'
-import { VoiceEditor } from './VoiceEditor'
 import { PageHead } from '@/shared/ui'
 import { Badge, Btn, Icon, KebabMenu } from '@/shared/ui'
 import { Confirm } from '@/shared/ui/Modal'
@@ -45,7 +44,7 @@ export function PersonasPage() {
           {vm.error ?? (vm.isLoading ? '불러오는 중…' : '상담가가 없습니다.')}
         </p>
       ) : vm.editing && vm.editTarget ? (
-        // 수정 — 등록과 같은 편집 화면 (저장 안 한 내용 확인 · 음성 세부 조절 포함)
+        // 수정 — 등록과 같은 편집 화면 (저장 안 한 내용 확인 · 음성 드롭다운 포함)
         <div className="flex min-h-0 flex-1 flex-col px-6 py-4">
           <PromptEditor target={vm.editTarget} onDone={vm.finishEdit} />
         </div>
@@ -80,9 +79,6 @@ export function PersonasPage() {
         >
           {vm.confirm.note}
         </Confirm>
-      )}
-      {vm.voiceOnly && vm.editTarget && (
-        <VoiceEditor target={vm.editTarget} onDone={vm.finishEdit} />
       )}
       {vm.testCall && (
         <TestCallModal
@@ -230,11 +226,6 @@ function Prompt({ vm }: { vm: Vm }) {
               onClick={vm.askReuse}
             >
               이 버전 다시 쓰기
-            </Btn>
-          )}
-          {p.canEdit && (
-            <Btn kind="editBadge" onClick={vm.startVoice}>
-              음성 세부 조절
             </Btn>
           )}
           {p.canEdit && (

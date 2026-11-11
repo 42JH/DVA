@@ -14,11 +14,11 @@ export function SelectField({
   label: string
   value: string
   onChange: (value: string) => void
-  options: { value: string; label: string }[]
+  options: { value: string; label: string; disabled?: boolean }[]
   placeholder?: string
   hint?: string
   error?: string
-  inline?: boolean // 라벨 왼쪽 120 (TextField inline과 같은 줄 맞춤, 07 음성 세부 조절)
+  inline?: boolean // 라벨 왼쪽 120 (TextField inline과 같은 줄 맞춤, 07 음성 설정)
   compact?: boolean // 칸 36 · 글자 14 · 라벨 12 — ops 화면 칸과 같은 크기 (07 상담가 히스토리, 11/10)
 }) {
   return (
@@ -45,7 +45,7 @@ export function SelectField({
             {placeholder}
           </option>
           {options.map((o) => (
-            <option key={o.value} value={o.value}>
+            <option key={o.value} value={o.value} disabled={o.disabled}>
               {o.label}
             </option>
           ))}

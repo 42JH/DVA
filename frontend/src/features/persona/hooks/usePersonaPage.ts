@@ -58,7 +58,7 @@ interface PromptView {
   author: string
   badges: Badge[]
   sections: { key: PromptKey; group: string | null; sub: boolean; title: string; text: string }[]
-  canEdit: boolean // [음성 세부 조절] · [프롬프트 수정] — 현재 버전을 볼 때만
+  canEdit: boolean // [프롬프트 수정] — 현재 버전을 볼 때만
   past: boolean // 기록에서 고른 지난 버전 → [현재 버전과 비교] · [이 버전 다시 쓰기]
   reuse: { disabled: boolean; hint: string | undefined } | null // [이 버전 다시 쓰기] — 관리자가 지난 버전을 볼 때만
 }
@@ -109,7 +109,7 @@ export function usePersonaPage() {
   const [personaSeq, setPersonaSeq] = useState<number | null>(null) // null = 통화에 사용 중인 상담가
   const [historyOpen, setHistoryOpen] = useState(false) // 오른쪽 = 버전 기록
   const [version, setVersion] = useState<number | null>(null) // 기록에서 고른 버전 (null = 현재 버전)
-  const [editing, setEditing] = useState<false | 'prompt' | 'voice'>(false) // prompt = 수정 화면, voice = 보기 화면 위 음성 창
+  const [editing, setEditing] = useState(false) // 수정 화면
   const [comparing, setComparing] = useState(false)
   const [testing, setTesting] = useState<number | null>(null) // 시험 통화 중인 버전
   const [confirming, setConfirming] = useState<Confirming>(null)
@@ -279,10 +279,10 @@ export function usePersonaPage() {
     return null
   })()
 
-  const beginEdit = (mode: 'prompt' | 'voice') => {
+  const startEdit = () => {
     setComparing(false)
     setVersion(null)
-    setEditing(mode)
+    setEditing(true)
   }
 
   return {
@@ -386,12 +386,9 @@ export function usePersonaPage() {
     startTestCall: () => viewing && setTesting(viewing.version),
     endTestCall: () => setTesting(null),
 
-    editing: editing === 'prompt',
-    voiceOnly: editing === 'voice',
+    editing,
     editTarget,
-    startEdit: () => beginEdit('prompt'),
-    // 보기 화면 [음성 세부 조절] = 화면은 그대로 두고 음성 창만 (11/11 사용자)
-    startVoice: () => beginEdit('voice'),
+    startEdit,
     // 저장하면 새로 생긴 현재 버전을 보여 줌 (취소면 그대로)
     finishEdit: () => {
       setEditing(false)

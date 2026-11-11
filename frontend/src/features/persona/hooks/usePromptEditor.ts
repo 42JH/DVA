@@ -30,9 +30,9 @@ export interface EditTarget {
   saveTo: number // 화면 번호 = HEAD + 1. 몇 번을 저장해도 같은 번호(초안 덮어쓰기)
 }
 
-/** 07 프롬프트 수정 · 음성 세부 조절 훅 (와이어프레임 07_페르소나관리_수정 · _음성세부조절, 10/31 · 11/02 실서버)
+/** 07 프롬프트 수정 · 음성 설정 훅 (와이어프레임 07_페르소나관리_수정 · _음성세부조절, 10/31 · 11/02 실서버)
  * 화면엔 바로 'v5 · 작성 중'. [저장] = PATCH(바뀐 칸만) + 바로 확정 → 새 버전 v5 (11/11, 통화엔 [통화에 사용하기]로만)
- * 음성 세부 조절 창은 저장 버튼 없이 바로 반영(작성 중에) → 수정 화면 [저장]으로 같이 저장
+ * 음성 드롭다운은 저장 버튼 없이 바로 반영(작성 중에) → 수정 화면 [저장]으로 같이 저장
  * 저장 안 한 내용이 있으면 [취소] · 다른 화면 이동 · 탭 닫기를 한 번 막음 */
 export function usePromptEditor(target: EditTarget, onDone: (savedVersion?: number) => void) {
   const qc = useQueryClient()
@@ -88,9 +88,8 @@ export function usePromptEditor(target: EditTarget, onDone: (savedVersion?: numb
     setField: (key: PromptKey, value: string) => setPrompt((p) => ({ ...p, [key]: value })),
     emptyNotice, // 저장이 막힌 이유 — 고친 게 있을 때만 화면에 보이면 됨
 
-    // 음성 세부 조절 창
+    // 음성 드롭다운
     ...voiceDraft,
-    voiceTitle: `v${target.saveTo} ${DRAFT_TAG}`,
 
     saveLabel: mutation.isPending ? '저장 중…' : `저장 → v${target.saveTo}`,
     canSave:
