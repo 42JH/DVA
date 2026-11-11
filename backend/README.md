@@ -1,12 +1,14 @@
 # 모놀리식 백엔드 공통 기반
 
+모든 모놀리식 DELETE는 [배열 통합 명세](docs/delete-array-contracts.md)를 따릅니다. 기존 배열형은 유지하고 단건 전용 경로는 교체하며, 프론트 호출 전환 후 함께 배포합니다. 기존 권한·soft delete·감사·보관 정책과 SYSTEM_ADMIN/ACTIVE 페르소나 보호는 유지합니다.
+
 최종 홈 화면의 오늘 주문·통화 건수와 최대 11개 미리보기는 [프론트 QA 연동 명세](docs/frontend-qa-api.md)를 따른다. 주문 전체는 실제 주문과 유효한 미완료 배송 단건 초안을 함께 반환한다. 미완료의 24시간·최신 확정 통화 조건은 [만료 명세](docs/incomplete-expiry-latest-call.md)를 따른다. 미답변 질문의 정확한 발화 연결은 현행 보장 범위에 포함하지 않는다. [후속 작업·검증 기록](docs/final-wireframe-follow-up.md)을 함께 확인한다.
 
 관리자 주문 목록은 [6개 상태 그룹](docs/order-status-groups.md)을 따른다. PAID는 PAID·SUBMITTING·SUBMITTING_FAILED, ACCEPTED는 접수 완료, SUBMISSION_FAILED는 최종 실패만 조회한다. 응답에 statusCounts.accepted를 추가하며 홈의 접수 실패 건수도 최종 실패 기준이다. 실제 주문 상태 8개와 결제·디버 전송은 유지한다.
 
 API 성능 개선은 [계획·동일 결과 검증·측정 기록](docs/api-performance-optimization.md)을 따른다. 응답·기능·오류·권한·보관 기준을 유지하며, 관리자 주문 목록의 배송상세 JSON과 통화 목록의 recordedAt은 페이지 선택 후 해당 행만 계산한다. 홈의 AI 통계 4개는 대상 통화 조회를 공유하며 개별 통계 API와 같은 값을 반환한다. 페르소나 목록·상세는 기존 버전·초안·프롬프트를 유지하면서 현재 페이지의 상세만 구성한다. 추가 migration·환경변수는 없다.
 
-프론트 QA 반영 작업은 [API 계약·검증 기록](docs/frontend-qa-api.md)을 따른다. 관리자 주문 목록은 기존 목록 필드에 같은 검색·기간·기업 조건의 statusCounts를 추가하며 미완료는 INCOMPLETE 배송 초안 목록으로 연결한다. GET /api/dashboard/home은 처리할 일·최대 5개 미리보기·기존 AI 통계 4개를 하나의 조회 스냅샷으로 제공한다. DELETE /api/companies는 organizationSeqs 배열 1~100개를 전체 성공·실패 단위로 처리하고 기존 단건 URL도 유지한다. 추가 migration은 없다.
+프론트 QA 반영 작업은 [API 계약·검증 기록](docs/frontend-qa-api.md)을 따른다. 관리자 주문 목록은 기존 목록 필드에 같은 검색·기간·기업 조건의 statusCounts를 추가하며 미완료는 INCOMPLETE 배송 초안 목록으로 연결한다. GET /api/dashboard/home은 처리할 일·최대 5개 미리보기·기존 AI 통계 4개를 하나의 조회 스냅샷으로 제공한다. DELETE /api/companies는 단건·다건 모두 organizationSeqs 배열 1~100개를 전체 성공·실패 단위로 처리한다. 기존 단건 URL은 제거하며 [프론트 전환 명세](docs/company-delete-array-only.md)를 따른다. 추가 migration은 없다.
 
 관리자 목록 GET /api/admins는 선택 q로 이름·로그인 아이디를 대소문자 구분 없이 부분 검색한다. 앞뒤 공백 제거 후 최대 100자이며 빈 검색어는 기존 목록, %, _는 일반 문자다. 기존 권한·상태 필터와 함께 페이지 적용 전 전체 계정에 검색하고 SYSTEM_ADMIN 전용 세션·삭제 계정 제외·공개 응답 정제를 유지한다. 실제 로그인 규칙과 DB는 변경하지 않으며 [작업·검증 기록](docs/admin-list-search-plan.md)을 따른다. 전달 명세는 후속 작업과 누적한다.
 

@@ -4,8 +4,10 @@ Backend 전용 기능. 현재 앱은 `053-drop-company-pins.sql`까지 적용한
 
 | API | 권한·입력 | 응답 |
 | --- | --- | --- |
-| DELETE /api/companies/{id} | 모든 활성 관리자, 관리자 세션·허용 Origin, 양의 정수 ID | 204, 본문 없음 |
-| DELETE /api/departments/{id} | 동일 | 204, 본문 없음 |
+| DELETE /api/companies | 모든 활성 관리자, 관리자 세션·허용 Origin, organizationSeqs 배열 1~100개 | 204, 본문 없음 |
+| DELETE /api/departments | 동일, departmentSeqs 배열 1~100개 | 204, 본문 없음 |
+
+기업은 단건도 `{ "organizationSeqs": [123] }`로 전달한다. 기존 `DELETE /api/companies/{id}`는 제거되어 404이며 GET 상세와 PATCH는 유지한다. 기존 프론트 상세 삭제가 구형 URL을 사용하므로 [호출 전환 명세](../../backend/docs/company-delete-array-only.md)를 적용한 뒤 함께 배포한다.
 
 없거나 이미 삭제된 ID는 404, 잘못된 ID는 400, 작업 잠금 경합은 409다. AI는 삭제할 수 없다. 재요청해도 같은 데이터를 다시 삭제하거나 청구하지 않는다. 응답 유실 뒤 재요청의 404는 대상이 이미 없는 상태이므로 목록을 다시 조회한다.
 

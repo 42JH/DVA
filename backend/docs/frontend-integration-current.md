@@ -1,5 +1,7 @@
 # 프론트 파트 연동 명세 — 2026-11-04
 
+DELETE의 최신 URL·배열 body·권한은 [전체 DELETE 통합 명세](delete-array-contracts.md)를 우선합니다. 기존 단건 DELETE URL은 제거합니다.
+
 로그인·가입·비밀번호 처리의 429는 `RATE_LIMITED`와 초 단위 `Retry-After`로 안내한다. 이름·새 비밀번호 상한과 기존 비밀번호 입력 호환성은 [S04 인증 제한 계약](auth-request-limits.md)을 따른다. 기존 성공 응답·쿠키·업무 API 요청 형식은 유지한다.
 
 [휴대전화 번호 입력 계약](mobile-phone-integration.md): 업무 전화번호는 정확히 11자리 숫자 문자열이다. 폼의 10~11자리 허용을 11자리로 맞춘다. 고객·직원·PIN·주문 입력과 완성 전화번호 필터에 적용한다.
@@ -192,14 +194,14 @@ BE가 삭제·만료 조건을 적용하므로 프론트는 DB에 직접 쿼리�
 
 | API                                     | 조건·영향                                                                                                                               |
 | --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `DELETE /api/orders/{id}`               | 관리자, 본문 없음. COLLECTING/CANCELLED/ACCEPTED 중 진행 통화·승인·안내 발송 등 차단 조건이 없을 때 숨김. 결제 취소·청구 금액 변경 아님 |
-| `DELETE /api/calls/{id}`                | 관리자, 본문 없음. PBX 종료 확인 + 연결 녹취 저장 완료 후 숨김. 주문은 보존                                                             |
-| `DELETE /api/admins/{id}`               | SYSTEM_ADMIN만 OPERATOR/SUPERVISOR 삭제, 대상 세션 즉시 폐기. SYSTEM_ADMIN 삭제 금지                                                    |
-| `DELETE /api/companies/{id}`            | 기업·부서·소속·기업 PIN을 함께 숨김                                                                                                     |
-| `DELETE /api/departments/{id}`          | 부서·그 소속·해당 기업 PIN을 숨김                                                                                                       |
-| `DELETE /api/members/{id}`              | 소속만 숨김. 고객 보존                                                                                                                  |
+| `DELETE /api/orders` + `{ orderSeqs: [id] }` | 관리자, 본문 없음. COLLECTING/CANCELLED/ACCEPTED 중 진행 통화·승인·안내 발송 등 차단 조건이 없을 때 숨김. 결제 취소·청구 금액 변경 아님 |
+| `DELETE /api/calls` + `{ callSessionSeqs: [id] }` | 관리자, 본문 없음. PBX 종료 확인 + 연결 녹취 저장 완료 후 숨김. 주문은 보존                                                             |
+| `DELETE /api/admins` + `{ adminUserSeqs: [id] }` | SYSTEM_ADMIN만 OPERATOR/SUPERVISOR 삭제, 대상 세션 즉시 폐기. SYSTEM_ADMIN 삭제 금지                                                    |
+| `DELETE /api/companies` + `{ organizationSeqs: [id] }` | 기업·부서·소속·기업 PIN을 함께 숨김                                                                                                     |
+| `DELETE /api/departments` + `{ departmentSeqs: [id] }` | 부서·그 소속·해당 기업 PIN을 숨김                                                                                                       |
+| `DELETE /api/members` + `{ membershipSeqs: [id] }` | 소속만 숨김. 고객 보존                                                                                                                  |
 | `DELETE /api/faqs`                      | `{ faqEntrySeqs: [...] }`. 원문 보관, AI DELETE 알림                                                                                    |
-| `DELETE /api/unanswered-questions/{id}` | OPEN 삭제, DELETED 재호출 204, REGISTERED 409                                                                                           |
+| `DELETE /api/unanswered-questions` + `{ unansweredQuestionSeqs: [id] }` | OPEN 삭제, DELETED 재호출 204, REGISTERED 409                                                                                           |
 
 신규 주문·통화 DELETE는 성공 204, 이미 삭제/미존재/만료면 404, 진행 상태 409 INVALID_STATE, 잠금 경합 409 REQUEST_IN_PROGRESS다. notPaid는 취소를 먼저 처리하고 PAID·SUBMITTING·중간/최종 접수 실패는 결제·접수 결과부터 확인한다. 녹취 RECEIVED/FAILED/업로드 중에는 통화 DELETE가 409다. 발급된 URL은 기존 최대 5분 만료까지 유효할 수 있다.
 
