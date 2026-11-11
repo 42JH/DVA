@@ -17,6 +17,7 @@ export TEST_UNUSED_SCHEMA="$test_root/unused-schema"
 export TEST_COMPANY_PIN_SCHEMA="$test_root/company-pin-schema"
 export TEST_RECORDING_RETRY_SCHEMA="$test_root/recording-retry-schema"
 export TEST_PARCEL_DRAFT_SCHEMA="$test_root/parcel-draft-schema"
+export TEST_PAYMENT_CARD_SCHEMA="$test_root/payment-card-schema"
 export PATH="$test_root/bin:$PATH"
 cat > "$test_root/bin/docker" <<'MOCK'
 #!/usr/bin/env bash
@@ -81,6 +82,11 @@ if [[ "$1" == exec && "$*" == *"to_regclass('public.order_parcel_drafts')"* ]]; 
     if [[ -f "$TEST_PARCEL_DRAFT_SCHEMA" ]]; then printf 't\n'; else printf 'f\n'; fi
     exit 0
 fi
+if [[ "$1" == exec && "$*" == *"to_regclass('public.payment_cards')"* ]]; then
+    [[ "${TEST_PAYMENT_CARD_QUERY_FAIL:-}" != 1 ]] || exit 1
+    if [[ -f "$TEST_PAYMENT_CARD_SCHEMA" ]]; then printf 't\n'; else printf 'f\n'; fi
+    exit 0
+fi
 if [[ "$1" == exec && "$*" == *psql* && "${TEST_VERIFY_FAIL:-}" == 1 ]]; then exit 1; fi
 if [[ "$*" == *' up '* && -n "${TEST_FAIL_VERSION:-}" && "$*" == *"/releases/$TEST_FAIL_VERSION/"* ]]; then
     exit 1
@@ -135,6 +141,7 @@ if [ -f "$root/backend/migrations/047-remove-unused-schema.sql" ]; then touch "$
 if [ -f "$root/backend/migrations/053-drop-company-pins.sql" ]; then touch "$TEST_COMPANY_PIN_SCHEMA"; fi
 if [ -f "$root/backend/migrations/054-recording-retry-policy.sql" ]; then touch "$TEST_RECORDING_RETRY_SCHEMA"; fi
 if [ -f "$root/backend/migrations/055-parcel-draft-intake.sql" ]; then touch "$TEST_PARCEL_DRAFT_SCHEMA"; fi
+if [ -f "$root/backend/migrations/064-payment-cards.sql" ]; then touch "$TEST_PAYMENT_CARD_SCHEMA"; fi
 MOCK
     printf 'SELECT 1;\n' > "$directory/infra/database/verify.sql"
     if [[ "${2:-}" == cutover || "${2:-}" == membership || "${2:-}" == cleanup || "${2:-}" == billing || "${2:-}" == history ]]; then
@@ -159,23 +166,27 @@ MOCK
     if [[ "${3:-}" == summary ]]; then
         printf 'SELECT 1;\n' > "$directory/backend/migrations/042-remove-call-analysis-result.sql"
     fi
-    if [[ "${4:-}" == address || "${4:-}" == retention || "${4:-}" == unused || "${4:-}" == pins || "${4:-}" == recording || "${4:-}" == drafts ]]; then
+    if [[ "${4:-}" == address || "${4:-}" == retention || "${4:-}" == unused || "${4:-}" == pins || "${4:-}" == recording || "${4:-}" == drafts || "${4:-}" == cards ]]; then
         printf 'SELECT 1;\n' > "$directory/backend/migrations/043-remove-address-coordinates.sql"
     fi
-    if [[ "${4:-}" == retention || "${4:-}" == unused || "${4:-}" == pins || "${4:-}" == recording || "${4:-}" == drafts ]]; then
+    if [[ "${4:-}" == retention || "${4:-}" == unused || "${4:-}" == pins || "${4:-}" == recording || "${4:-}" == drafts || "${4:-}" == cards ]]; then
         printf 'SELECT 1;\n' > "$directory/backend/migrations/045-data-retention.sql"
     fi
-    if [[ "${4:-}" == unused || "${4:-}" == pins || "${4:-}" == recording || "${4:-}" == drafts ]]; then
+    if [[ "${4:-}" == unused || "${4:-}" == pins || "${4:-}" == recording || "${4:-}" == drafts || "${4:-}" == cards ]]; then
         printf 'SELECT 1;\n' > "$directory/backend/migrations/047-remove-unused-schema.sql"
     fi
-    if [[ "${4:-}" == pins || "${4:-}" == recording || "${4:-}" == drafts ]]; then
+    if [[ "${4:-}" == pins || "${4:-}" == recording || "${4:-}" == drafts || "${4:-}" == cards ]]; then
         printf 'SELECT 1;\n' > "$directory/backend/migrations/053-drop-company-pins.sql"
     fi
-    if [[ "${4:-}" == recording || "${4:-}" == drafts ]]; then
+    if [[ "${4:-}" == recording || "${4:-}" == drafts || "${4:-}" == cards ]]; then
         printf 'SELECT 1;\n' > "$directory/backend/migrations/054-recording-retry-policy.sql"
     fi
-    if [[ "${4:-}" == drafts ]]; then
+    if [[ "${4:-}" == drafts || "${4:-}" == cards ]]; then
         printf 'SELECT 1;\n' > "$directory/backend/migrations/055-parcel-draft-intake.sql"
+    fi
+    if [[ "${4:-}" == cards ]]; then
+        printf 'SELECT 1;\n' > "$directory/backend/migrations/063-member-payment-policy.sql"
+        printf 'SELECT 1;\n' > "$directory/backend/migrations/064-payment-cards.sql"
     fi
     (cd "$directory" && find . -type f ! -name 'images.tar*' ! -name release-files.sha256 -print0 | sort -z | xargs -0 sha256sum > release-files.sha256)
 }
@@ -489,7 +500,7 @@ for failure in verification app; do
 done
 # Each later conversion must protect automatic deployment and recovery independently.
 old_version=call-summary
-for cutover in address retention unused pins recording drafts; do
+for cutover in address retention unused pins recording drafts cards; do
     case "$cutover" in
         address) schema_marker="$TEST_ADDRESS_SCHEMA"; query_failure=TEST_ADDRESS_QUERY_FAIL ;;
         retention) schema_marker="$TEST_RETENTION_SCHEMA"; query_failure=TEST_RETENTION_QUERY_FAIL ;;
@@ -497,6 +508,7 @@ for cutover in address retention unused pins recording drafts; do
         pins) schema_marker="$TEST_COMPANY_PIN_SCHEMA"; query_failure=TEST_COMPANY_PIN_QUERY_FAIL ;;
         recording) schema_marker="$TEST_RECORDING_RETRY_SCHEMA"; query_failure=TEST_RECORDING_RETRY_QUERY_FAIL ;;
         drafts) schema_marker="$TEST_PARCEL_DRAFT_SCHEMA"; query_failure=TEST_PARCEL_DRAFT_QUERY_FAIL ;;
+        cards) schema_marker="$TEST_PAYMENT_CARD_SCHEMA"; query_failure=TEST_PAYMENT_CARD_QUERY_FAIL ;;
     esac
     printf '%s\n' "$old_version" > "$test_root/site/current-release"
     make_release "$cutover" history summary "$cutover"
@@ -539,7 +551,7 @@ for cutover in address retention unused pins recording drafts; do
     assert_current "$cutover"
     if grep -E ' stop backend| up |^MIGRATE ' "$TEST_DOCKER_LOG"; then exit 1; fi
 
-    if [[ "$cutover" == pins || "$cutover" == recording || "$cutover" == drafts ]]; then
+    if [[ "$cutover" == pins || "$cutover" == recording || "$cutover" == drafts || "$cutover" == cards ]]; then
         : > "$TEST_DOCKER_LOG"
         if bash "$test_root/site/releases/$cutover/deploy.sh" --rollback; then exit 1; fi
         assert_current "$cutover"
@@ -579,14 +591,14 @@ for cutover in address retention unused pins recording drafts; do
 done
 
 # A release spanning later conversions needs just one stop and one backup.
-rm -f -- "$TEST_ADDRESS_SCHEMA" "$TEST_RETENTION_SCHEMA" "$TEST_UNUSED_SCHEMA" "$TEST_COMPANY_PIN_SCHEMA" "$TEST_RECORDING_RETRY_SCHEMA" "$TEST_PARCEL_DRAFT_SCHEMA"
+rm -f -- "$TEST_ADDRESS_SCHEMA" "$TEST_RETENTION_SCHEMA" "$TEST_UNUSED_SCHEMA" "$TEST_COMPANY_PIN_SCHEMA" "$TEST_RECORDING_RETRY_SCHEMA" "$TEST_PARCEL_DRAFT_SCHEMA" "$TEST_PAYMENT_CARD_SCHEMA"
 printf 'call-summary\n' > "$test_root/site/current-release"
-make_release combined history summary drafts
+make_release combined history summary cards
 : > "$TEST_DOCKER_LOG"
 bash "$test_root/site/releases/combined/deploy.sh"
 assert_current combined
 [[ -f "$TEST_ADDRESS_SCHEMA" && -f "$TEST_RETENTION_SCHEMA" && -f "$TEST_UNUSED_SCHEMA" && -f "$TEST_COMPANY_PIN_SCHEMA" ]]
-[[ -f "$TEST_RECORDING_RETRY_SCHEMA" && -f "$TEST_PARCEL_DRAFT_SCHEMA" ]]
+[[ -f "$TEST_RECORDING_RETRY_SCHEMA" && -f "$TEST_PARCEL_DRAFT_SCHEMA" && -f "$TEST_PAYMENT_CARD_SCHEMA" ]]
 [[ "$(grep -c ' stop backend$' "$TEST_DOCKER_LOG")" -eq 1 ]]
 [[ "$(grep -c '^BACKUP ' "$TEST_DOCKER_LOG")" -eq 1 ]]
-echo 'PASS: migration gating, fresh DB startup, compatible rollback, 008/010/019/021/042/043/045/047/053/054/055 stop-backup order and incompatible restore protection.'
+echo 'PASS: migration gating, fresh DB startup, compatible rollback, 008/010/019/021/042/043/045/047/053/054/055/064 stop-backup order and incompatible restore protection.'
