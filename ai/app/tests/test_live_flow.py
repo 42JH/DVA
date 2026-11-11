@@ -808,6 +808,7 @@ def test_origin_answer_alone_prioritizes_new_sender_address():
     ("not_answer", "no", "once", False, "exact"),
     ("not_answer", "yes", "once", True, "split_fallback"),
     ("not_answer", "no", "once", True, "split_detected"),
+    ("not_answer", "direct", "once", True, "split_detected"),
 ])
 def test_greeting_sender_name_change_asks_only_for_unanswered_choices(
         scope, address_answer, save_answer, name_in_greeting, greeting_mode):
@@ -832,7 +833,8 @@ def test_greeting_sender_name_change_asks_only_for_unanswered_choices(
         if "등록 이름도" in input:
             assert "sender_name_scope" in names
             return SimpleNamespace(answers=[choice("sender_name_scope", save_answer)])
-        return SimpleNamespace(answers=[choice("origin", address_answer if "발송 주소도" in input else "not_answer")])
+        origin = address_answer if "발송 주소도" in input and address_answer in ("yes", "no") else "not_answer"
+        return SimpleNamespace(answers=[choice("origin", origin)])
 
     client.decisions.create = decide
 
@@ -891,21 +893,24 @@ def test_greeting_sender_name_change_asks_only_for_unanswered_choices(
         assert "origin_confirm" not in out and s.state.current["sender_name"].value == "박영희"
         assert s.state.customer.name == "김철수"
 
-        if address_answer != "provided":
+        if address_answer in ("yes", "no"):
             await ai(conn, "발송 주소도 바꾸시겠어요?", 4000)
             await say(conn, "아니요" if address_answer == "yes" else "네", 4900)
         if address_answer == "yes":
             assert s.state.current["sender_address_detail"].value == "1201호"
-        elif address_answer == "no":
-            await until(lambda: any('"sender_change_next": "sender_address"' in e.get("content", "") for e in conn.sent))
-            assert not s.state.current["sender_address"].valid
-            assert not s.state.current["sender_address_detail"].valid
-            await ai(conn, "어떤 주소에서 보내시나요?", 5300)
+        elif address_answer in ("no", "direct"):
+            if address_answer == "no":
+                await until(lambda: any('"sender_change_next": "sender_address"' in e.get("content", "") for e in conn.sent))
+                assert not s.state.current["sender_address"].valid
+                assert not s.state.current["sender_address_detail"].valid
+            question = "발송 주소도 바꾸시겠어요?" if address_answer == "direct" else "어떤 주소에서 보내시나요?"
+            await ai(conn, question, 5300)
             await say(conn, "서울 강남구 테헤란로 212에서 보낼게요", 6200)
             out = await record("sender-address", 6200, {"sender_address": FULL["sender_address"]})
             assert out["sender_change_next"] == "sender_address_detail"
             assert out["missing"] == ["sender_address_detail"]
-            await ai(conn, "발송 상세주소가 있나요?", 7200)
+            assert out["address_detail_question"] == "상세주소를 알려주시겠어요?"
+            await ai(conn, out["address_detail_question"], 7200)
             await say(conn, "없어요", 8100)
             out = await record("sender-detail", 8100, {"sender_address_detail": ""})
             assert out["sender_change_next"] == "ask_name_save"

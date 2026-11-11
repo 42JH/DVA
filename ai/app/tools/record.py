@@ -17,7 +17,9 @@ from typing import Literal
 from pydantic import Field, create_model, model_validator
 
 from app.address.parse import detail_text
-from app.domain.address_book import begin_sender_name_change, save_offer, sender_change_available, sender_change_next
+from app.domain.address_book import (begin_sender_name_change, origin_confirmation, prefill_sender,
+                                     request_sender_address_change, save_offer, sender_change_available,
+                                     sender_change_next)
 from app.domain.assess import area_label, readback_facts
 from app.domain.confirm import issue_parcel_confirmation
 from app.domain.parcel_items import (ItemIssue, contextual_keyword, excluded_evidence, measurements, mentions,
@@ -191,6 +193,21 @@ async def record_fields(ctx: ToolContext, args: RecordArgs, *, expected_box: Box
             price = _price_for_items(s, draft, old_items, was_box_pending, args.item_price, facts)
             if price is not None:
                 values["item_price"] = price
+        keep_origin = False
+        spoken_origin = given.get("sender_address", "").strip()
+        if (spoken_origin and s.current is draft and draft["sender_address"].version == deps["sender_address"]
+                and (sender_change_next(s) == "ask_address_change" or origin_confirmation(s))):
+            # 주소 선택 질문에 주소로 직접 답해도 처리한다. 이전 상세는 새 상세를 기록하기 전에 비운다.
+            resolved = results.get("sender_address")
+            chosen = resolved.address if resolved is not None else spoken_origin
+            place = s.customer.origin_place
+            known = draft["sender_address"].value or (place.address if place else None)
+            keep_origin = bool(chosen and chosen == known
+                               and (resolved is None or resolved.status not in ("not_found", "region_needed")))
+            if not keep_origin:
+                request_sender_address_change(s)
+                deps["sender_address"] = draft["sender_address"].version
+                sender_address_pending = True
         for name, value in values.items():
             prev = s.field_of(name)
             was = prev.value if prev.valid else None
@@ -216,6 +233,9 @@ async def record_fields(ctx: ToolContext, args: RecordArgs, *, expected_box: Box
                 needs.append({"field": addr, "reason": "RESULT_SUPERSEDED"})  # 그사이 다른 값으로 바뀜
                 continue
             _apply_address(ctx, addr, r, given, facts, needs)
+        if keep_origin:
+            s.origin_answer = s.origin_applied = True
+            facts["recorded"].extend(prefill_sender(s, full=True))
         for name in invalid_fields(needs):
             s.record_invalid(name, next(n["reason"] for n in needs if n["field"] == name))
         changed = bool(facts["recorded"] or facts["cleared"] or facts.get("blocked_parcel_omitted") or facts.get("box_proposal")
