@@ -175,6 +175,19 @@ test('미판정 통화를 판정해 불만 칸만 바꾸고, 화면 · 상세가
   assert.equal(replay.status, 204, await replay.text());
   assert.equal(saved.repeats, 1); // AI가 보낸 되묻기 수는 그대로
   assert.equal(saved.retryAt, null);
+  const audit = (
+    await f.pool.query(
+      "SELECT actor_type,result,metadata FROM audit_logs WHERE target_type='CALL_SESSION' AND target_seq=$1 AND action='CALL_COMPLAINT_JUDGED'",
+      [id],
+    )
+  ).rows;
+  assert.deepEqual(audit, [
+    {
+      actor_type: 'SYSTEM',
+      result: 'SUCCESS',
+      metadata: { hasComplaint: true, complaintCount: 3 },
+    },
+  ]);
   const detail = await f.get('/api/calls/' + id);
   assert.equal(detail.status, 200);
   const analysis = (await detail.json()).data.analysis;
@@ -182,6 +195,15 @@ test('미판정 통화를 판정해 불만 칸만 바꾸고, 화면 · 상세가
   assert.equal(analysis.complaints.length, 3);
   // 다시 돌려도 판정이 끝난 통화는 집지 않는다
   await judgeAll(async () => assert.fail('판정한 통화를 다시 집음'));
+  assert.equal(
+    (
+      await f.pool.query(
+        "SELECT count(*)::int AS n FROM audit_logs WHERE target_seq=$1 AND action='CALL_COMPLAINT_JUDGED'",
+        [id],
+      )
+    ).rows[0].n,
+    1,
+  );
 });
 
 test('모델 장애는 3번까지 다시 시도하고, 그 뒤에는 미판정으로 남긴다', async () => {
@@ -205,6 +227,20 @@ test('모델 장애는 3번까지 다시 시도하고, 그 뒤에는 미판정�
   ]);
   await judgeAll(async () => assert.fail('3번 실패한 통화를 다시 집음'));
   assert.equal((await row(id)).attempts, 3);
+  const audits = (
+    await f.pool.query(
+      "SELECT result,metadata FROM audit_logs WHERE target_type='CALL_SESSION' AND target_seq=$1 AND action='CALL_COMPLAINT_FAILED'",
+      [id],
+    )
+  ).rows;
+  assert.equal(audits.length, 3);
+  assert.ok(
+    audits.every(
+      (a) =>
+        a.result === 'FAILED' &&
+        JSON.stringify(a.metadata) === JSON.stringify({ reason: 'MODEL_UNAVAILABLE' }),
+    ),
+  );
 });
 
 test('녹음이 아직 없으면 분석 뒤 30분까지 기다리고, 시도 수는 쓰지 않는다', async () => {
@@ -285,5 +321,34 @@ test('조회는 책임·강도·참고 표시를 제공하고 저장된 점검�
     analysis.complaints.every(
       (c) => !Object.hasOwn(c, 'dropped') && !Object.hasOwn(c, 'candidates'),
     ),
+  );
+});
+
+test('complaint result and its audit roll back together and preserve source analyses', async () => {
+  const id = await call(LINES);
+  const { AuditService } = require('../dist/audit/audit.service');
+  const audit = f.app.get(AuditService),
+    original = audit.recordSuccess;
+  audit.recordSuccess = async function (event, client) {
+    if (event.action === 'CALL_COMPLAINT_JUDGED') throw Error('audit unavailable');
+    return original.call(this, event, client);
+  };
+  try {
+    await assert.rejects(
+      f.app.get(ComplaintJudgeRepository).save(id, false, []),
+      /audit unavailable/,
+    );
+  } finally {
+    audit.recordSuccess = original;
+  }
+  assert.equal((await row(id)).hasComplaint, null);
+  assert.equal(
+    (
+      await f.pool.query(
+        "SELECT count(*)::int AS n FROM audit_logs WHERE target_type='CALL_SESSION' AND target_seq=$1 AND action='CALL_COMPLAINT_JUDGED'",
+        [id],
+      )
+    ).rows[0].n,
+    0,
   );
 });

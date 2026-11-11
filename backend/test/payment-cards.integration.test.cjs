@@ -446,6 +446,15 @@ test('a confirmed card decline leaves the order unpaid and retries only on an ex
   const result = await json(await createOrder(owner.id), 201);
   assert.equal(result.status, 'notPaid');
   assert.equal(result.paymentRequest.cardPaymentFailed, true);
+  assert.deepEqual(
+    (
+      await f.pool.query(
+        "SELECT result,metadata FROM audit_logs WHERE target_type='ORDER' AND target_seq=$1 AND action='ORDER_CARD_PAYMENT'",
+        [result.orderSeq],
+      )
+    ).rows,
+    [{ result: 'FAILED', metadata: { reason: 'PAYMENT_DECLINED' } }],
+  );
   const before = approvals().length;
   await f.app.get(PaymentsWorker).run();
   assert.equal(approvals().length, before);
