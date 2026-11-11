@@ -147,7 +147,15 @@ test('detail and list expose the stored analysis and actual older persona withou
     aiEndedAt: new Date(input.endedAt).toISOString(),
     repeatQuestionCount: 2,
     hasComplaint: true,
-    complaints: [{ ...input.complaints[0], utteranceOrders: [3, 6] }],
+    complaints: [
+      {
+        ...input.complaints[0],
+        utteranceOrders: [3, 6],
+        target: null,
+        level: null,
+        referenceOnly: false,
+      },
+    ],
     analysedAt: stored.analysed_at.toISOString(),
   });
   assert.equal(data.call.startedAt, new Date(call.startedAt).toISOString());
@@ -597,7 +605,9 @@ test('late analysis and utterances become readable without inventing a default p
   assert.equal(before.analysis.aiPersonaVersionSeq, null);
   assert.equal(before.analysis.personaName, null);
   assert.equal(before.analysis.personaVersion, null);
-  assert.deepEqual(before.analysis.complaints, [complaint]);
+  assert.deepEqual(before.analysis.complaints, [
+    { ...complaint, target: null, level: null, referenceOnly: false },
+  ]);
   const events = [1, 2].map((order) => ({
     eventId: randomUUID(),
     eventOrder: order,
