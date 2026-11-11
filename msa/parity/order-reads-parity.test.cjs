@@ -1753,5 +1753,265 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
       }
     },
   );
+  await t.test(
+    'billing charges preserve personal and organization principal, month totals and transactional audits',
+    async () => {
+      const requestId = randomUUID();
+      for (const db of [reference, databases.customer])
+        await db.query(
+          "INSERT INTO organizations(organization_seq,name,status) OVERRIDING SYSTEM VALUE VALUES(6200,'청구 검증 기업','ACTIVE')",
+        );
+      for (const db of [reference, databases.order]) {
+        const client = await db.connect();
+        try {
+          await client.query('BEGIN');
+          await client.query("SET LOCAL session_replication_role='replica'");
+          await client.query(
+            'INSERT INTO orders(order_seq,customer_seq,payment_method_type,status,creation_source,total_amount,paid_at,billing_organization_seq,billing_organization_name) ' +
+              'OVERRIDING SYSTEM VALUE SELECT 52000+n,CASE WHEN n=5 THEN NULL ELSE 1 END, ' +
+              "CASE WHEN n IN(2,6) THEN 'groupBilling' WHEN n=3 THEN 'billing' ELSE 'credit' END, " +
+              "CASE WHEN n=4 THEN 'COLLECTING' ELSE 'PAID' END,'AI',7000+n*1000, " +
+              "CASE WHEN n<>4 THEN '2036-02-29T15:00:00Z'::timestamptz END, " +
+              "CASE WHEN n IN(1,2) THEN 6200 END,CASE WHEN n IN(1,2) THEN '청구 검증 기업' END FROM generate_series(0,6)n",
+          );
+          await client.query(
+            'INSERT INTO organization_billing_months(organization_seq,billing_month,organization_name,monthly_amount,group_billing_amount) ' +
+              "VALUES(6200,'2036-02-01','이전 기업명',12345,678)",
+          );
+          await client.query('COMMIT');
+        } catch (error) {
+          await client.query('ROLLBACK');
+          throw error;
+        } finally {
+          client.release();
+        }
+      }
+      const services = [];
+      try {
+        for (const [owner, runtime] of [
+          ['monolith', './monolith-runtime'],
+          ['order', '../dist'],
+        ]) {
+          const { DatabaseService } = require(
+            runtime + '/database/database.service',
+          );
+          const { AuditService } = require(runtime + '/audit/audit.service');
+          const config = {
+            get: (key) =>
+              ({
+                NODE_ENV: 'test',
+                DB_HOST: owner + '-db',
+                DB_PORT: 5432,
+                DB_USER: owner + '_app',
+                DB_PASSWORD: process.env.PGPASSWORD,
+                DB_NAME: process.env.PGDATABASE,
+                OPERATIONS_URL: 'http://operations-app:3005',
+                CUSTOMER_AUTH_TOKEN: process.env.CUSTOMER_AUTH_TOKEN,
+              })[key],
+          };
+          const database = new DatabaseService(config);
+          let audit, service;
+          if (owner === 'monolith') {
+            const { AuditRepository } = require(
+              runtime + '/audit/audit.repository',
+            );
+            const { OrganizationBillingService } = require(
+              runtime + '/organizations/organization-billing.service',
+            );
+            const { OrganizationBillingRepository } = require(
+              runtime + '/organizations/organization-billing.repository',
+            );
+            audit = new AuditService(new AuditRepository(database));
+            service = new OrganizationBillingService(
+              database,
+              new OrganizationBillingRepository(database),
+              audit,
+            );
+          } else {
+            const { BillingService } = require(
+              runtime + '/billing/billing.service',
+            );
+            audit = new AuditService(database, config);
+            service = new BillingService(database, audit, config);
+          }
+          services.push({ database, audit, service });
+        }
+        const snapshot = async (db) => ({
+          charges: (
+            await db.query(
+              'SELECT order_seq,organization_seq,customer_seq,billing_month::text,payment_method_type,amount,occurred_at::text ' +
+                'FROM order_billing_charges WHERE order_seq BETWEEN 52000 AND 52006 ORDER BY order_seq',
+            )
+          ).rows,
+          months: (
+            await db.query(
+              'SELECT organization_seq,billing_month::text,organization_name,monthly_amount::text,group_billing_amount::text ' +
+                'FROM organization_billing_months WHERE organization_seq=6200 ORDER BY billing_month',
+            )
+          ).rows,
+        });
+        for (const db of [reference, databases.order]) {
+          await db.query(
+            "CREATE FUNCTION charge_fixture_failure() RETURNS trigger LANGUAGE plpgsql AS $fixture$ BEGIN RAISE EXCEPTION 'test-only month failure'; END $fixture$",
+          );
+          await db.query(
+            'CREATE TRIGGER charge_fixture_failure BEFORE INSERT ON organization_billing_months FOR EACH ROW EXECUTE FUNCTION charge_fixture_failure()',
+          );
+        }
+        try {
+          for (const { database, service } of services)
+            await assert.rejects(
+              database.transaction((client) =>
+                service.recordCharge(client, 52001, requestId),
+              ),
+            );
+          for (const db of [reference, databases.order])
+            assert.equal((await snapshot(db)).charges.length, 0);
+        } finally {
+          for (const db of [reference, databases.order]) {
+            await db.query(
+              'DROP TRIGGER charge_fixture_failure ON organization_billing_months',
+            );
+            await db.query('DROP FUNCTION charge_fixture_failure()');
+          }
+        }
+        for (const { database, service } of services) {
+          // The same order lock used by approval/submission serializes concurrent retries.
+          const record = (id) =>
+            database.transaction(async (client) => {
+              await client.query(
+                'SELECT 1 FROM orders WHERE order_seq=$1 FOR UPDATE',
+                [id],
+              );
+              await service.recordCharge(client, id, requestId);
+            });
+          for (let id = 52000; id <= 52006; id++) await record(id);
+          await Promise.all([record(52001), record(52001), record(52002)]);
+        }
+        const stored = await snapshot(reference);
+        assert.deepEqual(await snapshot(databases.order), stored);
+        assert.deepEqual(
+          stored.charges.map((row) => [
+            row.order_seq,
+            row.organization_seq,
+            row.customer_seq,
+            row.billing_month,
+            row.amount,
+          ]),
+          [
+            [52000, null, 1, '2036-03-01', 7000],
+            [52001, 6200, null, '2036-03-01', 8000],
+            [52002, 6200, null, '2036-03-01', 9000],
+          ],
+        );
+        assert.deepEqual(stored.months[1], {
+          organization_seq: 6200,
+          billing_month: '2036-03-01',
+          organization_name: '청구 검증 기업',
+          monthly_amount: '8000',
+          group_billing_amount: '9000',
+        });
+        const logs = async (db) =>
+          (
+            await db.query(
+              'SELECT action,result,target_type,target_seq,actor_type,actor_seq,metadata FROM audit_logs WHERE request_id=$1 ORDER BY audit_log_seq',
+              [requestId],
+            )
+          ).rows;
+        const original = await logs(reference);
+        for (let n = 0; n < 100; n++) {
+          if ((await logs(databases.operations)).length === original.length)
+            break;
+          await pause(25);
+        }
+        assert.deepEqual(await logs(databases.operations), original);
+        assert.deepEqual(
+          original.map((row) => [
+            row.action,
+            row.metadata.paymentMethodType,
+            row.metadata.amountBefore,
+            row.metadata.amountAfter,
+          ]),
+          [
+            ['BILLING_MONTH_INITIALIZED', 'credit', 12345, 0],
+            ['BILLING_MONTH_INITIALIZED', 'groupBilling', 678, 0],
+            ['BILLING_AMOUNT_INCREASED', 'credit', 0, 8000],
+            ['BILLING_AMOUNT_INCREASED', 'groupBilling', 0, 9000],
+          ],
+        );
+        const packet = {
+          eventId: randomUUID(),
+          source: 'order',
+          eventType: 'AuditPrepared',
+          payload: {
+            transactionId: randomUUID(),
+            occurredAt: new Date().toISOString(),
+            result: 'SUCCESS',
+            audit: {
+              actorId: null,
+              actorType: 'SYSTEM',
+              action: 'BILLING_AMOUNT_INCREASED',
+              targetType: 'ORGANIZATION',
+              targetId: 6200,
+              requestId,
+              metadata: {
+                billingMonth: '2036-03',
+                paymentMethodType: 'credit',
+                amountBefore: 0,
+                amountAfter: 8000,
+              },
+            },
+          },
+        };
+        for (const mutate of [
+          (e) => (e.payload.audit.actorType = 'AI'),
+          (e) => (e.payload.audit.targetType = 'ORDER'),
+          (e) => (e.payload.audit.metadata.amountAfter = -1),
+          (e) => (e.payload.audit.metadata.amountAfter = 2147483648),
+          (e) => (e.payload.audit.metadata.paymentMethodType = 'billing'),
+          (e) => (e.payload.audit.actorName = 'forged'),
+        ]) {
+          const event = structuredClone(packet);
+          event.eventId = randomUUID();
+          mutate(event);
+          const response = await fetch(
+            'http://operations-app:3005/internal/events',
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN,
+              },
+              body: JSON.stringify(event),
+            },
+          );
+          assert.equal(response.status, 422);
+        }
+        t.diagnostic(
+          'billing principal 7 states; source rollback, concurrent replay, KST month boundary and four exact audits',
+        );
+      } finally {
+        for (const { database, audit } of services) {
+          if (audit.onModuleDestroy) await audit.onModuleDestroy();
+          await database.onModuleDestroy();
+        }
+        for (const db of [reference, databases.order]) {
+          await db.query(
+            'DELETE FROM order_billing_charges WHERE order_seq BETWEEN 52000 AND 52006',
+          );
+          await db.query(
+            'DELETE FROM orders WHERE order_seq BETWEEN 52000 AND 52006',
+          );
+          await db.query(
+            'DELETE FROM organization_billing_months WHERE organization_seq=6200',
+          );
+        }
+        for (const db of [reference, databases.customer])
+          await db.query(
+            'DELETE FROM organizations WHERE organization_seq=6200',
+          );
+      }
+    },
+  );
   console.log('Compared HTTP requests: '+compared);
 });

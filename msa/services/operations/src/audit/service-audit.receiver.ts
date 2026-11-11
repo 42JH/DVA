@@ -77,6 +77,8 @@ function auditInput(
   service: 'customer' | 'consultation' | 'order',
 ) {
   const audit = payload.audit;
+  const billingIncrease =
+    service === 'order' && object(audit) && audit.action === 'BILLING_AMOUNT_INCREASED';
   const billingInitialization =
     service === 'order' && object(audit) && audit.action === 'BILLING_MONTH_INITIALIZED';
   const paymentCompleted =
@@ -142,6 +144,7 @@ function auditInput(
       ? actions.has(audit.action as string)
       : service === 'order'
         ? draftMutation ||
+          billingIncrease ||
           submission ||
           paymentCompleted ||
           [
@@ -159,7 +162,7 @@ function auditInput(
       ? targets.has(audit.targetType as string)
       : service === 'order'
         ? audit.targetType ===
-          (billingInitialization
+          (billingInitialization || billingIncrease
             ? 'ORGANIZATION'
             : draftMutation || audit.action === 'PARCEL_DRAFT_DELETED'
               ? 'ORDER_PARCEL_DRAFT'
@@ -195,7 +198,7 @@ function auditInput(
           : 'AI') ||
         audit.targetId === null)) ||
     (service === 'order' &&
-      ((billingInitialization
+      ((billingInitialization || billingIncrease
         ? payload.result !== 'SUCCESS' ||
           audit.actorType !== 'SYSTEM' ||
           audit.actorId !== null ||
@@ -206,9 +209,14 @@ function auditInput(
           typeof audit.metadata.billingMonth !== 'string' ||
           !/^(?!0000)[0-9]{4}-(0[1-9]|1[0-2])$/.test(audit.metadata.billingMonth) ||
           !['credit', 'groupBilling'].includes(audit.metadata.paymentMethodType as string) ||
-          !Number.isSafeInteger(audit.metadata.amountBefore) ||
+          !Number.isInteger(audit.metadata.amountBefore) ||
           Number(audit.metadata.amountBefore) < 0 ||
-          audit.metadata.amountAfter !== 0
+          !(billingInitialization
+            ? audit.metadata.amountAfter === 0
+            : Number.isInteger(audit.metadata.amountAfter) &&
+              Number(audit.metadata.amountAfter) > Number(audit.metadata.amountBefore) &&
+              Number(audit.metadata.amountAfter) - Number(audit.metadata.amountBefore) <=
+                2147483647)
         : paymentCompleted
           ? payload.result !== 'SUCCESS' ||
             audit.actorType !== 'SYSTEM' ||
@@ -245,7 +253,7 @@ function auditInput(
                   audit.metadata.orderParcelSeqs.length
               : audit.metadata !== undefined) ||
         (payload.result === 'SUCCESS' &&
-          (!(billingInitialization || paymentCompleted || paymentExpiration
+          (!(billingInitialization || billingIncrease || paymentCompleted || paymentExpiration
             ? audit.actorType === 'SYSTEM'
             : submission
               ? audit.actorType === 'SYSTEM' ||
