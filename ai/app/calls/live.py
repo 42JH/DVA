@@ -149,6 +149,7 @@ class LiveFlow:
         h["session.started"] = lambda s, ev: (base_started(s, ev), self.on_started(s))
         h["session.delegation.created"] = self.on_delegation
         h["response.event"] = self.on_response
+        service.error_context = self.error_context
 
     @staticmethod
     def rt(s: CallSession) -> Runtime:
@@ -1213,6 +1214,16 @@ class LiveFlow:
         return self.rt(s).delegations.setdefault(delegation_id or "_", {
             "offset_ms": None, "inflight": 0, "outputs": 0, "completed": False, "done": asyncio.Event(), "t": time.time()})
 
+    def error_context(self, s: CallSession) -> dict:
+        """Live 오류 시점: AI·고객이 말하는 중이었는지, 열린 위임(겹침으로 거절됐는지 판별용)."""
+        now, rt = time.time(), self.rt(s)
+        return {"ai_output_ago_ms": round((now - s.last_output_t) * 1000) if s.last_output_t else None,
+                "customer_speaking": rt.cust is not None,
+                "delegations": [{"id": str(did)[-6:], "inflight": d["inflight"], "outputs": d["outputs"],
+                                 "completed": d["completed"], "done": d["done"].is_set(),
+                                 "age_ms": round((now - d["t"]) * 1000)}
+                                for did, d in rt.delegations.items() if now - d["t"] < 30.0]}
+
     def _open(self, s: CallSession) -> list[dict]:
         """진행 중으로 볼 위임: 끝나지 않았고 15초 안에 시작한 것(완료 이벤트를 못 받은 위임이 대기를 붙잡지 않게)."""
         now = time.time()
@@ -1246,6 +1257,7 @@ class LiveFlow:
                 s.spawn(self._reopen_readback(s, d), "reopen")
         elif t == "response.created":
             self._dl(s, did)["completed"] = False
+            s.note("Backend 응답 시작", str(did)[-6:], {"delegation": did, "response_id": (inner.get("response") or {}).get("id")})
 
     async def call_tool(self, s: CallSession, did, item: dict) -> None:
         name, call_id = item.get("name"), item.get("call_id")
@@ -1344,7 +1356,7 @@ class LiveFlow:
             self.rt(s).await_speech = ("재개→AI 발화", time.time())
             offer = d.pop("readback_offer", None)
             marked = offer is not None and self._mark_readback(s, *offer)
-            delivered = await self.send(s, {"type": "response.create"})
+            delivered = await self.send(s, {"type": "response.create"}, about=f"재개 {str(did)[-6:]}")
             if marked:
                 if delivered:
                     d["readback_sent_id"] = offer[0]
@@ -1461,15 +1473,35 @@ class LiveFlow:
         while self.rt(s).cust is not None and time.monotonic() < deadline:
             await asyncio.sleep(0.05)
 
-    async def send(self, s: CallSession, event: dict) -> bool:
+    async def send(self, s: CallSession, event: dict, about: str | None = None) -> bool:
         if s.sideband is None or s.phase in (Phase.CLOSED, Phase.FAILED, Phase.FINALIZING, Phase.DONE):
             return False
+        event_id = s.next_event_id()
+        s.sent[event_id] = _sent_summary(event, about)
+        while len(s.sent) > SENT_KEPT:
+            del s.sent[next(iter(s.sent))]
         try:
-            await s.sideband.send(event | {"event_id": s.next_event_id()})
+            await s.sideband.send(event | {"event_id": event_id})
         except Exception as e:
             log.warning("송신 실패 %s %s %s", s.call_id, event.get("type"), type(e).__name__)
+            s.note("송신 실패", f"{event.get('type')} {type(e).__name__}", {"event_id": event_id, "sent": s.sent.get(event_id)})
             return False
         return True
+
+
+SENT_KEPT = 64
+
+
+def _sent_summary(event: dict, about: str | None) -> dict:
+    """Live 오류가 가리키는 이벤트를 알아볼 만큼만(본문 전체는 통화 기록의 전달·도구 사건에 이미 있다)."""
+    summary = {"type": event.get("type"), "at": time.time()}
+    if item := event.get("item"):
+        summary |= {"item_type": item.get("type"), "call_id": item.get("call_id")}
+    if content := event.get("content"):
+        summary["content"] = content[:120]
+    if about:
+        summary["about"] = about
+    return summary
 
 
 def _transcript(s: CallSession, speaker: str, u: Spoken) -> None:

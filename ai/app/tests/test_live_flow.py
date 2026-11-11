@@ -537,6 +537,45 @@ def test_agent_greets_first_on_session_start():
     assert len(greets) == 1 and greets[0]["type"] == "session.commentary.append"
 
 
+def test_live_error_keeps_message_and_the_rejected_sent_event():
+    """Live 오류는 code만으로 사유를 알 수 없었다: 원문(message)과 client_event_id가 가리키는 송신 이벤트를 기록·관제에 남긴다."""
+    svc, client = flow()
+
+    async def scenario():
+        task = asyncio.create_task(svc.on_incoming(incoming()))
+        await until(lambda: client.conns)
+        conn = client.conns[0]
+        conn.push(started())
+        await until(lambda: conn.sent)
+        greet = conn.sent[0]
+        for _ in range(2):  # 처리기 없는 이벤트: 횟수는 다, 사건은 처음 1건만
+            conn.push({"type": "session.something.new", "x": 1})
+        conn.push({"type": "session.usage.updated", "context_window": {"usage_ratio": 0.93}})
+        conn.push({"type": "response.event", "delegation_id": "item_abcdef", "event": {"type": "response.created"}})
+        conn.push({"type": "error", "error": {"type": "invalid_request_error", "code": "invalid_request_error",
+                                              "message": "거절 사유", "client_event_id": greet["event_id"]}})
+        s = svc.registry.calls["live_1"]
+        await until(lambda: any(e["kind"] == "오류" for e in s.events))
+        snap = s.snapshot()
+        conn.push({"type": "session.closed", "reason": "remote_hangup"})
+        await task
+        return greet, s, snap
+
+    greet, s, snap = run(scenario())
+    err = next(e for e in s.events if e["kind"] == "오류")
+    assert err["text"] == "invalid_request_error: 거절 사유"
+    assert err["data"]["error"]["message"] == "거절 사유"
+    assert err["data"]["sent"]["type"] == greet["type"] == "session.commentary.append"
+    assert "call_started" in err["data"]["sent"]["content"]
+    assert snap["errors"][0]["message"] == "invalid_request_error: 거절 사유"  # 관제(/monitor) 오류 줄
+    live = err["data"]["live"]  # 오류 시점 상태(겹침 판별)
+    assert live["customer_speaking"] is False
+    assert [(d["id"], d["completed"], d["done"]) for d in live["delegations"]] == [("abcdef", False, False)]
+    assert [e["text"] for e in s.events if e["kind"] == "Backend 응답 시작"] == ["abcdef"]
+    assert s.stats["미처리 session.something.new"] == 2
+    assert [e["text"] for e in s.events if e["kind"] == "미처리 이벤트"] == ["session.something.new"]
+    assert s.stats["컨텍스트 사용률"] == 0.93 and [e["kind"] for e in s.events].count("컨텍스트 경고") == 1
+
 def test_late_result_and_n2_wait_while_customer_is_speaking():
     """끼어들기: 고객이 말하는 동안 앞선 위임 결과로 재개(response.create)하거나 N2를 보내지 않는다. 말이 끝나면 보낸다."""
     svc, client = flow()
