@@ -12,7 +12,8 @@ import { useScrollable } from '@/shared/lib/useScrollable'
 import { CompanyCsvModal } from './CompanyModals'
 import { Pagination } from '@/shared/ui/Pagination'
 import { usePageSize } from '@/shared/lib/paging'
-import { Confirm } from '@/shared/ui/Modal'
+import { Confirm, Modal } from '@/shared/ui/Modal'
+import { TextInput } from '@/shared/ui/Field'
 
 export function CompaniesPage() {
   const navigate = useNavigate()
@@ -23,6 +24,7 @@ export function CompaniesPage() {
   const scrollable = useScrollable(box, [vm.rows])
   const [asking, setAsking] = useState<{ id: number; name: string } | null>(null) // 한 곳 삭제 확인
   const removeOne = vm.removeOne
+  const [editing, setEditing] = useState<{ id: number; name: string } | null>(null) // 기업명 수정 창
   const askRow = (id: number, name: string) => {
     if (vm.selected.has(id) && vm.selected.size > 1)
       vm.askDelete() // 체크한 곳 모두
@@ -76,7 +78,7 @@ export function CompaniesPage() {
                 <th scope="col" className="w-[140px]">
                   등록
                 </th>
-                <th scope="col" className="w-[90px] text-right">
+                <th scope="col" className="w-[100px] text-right">
                   관리
                 </th>
               </tr>
@@ -115,7 +117,10 @@ export function CompaniesPage() {
                     {r.date}
                   </td>
                   <td onClick={(e) => e.stopPropagation()}>
-                    <span className="flex justify-center">
+                    <span className="flex justify-center gap-1.5">
+                      <Btn kind="warning" onClick={() => setEditing({ id: r.id, name: r.name })}>
+                        수정
+                      </Btn>
                       <Btn kind="dangerBadge" onClick={() => askRow(r.id, r.name)}>
                         삭제
                       </Btn>
@@ -145,6 +150,20 @@ export function CompaniesPage() {
         />
       </section>
       {vm.csvOpen && <CompanyCsvModal onClose={vm.closeCsv} />}
+      {editing && (
+        <RenameModal
+          name={editing.name}
+          busy={vm.rename.isPending}
+          error={vm.rename.error ? errorText(vm.rename.error, '저장') : null}
+          onSave={(name) =>
+            vm.rename.mutate({ id: editing.id, name }, { onSuccess: () => setEditing(null) })
+          }
+          onClose={() => {
+            setEditing(null)
+            vm.rename.reset()
+          }}
+        />
+      )}
       {(vm.confirming || asking) && (
         <Confirm
           title="기업을 삭제할까요?"
@@ -172,5 +191,56 @@ export function CompaniesPage() {
         </Confirm>
       )}
     </>
+  )
+}
+
+/** 기업명 수정 창 — 바뀐 게 없거나 비었으면 저장 꺼짐 */
+function RenameModal({
+  name,
+  busy,
+  error,
+  onSave,
+  onClose,
+}: {
+  name: string
+  busy: boolean
+  error: string | null
+  onSave: (name: string) => void
+  onClose: () => void
+}) {
+  const [value, setValue] = useState(name)
+  const next = value.trim()
+  const canSave = !busy && next !== '' && next !== name
+  return (
+    <Modal
+      title="기업 수정"
+      width={440}
+      onClose={onClose}
+      footer={
+        <>
+          {error && (
+            <p role="alert" className="min-w-0 flex-1 text-[12px] text-ops-stop">
+              {error}
+            </p>
+          )}
+          <Btn className="ml-auto" onClick={onClose}>
+            취소
+          </Btn>
+          <Btn kind="primary" type="submit" form="company-rename" disabled={!canSave}>
+            {busy ? '저장 중…' : '저장'}
+          </Btn>
+        </>
+      }
+    >
+      <form
+        id="company-rename"
+        onSubmit={(e) => {
+          e.preventDefault()
+          if (canSave) onSave(next)
+        }}
+      >
+        <TextInput label="기업명" value={value} onChange={setValue} />
+      </form>
+    </Modal>
   )
 }
