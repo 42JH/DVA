@@ -22,6 +22,21 @@ const rec = (src) => {
 };
 const set = (v) => (v === null ? undefined : new Set(v));
 const of = (fn) => cases.filter((c) => c.fn === fn);
+const plain = (value) =>
+  JSON.parse(
+    JSON.stringify(value, (_key, item) =>
+      item instanceof Set ? [...item].sort((a, b) => a - b) : item,
+    ),
+  );
+const withDispute = async (values, action) => {
+  const previous = [...judge.DISPUTE];
+  judge.DISPUTE.splice(0, judge.DISPUTE.length, ...values);
+  try {
+    return await action();
+  } finally {
+    judge.DISPUTE.splice(0, judge.DISPUTE.length, ...previous);
+  }
+};
 
 test('파이썬 기준 구현에서 기록한 사례가 있다', () => {
   for (const fn of [
@@ -45,12 +60,28 @@ test('차례 나누기 · 모델 입력 글이 같다', () => {
 });
 
 test('모델 결과 검사가 같다', () => {
-  for (const c of of('check')) assert.deepEqual(judge.check(c.raw, rec(c.rec)), c.out);
+  for (const c of of('check')) assert.deepEqual(judge.check(c.raw, rec(c.rec), c.sources), c.out);
 });
 
-test('다수결이 같다', () => {
+test('다수결이 같다', async () => {
   for (const c of of('vote'))
-    assert.deepEqual(judge.vote(structuredClone(c.analyses), c.need), c.out);
+    await withDispute(c.dispute, () =>
+      assert.deepEqual(plain(judge.vote(structuredClone(c.analyses), c.need)), c.out),
+    );
+});
+
+test('업무 규칙·FAQ 지시문이 기준 원문과 같다', () => {
+  const prompts = require('../dist/call-insights/complaints/complaint-prompts');
+  for (const c of of('references')) assert.equal(judge.references(c.faqs, c.rules), c.out);
+  for (const c of of('instructions'))
+    assert.equal(
+      judge.instructions(
+        c.faqs,
+        c.prompt === 'verify.md' ? prompts.VERIFY_PROMPT : prompts.JUDGE_PROMPT,
+        c.rules,
+      ),
+      c.out,
+    );
 });
 
 test('코드로 정하는 응답 지연 · 정보 인식 오류 · 번호 자릿수가 같다', () => {
@@ -85,7 +116,9 @@ test('녹음 말소리 구간이 같다', () => {
 test('판정 흐름(3판 다수결 · 장면 확인 · 실패)이 같다 — 같은 순서로 같은 가짜 모델 답을 넣음', async () => {
   for (const c of of('run')) {
     let calls = 0;
-    const ask = async () => {
+    const requests = [];
+    const ask = async (instructions, input, name, schema) => {
+      requests.push({ instructions, input, name, schema });
       calls += 1;
       const reply = c.replies[Math.min(calls, c.replies.length) - 1];
       if (reply.error) throw new Error(reply.error);
@@ -94,7 +127,10 @@ test('판정 흐름(3판 다수결 · 장면 확인 · 실패)이 같다 — 같
         usage: { input: 900, cached: 0, output: 300, reasoning: 200 },
       };
     };
-    assert.deepEqual(await judge.run(rec(c.rec), ask, c.faqs, c.votes), c.out);
+    await withDispute(c.dispute, async () => {
+      assert.deepEqual(plain(await judge.run(rec(c.rec), ask, c.faqs, c.votes)), c.out);
+      assert.deepEqual(requests, c.requests);
+    });
   }
 });
 
@@ -129,6 +165,9 @@ test('백엔드 저장 모양: 화면 6유형만, 발화 순번은 겹침 없이
       {
         t: 2,
         complain: true,
+        complain_target: 'ai_service',
+        complain_level: 'mild',
+        complain_quote: '네? 뭐라고요',
         cust: ['ask_back', 'complain'],
         given: [],
         ai: [],
@@ -271,4 +310,119 @@ test('집기가 지연되어 fill이 겹쳐도 설정한 동시 판정 수를 �
     await worker.onModuleDestroy();
     worker.onApplicationShutdown();
   }
+});
+
+test('one call builds shared instructions once while retaining independent votes and usage', async () => {
+  let reads = 0;
+  const faq = {
+    get question() {
+      reads++;
+      return 'Synthetic question';
+    },
+    answer: 'Synthetic answer',
+  };
+  const record = judge.fromEvents(
+      [
+        {
+          kind: 'UTTERANCE',
+          occurredAt: '2026-11-01T00:00:00Z',
+          offsetSeconds: 0,
+          payload: { utteranceOrder: 1, speaker: 'CUSTOMER', utteranceText: '요금이 궁금합니다.' },
+        },
+      ],
+      '',
+      null,
+    ),
+    requests = [];
+  const output = await judge.run(
+    record,
+    async (...args) => {
+      requests.push(args);
+      return {
+        data: {
+          turns: [],
+          call: { purposes: ['inquiry'], goal: 'achieved', mood: 'neutral', summary: 'Synthetic' },
+        },
+        usage: { input: 3, cached: 0, output: 2, reasoning: 1 },
+      };
+    },
+    [faq],
+  );
+  assert.equal(reads, 1);
+  assert.equal(requests.length, 3);
+  assert.deepEqual(requests[0], requests[1]);
+  assert.deepEqual(requests[1], requests[2]);
+  assert.equal(output.votes, 3);
+  assert.deepEqual(output.usage, { input: 9, cached: 0, output: 6, reasoning: 3 });
+  const newer = [];
+  await judge.run(
+    record,
+    async (...args) => {
+      newer.push(args);
+      return { data: { turns: [], call: {} }, usage: null };
+    },
+    [{ question: 'Changed question', answer: 'Changed answer' }],
+  );
+  assert.notEqual(requests[0][0], newer[0][0]);
+  assert.equal(
+    await judge.run(record, async () => {
+      throw new Error('must not call provider');
+    }, [
+      {
+        get question() {
+          throw new Error('malformed FAQ');
+        },
+        answer: 'unused',
+      },
+    ]),
+    null,
+  );
+});
+
+test('고객 인용은 번호 마스킹 전에 확인하고 저장값에는 판정 결과만 남긴다', () => {
+  const r = judge.fromEvents([
+    {
+      kind: 'UTTERANCE',
+      occurredAt: '2026-11-02T00:00:01Z',
+      offsetSeconds: 1,
+      payload: {
+        utteranceOrder: 1,
+        speaker: 'CUSTOMER',
+        utteranceText: '요금 12345원이 너무 비싸네요',
+      },
+    },
+  ]);
+  const raw = {
+    turns: [
+      {
+        t: 1,
+        cust: ['complain'],
+        complain_quote: '요금 12345원이 너무 비싸네요',
+        complain_target: 'price_policy',
+        complain_level: 'bogus',
+        issue: 'none',
+      },
+    ],
+  };
+  const checked = judge.check(raw, r);
+  assert.equal(checked.turns[0].complain, true);
+  assert.equal(checked.turns[0].complain_level, 'mild');
+  const saved = extract.backendComplaints(checked, r);
+  assert.deepEqual(saved.complaints, [
+    {
+      type: 'DISSATISFACTION_EXPRESSION',
+      target: 'price_policy',
+      level: 'mild',
+      evidenceText: '요금 ***원이 너무 비싸네요',
+      offsetSeconds: 1,
+      utteranceOrders: [1],
+    },
+  ]);
+  assert.equal(
+    judge.check({ turns: [{ ...raw.turns[0], complain_quote: '요금 ***원이 너무 비싸네요' }] }, r)
+      .turns[0].complain,
+    false,
+  );
+  assert.equal(Object.hasOwn(saved, 'dropped'), false);
+  assert.equal(Object.hasOwn(saved, 'candidates'), false);
 });

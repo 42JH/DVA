@@ -22,6 +22,7 @@ const post = (path, body) =>
   });
 
 /** 통화 + AI 분석(불만 미판정) + 이벤트(발화 · 동작)를 AI API로 넣는다 */
+const analysisInputs = new Map();
 async function call(lines, { analysedMinutesAgo = 60 } = {}) {
   const providerCallId = 'rtc_complaint_' + randomUUID();
   const { id } = (
@@ -48,7 +49,7 @@ async function call(lines, { analysedMinutesAgo = 60 } = {}) {
   }));
   const sent = await post('/api/ai/calls/' + id + '/events', { providerCallId, events });
   assert.equal(sent.status, 204, await sent.clone().text());
-  const analysed = await post('/api/ai/calls/' + id + '/analysis', {
+  const analysisInput = {
     providerCallId,
     startedAt: new Date(start).toISOString(),
     endedAt: new Date(start + 60000).toISOString(),
@@ -56,7 +57,9 @@ async function call(lines, { analysedMinutesAgo = 60 } = {}) {
     repeatQuestionCount: 1,
     hasComplaint: null,
     complaints: [],
-  });
+  };
+  analysisInputs.set(id, analysisInput);
+  const analysed = await post('/api/ai/calls/' + id + '/analysis', analysisInput);
   assert.equal(analysed.status, 204, await analysed.clone().text());
   await f.pool.query(
     'UPDATE call_analyses SET analysed_at=clock_timestamp()-make_interval(mins=>$2) WHERE call_session_seq=$1',
@@ -109,7 +112,12 @@ const REPLY = {
       why: '이름을 다시 물음',
       quote: '보내시는 분 성함을 말씀해 주세요',
     }),
-    turn(3, { cust: ['complain'] }),
+    turn(3, {
+      cust: ['complain'],
+      complain_quote: '방금 말했잖아요',
+      complain_target: 'ai_service',
+      complain_level: 'mild',
+    }),
   ],
   call: { purposes: ['register'], goal: 'partial', mood: 'negative', summary: '이름을 두 번 말함' },
 };
@@ -131,6 +139,9 @@ async function judgeAll(ask) {
 test('미판정 통화를 판정해 불만 칸만 바꾸고, 화면 · 상세가 그 값을 읽는다', async () => {
   const id = await call(LINES);
   await only(id);
+  const originalHash = (
+    await f.pool.query('SELECT payload_hash FROM call_analyses WHERE call_session_seq=$1', [id])
+  ).rows[0].payload_hash;
   let asked = 0;
   await judgeAll(async (instructions, input, name) => {
     asked++;
@@ -145,6 +156,23 @@ test('미판정 통화를 판정해 불만 칸만 바꾸고, 화면 · 상세가
     'INFORMATION_RECOGNITION_ERROR',
     'INTERRUPTION',
   ]);
+  assert.equal(
+    saved.complaints.find((c) => c.type === 'DISSATISFACTION_EXPRESSION').target,
+    'ai_service',
+  );
+  assert.equal(saved.complaints.find((c) => c.type === 'DISSATISFACTION_EXPRESSION').level, 'mild');
+  for (const complaint of saved.complaints)
+    assert.deepEqual(
+      Object.keys(complaint).sort(),
+      ['type', 'target', 'level', 'evidenceText', 'offsetSeconds', 'utteranceOrders'].sort(),
+    );
+  assert.equal(
+    (await f.pool.query('SELECT payload_hash FROM call_analyses WHERE call_session_seq=$1', [id]))
+      .rows[0].payload_hash,
+    originalHash,
+  );
+  const replay = await post('/api/ai/calls/' + id + '/analysis', analysisInputs.get(id));
+  assert.equal(replay.status, 204, await replay.text());
   assert.equal(saved.repeats, 1); // AI가 보낸 되묻기 수는 그대로
   assert.equal(saved.retryAt, null);
   const detail = await f.get('/api/calls/' + id);
@@ -220,4 +248,42 @@ test('발화 미수집 분석은 집지 않고 늦게 발화가 도착하면 판
   assert.equal(response.status, 204, await response.clone().text());
   await judgeAll(async () => ({ data: REPLY, usage: null }));
   assert.equal((await row(id)).hasComplaint, true);
+});
+
+test('조회는 책임·강도·참고 표시를 제공하고 저장된 점검용 필드를 노출하지 않는다', async () => {
+  const id = await call(LINES);
+  const found = [
+    { type: 'DISSATISFACTION_EXPRESSION', target: 'delivery_other', level: 'explicit' },
+    { type: 'DISSATISFACTION_EXPRESSION', target: 'unknown', level: 'unknown' },
+    { type: 'DISSATISFACTION_EXPRESSION' },
+    { type: 'UNSUPPORTED_ANSWER', target: 'ai_service', level: 'mild' },
+  ].map((c) => ({
+    ...c,
+    evidenceText: '합성 근거',
+    offsetSeconds: 9,
+    utteranceOrders: [4],
+    dropped: { quote: 1 },
+    candidates: [],
+  }));
+  await f.pool.query(
+    'UPDATE call_analyses SET has_complaint=true,complaints=$2::jsonb WHERE call_session_seq=$1',
+    [id, JSON.stringify(found)],
+  );
+  const response = await f.get('/api/calls/' + id);
+  assert.equal(response.status, 200);
+  const analysis = (await response.json()).data.analysis;
+  assert.deepEqual(
+    analysis.complaints.map((c) => [c.target, c.level, c.referenceOnly]),
+    [
+      ['delivery_other', 'explicit', false],
+      [null, null, false],
+      [null, null, false],
+      [null, null, true],
+    ],
+  );
+  assert.ok(
+    analysis.complaints.every(
+      (c) => !Object.hasOwn(c, 'dropped') && !Object.hasOwn(c, 'candidates'),
+    ),
+  );
 });

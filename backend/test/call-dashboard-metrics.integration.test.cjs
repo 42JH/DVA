@@ -300,7 +300,7 @@ test('soft-deleted and retention-expired calls reject new metric writes and pres
   await f.error(await post(expired, 'response-wait-metrics', wait(expired)), 404, 'NOT_FOUND');
 });
 
-test('new complaint codes round-trip through existing final analysis and call detail without new fields', async () => {
+test('new complaint codes round-trip through existing final analysis and call detail with response metadata', async () => {
   const c = await createCall(false);
   const times = (
     await f.pool.query('SELECT started_at,ended_at FROM call_sessions WHERE call_session_seq=$1', [
@@ -334,7 +334,15 @@ test('new complaint codes round-trip through existing final analysis and call de
   await ok(await post(c, 'analysis', body));
   const detail = await f.get('/api/calls/' + c.id);
   assert.equal(detail.status, 200);
-  assert.deepEqual((await detail.json()).data.analysis.complaints, complaints);
+  assert.deepEqual(
+    (await detail.json()).data.analysis.complaints,
+    complaints.map((complaint) => ({
+      ...complaint,
+      target: null,
+      level: null,
+      referenceOnly: complaint.type === 'UNSUPPORTED_ANSWER',
+    })),
+  );
   assert.doesNotMatch(
     JSON.stringify(f.logs),
     /대시보드 전용 민감 근거|rtc_dashboard_private_|Bearer /,

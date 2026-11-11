@@ -13,6 +13,8 @@ export interface StoredComplaint {
   evidenceText: string;
   offsetSeconds: number | null;
   utteranceOrders: number[];
+  target?: string | null;
+  level?: string | null;
 }
 
 /** 통화 불만 판정(후처리) 저장소 — AI 분석이 들어온 통화 중 아직 판정하지 않은(has_complaint IS NULL) 것을 집고, 결과로 바꾼다 */

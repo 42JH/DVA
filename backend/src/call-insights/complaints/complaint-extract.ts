@@ -19,6 +19,11 @@ const ASK_VERB = /알려|말씀|부탁|여쭤|어떻게 되/u;
 const GREET_NAME = /[가-힣]{2,4} ?(고객)?님/u;
 const GREET_ORIGIN = /에서 보내시는/u;
 const CHANGED = /바꾸|바꿀|다른|변경|아니|새로/u;
+const NAME_CHANGE =
+  /(이름|성함|보내는 ?(사람|분)).{0,12}(바꾸|바꿀|바꿔|변경|다른)|(바꾸|바꿀|바꿔|변경).{0,8}(이름|성함)/u;
+const ORIGIN_CHANGE =
+  /다른 ?(데|곳)에서|딴 ?데서|(보내는 ?(곳|주소)|출발).{0,12}(바꾸|바꿀|바꿔|변경|다른)/u;
+const SENTENCES = /(?<=[.?!])\s*|(?<=[다요까죠])\.?\s+/u;
 
 /** 응답 지연 [(앞 발화 번호, 뒤 발화 번호)]. 녹음 말소리 구간이 없으면 정하지 않는다 */
 export function slowTurns(rec: CallRecord): [number, number][] {
@@ -93,11 +98,21 @@ export function infoErrors(rec: CallRecord): [number, number, string][] {
           .map((x) => x.text)
           .join(' ')
       : '';
-  const checks: [RegExp, boolean, string][] = [
-    [ASK_SENDER_NAME, !!first && GREET_NAME.test(first.text), '인사에서 부른 이름을 다시 물음'],
-    [ASK_ORIGIN, !!first && GREET_ORIGIN.test(first.text), '인사에서 말한 등록 출발지를 다시 물음'],
+  const checks: [RegExp, boolean, string, RegExp][] = [
+    [
+      ASK_SENDER_NAME,
+      !!first && GREET_NAME.test(first.text),
+      '인사에서 부른 이름을 다시 물음',
+      NAME_CHANGE,
+    ],
+    [
+      ASK_ORIGIN,
+      !!first && GREET_ORIGIN.test(first.text),
+      '인사에서 말한 등록 출발지를 다시 물음',
+      ORIGIN_CHANGE,
+    ],
   ];
-  for (const [ask, known, why] of checks) {
+  for (const [ask, known, why, field] of checks) {
     if (!known) continue;
     for (let k = 1; k < us.length; k++) {
       const u = us[k];
@@ -109,13 +124,15 @@ export function infoErrors(rec: CallRecord): [number, number, string][] {
           .filter((x) => x.customer)
           .map((x) => x.text)
           .join(' ');
-      if (
-        !u.customer &&
-        ask.test(u.text) &&
-        ASK_VERB.test(u.text) &&
-        !u.text.includes('성함은') &&
-        !CHANGED.test(before)
-      ) {
+      const changed =
+        CHANGED.test(before) || us.slice(1, k).some((x) => x.customer && field.test(x.text));
+      const asked = u.text
+        .split(SENTENCES)
+        .some(
+          (sentence) =>
+            ask.test(sentence) && ASK_VERB.test(sentence) && !sentence.includes('성함은'),
+        );
+      if (!u.customer && asked && !changed) {
         out.push([u.order, u.order, why]);
         break;
       }
@@ -129,7 +146,7 @@ const MERGE_GAP = 1; // 같은 문제가 이만큼 차례 안에 다시 나오�
 const DEFAULT_REASON: Record<string, string> = {
   RECOGNITION_FAILURE: '고객이 준 정보를 잘못 받음',
   INTENT_FAILURE: '고객의 질문·요청을 다르게 받음',
-  UNGROUNDED_ANSWER: '확인 없이 답함',
+  UNGROUNDED_ANSWER: 'FAQ · 업무 규칙과 다르게 안내함',
   SLOW_RESPONSE: 'AI 응답이 늦어 고객이 기다림',
   INTERRUPTION: '고객이 끼어들어 AI 말이 중간에 끊김',
   CUSTOMER_CONFUSION: '고객이 AI 말을 못 알아들음',
@@ -150,9 +167,18 @@ export interface Complaint {
   evidenceText: string;
   offsetSeconds: number | null;
   utteranceOrders: number[];
+  target?: string | null;
+  level?: string | null;
 }
 
-type Mark = { t: number; issue: string | null; why: string };
+type Mark = {
+  t: number;
+  issue: string | null;
+  why: string;
+  complain_target?: string | null;
+  complain_level?: string | null;
+  complain_quote?: string;
+};
 
 /** 문제가 있는 차례를 불만으로. 유형마다 같은 문제가 이어지거나 MERGE_GAP 차례 안에 다시 나오면 한 건으로 합친다 */
 export function complaints(analysis: Judged, rec: CallRecord): Complaint[] {
@@ -163,8 +189,8 @@ export function complaints(analysis: Judged, rec: CallRecord): Complaint[] {
     marks.get(kind)!.push(m);
   };
   for (const t of analysis.turns) {
-    if (t.issue && t.issue !== 'FRUSTRATION') add(t.issue, t);
-    if (t.issue === 'FRUSTRATION' || t.complain) add('FRUSTRATION', t);
+    if (t.issue) add(t.issue, t);
+    if (t.complain) add('FRUSTRATION', t);
   }
   const turnOf = new Map(
     rec.turns.flatMap((t) => t.utterances.map((u) => [u.order, t.no] as const)),
@@ -194,8 +220,10 @@ export function complaints(analysis: Judged, rec: CallRecord): Complaint[] {
         for (let n = last + 1; n < m.t; n++)
           for (const u of byNo.get(n)?.utterances ?? []) between.push(u.order);
         out[out.length - 1][1].utteranceOrders.push(...between, ...orders);
+        if (kind === 'FRUSTRATION' && m.complain_level === 'explicit')
+          out[out.length - 1][1].level = 'explicit';
       } else {
-        const why = m.issue === kind ? m.why : '';
+        const why = kind === 'FRUSTRATION' ? m.complain_quote : m.issue === kind ? m.why : '';
         out.push([
           m.t,
           {
@@ -203,6 +231,9 @@ export function complaints(analysis: Judged, rec: CallRecord): Complaint[] {
             evidenceText: why || DEFAULT_REASON[kind],
             offsetSeconds: byNo.get(m.t)!.utterances[0].offset,
             utteranceOrders: orders,
+            ...(kind === 'FRUSTRATION'
+              ? { target: m.complain_target ?? null, level: m.complain_level ?? null }
+              : {}),
           },
         ]);
       }
@@ -227,12 +258,16 @@ export function backendComplaints(
     evidenceText: string;
     offsetSeconds: number | null;
     utteranceOrders: number[];
+    target: string | null;
+    level: string | null;
   }[];
 } {
   const found = complaints(analysis, rec)
     .filter((c) => c.type in BACKEND_TYPE)
     .map((c) => ({
       type: BACKEND_TYPE[c.type],
+      target: c.type === 'FRUSTRATION' ? (c.target ?? null) : null,
+      level: c.type === 'FRUSTRATION' ? (c.level ?? null) : null,
       evidenceText: c.evidenceText,
       offsetSeconds: c.offsetSeconds === null ? null : Math.max(0, Math.trunc(c.offsetSeconds)),
       utteranceOrders: [...new Set(c.utteranceOrders)].sort((a, b) => a - b),

@@ -220,3 +220,7 @@ S3의 403은 파일 미존재로 단정하지 않는다. 실패 항목은 `url`�
 
 
 모든 목록 응답의 최상위 total_count는 필수인 0 이상 정수이며 같은 검색·필터·권한 범위의 전체 결과 수다. limit·offset 적용 전 COUNT(*)를 목록 데이터와 같은 SQL 스냅샷에서 계산한다. 검색 결과 없음은 0이며 offset이 전체 건수를 넘어 data가 비어도 total_count는 유지한다. 기존 hasNext는 유지한다.
+
+### 고객 불만의 책임·강도
+
+analysis.complaints에는 target·level·referenceOnly가 추가된다. target은 DISSATISFACTION_EXPRESSION에서 ai_service·price_policy·delivery_other이며 level은 explicit·mild다. 기존 미상 값과 다른 유형은 null이다. UNSUPPORTED_ANSWER의 referenceOnly는 true이고 AI 품질 비율에서 제외한다. 목록의 hasComplaint 필터는 저장된 전체 판정을 계속 사용한다.

@@ -150,10 +150,8 @@ export class OrdersRepository {
     const page = await readPage<PreviousOrderAddressDto & { __sort_position: number }>(
       client,
       `SELECT o.order_seq AS "orderSeq",p.order_parcel_seq AS "orderParcelSeq",o.created_at AS "createdAt",p.parcel_position AS __sort_position,
-        jsonb_build_object('name',p.${side}_name,'phoneNumber',p.${side}_phone_number,
-          'roadAddress',p.${side}_road_address,'jibunAddress',p.${side}_jibun_address,
-          'detailAddress',p.${side}_detail_address,'dongName',p.${side}_dong_name,
-          'postalCode',p.${side}_postal_code) AS address
+        p.${side}_name AS __name,p.${side}_phone_number AS __phone,p.${side}_road_address AS __road,
+        p.${side}_jibun_address AS __jibun,p.${side}_detail_address AS __detail,p.${side}_dong_name AS __dong,p.${side}_postal_code AS __postal
        FROM orders o JOIN order_parcels p ON p.order_seq=o.order_seq
        WHERE o.customer_seq=$1 AND o.status='ACCEPTED' AND p.status='ACTIVE' AND o.deleted_at IS NULL
          AND COALESCE(o.closed_at,o.created_at)>clock_timestamp()-interval '5 years'
@@ -167,6 +165,9 @@ export class OrdersRepository {
       [customerId, query.from ?? null, query.to ?? null, query.q || null],
       query,
       '"createdAt" DESC,"orderSeq" DESC,__sort_position,"orderParcelSeq"',
+      `page.__page_ordinal,page."orderSeq",page."orderParcelSeq",page."createdAt",page.__sort_position,
+       jsonb_build_object('name',page.__name,'phoneNumber',page.__phone,'roadAddress',page.__road,
+        'jibunAddress',page.__jibun,'detailAddress',page.__detail,'dongName',page.__dong,'postalCode',page.__postal) AS address`,
     );
     return {
       ...page,
@@ -286,8 +287,7 @@ export class OrdersRepository {
       `SELECT o.order_seq AS "orderSeq", o.customer_seq AS "customerSeq", o.status,
           o.creation_source AS "creationSource",o.total_amount AS "totalAmount",o.payment_due_at AS "paymentDueAt",o.paid_at AS "paidAt",
           o.payment_method_type AS "paymentMethodType", o.pickup_requested_at AS "pickupRequestedAt",
-          o.created_at AS "createdAt",
-          (SELECT count(*)::int FROM order_parcels p WHERE p.order_seq=o.order_seq) AS "parcelCount"
+          o.created_at AS "createdAt"
          FROM orders o
          WHERE o.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM order_parcel_drafts d WHERE d.legacy_order_seq=o.order_seq)
            AND COALESCE(o.closed_at,o.created_at)>clock_timestamp()-interval '5 years'
@@ -307,6 +307,7 @@ export class OrdersRepository {
       ],
       query,
       '"createdAt" DESC,"orderSeq" DESC',
+      'page.*,(SELECT count(*)::int FROM order_parcels p WHERE p.order_seq=page."orderSeq") AS "parcelCount"',
     );
   }
 

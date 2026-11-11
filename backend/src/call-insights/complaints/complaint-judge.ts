@@ -2,7 +2,7 @@
 // 기준 구현: ai/call_analysis/analyze.py (정답 묶음으로 점수를 잰 코드). 규칙을 바꿀 때는 파이썬에서 점수를 다시 재고 같이 고친다.
 // 모델 결과는 미신뢰 입력이라 check()가 입력에 있는 차례, 정해진 값, 행동과 맞는 문제만 남긴다.
 // 같은 통화를 VOTES번 동시에 판정해 같은 차례 · 같은 문제가 NEED번 이상 나온 것만 남긴다(다수결).
-import { JUDGE_PROMPT, VERIFY_PROMPT } from './complaint-prompts';
+import { AI_RULES, JUDGE_PROMPT, VERIFY_PROMPT } from './complaint-prompts';
 import { Segment, pauses, pyRound } from './complaint-timing';
 
 export const MODEL = 'gpt-6-luna';
@@ -49,15 +49,15 @@ export const FIELDS = [
   'pickup_at',
   'payment',
 ] as const;
-const BASIS = ['faq', 'tool', 'order', 'none', 'na'] as const;
 // 말 끊김 · 응답 지연은 모델이 고르지 않는다 — 대본 · 녹음 사실로 코드가 정한다(complaint-facts)
 export const ISSUES = [
   'RECOGNITION_FAILURE',
   'INTENT_FAILURE',
   'UNGROUNDED_ANSWER',
   'CUSTOMER_CONFUSION',
-  'FRUSTRATION',
 ] as const;
+export const TARGETS = ['ai_service', 'price_policy', 'delivery_other'] as const;
+export const LEVELS = ['explicit', 'mild'] as const;
 const PURPOSES = ['register', 'lookup', 'cancel', 'inquiry', 'handoff', 'other'] as const;
 const GOALS = ['achieved', 'partial', 'failed', 'none'] as const;
 const MOODS = ['positive', 'neutral', 'negative'] as const;
@@ -175,7 +175,14 @@ export interface JudgedTurn {
   given: string[];
   ai: string[];
   asked: string[];
-  basis: string;
+  complain_target?: string | null;
+  complain_level?: string | null;
+  complain_quote?: string;
+  complain_single?: {
+    complain_target?: string | null;
+    complain_level?: string | null;
+    complain_quote?: string;
+  };
   issue: Issue | null;
   why: string;
   quote?: string;
@@ -185,6 +192,9 @@ export interface Judged {
   turns: JudgedTurn[];
   call: { purposes: string[]; goal: string | null; mood: string | null; summary: string };
   missing?: number;
+  dropped?: Record<string, number>;
+  single?: Span[];
+  disputed?: Span[];
 }
 
 export interface Usage {
@@ -376,21 +386,32 @@ export function describe(rec: CallRecord, only?: Set<number>, mark?: Set<number>
   return lines.join('\n');
 }
 
-/** 판정 지시문 = 지시문 + (있으면) FAQ 원문. FAQ는 통화마다 같아 앞부분 캐시가 걸린다 */
-export function instructions(
-  faqs: { question?: unknown; answer?: unknown }[] | null,
-  prompt = JUDGE_PROMPT,
+/** AI 업무 규칙과 FAQ 원문을 판정과 반대 근거 검사에 함께 사용한다. */
+export function references(
+  faqs: { question?: unknown; answer?: unknown }[] | null = null,
+  rules = true,
 ): string {
-  if (!faqs?.length) return prompt;
-  const one = (v: unknown) => pySplitJoin(pyStr(v));
-  const rows = faqs.map((f) => `- Q: ${one(f.question)}\n  A: ${one(f.answer)}`);
-  return `${prompt}\n\n## FAQ 원문 (AI가 검색해 답할 수 있는 안내 자료 전체)\n\n` + rows.join('\n');
+  let text = rules
+    ? '\n\n## AI 업무 규칙 (AI 상담원이 지시문으로 가진 규칙 — 조회 없이도 아는 것)\n\n' +
+      AI_RULES.replace(/<!--.*?-->\s*/gs, '')
+    : '';
+  if (faqs?.length) {
+    const one = (v: unknown) => pySplitJoin(pyStr(v));
+    text +=
+      '\n\n## FAQ 원문 (AI가 검색해 답할 수 있는 안내 자료 전체)\n\n' +
+      faqs.map((f) => `- Q: ${one(f.question)}\n  A: ${one(f.answer)}`).join('\n');
+  }
+  return text;
 }
 
-const codes = (values: readonly string[]) => ({
-  type: 'array',
-  items: { type: 'string', enum: [...values] },
-});
+export function instructions(
+  faqs: { question?: unknown; answer?: unknown }[] | null = null,
+  prompt = JUDGE_PROMPT,
+  rules = true,
+): string {
+  return prompt + references(faqs, rules);
+}
+
 export const SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -401,17 +422,125 @@ export const SCHEMA = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['t', 'cust', 'given', 'ai', 'asked', 'basis', 'issue', 'why', 'quote'],
+        required: [
+          't',
+          'cust',
+          'given',
+          'ai',
+          'asked',
+          'issue',
+          'why',
+          'quote',
+          'complain_quote',
+          'complain_target',
+          'complain_level',
+          'unground_source',
+        ],
         properties: {
-          t: { type: 'integer' },
-          cust: codes(CUST),
-          given: codes(FIELDS),
-          ai: codes(AI),
-          asked: codes(FIELDS),
-          basis: { type: 'string', enum: [...BASIS] },
-          issue: { type: 'string', enum: ['none', ...ISSUES] },
-          why: { type: 'string' },
-          quote: { type: 'string' },
+          t: {
+            type: 'integer',
+          },
+          cust: {
+            type: 'array',
+            items: {
+              type: 'string',
+              enum: [
+                'answer',
+                'question',
+                'request',
+                'correct',
+                'confirm',
+                'ask_back',
+                'wait',
+                'complain',
+                'end',
+                'other',
+              ],
+            },
+          },
+          given: {
+            type: 'array',
+            items: {
+              type: 'string',
+              enum: [
+                'sender_name',
+                'sender_phone',
+                'sender_address',
+                'receiver_name',
+                'receiver_phone',
+                'receiver_address',
+                'item',
+                'item_price',
+                'pickup_at',
+                'payment',
+              ],
+            },
+          },
+          ai: {
+            type: 'array',
+            items: {
+              type: 'string',
+              enum: [
+                'ask',
+                'inform',
+                'confirm',
+                'process',
+                'handoff',
+                'refuse',
+                'wait',
+                'close',
+                'other',
+              ],
+            },
+          },
+          asked: {
+            type: 'array',
+            items: {
+              type: 'string',
+              enum: [
+                'sender_name',
+                'sender_phone',
+                'sender_address',
+                'receiver_name',
+                'receiver_phone',
+                'receiver_address',
+                'item',
+                'item_price',
+                'pickup_at',
+                'payment',
+              ],
+            },
+          },
+          issue: {
+            type: 'string',
+            enum: [
+              'none',
+              'RECOGNITION_FAILURE',
+              'INTENT_FAILURE',
+              'UNGROUNDED_ANSWER',
+              'CUSTOMER_CONFUSION',
+            ],
+          },
+          why: {
+            type: 'string',
+          },
+          quote: {
+            type: 'string',
+          },
+          complain_quote: {
+            type: 'string',
+          },
+          complain_target: {
+            type: 'string',
+            enum: ['none', 'ai_service', 'price_policy', 'delivery_other'],
+          },
+          complain_level: {
+            type: 'string',
+            enum: ['none', 'explicit', 'mild'],
+          },
+          unground_source: {
+            type: 'string',
+          },
         },
       },
     },
@@ -420,10 +549,24 @@ export const SCHEMA = {
       additionalProperties: false,
       required: ['purposes', 'goal', 'mood', 'summary'],
       properties: {
-        purposes: codes(PURPOSES),
-        goal: { type: 'string', enum: [...GOALS] },
-        mood: { type: 'string', enum: [...MOODS] },
-        summary: { type: 'string' },
+        purposes: {
+          type: 'array',
+          items: {
+            type: 'string',
+            enum: ['register', 'lookup', 'cancel', 'inquiry', 'handoff', 'other'],
+          },
+        },
+        goal: {
+          type: 'string',
+          enum: ['achieved', 'partial', 'failed', 'none'],
+        },
+        mood: {
+          type: 'string',
+          enum: ['positive', 'neutral', 'negative'],
+        },
+        summary: {
+          type: 'string',
+        },
       },
     },
   },
@@ -463,12 +606,18 @@ function quoted(quote: string, rec: CallRecord, no: number): boolean {
   );
 }
 
-/** 모델 결과 검사: 입력에 있는 차례만 한 번씩, 정해진 값만. 행동과 맞지 않는 문제 · 대본에 없는 인용은 버린다 */
-export function check(raw: unknown, rec: CallRecord): Judged {
+const normalizeSource = (text: string) => text.replace(/[^\p{L}\p{N}]+/gu, '');
+
+/** 모델 출력의 차례·인용·책임 대상을 검사한 뒤 번호를 가린다. */
+export function check(raw: unknown, rec: CallRecord, sources = ''): Judged {
   const obj =
     raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
   const byNo = new Map(rec.turns.map((t) => [t.no, t]));
   const turns = new Map<number, JudgedTurn>();
+  const dropped: Record<string, number> = {};
+  const drop = (reason: string) => {
+    dropped[reason] = (dropped[reason] ?? 0) + 1;
+  };
   for (const item of Array.isArray(obj.turns) ? obj.turns : []) {
     if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
     let r = item as Record<string, unknown>;
@@ -477,17 +626,28 @@ export function check(raw: unknown, rec: CallRecord): Judged {
     const turn = byNo.get(no)!;
     const cust = pick(r.cust, CUST);
     const ai = pick(r.ai, AI);
-    const basis = has(BASIS, r.basis) ? r.basis : 'na';
     let issue: Issue | null = has(ISSUES, r.issue) ? (r.issue as Issue) : null;
-    const fits: Partial<Record<Issue, boolean>> = {
-      UNGROUNDED_ANSWER: ai.includes('inform') && basis === 'none',
-      CUSTOMER_CONFUSION: cust.includes('ask_back'),
-      FRUSTRATION: cust.includes('complain'),
-    };
-    if (issue && fits[issue] === false) issue = null;
-    if (issue === 'UNGROUNDED_ANSWER' && turn.actions.some(([, a]) => a in REVIEWS)) issue = null;
+    if (issue === 'CUSTOMER_CONFUSION' && !cust.includes('ask_back')) {
+      drop('fits');
+      issue = null;
+    }
+    if (issue === 'UNGROUNDED_ANSWER') {
+      const source = normalizeSource(pyStr(r.unground_source));
+      if (
+        turn.actions.some(([, action]) => action in REVIEWS) ||
+        !ai.includes('inform') ||
+        chars(source).length < 8 ||
+        !sources.includes(source)
+      ) {
+        drop('source');
+        issue = null;
+      }
+    }
     const quote = pySplitJoin(pyStr(r.quote));
-    if (issue && !quoted(quote, rec, no)) issue = null;
+    if (issue && !quoted(quote, rec, no)) {
+      drop('quote');
+      issue = null;
+    }
     if (!turn.down && turn.actions.some(([, , txt]) => txt.includes(PHONE_REJECT))) {
       const ok = spokenPhoneOk(
         turn.utterances
@@ -501,14 +661,25 @@ export function check(raw: unknown, rec: CallRecord): Judged {
         r = { ...r, why: '맞는 번호를 자릿수가 틀렸다며 다시 물음' };
       }
     }
+    const complaintQuote = pySplitJoin(pyStr(r.complain_quote));
+    const target = has(TARGETS, r.complain_target) ? r.complain_target : null;
+    const normalized = normalizeSource(complaintQuote);
+    const complain =
+      cust.includes('complain') &&
+      target !== null &&
+      chars(normalized).length >= 4 &&
+      turn.utterances.some((u) => u.customer && normalizeSource(u.text).includes(normalized));
+    if (cust.includes('complain') && !complain) drop('complain');
     const out: JudgedTurn = {
       t: no,
-      complain: cust.includes('complain') && !turn.down,
+      complain,
+      complain_target: complain ? target : null,
+      complain_level: complain ? (has(LEVELS, r.complain_level) ? r.complain_level : 'mild') : null,
+      complain_quote: complain ? clean(complaintQuote, MAX_QUOTE) : '',
       cust,
       given: pick(r.given, FIELDS),
       ai,
       asked: pick(r.asked, FIELDS),
-      basis,
       issue,
       why: issue ? clean(r.why, MAX_WHY) : '',
     };
@@ -528,6 +699,7 @@ export function check(raw: unknown, rec: CallRecord): Judged {
       summary: clean(c.summary, MAX_SUMMARY),
     },
     missing: byNo.size - turns.size,
+    dropped,
   };
 }
 
@@ -549,22 +721,51 @@ export function spans(a: Judged): Span[] {
 
 const overlaps = (a: Set<number>, b: Set<number>) => [...a].some((n) => b.has(n));
 
-/** 다수결: 유형이 같고 차례가 겹치는 문제 묶음이 need판 이상에서 나온 것만 남긴다(먼저 나온 판의 차례 · 사유) */
+function plurality<T>(values: T[]): T | null {
+  const counts = new Map<T, number>();
+  for (const value of values) counts.set(value, (counts.get(value) ?? 0) + 1);
+  let result: T | null = null;
+  let most = 0;
+  for (const [value, count] of counts) {
+    if (count > most) {
+      result = value;
+      most = count;
+    }
+  }
+  return result;
+}
+
+/** 같은 유형의 겹치는 장면을 다수결로 남기고 책임·강도·통화 칸도 합의한다. */
 export function vote(analyses: Judged[], need: number): Judged {
   const turns = new Map<number, JudgedTurn>();
   for (const a of analyses)
     for (const t of a.turns) if (!turns.has(t.t)) turns.set(t.t, { ...t, issue: null, why: '' });
-  for (const [n, t] of turns)
-    t.complain =
-      analyses.filter((a) => a.turns.some((x) => x.t === n && x.complain)).length >= need;
+  for (const [n, t] of turns) {
+    const said = analyses.flatMap((a) => a.turns.filter((x) => x.t === n && x.complain));
+    t.complain = said.length >= need;
+    t.complain_target = t.complain ? plurality(said.map((x) => x.complain_target ?? null)) : null;
+    t.complain_level = t.complain ? plurality(said.map((x) => x.complain_level ?? null)) : null;
+    t.complain_quote = t.complain ? said[0].complain_quote! : '';
+    if (said.length && !t.complain)
+      t.complain_single = {
+        complain_target: said[0].complain_target,
+        complain_level: said[0].complain_level,
+        complain_quote: said[0].complain_quote,
+      };
+  }
   const runs = analyses.map(spans);
   const kept: [Issue, Set<number>][] = [];
+  const split: Span[] = [];
   for (const runSpans of runs) {
     for (const [kind, nos, ts] of runSpans) {
       const seen = runs.filter((other) =>
         other.some(([k, n]) => k === kind && overlaps(nos, n)),
       ).length;
-      if (seen < need || kept.some(([k, n]) => k === kind && overlaps(nos, n))) continue;
+      if (seen < need) {
+        if (!split.some(([k, n]) => k === kind && overlaps(nos, n))) split.push([kind, nos, ts]);
+        continue;
+      }
+      if (kept.some(([k, n]) => k === kind && overlaps(nos, n))) continue;
       kept.push([kind, nos]);
       for (const t of ts) {
         const turn = turns.get(t.t)!;
@@ -575,14 +776,29 @@ export function vote(analyses: Judged[], need: number): Judged {
       }
     }
   }
+  const single = split.filter(
+    ([kind, nos, ts]) =>
+      !kept.some(([k, n]) => k === kind && overlaps(nos, n)) &&
+      !ts.some((t) => turns.get(t.t)!.issue),
+  );
   return {
     turns: [...turns.keys()].sort((a, b) => a - b).map((n) => turns.get(n)!),
-    call: analyses[0].call,
+    call: {
+      ...analyses[0].call,
+      mood: plurality(analyses.map((a) => a.call.mood ?? null)),
+      goal: plurality(analyses.map((a) => a.call.goal ?? null)),
+      purposes: PURPOSES.filter(
+        (p) => analyses.filter((a) => a.call.purposes?.includes(p)).length >= need,
+      ),
+    },
+    single,
+    disputed: single.filter(([kind]) => DISPUTE.includes(kind)),
   };
 }
 
 // 장면 확인(2차): 1차 판정이 잡은 용건 인식 · 근거 없는 답변을 그 장면만 보여 주고 예/아니오로 다시 묻는다
 const VERIFY: Issue[] = ['INTENT_FAILURE', 'UNGROUNDED_ANSWER'];
+export const DISPUTE: Issue[] = [];
 const VERIFY_CONTEXT = 3;
 const VERIFY_SCHEMA = {
   type: 'object',
@@ -617,10 +833,19 @@ export async function run(
   const text = describe(rec);
   if (chars(text).length > MAX_INPUT_CHARS) return null;
   const need = Math.min(NEED, votes);
+  let prepared: { instructions: string; sources: string; references: string } | undefined;
   const judgeOnce = async () => {
     try {
-      const { data, usage } = await ask(instructions(faqs), text, 'call_analysis', SCHEMA);
-      return { ...check(data, rec), usage };
+      if (!prepared) {
+        const refs = references(faqs);
+        prepared = {
+          instructions: JUDGE_PROMPT + refs,
+          sources: normalizeSource(refs + text),
+          references: refs,
+        };
+      }
+      const { data, usage } = await ask(prepared.instructions, text, 'call_analysis', SCHEMA);
+      return { ...check(data, rec, prepared.sources), usage };
     } catch {
       return null;
     }
@@ -634,8 +859,17 @@ export async function run(
   const scenes = spans(out)
     .filter(([kind]) => VERIFY.includes(kind))
     .map(([kind, nos]) => [kind, nos] as const);
+  const dropped: Record<string, number> = {};
+  for (const a of done)
+    for (const [reason, count] of Object.entries(a.dropped ?? {}))
+      dropped[reason] = (dropped[reason] ?? 0) + count;
+  const disputed = out.disputed ?? [];
+  delete out.disputed;
   const checked = await Promise.all(
-    scenes.map(async ([kind, nos]) => {
+    [
+      ...scenes.map(([kind, nos]) => ({ kind, nos, strict: false })),
+      ...disputed.map(([kind, nos]) => ({ kind, nos, strict: true })),
+    ].map(async ({ kind, nos, strict }) => {
       const lo = Math.min(...nos);
       const hi = Math.max(...nos);
       const shown = new Set(
@@ -643,29 +877,40 @@ export async function run(
       );
       const input = `유형: ${kind}\n\n` + describe(rec, shown, nos);
       try {
-        const { data, usage } = await ask(
-          instructions(kind === 'UNGROUNDED_ANSWER' ? faqs : null, VERIFY_PROMPT),
-          input,
-          'confirm',
-          VERIFY_SCHEMA,
-        );
+        const refs = kind === 'UNGROUNDED_ANSWER' ? prepared!.references : references(null);
+        const { data, usage } = await ask(VERIFY_PROMPT + refs, input, 'confirm', VERIFY_SCHEMA);
         const verdict =
           data && typeof data === 'object' ? (data as { verdict?: unknown }).verdict : undefined;
-        return [verdict !== 'no', usage] as const;
+        return [strict ? verdict === 'yes' : verdict !== 'no', usage] as const;
       } catch {
-        return [true, null] as const; // 확인 못 했다고 지우지 않는다
+        return [!strict, null] as const;
       }
     }),
   );
+  disputed.forEach(([kind, , ts], i) => {
+    const [keep, usage] = checked[scenes.length + i];
+    if (usage) used.push(usage);
+    if (!keep) dropped['dispute_' + kind] = (dropped['dispute_' + kind] ?? 0) + 1;
+    if (keep)
+      for (const t of ts) {
+        const turn = out.turns.find((x) => x.t === t.t);
+        if (turn && !turn.issue) {
+          turn.issue = kind;
+          turn.why = t.why;
+        }
+      }
+  });
   scenes.forEach(([kind, nos], i) => {
     const [keep, usage] = checked[i];
     if (usage) used.push(usage);
-    if (!keep)
+    if (!keep) {
+      dropped['verify_' + kind] = (dropped['verify_' + kind] ?? 0) + 1;
       for (const t of out.turns)
         if (nos.has(t.t) && t.issue === kind) {
           t.issue = null;
           t.why = '';
         }
+    }
   });
   const usage = used.length
     ? (Object.fromEntries(
@@ -675,5 +920,11 @@ export async function run(
         ]),
       ) as unknown as Usage)
     : null;
-  return { ...out, missing: rec.turns.length - out.turns.length, votes: done.length, usage };
+  return {
+    ...out,
+    dropped,
+    missing: rec.turns.length - out.turns.length,
+    votes: done.length,
+    usage,
+  };
 }

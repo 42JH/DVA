@@ -30,11 +30,22 @@ export class OrderIntakeRepository {
     orderSeq: number | null,
     mappings: ParcelConversionDto[],
   ) {
-    for (const mapping of mappings)
+    if (
+      mappings.length > 1 &&
+      new Set(mappings.map((mapping) => mapping.draftSeq)).size === mappings.length
+    )
       await client.query(
-        `UPDATE order_parcel_drafts SET status='CONVERTED',order_parcel_seq=$2,order_seq=$3,version=version+1,updated_at=clock_timestamp() WHERE draft_seq=$1`,
-        [mapping.draftSeq, mapping.orderParcelSeq, orderSeq],
+        `UPDATE order_parcel_drafts d SET status='CONVERTED',order_parcel_seq=m."orderParcelSeq",
+         order_seq=$2,version=d.version+1,updated_at=clock_timestamp()
+         FROM jsonb_to_recordset($1::jsonb) AS m("draftSeq" int,"orderParcelSeq" int) WHERE d.draft_seq=m."draftSeq"`,
+        [JSON.stringify(mappings), orderSeq],
       );
+    else
+      for (const mapping of mappings)
+        await client.query(
+          `UPDATE order_parcel_drafts SET status='CONVERTED',order_parcel_seq=$2,order_seq=$3,version=version+1,updated_at=clock_timestamp() WHERE draft_seq=$1`,
+          [mapping.draftSeq, mapping.orderParcelSeq, orderSeq],
+        );
     await client.query(
       `UPDATE order_parcel_drafts SET status='INCOMPLETE',version=version+1,updated_at=clock_timestamp()
       WHERE call_session_seq=$1 AND status='EDITING' AND deleted_at IS NULL`,

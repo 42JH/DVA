@@ -95,7 +95,23 @@ function callResult(row: CallRow): CallListItemDto {
             aiEndedAt: aiEndedAt!,
             repeatQuestionCount,
             hasComplaint,
-            complaints: complaints!,
+            complaints: (complaints ?? []).map((complaint) => ({
+              type: complaint.type,
+              evidenceText: complaint.evidenceText,
+              offsetSeconds: complaint.offsetSeconds,
+              utteranceOrders: complaint.utteranceOrders,
+              target:
+                complaint.type === 'DISSATISFACTION_EXPRESSION' &&
+                ['ai_service', 'price_policy', 'delivery_other'].includes(complaint.target ?? '')
+                  ? complaint.target
+                  : null,
+              level:
+                complaint.type === 'DISSATISFACTION_EXPRESSION' &&
+                ['explicit', 'mild'].includes(complaint.level ?? '')
+                  ? complaint.level
+                  : null,
+              referenceOnly: complaint.type === 'UNSUPPORTED_ANSWER',
+            })),
             analysedAt,
           },
   };
