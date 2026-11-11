@@ -17,6 +17,7 @@ import { useCallView, type CallView } from '../hooks/useCallView'
 import { Player } from './Player'
 import { AiSteps, AiToggle, Talk } from '../../../shared/call/AiSteps'
 import { useShowAi } from '@/shared/lib/useShowAi'
+import { useKeepScroll } from '@/shared/lib/keepScroll'
 
 type Line = CallView['segments'][number]['lines'][number]
 type Event = CallView['events'][number]
@@ -123,9 +124,10 @@ function Fact({ label, children }: { label: string; children: string }) {
 /** 대화 — 말풍선 사이에 그 시각의 AI 처리 기록. 재생 중이면 지금 말을 따라 내려감 */
 function Chat({ vm, arrival, showAi }: { vm: CallView; arrival: Arrival; showAi: boolean }) {
   const list = useRef<HTMLDivElement>(null)
+  const back = useKeepScroll(list, 'chat')
   const touched = useFollowScroll(list, vm.focusKey, vm.player.playing, vm.jump)
   const lines = vm.segments.flatMap((g) => g.lines)
-  const marked = useArrival(list, lines, vm, arrival)
+  const marked = useArrival(list, lines, vm, back ? null : arrival) // 뒤로 왔으면 보던 곳 그대로
 
   // AI 처리 기록 → 그 시각 직전에 시작한 말 아래에 붙임 (시각을 모르면 맨 끝)
   const after = new Map<number | 'end', Event[]>()
@@ -226,6 +228,8 @@ function useArrival(
 /** 오른쪽 운영팀용 정보 — 고객 · 주문 · 처리 결과 · 불만 (한 화면에 다 보여 목차는 두지 않음) */
 function Contents({ vm }: { vm: CallView }) {
   const s = vm.summary
+  const side = useRef<HTMLDivElement>(null)
+  useKeepScroll(side, 'side')
   // 분석 실패면 기다리라는 말 대신 받지 못했다고
   const waitText =
     s?.state.label === '분석 실패' ? '분석을 받지 못했습니다.' : '분석이 끝나면 보입니다.'
@@ -234,7 +238,10 @@ function Contents({ vm }: { vm: CallView }) {
       aria-label="통화 정보"
       className="flex w-[400px] shrink-0 flex-col border-l border-ops-line bg-white max-xl:w-[340px]"
     >
-      <div className="relative min-h-0 flex-1 [scrollbar-width:thin] overflow-y-auto px-5 py-4">
+      <div
+        ref={side}
+        className="relative min-h-0 flex-1 [scrollbar-width:thin] overflow-y-auto px-5 py-4"
+      >
         {!s ? (
           <p className="text-[13px] text-ops-sub">불러오는 중…</p>
         ) : (

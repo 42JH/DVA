@@ -8,6 +8,7 @@ import { PageHead } from '@/shared/ui'
 import { Btn, Icon } from '@/shared/ui'
 import { SearchBox, SkeletonRows } from '@/shared/ui/ListFrame'
 import { useScrollable } from '@/shared/lib/useScrollable'
+import { useKeepScroll } from '@/shared/lib/keepScroll'
 import { CompanyCsvModal } from './CompanyModals'
 import { Pagination } from '@/shared/ui/Pagination'
 import { usePageSize } from '@/shared/lib/paging'
@@ -21,6 +22,7 @@ export function CompaniesPage() {
   const vm = useCompanyList(size)
   const box = useRef<HTMLDivElement>(null)
   const scrollable = useScrollable(box, [vm.rows])
+  useKeepScroll(box, 'list')
   const month = Number(todayYmd().slice(5, 7))
   return (
     <>

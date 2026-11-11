@@ -1,5 +1,6 @@
 // 목록 틀: 흰 표 상자(가로 스크롤은 상자 안에서만), 새 항목 알림 줄, 아래 쪽 이동 줄
-import { useEffect, useRef, type ReactNode } from 'react'
+import { useRef, type ReactNode } from 'react'
+import { useKeepScroll } from '@/shared/lib/keepScroll'
 import type { useSnapshotList } from '@/shared/lib/useSnapshotList'
 import { useScrollable } from '@/shared/lib/useScrollable'
 import { Icon } from './controls'
@@ -32,10 +33,9 @@ export function ListFrame({
   children: ReactNode // <table>
 }) {
   const box = useRef<HTMLDivElement>(null)
-  // 쪽 · 개수가 바뀌면 상자 맨 위로
-  useEffect(() => {
-    box.current?.scrollTo({ top: 0 })
-  }, [list.page, list.size])
+  // 쪽 · 개수를 바꾸면 상자 맨 위로 — 누를 때만 (예전엔 쪽 값이 바뀔 때마다라, 뒤로 와서 목록을 다시 받을 때도 맨 위로 감)
+  const top = () => box.current?.scrollTo({ top: 0 })
+  useKeepScroll(box, 'list')
 
   const scrollable = useScrollable(box, [list.items])
 
@@ -56,7 +56,10 @@ export function ListFrame({
             새 {unit} {list.fresh.toLocaleString('ko-KR')}건이 들어왔습니다.
             <button
               type="button"
-              onClick={list.latest}
+              onClick={() => {
+                list.latest()
+                top()
+              }}
               className="font-semibold underline-offset-2 hover:underline"
             >
               최신 목록 보기
@@ -81,8 +84,14 @@ export function ListFrame({
         page={list.page}
         size={list.size}
         total={list.total}
-        onPage={list.setPage}
-        onSize={list.setSize}
+        onPage={(p) => {
+          list.setPage(p)
+          top()
+        }}
+        onSize={(n) => {
+          list.setSize(n)
+          top()
+        }}
       />
     </>
   )

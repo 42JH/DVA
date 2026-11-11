@@ -12,6 +12,7 @@ import { Btn, Icon } from '@/shared/ui'
 import { SearchBox } from '@/shared/ui/ListFrame'
 import { useExamples, useFaqs, type FaqsVm } from '../hooks/useFaqs'
 import { useEffect, useRef, useState } from 'react'
+import { useKeepScroll } from '@/shared/lib/keepScroll'
 
 /** 2026.11.07 */
 const ymd = (iso: string | null) => {
@@ -24,6 +25,8 @@ import { Confirm } from '@/shared/ui/Modal'
 
 export function FaqsPage() {
   const vm = useFaqs()
+  const box = useRef<HTMLElement>(null)
+  useKeepScroll(box, 'list')
   return (
     <>
       <PageHead title="FAQ">
@@ -39,6 +42,7 @@ export function FaqsPage() {
         </Btn>
       </PageHead>
       <section
+        ref={box}
         aria-label="FAQ 목록"
         className="min-h-0 min-w-0 flex-1 [scrollbar-width:thin] overflow-y-auto px-6 py-4"
       >

@@ -7,6 +7,7 @@ import { PageHead } from '@/shared/ui'
 import { Btn, Segments } from '@/shared/ui'
 import { SearchBox, SkeletonRows } from '@/shared/ui/ListFrame'
 import { useScrollable } from '@/shared/lib/useScrollable'
+import { useKeepScroll } from '@/shared/lib/keepScroll'
 import { Pagination } from '@/shared/ui/Pagination'
 import { usePageSize } from '@/shared/lib/paging'
 import { Confirm } from '@/shared/ui/Modal'
@@ -58,6 +59,7 @@ export function AdminsPage() {
   const pendingTab = vm.tab === 'PENDING' // 승인 대기는 아직 계정이 아니라 신청일만
   const box = useRef<HTMLDivElement>(null)
   const scrollable = useScrollable(box, [vm.rows])
+  useKeepScroll(box, 'list')
   return (
     <>
       <PageHead title="관리자">
