@@ -40,12 +40,12 @@ const COUNT_KEY: Record<StatusGroup, keyof StatusCounts> = {
 
 const GROUPS: { value: StatusGroup; label: string }[] = [
   { value: 'ALL', label: '전체' },
-  { value: 'PAID', label: '결제 완료' }, // 서버 묶음 PAID = 결제 완료 · 디버 접수 중 · 접수 재시도 중 (11/11)
-  { value: 'notPaid', label: '결제 대기' },
-  { value: 'ACCEPTED', label: '접수 완료' },
-  { value: 'CANCELLED', label: '주문 취소' },
-  { value: 'SUBMISSION_FAILED', label: '접수 실패' }, // 최종 실패만
   { value: 'COLLECTING', label: '미완료' },
+  { value: 'notPaid', label: '결제 대기' },
+  { value: 'PAID', label: '결제 완료' }, // 서버 묶음 PAID = 결제 완료 · 디버 접수 중 · 접수 재시도 중 (11/11)
+  { value: 'ACCEPTED', label: '접수 완료' },
+  { value: 'SUBMISSION_FAILED', label: '접수 실패' }, // 최종 실패만
+  { value: 'CANCELLED', label: '주문 취소' },
 ]
 // o = 열어 둔 주문 '주문번호' 또는 '주문번호-배송번호' (통화 상세의 주문 링크도 이걸로 엶) · 미완료(배송 초안)는 'd초안번호'
 // d = 접수 시각 정렬 ('asc' = 오래된 순)
