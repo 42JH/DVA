@@ -109,7 +109,7 @@ export class ParcelDraftWriteController {
     }
     if (event.payload.operation === 'RecipientReceiptRead') {
       const row = (
-        await this.database.pool.query<{ receipt: RecipientReceipt }>(
+        await this.database.referencePool.query<{ receipt: RecipientReceipt }>(
           "SELECT i.payload->'result'->'customerReceipt' AS receipt FROM outbox_events o JOIN inbox_events i ON i.event_id=(o.payload->>'writeEventId')::uuid WHERE o.event_id=$1 AND o.destination='customer' AND o.event_type='OrderRecipientPinsWritten' AND i.source='customer' AND i.event_type='ParcelDraftWriteRequested'",
           [event.payload.input.eventId],
         )
@@ -125,7 +125,8 @@ export class ParcelDraftWriteController {
         payload: await this.finalization(Number(event.payload.input.id)),
       };
     }
-    const { rows } = await this.database.pool.query<OwnerCallWriteReceipt>(
+    // A held owner write can need these reads before releasing a business connection.
+    const { rows } = await this.database.referencePool.query<OwnerCallWriteReceipt>(
       `SELECT event_id AS "eventId",payload FROM outbox_events WHERE destination='consultation'
        AND event_type IN ('ParcelDraftCallWritten','OrderCallLinked','LegacyOrderCallWritten') AND aggregate_seq=$1 AND delivered_at IS NULL ORDER BY outbox_seq`,
       [event.payload.input.id],
@@ -163,7 +164,7 @@ export class ParcelDraftWriteController {
 
   private async finalization(id: number): Promise<IntakeFinalization | null> {
     const row = (
-      await this.database.pool.query<{ result: IntakeFinalization | null }>(
+      await this.database.referencePool.query<{ result: IntakeFinalization | null }>(
         "SELECT payload->'result'->'data'->'finalization' AS result FROM inbox_events WHERE event_id=$1 AND source='customer' AND event_type='ParcelDraftWriteRequested'",
         [finalizationId(id)],
       )

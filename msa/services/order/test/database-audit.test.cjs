@@ -24,3 +24,26 @@ test('an unknown COMMIT outcome never sends an abort that could erase committed 
   const {db,events}=await fixture('lost-commit');await assert.rejects(db.transaction(async()=>42));
   assert.ok(events.includes('COMMIT'));assert.ok(events.includes('release'));assert.ok(!events.includes('abort'));assert.ok(!events.includes('confirmed'));
 });
+
+test('owner recovery reads use the reference connection while business connections are occupied',async()=>{
+  const {ParcelDraftWriteController}=require('../dist/orders/parcel-draft-write.controller');
+  const reads=[];
+  const receipt={eventId:require('node:crypto').randomUUID()};
+  const database={
+    pool:{query:async()=>{throw new Error('All five business connections are occupied');}},
+    referencePool:{query:async sql=>{reads.push(sql);return{rows:sql.includes('customerReceipt')?[{receipt}]:[]};}},
+  };
+  const controller=new ParcelDraftWriteController(null,null,database,null,null,null);
+  for(const [source,operation,input]of [
+    ['consultation','PendingCallWritesRead',{id:1}],
+    ['consultation','IntakeFinalizationRead',{id:1}],
+    ['customer','RecipientReceiptRead',{eventId:receipt.eventId}],
+  ]) {
+    const event={eventId:require('node:crypto').randomUUID(),source,eventType:'ParcelDraftWriteReferenceRequested',payload:{operation,input}};
+    const result=await controller.references(event);
+    assert.equal(result.eventId,event.eventId);
+    assert.equal(result.status,'processed');
+    assert.deepEqual(result.payload,operation==='RecipientReceiptRead'?receipt:operation==='IntakeFinalizationRead'?null:[]);
+  }
+  assert.equal(reads.length,3);
+});
