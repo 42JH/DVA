@@ -392,29 +392,32 @@ export function usePersonaPage() {
       setVersion(null)
     },
 
-    personas: list.map((p): PersonaItem => {
-      const newer = p.inUse && !p.applyingVersion && p.head.version !== p.appliedVersion
-      return {
-        personaSeq: p.personaSeq,
-        name: p.name,
-        selected: p.personaSeq === persona?.personaSeq,
-        inUse: p.inUse,
-        applying: p.applyingVersion
-          ? `${VERSION_BADGE.PENDING.label}${p.applyError ? ' · AI 반영 오류' : ''}`
-          : null,
-        voice: voiceName(p.voice.voice),
-        deletable: canManage && !p.inUse && !p.applyingVersion,
-        note: newer ? '통화엔 이전 버전 사용 중' : null,
-        useLabel:
-          !canManage || p.applyingVersion
-            ? null
-            : !p.inUse
-              ? '통화에 사용하기'
-              : newer
-                ? '새 버전 통화에 사용하기'
-                : null,
-      }
-    }),
+    // 통화에 사용 중인 상담가는 늘 맨 위 (나머지는 서버가 준 순서 그대로)
+    personas: [...list]
+      .sort((a, b) => Number(b.inUse) - Number(a.inUse))
+      .map((p): PersonaItem => {
+        const newer = p.inUse && !p.applyingVersion && p.head.version !== p.appliedVersion
+        return {
+          personaSeq: p.personaSeq,
+          name: p.name,
+          selected: p.personaSeq === persona?.personaSeq,
+          inUse: p.inUse,
+          applying: p.applyingVersion
+            ? `${VERSION_BADGE.PENDING.label}${p.applyError ? ' · AI 반영 오류' : ''}`
+            : null,
+          voice: voiceName(p.voice.voice),
+          deletable: canManage && !p.inUse && !p.applyingVersion,
+          note: newer ? '통화엔 이전 버전 사용 중' : null,
+          useLabel:
+            !canManage || p.applyingVersion
+              ? null
+              : !p.inUse
+                ? '통화에 사용하기'
+                : newer
+                  ? '새 버전 통화에 사용하기'
+                  : null,
+        }
+      }),
     selectPersona: (seq: number) => {
       setPersonaSeq(seq)
       setVersion(null)
