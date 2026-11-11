@@ -8,6 +8,8 @@
 
 **받는 곳 부분 변경**: 개인 주소록·이전 도착지 후보 확인에서 서버가 `destination_change_question`을 보내면 후보 이름을 포함한 질문을 그대로 한다. `destination_partial_change`가 `address`이면 기존 이름·연락처를 유지하고 새 주소를 받는다. `recipient`이면 기존 주소·상세주소를 유지하고 새 이름·연락처를 받는다. 구체적인 새 값만 `record_fields`에 넣는다. 범위 확인 중 받은 새 값은 현재 후보에 보관해 답변 후 검증한다. 주소로 검증되지 않고 도로명·지번과 번호도 없는 입력은 `RECEIVER_ADDRESS_VALUE_REQUIRED`를 반환한다. 부분 변경 중 `find_destination`은 `DEST_CHANGE_USE_RECORD`와 현재 누락 항목을 반환한다.
 
+**개인 주소록 후보**: 받는 분 이름이 기록된 택배는 두 도구 모두 이름이 일치하는 후보만 찾는다. 이름이 아직 없으면 주소로 후보를 제안할 수 있다. `find_destination`에 기록된 이름과 다른 이름이 들어오면 `DEST_RECIPIENT_USE_RECORD`를 반환한다. 고객이 이름을 정정하면 `record_fields`에 실제로 들은 이름을 넣는다.
+
 **접수 조회 주소**: 선택된 택배의 `lookup_order`에 `sender_address_detail`과 `receiver_address_detail`을 해당 기본주소와 함께 전달한다. 빈 문자열은 상세주소 없음, 누락은 조회 결과로 확인할 수 없음을 뜻한다.
 
 **실행기** `run_tool(ctx, name, arguments, call_id, allowed=None)`: 같은 `call_id` 재수신은 처음 결과 그대로 → 허용 확인(`TOOL_NOT_ALLOWED`, 인수 검증보다 먼저) → strict 인수 검증(`TOOL_ARGS_INVALID` + needs에 필드 경로) → 예산 안 실행(도구 3초·RAG 12초 → `TOOL_TIMEOUT`/`KB_TIMEOUT`) → BE 실패는 `BackendFailure.code`, 그 밖 예외는 `INTERNAL_ERROR`(모두 unavailable).

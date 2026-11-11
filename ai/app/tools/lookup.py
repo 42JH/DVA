@@ -11,7 +11,7 @@ from pydantic import Field
 
 from app.address.parse import detail_text
 from app.domain.address_book import receiver_questions_deferred
-from app.domain.candidates import apply_pick, buffer_destination_fields, offer
+from app.domain.candidates import apply_pick, buffer_destination_fields, offer, reject_candidates
 from app.domain.state import DOCUMENT_ITEM_PRICE, CandidateSet, Items, ParcelDraft, Place, Source
 from app.integrations.backend.gateway import BackendFailure
 from app.observability.trace import observe_latency
@@ -50,7 +50,8 @@ def _from_be(p: BEPlace, source: Source) -> Place:
 
 @model_tool("find_destination",
             "주소록·이전 도착지와 기업·사원 배송지에서 고객이 말한 받는 곳을 찾는다. 상호·건물명·도로명은 place에(실제 주소로 바꿔 "
-            "주소록과 대조하고, 없으면 그 주소로 새 받는 분을 기록한다). 기업명은 organization, 부서는 department. "
+            "현재 택배의 받는 분과 맞는 주소록 후보만 찾고, 없으면 그 주소를 기록한다). 받는 분을 정정할 때는 record_fields를 사용한다. "
+            "기업명은 organization, 부서는 department. "
             "고객이 말한 문자열만 채우고 나머지는 null.", DestinationArgs)
 async def find_destination(ctx: ToolContext, args: DestinationArgs) -> ToolOutcome:
     said = {k: v.strip() for k, v in args.model_dump().items() if v and v.strip()}
@@ -70,28 +71,39 @@ async def find_destination(ctx: ToolContext, args: DestinationArgs) -> ToolOutco
                 "guidance": "받는 곳에서 바꾸기로 한 항목에 이미 들은 값이 있으면 record_fields로 바로 기록한다. "
                             "값을 아직 듣지 않았으면 missing의 첫 항목만 묻는다."},
                 summary=state_summary(ctx.state, ctx.policy))
+        receiver = draft["receiver_name"]
+        known_name = receiver.value if receiver.valid else None
+        if not company and known_name and name and _recipient_key(name) != _recipient_key(known_name):
+            return ToolOutcome("needs_input", "DEST_RECIPIENT_USE_RECORD", {
+                "guidance": "고객이 받는 분을 정정했으면 실제로 들은 새 이름과 주소를 record_fields로 기록한다. "
+                            "주소만 말했으면 주소만 기록한다."}, summary=state_summary(ctx.state, ctx.policy))
         draft.deferred_destination = None  # 새 검색은 같은 택배의 앞선 검색을 대신한다.
         draft.destination_search_id += 1
         search = (draft, draft.destination_search_id)
         places = list(ctx.state.customer.places)
         started_deferred = receiver_questions_deferred(ctx.state)
-    be = [_to_be(p) for p in places]
+    recipient_name = known_name or name
     # 상호·건물명·도로명 → 실제 주소(주소DB, 없으면 카카오 키워드). 핀 문자열은 상호를 담지 않으므로 주소로 대조한다
     # (통화 67d29423: "다이소 구미 인동점"이 낱말 겹침으로 다른 건물의 핀 3건을 불러왔다)
     resolved = await _resolve(ctx, place) if place and not company else None
     if resolved and resolved.status in ("confirmed", "ambiguous"):
-        found = match_places(be, name, resolved.address, detail)  # 도로명·건물번호가 맞는 핀만(번호가 다르면 제외)
+        found = book_matches(places, recipient_name, resolved.address, detail)
         if found:  # 기존 수신인: 확인을 거친다
-            return await _offer(ctx, search, [places[be.index(p)] for p in found])
-        return await _new_receiver(ctx, search, name, resolved.detail or args.detail, resolved)
+            return await _offer(ctx, search, found)
+        return await _new_receiver(ctx, search, name if not known_name else None, resolved.detail or args.detail, resolved)
     if not company:  # 주소로 못 바꾼 말(지역·약칭): 들은 낱말로 주소록 대조
-        found = match_places(be[:ctx.pin_recent_count], name, place, detail) or match_places(be, name, place, detail)
+        found = (book_matches(places[:ctx.pin_recent_count], recipient_name, place, detail)
+                 or book_matches(places, recipient_name, place, detail))
         if found:  # 최근 N개에서 먼저
-            return await _offer(ctx, search, [places[be.index(p)] for p in found])
+            return await _offer(ctx, search, found)
     if resolved and resolved.status == "region_needed":
         return await _destination_problem(ctx, search, ToolOutcome("needs_input", "ADDRESS_REGION_NEEDED", {"found": 0}, [
             {"field": "receiver_address", "reason": "ADDRESS_REGION_NEEDED", "regions": list(resolved.alternatives),
              "heard": place}]))
+    if known_name and not company:
+        needs = [{"field": "receiver_address", "reason": "DEST_NONE"}] if place else []
+        return await _destination_problem(ctx, search, ToolOutcome("needs_input" if needs else "ok", "DEST_NONE",
+                                          {"found": 0}, needs), keep_receiver=True)
     query = " ".join(said[k] for k in ("organization", "department", "name", "place", "detail") if k in said)
     page = await ctx.backend.read("company_search", ctx.backend.api.search_company_places, query,
                                   limit=ctx.max_pin_options + 1)
@@ -114,18 +126,21 @@ def _current_search(ctx: ToolContext, search: tuple[ParcelDraft, int]) -> bool:
 
 
 async def _destination_problem(ctx: ToolContext, search: tuple[ParcelDraft, int], outcome: ToolOutcome, *,
-                               name: str | None = None, started_deferred: bool = False) -> ToolOutcome:
+                               name: str | None = None, started_deferred: bool = False,
+                               keep_receiver: bool = False) -> ToolOutcome:
     async with ctx.lock:
         s = ctx.state
         if not _current_search(ctx, search):
             return ToolOutcome("needs_input", "RESULT_SUPERSEDED", summary=state_summary(s, ctx.policy))
+        if keep_receiver and s.candidates and s.candidates.kind == "destination":
+            reject_candidates(s)
         deferred = receiver_questions_deferred(s)
         facts = {}
         if name and (started_deferred or deferred) and s.record("receiver_name", name):
             facts["recorded"] = ["receiver_name"]
         if deferred:
             return ToolOutcome("ok", facts=facts, summary=state_summary(s, ctx.policy))
-        if facts:
+        if facts or keep_receiver:
             outcome.facts.update(facts)
             outcome.summary = state_summary(s, ctx.policy)
         return outcome
@@ -168,15 +183,22 @@ async def _new_receiver(ctx: ToolContext, search: tuple[ParcelDraft, int],
             return ToolOutcome("ok", "DEST_NEW_RECEIVER", summary=summary)
     return ToolOutcome("ok", "DEST_NEW_RECEIVER", {
         "address": resolved.address,
-        "guidance": "주소록에 없는 받는 곳. 주소를 그 주소로 기록했으니 받는 분 성함·주소를 확인하고 빠진 항목만 묻는다."},
+        "guidance": "받는 곳 주소를 기록했다. 서버 결과에서 빠진 항목만 묻는다."},
         summary=summary)
+
+
+def _recipient_key(name: str) -> str:
+    return "".join(words(name)).casefold().removesuffix("님")
 
 
 def book_matches(places, name: str | None, place: str | None, detail: str | None) -> list[Place]:
     """주소록에서 이름·장소(실제 주소 또는 들은 낱말)·상세가 맞는 핀."""
-    places = list(places)
+    recipient = _recipient_key(name) if name else None
+    places = [p for p in places if recipient is None or _recipient_key(p.name) == recipient]
+    if not places:
+        return []
     be = [_to_be(p) for p in places]
-    return [places[be.index(p)] for p in match_places(be, name, place, detail)]
+    return [places[be.index(p)] for p in match_places(be, None, place, detail)]
 
 
 def offer_destination(state, found: list[Place], max_options: int, be_places: list | None = None) -> ToolOutcome:
