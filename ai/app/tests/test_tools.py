@@ -1059,3 +1059,22 @@ def test_address_in_several_regions_asks_region(corrector, address):
     assert c.state.field_of("receiver_address").status == FieldStatus.INVALID
     out = call(c, "record_fields", {"receiver_address": "양천구 중앙로 232"})
     assert out["status"] == "ok" and c.state.field_of("receiver_address").value == "서울특별시 양천구 중앙로 232"
+
+
+def test_place_name_leads_address_detail(address):
+    """건물명으로 찾은 기본주소는 도로명주소로, 상세주소는 검색이 찾은 이름을 앞에 붙여 기록한다."""
+    c = ctx(address=address)
+    s = c.state
+    call(c, "record_fields", {"receiver_address": "서울 포스코 센타"})
+    assert s.field_of("receiver_address").value == "서울특별시 강남구 테헤란로 212"
+    call(c, "record_fields", {"receiver_address_detail": "3층"})
+    assert s.field_of("receiver_address_detail").value == "포스코센터 3층"
+    call(c, "record_fields", {"receiver_address_detail": "포스코센터 5층"})  # 이미 이름으로 시작하면 두 번 붙이지 않는다
+    assert s.field_of("receiver_address_detail").value == "포스코센터 5층"
+    call(c, "record_fields", {"receiver_address_detail": ""})  # 상세주소 없음 → 이름만
+    assert s.field_of("receiver_address_detail").value == "포스코센터"
+    call(c, "record_fields", {"sender_address": "서울 포스코 센타", "sender_address_detail": "2층"})  # 같은 호출
+    assert s.field_of("sender_address_detail").value == "포스코센터 2층"
+    call(c, "record_fields", {"receiver_address": "서울 강남구 테헤란로 211"})  # 번호로 다시 받으면 이름을 떼고
+    call(c, "record_fields", {"receiver_address_detail": "3층"})
+    assert s.field_of("receiver_address_detail").value == "3층"

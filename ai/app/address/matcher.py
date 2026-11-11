@@ -11,7 +11,7 @@
 import re
 import time
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Literal
 
 from app.address.parse import (LETTER, branch_key, is_number_token, parse, readings, split_detail, strip_ending,
@@ -28,6 +28,7 @@ class Resolution:
     address: str | None
     candidates: tuple[str, ...]
     weak: bool = False
+    place: str | None = None  # 번호 없이 건물명·상호명으로 확정했을 때 검색이 찾은 이름(주소DB 건물명·카카오 장소명)
 
 
 NOT_FOUND = Resolution("not_found", None, ())
@@ -290,11 +291,12 @@ def jibun_candidates(db, text):
 def building_candidates(db, text):
     """건물명(부가정보)으로 찾기: 번호 없는 발화("롯데월드타워", "송파구 롯데월드타워")를 건물명 색인과 소리로 비교.
     복합 표기는 빌드 때 풀어 두었으므로(gazetteer.name_variants) 여기서는 같은 이름인지(거리)만 본다.
-    -> {도로명주소: (거리, (시도, 시군구))}. 지역이 둘 이상이면 어차피 되묻기라 주소를 읽지 않고 이름을 자리에 넣는다(judge는 지역만 본다)."""
+    -> ({도로명주소: (거리, (시도, 시군구))}, {도로명주소: 건물명}). 지역이 둘 이상이면 어차피 되묻기라 주소를 읽지 않고 이름을
+    자리에 넣는다(judge는 지역만 본다)."""
     tokens, branch, number = parse(text)[0]
     # 번호 토큰이 하나라도 있으면("한누리대로 2130 세종시청이요") 건물명이 아니다 — 번호는 도로·지번 경로가 본다
     if branch is not None or number or any(map(is_number_token, tokens)) or not hasattr(db, "search_names"):
-        return {}
+        return {}, {}
     scopes, rest = db.match_region(tokens)
     if not scopes:
         scopes, rest = sido_scope(db, tokens)
@@ -308,17 +310,17 @@ def building_candidates(db, text):
         hits += [(d, name, (sido, sg)) for name, sido, sg in db.search_names(2, db.name_key(said), scope)
                  if (d := distance(q, Name(read_digits(re.sub(r"[\s,.·()]", "", name))))) < 99]
     if not hits:
-        return {}
+        return {}, {}
     best = min(d for d, _, _ in hits)
     close = [h for h in hits if h[0] - best < MARGIN]
     if len({r for _, _, r in close}) > 1:
-        return {f"{name} ({' '.join(r).strip()})": (d, r) for d, name, r in close}
-    found = {}
+        return {f"{name} ({' '.join(r).strip()})": (d, r) for d, name, r in close}, {}
+    found, names = {}, {}
     for d, name, r in close:
         for addr in db.named_addresses(name, [r]):
             if d < found.get(addr, (99,))[0]:
-                found[addr] = (d, r)
-    return found
+                found[addr], names[addr] = (d, r), name
+    return found, names
 
 
 # --- 판정 ------------------------------------------------------------------------
@@ -429,7 +431,9 @@ def _correct(db, text) -> Resolution:
         return judge(scored, exact_only=national)
     # 건물명은 건축물대장 이름이라 사람들이 부르는 장소명과 다를 수 있다(부가정보의 "63빌딩"은 인천의 다른 건물) — 지역 없이 건물명만으로
     # 확정한 결과는 weak: 두 번째 근거로 가린다
-    return judge(building_candidates(db, text), exact_only=national, weak_confirm=national)
+    found, names = building_candidates(db, text)
+    r = judge(found, exact_only=national, weak_confirm=national)
+    return replace(r, place=names.get(r.address)) if r.status == "confirmed" else r
 
 
 def judge(scored: dict, exact_only=False, weak_confirm=False) -> Resolution:
@@ -473,22 +477,26 @@ def _same_road(db, tokens, branch, address):
                for k in (1, 2) if len(tokens) >= k)
 
 
-def with_witness(db, local: Resolution, texts: list[str], heard: str) -> Resolution:
+def with_witness(db, local: Resolution, texts: list[str], heard: str, names: dict[str, str] | None = None) -> Resolution:
     """로컬이 못 찾았거나 약할 때(weak) 카카오가 돌려준 도로명주소들로 다시 판정. 주소DB로 검증한 것만 쓰고, 들은 건물번호가
     있으면 같은 번호만 받는다(번호를 고쳐 맞추지 않는 규칙). 로컬 확정이 있으면 그것이 1순위이고 카카오가 다른 지역을 가리키면
-    되묻는다. 지역이 엇갈리면 되묻고, 한 지역이면 1순위로 확정. 검증된 게 없으면 로컬 결과 그대로."""
+    되묻는다. 지역이 엇갈리면 되묻고, 한 지역이면 1순위로 확정. 검증된 게 없으면 로컬 결과 그대로.
+    names: 카카오 장소 검색의 {도로명주소: 장소명}. 번호 없이 말했을 때만 확정 주소의 장소명을 place로 싣는다."""
     tokens, branch, number = parse(heard)[0]
-    found = {}
+    found, places = {}, {}
     if local.status == "confirmed" and (v := verify(db, local.address)):
         found[local.address] = v[1]
     for text in texts:
         v = verify(db, text)
         if v and (not number or (v[0].endswith(" " + number) and _same_road(db, tokens, branch, v[0]))):
             found.setdefault(v[0], v[1])
+            if not number and (names or {}).get(text):
+                places.setdefault(v[0], names[text])
     if not found:
         return local
     regions = tuple(dict.fromkeys(" ".join(r).strip() for r in found.values()))
     if len(regions) > 1:
         return Resolution("region_needed", None, regions[:3])
     first = next(iter(found))
-    return Resolution("confirmed", first, (first,))
+    return Resolution("confirmed", first, (first,),
+                      place=places.get(first) or (local.place if first == local.address else None))

@@ -216,6 +216,9 @@ async def record_fields(ctx: ToolContext, args: RecordArgs, *, expected_box: Box
                 deps["sender_address"] = draft["sender_address"].version
                 sender_address_pending = True
         for name, value in values.items():
+            role = name.removesuffix("_address_detail")
+            if role != name and f"{role}_address" not in given:
+                value = s.current.place_detail(role, value)
             prev = s.field_of(name)
             was = prev.value if prev.valid else None
             if name == "sender_name" and value and value != s.customer.name and sender_change_available(s):
@@ -563,6 +566,12 @@ def _apply_address(ctx: ToolContext, addr: str, r, given: dict, facts: dict, nee
                 s.clear(detail)
                 facts["cleared"].append(detail)
     setattr(s.current, f"{role}_geo", r.geo if r else None)
+    if r is not None and r.place:
+        s.current.places[role] = (value, r.place)
+        if s.field_of(detail).valid:  # 같은 발화의 상세주소나 이미 받은 상세주소 앞에 이름을 붙인다
+            s.record(detail, s.current.place_detail(role, s.field_of(detail).value), s.field_of(detail).source)
+    else:
+        s.current.places.pop(role, None)
     if r is not None and r.status == "ambiguous":
         s.field_of(addr).candidates = r.alternatives  # P6: 나머지 후보 보관
         facts.setdefault("auto_selected", []).append(addr)
