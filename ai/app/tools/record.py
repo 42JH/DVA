@@ -182,6 +182,7 @@ async def record_fields(ctx: ToolContext, args: RecordArgs, *, expected_box: Box
             return ToolOutcome("needs_input", "RESULT_SUPERSEDED", summary=state_summary(s, policy))
         if expected_box is not None and (draft.box_proposal is not expected_box or s.intent != "order" or s.pending):
             return ToolOutcome("needs_input", "RESULT_SUPERSEDED", summary=state_summary(s, policy))
+        sender_address_pending = sender_change_next(s) in ("sender_address", "sender_address_detail")
         old_items = draft["items"].value if draft["items"].valid else None
         was_box_pending = draft.box_size_pending
         _check_items(ctx, args, item_parts, facts, needs)
@@ -224,13 +225,19 @@ async def record_fields(ctx: ToolContext, args: RecordArgs, *, expected_box: Box
         nothing = not changed and not needs
         if nothing and (s.pending or s.awaiting_fix):
             return ToolOutcome("ok", "NOTHING_CHANGED", summary=state_summary(s, policy))
-        # 받는 분 성함·주소를 들으면 고객이 요청하지 않아도 주소록에 같은 받는 분·같은 주소가 있는지 바로 확인한다
-        # (사용자 결정 2026-11-10). 핀에서 고른 받는 곳이면 다시 찾지 않는다.
-        if (not needs and not s.pending and s.customer.places
-                and {"receiver_name", "receiver_address"} & set(facts["recorded"])
+        next_sender = sender_change_next(s)
+        address_pending = next_sender in ("sender_address", "sender_address_detail")
+        address_completed = (sender_address_pending and s.current is draft and
+                             all(draft[name].valid for name in ("sender_address", "sender_address_detail")))
+        # 받는 분 성함·주소는 자동으로 주소록과 대조한다. 발송 주소 변경 중 들은 값은 변경을 마친 뒤 대조한다.
+        # 핀에서 고른 받는 곳이면 다시 찾지 않는다.
+        if (not address_pending and not needs and not s.pending and s.customer.places
+                and ({"receiver_name", "receiver_address"} & set(facts["recorded"])
+                     or address_completed and not s.candidates)
                 and s.field_of("receiver_address").source not in (Source.PIN, Source.HISTORY, Source.COMPANY)):
             rn, ra = s.field_of("receiver_name"), s.field_of("receiver_address")
-            found = book_matches(s.customer.places, rn.value if rn.valid else None, ra.value if ra.valid else None, None)
+            found = (book_matches(s.customer.places, rn.value if rn.valid else None, ra.value if ra.valid else None, None)
+                     if rn.valid or ra.valid else [])
             if found:
                 out = offer_destination(s, found, ctx.max_pin_options)
                 out.facts |= {k: v for k, v in facts.items() if v}
@@ -245,12 +252,13 @@ async def record_fields(ctx: ToolContext, args: RecordArgs, *, expected_box: Box
             iso, moved = default_pickup(ctx.now(), rule)
             s.record("pickup_at", iso, Source.SERVER)
         if pending:  # 되읽기 gate 개방: 확인 내용을 이 결과로 준다(N1)
-            if not sender_change_next(s):
+            if not next_sender:
                 facts["readback"] = readback_facts(pending.snapshot)
                 facts["readback_id"] = pending.id
             # 고객 정보·주소 저장은 묻지 않고 택배를 담을 때 한다(사용자 결정 2026-11-06). 여기서는 대상만 정해 둔다
             s.address_offer = save_offer(s) or None
-        elif any(a in facts["recorded"] for a in ADDRESSES) and all(s.field_of(a).valid for a in ADDRESSES):
+        elif (not address_pending and (address_completed or any(a in facts["recorded"] for a in ADDRESSES))
+              and all(s.field_of(a).valid for a in ADDRESSES)):
             # 두 주소가 갖춰진 순간 동 이름으로 한 번 확인(S15P31D109-164). 되읽기가 열리면 거기에 같은 값이 있다
             facts["confirm_route"] = {"from": area_label(s.current["sender_address"].value, s.current.sender_geo),
                                       "to": area_label(s.current["receiver_address"].value, s.current.receiver_geo)}

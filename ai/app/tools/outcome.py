@@ -4,7 +4,7 @@ code는 사유 표시·관측·테스트용. 문장 지시는 넣지 않는다(d
 from dataclasses import dataclass, field
 from typing import Literal
 
-from app.domain.address_book import sender_change_next
+from app.domain.address_book import origin_confirmation, sender_change_next
 from app.domain.assess import assess
 from app.domain.state import ConversationState, FieldStatus, Items, Place, Source
 from app.policy.model import Policy
@@ -34,7 +34,7 @@ class ToolOutcome:
 
 
 def state_summary(state: ConversationState, policy: Policy) -> dict:
-    """값 기록·조회 결과에 붙이는 상태 요약(delegation.md §6.2-6). 값은 넣지 않고 상태만."""
+    """값 기록·조회 결과에 붙이는 상태 요약. 발송 주소를 고르는 중이면 서버 확인 질문도 준다."""
     a = assess(state, policy)
     fields = {}
     if state.current is not None:
@@ -44,10 +44,11 @@ def state_summary(state: ConversationState, policy: Policy) -> dict:
     if next_sender := sender_change_next(state):
         summary["sender_change_next"] = next_sender
         summary["can_proceed"] = False
+        summary["missing"] = [next_sender] if next_sender in a.missing else []
         if next_sender == "ask_address_change":
             summary["sender_change_question"] = "발송 주소도 바꾸시겠어요?"
-        if next_sender == "ask_address_change" or (next_sender == "sender_name" and state.origin_answer is None):
-            summary["missing"] = [name for name in a.missing if name not in ("sender_address", "sender_address_detail")]
+    elif origin := origin_confirmation(state):
+        summary.update(origin_confirm=origin, missing=[], can_proceed=False)
     if state.current and state.current.box_size_pending:
         fields["items"] = FieldStatus.PENDING_CHOICE.value
         summary["box_size_pending"] = True

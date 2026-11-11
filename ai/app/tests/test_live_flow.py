@@ -756,14 +756,49 @@ def test_registered_greeting_answer_preserves_address_scope_without_model(greeti
         assert all(cur[n].source == Source.PROFILE for n in ("sender_address", "sender_address_detail"))
         assert cur.sender_geo is not None and cur["sender_address_detail"].value == "1201호"
     else:
-        assert facts["summary"]["missing"][0] == "receiver_name" and "sender_address" in facts["summary"]["missing"]
         if expected == "name_only":
             assert facts["summary"]["sender_change_next"] == "sender_address"
+            assert facts["summary"]["missing"] == ["sender_address"]
+        else:
+            assert facts["summary"]["missing"] == []
         assert not cur["sender_address"].valid
         assert ("origin_confirm" in facts) == (expected == "ask_origin")
         if expected == "ask_origin" and greeting_address:
             assert facts["origin_confirm"] == "registered"  # 이미 말한 주소는 다시 읽지 않는다.
         assert s.state.origin_answer is (False if expected == "name_only" else None)
+
+
+def test_origin_answer_alone_prioritizes_new_sender_address():
+    from backend_client.order import Place as BPlace
+
+    svc, client = flow()
+    svc.d.backend.api.add_customer(CALLER, "김철수", default_origin=BPlace(
+        name="김철수", phone=CALLER, address="서울특별시 강남구 가람9길 212", address_detail="1201호"))
+
+    async def scenario():
+        task = asyncio.create_task(svc.on_incoming(incoming()))
+        await until(lambda: client.conns)
+        conn = client.conns[0]
+        conn.push(started())
+        await until(lambda: svc.registry.calls["live_1"].phase == Phase.ACTIVE)
+        s = svc.registry.calls["live_1"]
+        await ai(conn, "안녕하세요, 김철수님, 서울 강남구 가람구길 이백십이에서 보내시는 택배 접수 도와드릴까요?", 0)
+        await say(conn, "택배를 새로 보낼게요", 1500)
+        await until(lambda: any('"origin_confirm": "registered"' in e.get("content", "") for e in conn.sent))
+        # 운영 로그와 같이 별도 sender_change 답 없이 origin과 switch만 반환한다.
+        client.decisions.create = AsyncMock(return_value=SimpleNamespace(
+            answers=[choice("origin", "no"), choice("switch", "edit_parcel")]))
+        await ai(conn, "등록된 발송 주소로 보내실까요?", 3200)
+        await say(conn, "이번에는 다른 곳에서 보낼 거예요", 4200)
+        await until(lambda: any('"sender_change_next": "sender_address"' in e.get("content", "") for e in conn.sent))
+        notice = next(e["content"] for e in conn.sent if '"sender_change_next": "sender_address"' in e.get("content", ""))
+        assert json.loads(notice.split("[서버 결과] ", 1)[1])["summary"]["missing"] == ["sender_address"]
+        assert s.state.current.sender_address_change and not s.state.current.sender_name_for_parcel
+        assert not any('"edit_parcel"' in e.get("content", "") for e in conn.sent)
+        conn.push({"type": "session.closed", "reason": "remote_hangup"})
+        await task
+
+    run(scenario())
 
 
 @pytest.mark.parametrize(("scope", "address_answer", "save_answer", "name_in_greeting", "greeting_mode"), [
@@ -833,8 +868,9 @@ def test_greeting_sender_name_change_asks_only_for_unanswered_choices(
             reply = "이번 택배만 박영희 이름으로 보낼게요" if scope == "once" else "박영희 이름으로 보낼게요"
             fields = {"sender_name": "박영희"}
             if address_answer == "provided":
-                reply += " 서울 강남구 테헤란로 212에서 보낼게요"
+                reply += " 서울 강남구 테헤란로 212 3층에서 보낼게요"
                 fields["sender_address"] = FULL["sender_address"]
+                fields["sender_address_detail"] = "3층"
             customer = asyncio.create_task(say(conn, reply, name_turn))
             await until(lambda: s.rt.cust is not None)
             out = await record("sender-name", name_turn, fields)
@@ -867,6 +903,11 @@ def test_greeting_sender_name_change_asks_only_for_unanswered_choices(
             await ai(conn, "어떤 주소에서 보내시나요?", 5300)
             await say(conn, "서울 강남구 테헤란로 212에서 보낼게요", 6200)
             out = await record("sender-address", 6200, {"sender_address": FULL["sender_address"]})
+            assert out["sender_change_next"] == "sender_address_detail"
+            assert out["missing"] == ["sender_address_detail"]
+            await ai(conn, "발송 상세주소가 있나요?", 7200)
+            await say(conn, "없어요", 8100)
+            out = await record("sender-detail", 8100, {"sender_address_detail": ""})
             assert out["sender_change_next"] == "ask_name_save"
         else:
             assert s.state.current["sender_address"].value == FULL["sender_address"]
@@ -874,8 +915,8 @@ def test_greeting_sender_name_change_asks_only_for_unanswered_choices(
         if save_answer:
             if address_answer == "yes":
                 await until(lambda: any('"sender_change_next": "ask_name_save"' in e.get("content", "") for e in conn.sent))
-            await ai(conn, "등록 이름도 바꿔드릴까요?", 7500)
-            await say(conn, "네" if save_answer == "save" else "아니요", 8500)
+            await ai(conn, "등록 이름도 바꿔드릴까요?", 9200)
+            await say(conn, "네" if save_answer == "save" else "아니요", 10200)
             await until(lambda: not s.state.current.ask_customer_name_save)
         else:
             assert not s.state.current.ask_customer_name_save

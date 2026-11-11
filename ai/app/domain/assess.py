@@ -6,6 +6,7 @@
 
 from dataclasses import dataclass
 
+from app.domain.address_book import origin_confirmation, sender_change_next
 from app.domain.state import ConversationState, FieldStatus, Geo
 from app.domain.store import pending_reconfirm
 from app.policy.model import Policy
@@ -73,6 +74,8 @@ def assess(state: ConversationState, policy: Policy) -> Assessment:
         stage = "intent"
     elif state.intent != "order":
         stage = state.intent
+    elif origin_confirmation(state) or sender_change_next(state) in ("sender_address", "sender_address_detail"):
+        stage = "address"
     elif collecting and missing:
         stage = next(s.id for s in policy.collect_stages() if not stages[s.id].complete)
     elif collecting:
