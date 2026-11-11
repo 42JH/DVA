@@ -67,7 +67,7 @@ export function useAddPersona(onDone: (personaSeq: number) => void, onClose: () 
   const guard = useLeaveGuard(dirty, mutation.isPending || mutation.isSuccess, onClose)
 
   return {
-    tag: `v1 · ${DRAFT_TAG}`,
+    tag: DRAFT_TAG,
     subtitle: '새 상담가 · 통화에 쓰려면 등록 뒤 시험 통화를 하고 적용하세요',
     name,
     setName,

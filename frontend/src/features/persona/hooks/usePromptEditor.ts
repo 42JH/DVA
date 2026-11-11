@@ -75,8 +75,8 @@ export function usePromptEditor(target: EditTarget, onDone: (savedVersion?: numb
   const guard = useLeaveGuard(dirty, mutation.isPending || mutation.isSuccess, () => onDone())
 
   return {
-    tag: `v${target.saveTo} · ${DRAFT_TAG}`,
-    subtitle: `${target.personaName} · v${target.basedOn}에서 시작`,
+    tag: DRAFT_TAG,
+    subtitle: target.personaName,
     name,
     setName,
     // 칸마다 고정 제목 + 입력칸 (11/10 — 제목은 못 고침, 줄 번호 없음)
@@ -91,7 +91,7 @@ export function usePromptEditor(target: EditTarget, onDone: (savedVersion?: numb
     // 음성 드롭다운
     ...voiceDraft,
 
-    saveLabel: mutation.isPending ? '저장 중…' : `저장 → v${target.saveTo}`,
+    saveLabel: mutation.isPending ? '저장 중…' : '저장',
     canSave:
       (dirty || target.draftRevision !== null) && // 남은 초안은 고치지 않아도 확정할 수 있게
       name.trim() !== '' &&
