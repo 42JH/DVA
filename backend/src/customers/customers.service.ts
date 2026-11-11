@@ -24,6 +24,12 @@ export class CustomersService {
     private readonly calls: ConsultationsService,
   ) {}
 
+  async billingMonth(id: number, month?: string) {
+    const result = await this.repository.billingMonth(id, month);
+    if (!result) throw new ApiException(404, 'NOT_FOUND', '고객을 찾을 수 없습니다.');
+    return result;
+  }
+
   async removeMany(ids: number[], actorId: number, requestId: string): Promise<void> {
     const sorted = [...ids].sort((a, b) => a - b);
     try {

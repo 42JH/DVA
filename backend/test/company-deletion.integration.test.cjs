@@ -451,11 +451,13 @@ test('detachment preserves the customer personal monthly policy without carrying
   const saved = await detail(settled.orderSeq);
   assert.equal(saved.billingOrganizationSeq, null);
   assert.equal(saved.billingDepartmentSeq, null);
-  assert.equal(
-    (await pool.query('SELECT 1 FROM order_billing_charges WHERE order_seq=$1', [settled.orderSeq]))
-      .rowCount,
-    0,
+  const charges = await pool.query(
+    'SELECT organization_seq,customer_seq,amount FROM order_billing_charges WHERE order_seq=$1',
+    [settled.orderSeq],
   );
+  assert.deepEqual(charges.rows, [
+    { organization_seq: null, customer_seq: f.customer, amount: saved.totalAmount },
+  ]);
 });
 
 test('department deletion preserves personal PINs and historical COMPANY_PIN audit events', async () => {

@@ -10,6 +10,7 @@ import {
 import { Customer, EmployeeCustomerIdentity } from './customers.types';
 import { CallerContextDto } from './dto/caller-context.dto';
 import { CustomerListItemDto } from './dto/customer-response.dto';
+import { CustomerBillingMonthDto } from './dto/customer-billing-month.dto';
 
 const columns =
   'customer_seq AS "customerSeq", name, phone_number AS "phoneNumber", status,monthly_billing_enabled AS "monthlyBillingEnabled",address_data AS address';
@@ -48,6 +49,22 @@ export class CustomersRepository {
   }
 
   constructor(private readonly database: DatabaseService) {}
+
+  async billingMonth(id: number, month?: string) {
+    return (
+      await this.database.pool.query<CustomerBillingMonthDto>(
+        `SELECT c.customer_seq AS "customerSeq",to_char(m.month,'YYYY-MM') AS month,
+         coalesce(sum(b.amount),0)::float8 AS "monthlyAmount"
+         FROM customers c
+         CROSS JOIN (SELECT coalesce(to_date($2,'YYYY-MM'),
+          date_trunc('month',clock_timestamp() AT TIME ZONE 'Asia/Seoul')::date) AS month) m
+         LEFT JOIN order_billing_charges b ON b.customer_seq=c.customer_seq AND b.billing_month=m.month
+         WHERE c.customer_seq=$1 AND c.deleted_at IS NULL
+         GROUP BY c.customer_seq,m.month`,
+        [id, month ?? null],
+      )
+    ).rows[0];
+  }
 
   async updateIdentities(client: PoolClient, rows: EmployeeCustomerIdentity[]): Promise<void> {
     if (!rows.length) return;

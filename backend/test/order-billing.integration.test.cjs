@@ -759,6 +759,76 @@ test('monthly initialization commits at most ten records per transaction and pre
   );
 });
 
+test('customer billing keeps the original personal charge across retries, edits and company enrollment', async () => {
+  const customer = await request('/customers', {
+    address: customerAddress(),
+    name: '개인 월결제 검증',
+    phoneNumber: '018' + String(Math.floor(Math.random() * 90000000) + 10000000),
+    monthlyBillingEnabled: true,
+  });
+  assert.equal(customer.status, 201);
+  const id = customer.body.data.customerSeq;
+  const path = `/customers/${id}/billing`;
+  const read = (suffix = '', ai = false) => request(path + suffix, undefined, ai, 'GET');
+  const initial = await read();
+  assert.equal(initial.status, 200);
+  assert.equal(initial.body.data.monthlyAmount, 0);
+  assert.equal((await read('?month=2026-13')).status, 400);
+  assert.equal((await read('', true)).status, 401);
+
+  const credit = finalBody({ customerSeq: id, paymentMethodType: 'credit' });
+  const key = randomUUID();
+  const personal = await createFinal(credit, false, key);
+  assert.equal(personal.body.data.status, 'ACCEPTED', JSON.stringify(personal.body));
+  const orderId = personal.body.data.orderSeq;
+  assert.equal((await createFinal(credit, false, key)).body.data.orderSeq, orderId);
+  const paidMonth = (
+    await pool.query(
+      "SELECT to_char(paid_at AT TIME ZONE 'Asia/Seoul','YYYY-MM') AS month FROM orders WHERE order_seq=$1",
+      [orderId],
+    )
+  ).rows[0].month;
+  const pending = await createFinal(finalBody({ customerSeq: id }));
+  assert.equal(pending.body.data.status, 'notPaid');
+  assert.equal((await request(`/orders/${pending.body.data.orderSeq}/cancel`, {})).status, 204);
+  await pool.query('UPDATE orders SET total_amount=10000 WHERE order_seq=$1', [orderId]);
+
+  const company = (
+    await request('/companies', { name: '개인 청구 분리 검증', monthlyBillingEnabled: true })
+  ).body.data.organizationSeq;
+  const department = (
+    await request(`/companies/${company}/departments`, {
+      name: '그룹결제 검증',
+      groupBillingEnabled: true,
+    })
+  ).body.data.departmentSeq;
+  assert.equal(
+    (
+      await request(`/companies/${company}/members`, {
+        customerSeq: id,
+        employeeNo: 'PERSONAL-BILLING',
+        role: 'MEMBER',
+        departmentSeq: department,
+      })
+    ).status,
+    204,
+  );
+  assert.equal((await createFinal(credit)).body.data.status, 'ACCEPTED');
+  assert.equal(
+    (await createFinal({ ...credit, paymentMethodType: 'groupBilling' })).body.data.status,
+    'ACCEPTED',
+  );
+  const expected = { customerSeq: id, month: paidMonth, monthlyAmount: 12000 };
+  assert.deepEqual((await read(`?month=${paidMonth}`)).body.data, expected);
+  assert.deepEqual((await read()).body.data, expected);
+  assert.equal((await read('?month=2099-01')).body.data.monthlyAmount, 0);
+  const corporate = (
+    await request(`/companies/${company}/billing?month=${paidMonth}`, undefined, false, 'GET')
+  ).body.data;
+  assert.equal(corporate.monthlyAmount, 12000);
+  assert.equal(corporate.groupBillingAmount, 12000);
+});
+
 test('employees without departments retain corporate credit and cannot use group billing', async () => {
   const company = (
     await request('/companies', { name: '부서 없는 월결제 기업', monthlyBillingEnabled: true })
