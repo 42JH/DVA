@@ -1,13 +1,16 @@
 """주소 보정(app/address): 보정기 자체(도로 사전·작은 주소DB)와 카카오 지번·우편번호. record_fields에 붙은 동작은 test_tools.
 보정기 사례는 kakao_map_test의 자체 테스트를 옮긴 것이다. 실제 주소DB(data/address.db) 없이 돈다."""
 
+import asyncio
 import csv
+import time
 from pathlib import Path
 
 import httpx2
 import pytest
 from conftest import run
 
+from app.address import matcher
 from app.address.gazetteer import AddressDB, open_db
 from app.address.matcher import NOT_FOUND, RoadDict, candidates, correct
 from app.address.phonetic import jamo
@@ -482,13 +485,36 @@ def test_witness_checks_weak_local_results(db_path, fake_kakao, monkeypatch):
     assert run(svc.resolve("포스코 센타")).address == "서울특별시 강남구 테헤란로 212"  # 되묻기(weak) → 카카오로 확정
 
 
-def test_witness_is_not_asked_for_strong_results_or_without_key(db_path, fake_kakao, monkeypatch):
+def test_witness_does_not_override_strong_results_and_needs_key(db_path, fake_kakao, monkeypatch):
+    """카카오 검색은 로컬 보정과 동시에 시작하지만, 결과는 로컬이 못 찾았거나 약할 때만 쓴다."""
     svc = AddressService(open_db(db_path))
-    seen = witness(monkeypatch, places=["서울 양천구 중앙로 232"])
-    assert run(svc.resolve("중앙로 232")).status == "region_needed" and not seen  # 여러 지역에 실제로 있음: 카카오가 덮지 못한다
-    assert run(svc.resolve("서울 강남구 테헤란로 212")).status == "confirmed" and not seen
+    witness(monkeypatch, places=["서울 양천구 중앙로 232"])
+    assert run(svc.resolve("중앙로 232")).status == "region_needed"  # 여러 지역에 실제로 있음: 카카오가 덮지 못한다
+    witness(monkeypatch, places=["서울 강남구 테헤란로 211"])
+    assert run(svc.resolve("서울 강남구 테헤란로 212")).address == "서울특별시 강남구 테헤란로 212"
+    seen = witness(monkeypatch, places=["서울 강남구 테헤란로 212"])
     monkeypatch.delenv("KAKAO_REST_API_KEY")
     assert run(svc.resolve("무슨빌딩")).status == "not_found" and not seen
+
+
+def test_witness_search_overlaps_local_correction(db_path, fake_kakao, monkeypatch):
+    """운영: 상호명은 로컬 보정이 다시 보기 상한을 다 써서, 카카오를 그 뒤에 부르면 예산을 넘겨 들은 값이 기록됐다.
+    로컬 0.3초 + 카카오 0.3초를 예산 0.5초 안에 끝내려면 둘이 겹쳐야 한다."""
+    real = matcher.resolve_detail
+
+    def slow_local(*a):
+        time.sleep(0.3)
+        return real(*a)
+
+    async def slow_places(q, *a, **k):
+        await asyncio.sleep(0.3)
+        return ["서울 강남구 테헤란로 212"]
+
+    witness(monkeypatch)
+    monkeypatch.setattr(matcher, "resolve_detail", slow_local)
+    monkeypatch.setattr(kakao, "search_places", slow_places)
+    r = run(AddressService(open_db(db_path), budget_sec=0.5).resolve("무슨빌딩"))
+    assert (r.status, r.address) == ("confirmed", "서울특별시 강남구 테헤란로 212")
 
 
 # --- 접수용 값(지번·법정동·우편번호)을 주소DB에서(4단계 Geo 로컬화, 2026-11-06) ---
