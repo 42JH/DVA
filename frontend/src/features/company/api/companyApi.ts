@@ -178,6 +178,10 @@ export const setGroupBilling = (departmentSeq: number, enabled: boolean): Promis
   api.patch(`/departments/${departmentSeq}`, { body: { groupBillingEnabled: enabled } })
 
 /** 기업 삭제 — 소속 · 부서 · 기업 PIN 삭제, 고객 · 주문 · 통화 이력은 보존 */
+/** 기업명 바꾸기 — 서버가 앞뒤 공백을 지움, 빈 이름은 400 */
+export const renameCompany = (id: number, name: string): Promise<void> =>
+  api.patch(`/companies/${id}`, { body: { name } })
+
 export const deleteCompany = (id: number): Promise<void> => api.delete(`/companies/${id}`)
 
 /** 기업 여러 곳 삭제 — 1~100곳 한 번에, 한 곳이라도 실패하면 전체 되돌림(404 · 409). 204 */
