@@ -61,7 +61,7 @@ export interface OrderListItem {
 
 export const orderQueries = {
   all: () => ['orders'] as const, // shared/order의 상세와 같은 뿌리 → 수정 · 추가 후 invalidate 한 번에 목록 · 상세 모두 갱신
-  // 보내는 분(= 주문 고객) 결제 자격 — 주문을 보내면 같은 뿌리라 함께 새로 받음 (월정산을 켠 뒤 등)
+  // 보내는 분(= 주문 고객) 결제 자격 — 주문을 보내면 같은 뿌리라 함께 새로 받음 (월결제을 켠 뒤 등)
   payContext: (phone: string) =>
     queryOptions({
       queryKey: [...orderQueries.all(), 'pay-context', phone],
@@ -72,7 +72,7 @@ export const orderQueries = {
 
 // ---------- 결제 자격 (11/10) ----------
 // 서버 규칙 (customers.repository availablePaymentMethods · order-payments eligibility):
-// 개인카드 = 늘 · 월정산 = 개인 고객은 고객 설정, 기업 소속은 기업 설정 · 그룹카드 = 기업 소속 + 부서 설정. 접수 때 서버가 다시 확인(아니면 403)
+// 개인카드 = 늘 · 월결제 = 개인 고객은 고객 설정, 기업 소속은 기업 설정 · 그룹카드 = 기업 소속 + 부서 설정. 접수 때 서버가 다시 확인(아니면 403)
 const PAY_FROM_DTO: Record<'billing' | 'credit' | 'groupBilling', PaymentMethod> = {
   billing: 'PERSONAL_CARD',
   credit: 'MONTHLY',
@@ -86,7 +86,7 @@ interface PayContextDto {
 }
 export interface PayContext {
   customerSeq: number | null // null = 처음 보는 번호 (주문 때 서버가 고객을 만듦)
-  // 기업 소속(멤버십이 있으면 비활성이어도)이면 기업 이름 — 서버는 소속이 있으면 고객의 월정산 설정을 안 봄
+  // 기업 소속(멤버십이 있으면 비활성이어도)이면 기업 이름 — 서버는 소속이 있으면 고객의 월결제 설정을 안 봄
   company: string | null
   available: PaymentMethod[]
 }
@@ -103,9 +103,9 @@ async function fetchPayContext(phone: string, signal?: AbortSignal): Promise<Pay
   }
 }
 
-/** 개인 고객에게 월정산 추가 — 주문을 보내기 전에 (서버가 접수 순간 자격을 확인). 고객 번호를 돌려줌
- * 기존 고객 = PATCH /customers/{id} · 처음 보는 번호 = POST /customers(주소 필수)로 월정산 켠 채 생성
- * 그 사이 같은 번호가 등록됐으면(409) 다시 찾아 PATCH. 주문이 나중에 실패해도 월정산은 켜진 채 남음 (11/10 결정) */
+/** 개인 고객에게 월결제 추가 — 주문을 보내기 전에 (서버가 접수 순간 자격을 확인). 고객 번호를 돌려줌
+ * 기존 고객 = PATCH /customers/{id} · 처음 보는 번호 = POST /customers(주소 필수)로 월결제 켠 채 생성
+ * 그 사이 같은 번호가 등록됐으면(409) 다시 찾아 PATCH. 주문이 나중에 실패해도 월결제은 켜진 채 남음 (11/10 결정) */
 export async function addMonthly(customerSeq: number | null, sender: PartyInput): Promise<number> {
   const patch = (id: number) =>
     api.patch(`/customers/${id}`, { body: { monthlyBillingEnabled: true } }).then(() => id)
@@ -164,7 +164,7 @@ export const createOrder = (
   input: OrderInput,
   shippingFee: number,
   idempotencyKey: string,
-  customerSeq?: number, // 월정산을 먼저 켠 고객 — 없으면 이름 · 전화로 서버가 찾거나 만듦
+  customerSeq?: number, // 월결제을 먼저 켠 고객 — 없으면 이름 · 전화로 서버가 찾거나 만듦
 ): Promise<ApiItem<{ orderSeq: number; status: OrderStatus }>> =>
   api.post('/admin/orders', {
     body: buildCreateOrder(input, shippingFee, customerSeq),

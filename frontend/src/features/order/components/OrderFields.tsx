@@ -327,7 +327,7 @@ function Pickup({ f }: { f: OrderForm }) {
   )
 }
 
-/** 결제 방식 — 미완료 주문이 아니면 잠김. 고객이 못 쓰는 칩은 꺼짐 · 개인 고객 월정산은 물어보고 추가 (11/10) */
+/** 결제 방식 — 미완료 주문이 아니면 잠김. 고객이 못 쓰는 칩은 꺼짐 · 개인 고객 월결제은 물어보고 추가 (11/10) */
 function Payment({ f }: { f: OrderForm }) {
   if (f.paymentLocked)
     return <TextInput label="결제 방식" value={f.paymentText} onChange={() => {}} readOnly />
@@ -344,7 +344,7 @@ function Payment({ f }: { f: OrderForm }) {
       {f.paymentHint && <p className="text-[12px] text-ops-sub">{f.paymentHint}</p>}
       {f.askingMonthly && (
         <Confirm
-          title={`${f.monthlyName}님에게 월정산을 추가할까요?`}
+          title={`${f.monthlyName}님에게 월결제을 추가할까요?`}
           ok="추가"
           onOk={f.agreeMonthly}
           onClose={f.declineMonthly}

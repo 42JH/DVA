@@ -23,7 +23,7 @@ const address = (p: PartyInput) => ({
 
 export function buildCreateOrder(input: OrderInput, shippingFee: number, customerSeq?: number) {
   return {
-    // 수기 = 주문자가 보내는 분. 고객 번호가 있으면(월정산을 먼저 켬, 11/10) 그 고객 — 서버는 둘 중 하나만 받음
+    // 수기 = 주문자가 보내는 분. 고객 번호가 있으면(월결제을 먼저 켬, 11/10) 그 고객 — 서버는 둘 중 하나만 받음
     ...(customerSeq
       ? { customerSeq }
       : { customer: { name: input.sender.name, phoneNumber: input.sender.phoneNumber } }),

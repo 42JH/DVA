@@ -17,7 +17,7 @@ import type { Address, CustomerDto, PayMethod, PinDto } from '@/shared/customer/
 import { customerSearch } from '@/shared/customer/customerSearch'
 
 // 고객 확인 POST /customers/context — 서버가 계산한 '쓸 수 있는 결제'와 소속 기업 · 부서 (develop-backend customers.repository)
-// billing 개인카드(항상) · credit 월정산(일반 고객은 고객 허용, 기업 고객은 기업 허용) · groupBilling 그룹카드(소속 부서 허용)
+// billing 개인카드(항상) · credit 월결제(일반 고객은 고객 허용, 기업 고객은 기업 허용) · groupBilling 그룹카드(소속 부서 허용)
 // 전화번호만 보내면 통화 · 감사 기록을 남기지 않음 (백엔드 설명)
 interface CallerContext {
   organization: { organizationSeq: number; name: string } | null
@@ -26,7 +26,7 @@ interface CallerContext {
 }
 const PAY_LABEL: Record<PayMethod, string> = {
   billing: '개인카드',
-  credit: '월정산',
+  credit: '월결제',
   groupBilling: '그룹카드',
 } // 주문 화면 결제 방식과 같은 말
 

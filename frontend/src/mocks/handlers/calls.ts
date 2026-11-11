@@ -323,7 +323,7 @@ const CALLS: CallDetail[] = [
       say(102, 'CUSTOMER', '네, 알겠어요.'),
       say(104, 'AI', '보내시는 물건 값은 대략 얼마인가요?'),
       say(108, 'CUSTOMER', '3만 원 정도요.'),
-      say(112, 'AI', '결제는 월정산으로 처리됩니다. 지금까지 말씀하신 내용으로 접수할까요?'),
+      say(112, 'AI', '결제는 월결제으로 처리됩니다. 지금까지 말씀하신 내용으로 접수할까요?'),
       say(118, 'CUSTOMER', '네, 해 주세요.'),
       say(218, 'AI', '접수되었습니다. 내일 오전 9시에 기사님이 방문합니다.'),
     ],
@@ -342,7 +342,7 @@ const CALLS: CallDetail[] = [
       save(91, 'clientComment', '경비실에 맡겨 주세요'),
       act(94, 'SEARCH', 'FAQ 근거 없음'), // AI가 보내는 검색 요약 그대로 — 미답변(94초)과 같은 시각 → 06 AI 동작 '… · 근거 부족'
       save(109, 'itemPrice', '30,000원'),
-      save(215, 'paymentMethodType', '월정산'),
+      save(215, 'paymentMethodType', '월결제'),
       act(217, 'SEND', '디버 접수 완료'),
     ],
     results: [
@@ -595,7 +595,7 @@ function generatedScene(id: number): CallDetail | undefined {
       store('clientComment', order.clientComment)
     }
     if (id % 5 === 0) faq(id)
-    const pay = order.paymentMethod ? PAYMENT_METHOD_LABEL[order.paymentMethod] : '월정산'
+    const pay = order.paymentMethod ? PAYMENT_METHOD_LABEL[order.paymentMethod] : '월결제'
     ai(`결제는 ${pay}로 처리됩니다. 지금까지 말씀하신 내용으로 접수할까요?`)
     me('네, 해 주세요.')
     store('paymentMethodType', pay)
