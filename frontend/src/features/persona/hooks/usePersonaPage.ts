@@ -201,7 +201,8 @@ export function usePersonaPage() {
     const before = historyOpen ? all.find((x) => !x.isDraft && x.version < v.version) : undefined
     const sections = PROMPT_SECTIONS.map((s) => {
       let rows: { key: string; parts: Part[] }[] | null = null
-      if (before) {
+      // 안 바뀐 칸은 rows 없이 → 상담가 유형 화면처럼 마크다운 (비교 조각은 마크다운 문법이 잘려 글자 그대로만 가능)
+      if (before && before.prompt[s.key] !== v.prompt[s.key]) {
         const d = inlineDiff(before.prompt[s.key].split('\n'), v.prompt[s.key].split('\n'))
         rows = d.blocks.map((parts, i) => ({ key: String(i), parts }))
       }
