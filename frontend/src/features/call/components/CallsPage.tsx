@@ -213,7 +213,8 @@ function Row({ r, from, onWarm }: { r: CallsRow; from: string; onWarm: () => voi
       {cell(
         <span data-chips="complaints" className="flex gap-1 whitespace-nowrap">
           {r.judging ? (
-            <span className="text-[12px] text-ops-faint">판정 전</span>
+            // 판정 전 · 대상 없는 옛 판정 모두 같은 회색 '분석 전' 칩 (11/11 사용자: 두 말이 섞여 불편)
+            <Badge tone="idle">분석 전</Badge>
           ) : (
             r.complaints.map((c) => (
               <span key={c.key} title={c.title}>
