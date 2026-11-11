@@ -89,9 +89,9 @@ export function useCalls() {
         key: c.target ?? 'none',
         label: targetLabel(c.target),
         title: c.reason,
+        tone: c.target ? ('stop' as const) : ('idle' as const), // 대상 없는 옛 판정('분석 전')은 회색
       })),
       judging: row.counts !== null && row.hasComplaint === null, // 분석은 끝났고 불만 판정은 아직
-
       duration: row.durationSec === null ? '' : fmtDuration(row.durationSec),
       // 이 통화로 접수된 주문 — 번호만 (주문 상태는 주문 화면에서, 11/07 사용자)
       order: d.orderSeq ? { seq: d.orderSeq, no: orderNo(d.orderSeq) } : null,

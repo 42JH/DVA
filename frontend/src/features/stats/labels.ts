@@ -1,7 +1,7 @@
 // 02 코드 → 화면 문구 · 색 (컨벤션 6.3: 코드는 api/, 문구는 labels.ts). 표시 이름 = 대시보드 연동 명세 (줄 순서는 서버가 정해서 줌)
 import type { CustomerType, ProcessType, Stage } from './api/dashboardApi'
 import type { ComplaintTarget } from '@/shared/call/callDto'
-import { TARGET_LABEL, type AI_ERROR_TYPES } from '@/shared/call/complaints'
+import { TARGET_LABEL, targetLabel, type AI_ERROR_TYPES } from '@/shared/call/complaints'
 
 type AiErrorType = (typeof AI_ERROR_TYPES)[number]
 
@@ -40,7 +40,7 @@ export const AI_ERROR: Record<AiErrorType, { label: string; stroke: string; bg: 
   SLOW_RESPONSE: { label: '응답 지연', ...SHADES[2] },
   INTERRUPTION: { label: '말 끊김', ...SHADES[3] },
 }
-/** 고객 불만 탭 — 무엇에 대한 불만인지. none = 대상이 없는 옛 판정 */
+/** 고객 불만 탭 — 무엇에 대한 불만인지. none = 대상이 없는 옛 판정(새 기준으로 다시 분석 전) */
 export const COMPLAINT_TARGET: Record<
   ComplaintTarget | 'none',
   { label: string; stroke: string; bg: string }
@@ -48,7 +48,7 @@ export const COMPLAINT_TARGET: Record<
   ai_service: { label: TARGET_LABEL.ai_service, ...SHADES[0] },
   price_policy: { label: TARGET_LABEL.price_policy, ...SHADES[1] },
   delivery_other: { label: TARGET_LABEL.delivery_other, ...SHADES[2] },
-  none: { label: '구분 전', ...SHADES[4] },
+  none: { label: targetLabel(null), ...SHADES[4] },
 }
 
 /** 응답 대기 처리 유형 (명세 §5) */

@@ -227,15 +227,18 @@ export function ComplaintCard({ c }: { c: CardState<ComplaintView> }) {
   return (
     <Card
       title={
-        <Segments
-          label="AI 응대 품질"
-          value={tab}
-          onPick={setTab}
-          items={[
-            { value: 'ai', label: 'AI 응대 오류' },
-            { value: 'customer', label: '고객 불만' },
-          ]}
-        />
+        // 흰 카드 위라 회색 바탕을 깔아 고른 탭(흰 칸)이 보이게 (11/11 사용자: 가시성)
+        <div className="rounded-lg bg-ops-idle-soft p-0.5">
+          <Segments
+            label="AI 응대 품질"
+            value={tab}
+            onPick={setTab}
+            items={[
+              { value: 'ai', label: 'AI 응대 오류' },
+              { value: 'customer', label: '고객 불만' },
+            ]}
+          />
+        </div>
       }
       aside={<Chip>전체 고객</Chip>}
       c={c}
