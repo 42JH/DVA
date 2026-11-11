@@ -222,11 +222,11 @@ function auditInput(
           typeof audit.metadata.billingMonth !== 'string' ||
           !/^(?!0000)[0-9]{4}-(0[1-9]|1[0-2])$/.test(audit.metadata.billingMonth) ||
           !['credit', 'groupBilling'].includes(audit.metadata.paymentMethodType as string) ||
-          !Number.isInteger(audit.metadata.amountBefore) ||
+          !Number.isSafeInteger(audit.metadata.amountBefore) ||
           Number(audit.metadata.amountBefore) < 0 ||
           !(billingInitialization
             ? audit.metadata.amountAfter === 0
-            : Number.isInteger(audit.metadata.amountAfter) &&
+            : Number.isSafeInteger(audit.metadata.amountAfter) &&
               Number(audit.metadata.amountAfter) > Number(audit.metadata.amountBefore) &&
               Number(audit.metadata.amountAfter) - Number(audit.metadata.amountBefore) <=
                 2147483647)
