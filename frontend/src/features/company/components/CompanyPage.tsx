@@ -135,7 +135,7 @@ function DeptPanel({ vm }: { vm: VM }) {
           </span>
           <span className="text-[12px] text-ops-sub tabular-nums">{count}명</span>
         </button>
-        <div className="flex gap-3 px-4 pb-2.5">{actions}</div>
+        <div className="flex gap-1.5 px-4 pb-2.5">{actions}</div>
       </li>
     )
   }
@@ -143,7 +143,7 @@ function DeptPanel({ vm }: { vm: VM }) {
     <section aria-label="부서" className={`${card} flex w-[220px] shrink-0 flex-col xl:w-[280px]`}>
       <div className="flex h-12 items-center border-b border-ops-line pr-3 pl-4">
         <h2 className="text-[14px] font-bold">부서</h2>
-        <Btn className="ml-auto" onClick={() => vm.open({ kind: 'addDept' })}>
+        <Btn kind="primary" className="ml-auto" onClick={() => vm.open({ kind: 'addDept' })}>
           <Icon name="plus" />
           부서 추가
         </Btn>
@@ -156,20 +156,12 @@ function DeptPanel({ vm }: { vm: VM }) {
             d.name,
             d.memberCount,
             <>
-              <button
-                type="button"
-                onClick={() => vm.open({ kind: 'renameDept', dept: d })}
-                className="text-[12px] font-medium text-ops-sub hover:text-ops-ink"
-              >
+              <Btn kind="editBadge" onClick={() => vm.open({ kind: 'renameDept', dept: d })}>
                 이름 변경
-              </button>
-              <button
-                type="button"
-                onClick={() => vm.open({ kind: 'deleteDept', dept: d })}
-                className="text-[12px] font-medium text-ops-stop hover:underline"
-              >
+              </Btn>
+              <Btn kind="dangerBadge" onClick={() => vm.open({ kind: 'deleteDept', dept: d })}>
                 삭제
-              </button>
+              </Btn>
             </>,
           ),
         )}
@@ -228,9 +220,11 @@ function TabHead({ vm }: { vm: VM }) {
               label="사원 검색"
             />
           </span>
-          <Btn onClick={() => vm.open({ kind: 'csv' })}>
+          <Btn kind="primary" onClick={() => vm.open({ kind: 'csv' })}>
             <Icon name="sheet" />
-            CSV<span className="max-xl:hidden">로 사원</span> 등록
+            <span>
+              CSV<span className="max-xl:hidden">로 사원</span> 등록
+            </span>
           </Btn>
           <Btn kind="primary" onClick={() => vm.open({ kind: 'add' })}>
             <Icon name="plus" />
