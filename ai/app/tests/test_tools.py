@@ -10,7 +10,7 @@ from conftest import CALLER, GEO, INCOMING_AT, run
 
 from app.address.gazetteer import AddressDB
 from app.address.matcher import correct
-from app.domain.candidates import apply_pick
+from app.domain.candidates import apply_pick, offer
 from app.domain.rules import normalize_phone, parse_pickup
 from app.domain.state import ConversationState, Customer, FieldStatus, Geo, Items, Place, Source
 from app.integrations.address import AddressService
@@ -577,6 +577,28 @@ def test_get_state_changes_nothing():
     v = c.state.state_version
     out = call(c, "get_state", {})
     assert out["status"] == "ok" and out["stage"] == "sender" and c.state.state_version == v
+    assert "facts" not in out  # 값은 고객이 물었을 때(include_values)만
+
+
+def test_get_state_values_on_request():
+    """고객이 물으면 고르기 전 후보·고른 뒤 기록 값을 서버 상태로 준다. 발신번호·기업 사원 연락처·상세주소는 주지 않는다."""
+    pins = (place("박지호", "경상북도 구미시 인의로 1"), place("박지호", "서울특별시 양천구 신정로 2", detail="403호"))
+    c = ctx(customer=Customer(caller_phone=CALLER, places=pins))
+    labels = call(c, "find_destination", {"name": "박지호"})["facts"]["labels"]
+    v = c.state.state_version
+    before = call(c, "get_state", {"include_values": True})["facts"]
+    assert [x["address_detail"] for x in before["candidates"]] == ["101호", "403호"]
+    assert {x["phone"] for x in before["candidates"]} == {"01098765432"} and c.state.state_version == v
+    assert apply_pick(c.state, labels[1])
+    cur = call(c, "get_state", {"include_values": True})["facts"]["current"]
+    assert cur["receiver_address_detail"] == {"value": "403호", "from": "pin"}
+    assert cur["receiver_phone"] == {"value": "01098765432", "from": "pin"}
+    assert "sender_phone" not in cur and c.state.field_of("sender_phone").valid  # 발신번호는 읽지 않는다
+    company = ctx()
+    offer(company.state, "destination", ("세종대로 김부장",),
+          (Place("김부장", "01011112222", "서울 중구 세종대로 110", "5층", None, Source.COMPANY),))
+    cand = call(company, "get_state", {"include_values": True})["facts"]["candidates"][0]
+    assert cand == {"label": "세종대로 김부장", "name": "김부장", "address": "서울 중구 세종대로 110"}
 
 
 def test_record_rejected_after_order_submitted():

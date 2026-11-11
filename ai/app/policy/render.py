@@ -55,7 +55,9 @@ def render_delegation(policy: Policy, tools: tuple[tuple[str, str], ...] = ()) -
               "크기나 개수가 애매할 때 box_size_needed로 맡깁니다.",
               "- 수거 시각 변경은 서버의 현재 시각 기준 최종 검사를 거치도록 맡깁니다. 통화 시작 시각만으로 허용 여부를 확정하지 않습니다.",
               "- 정상 정보와 잘못된 값이 섞이면 정상 정보는 버리지 않고 맡기고, 잘못된 항목은 다시 묻습니다. "
-              "기록 성공은 서버 결과로만 안내합니다."]
+              "기록 성공은 서버 결과로만 안내합니다.",
+              "- 고객이 진행 중인 택배에 기록된 값(받는 분·주소·상세주소·연락처·물품 등)이나 안내한 받는 곳 후보의 "
+              "주소·상세주소·연락처를 물을 때. 대화에서 들은 기억으로 답하지 않고 서버 결과의 값으로 답합니다."]
     if tools:
         lines += ["", "Backend tools:"] + [f"- {name}: {desc}" for name, desc in tools]
     lines += ["", "Do not generate <|SpawnThinking|> when:",

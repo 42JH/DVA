@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from app.domain.assess import assess
-from app.domain.state import ConversationState, FieldStatus
+from app.domain.state import ConversationState, FieldStatus, Items, Place, Source
 from app.policy.model import Policy
 
 Status = Literal["ok", "needs_input", "needs_choice", "needs_confirmation", "rejected", "unavailable", "unknown"]
@@ -46,3 +46,31 @@ def state_summary(state: ConversationState, policy: Policy) -> dict:
     elif state.current and state.current.documents_only():
         fields["item_price"] = FieldStatus.VALID.value
     return summary
+
+
+# 기업 사원 배송지는 발신 고객의 주소록이 아니다 — 연락처·상세주소는 요청해도 주지 않는다(주소록 주인 = 발신번호 전제 밖)
+_PRIVATE_PARTS = ("phone", "address_detail")
+
+
+def _shown(source: Source | None, part: str) -> bool:
+    return not (source == Source.COMPANY and part.endswith(_PRIVATE_PARTS))
+
+
+def order_values(state: ConversationState, policy: Policy) -> dict:
+    """고객이 물은 진행 중 택배의 기록된 값과 제시 중인 받는 곳 후보(get_state include_values).
+    서버 상태에서만 만든다 — Live가 대화 기억으로 답하지 않게. 발신번호(kind auto)·검증 안 된 값은 넣지 않는다."""
+    out: dict = {}
+    if state.current is not None:
+        current = {}
+        for name, f in state.current.fields.items():
+            if not f.valid or f.value is None or policy.fields[name].kind == "auto" or not _shown(f.source, name):
+                continue
+            value = {k: v for k, v in f.value.__dict__.items() if v} if isinstance(f.value, Items) else f.value
+            current[name] = {"value": value} | ({"from": f.source.value} if f.source not in (Source.CUSTOMER, None) else {})
+        out["current"] = current
+    c = state.candidates
+    if c is not None and c.kind == "destination":
+        out["candidates"] = [{"label": label} | {part: getattr(p, part) for part in ("name", "phone", "address", "address_detail")
+                                                 if getattr(p, part) and _shown(p.source, part)}
+                             for label, p in zip(c.labels, c.items) if isinstance(p, Place)]
+    return out

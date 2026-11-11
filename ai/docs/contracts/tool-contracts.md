@@ -14,7 +14,7 @@
 | `find_destination` | name·place·detail·organization·department | needs_choice(이름표, 후보는 `state.candidates`; 1건이면 facts.guidance로 질문형 확인) / ok(`DEST_PICKED`: 이미 제시한 후보 중 1건으로 좁혀지면 그 핀을 바로 적용, 2026-11-10) / ok(`DEST_NEW_RECEIVER`: place를 실제 주소로 바꾼 뒤 그 주소의 핀이 없으면 받는 곳 주소·성함 기록) / needs_input(`ADDRESS_REGION_NEEDED`) / needs_input(`DEST_NONE`·`DEST_TOO_MANY`) / unavailable(BE) |
 | `lookup_orders` | receiver_name, other_customer | ok(1건 → `state.selected_order`) / needs_choice(여러 건) / needs_input(`ORDER_NOT_FOUND_BY_NAME`) / rejected(`ORDER_OTHER_CUSTOMER`: 다른 번호·다른 고객 접수, BE 호출 없음) / unavailable(`CALL_NOT_REGISTERED`). 조회 결과 facts에 `scope`(이 번호로 접수된 택배만) |
 | `search_manual` | question | ok(answerable, context; `KB_NO_EVIDENCE`·`KB_LOW_SCORE`) / unavailable(`KB_UNAVAILABLE`·`KB_TIMEOUT`) |
-| `get_state` | 없음 | ok + 상태 요약(아무것도 바꾸지 않음) |
+| `get_state` | `include_values`(bool, 기본 false) | ok + 상태 요약(아무것도 바꾸지 않음). `include_values=true`면 `facts.current`(진행 중 택배의 검증된 값 `{value, from?}`, 발신번호 제외)·`facts.candidates`(제시 중인 받는 곳 후보의 이름표·성함·주소·상세주소·연락처). 기업 사원 후보·값의 연락처·상세주소는 넣지 않음 |
 
 **서버 전용**(모델에 없음): `app/tools/cancel.py cancel_parcel` — `ops["cancel:{o}:{p}"]`, 앞 시도가 불확실하면 상세 재조회 후 재요청, 결과 ok(done·`CANCEL_ALREADY`) / rejected(`CANCEL_LOCKED`·`ORDER_OUT_OF_RANGE`) / unknown(`CANCEL_OUTCOME_UNKNOWN`, 완료라고 말하지 않음). 선택형 판단(확인·후보 선택·용건)은 도구가 아니라 발화 끝 Decision(`delegation.md` §2).
 

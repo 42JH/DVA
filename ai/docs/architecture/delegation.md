@@ -83,7 +83,7 @@
 | 4 | 외부 업무 실행 | 확정 관문 통과 후 취소·상담원 전환·통화 결과 전송·고객 등록·PIN | 서버가 **검증된 상태 값**으로 Tool 실행 | (확인은 경로 2) | ✘ | BE·OpenAI refer |
 | 5 | 복합 발화 | 한 발화에 선택형 + 자유형("네, 근데 받는 분 이름이 박민수예요", "두 번째 말고 강남에 있는 곳") | 경로 2와 3이 **병렬**로 진행 → 서버 통합(§4.1) | ✔ | ✔ | 3과 같음 |
 
-Backend 도구(경로 3 전용, 모두 strict): `record_fields`, `find_destination`, `lookup_orders`, `search_manual`, `get_state`(맥락 복구, 판단 없음). 경로 4의 실행 도구는 서버 전용이며 모델에 노출하지 않는다.
+Backend 도구(경로 3 전용, 모두 strict): `record_fields`, `find_destination`, `lookup_orders`, `search_manual`, `get_state`(맥락 복구·고객이 물은 진행 중 택배 값과 후보 값 조회, 판단 없음). 경로 4의 실행 도구는 서버 전용이며 모델에 노출하지 않는다.
 
 **Decision이 행동과 인자를 이미 정했다면 Backend가 필요한가?** 경로 2·4는 인자가 선택지 안에 있어 필요 없다. 경로 3은 Decision이 자유형 값을 만들지 않으므로 Backend가 필요하다. 서버가 Backend를 따로 부르는 방법은 문서화되지 않았으므로(D10) 경로 3은 Live 위임으로만 시작된다.
 

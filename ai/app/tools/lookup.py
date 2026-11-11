@@ -1,6 +1,6 @@
 """읽기 도구: find_destination(받는 곳 찾기) · lookup_orders(보낸 택배 조회) · search_manual(FAQ) · get_state.
 원본 match_pins·lookup_orders·search_manual을 새 상태 모델로. 찾은 후보는 state.candidates에 두고 결과에는 이름표만 준다
-(상세주소·연락처는 먼저 읽어 주지 않는다). 후보 선택은 고객 발화 끝 Decision pick → app.domain.candidates.apply_pick.
+(상세주소·연락처는 먼저 읽어 주지 않는다. 고객이 물으면 get_state include_values로 준다). 후보 선택은 고객 발화 끝 Decision pick → app.domain.candidates.apply_pick.
 """
 
 import asyncio
@@ -16,7 +16,7 @@ from app.observability.trace import observe_latency
 from app.rag.schemas import Evidence, SearchContext
 from app.tools.context import ToolContext
 from app.tools.executor import Args, model_tool
-from app.tools.outcome import ToolOutcome, state_summary
+from app.tools.outcome import ToolOutcome, order_values, state_summary
 from backend_client.api import parcel_lookup_details
 from backend_client.order import Place as BEPlace
 from backend_client.order import match_places, pin_labels, words
@@ -320,12 +320,15 @@ async def search_manual(ctx: ToolContext, args: ManualQuery) -> ToolOutcome:
 
 # --- get_state ---
 
-class NoArgs(Args):
-    pass
+class StateArgs(Args):
+    include_values: bool = Field(False, description="고객이 진행 중인 택배에 기록된 값이나 제시된 받는 곳 후보의 "
+                                                    "주소·상세주소·연락처를 물었을 때만 true")
 
 
-@model_tool("get_state", "지금까지 기록된 항목의 상태와 빠진 항목을 본다(맥락 복구용, 아무것도 바꾸지 않음).", NoArgs)
-async def get_state(ctx: ToolContext, args: NoArgs) -> ToolOutcome:
+@model_tool("get_state", "지금까지 기록된 항목의 상태와 빠진 항목을 본다(아무것도 바꾸지 않음). include_values=true면 "
+                         "진행 중인 택배에 기록된 값과 제시 중인 받는 곳 후보의 값도 준다.", StateArgs)
+async def get_state(ctx: ToolContext, args: StateArgs) -> ToolOutcome:
     async with ctx.lock:
-        return ToolOutcome("ok", summary=state_summary(ctx.state, ctx.policy))
+        values = order_values(ctx.state, ctx.policy) if args.include_values else {}
+        return ToolOutcome("ok", facts=values, summary=state_summary(ctx.state, ctx.policy))
 
