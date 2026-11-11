@@ -30,9 +30,8 @@ export function emptyPromptNotice(p: PromptFields): string | null {
   return empty.length ? `${empty.join(' · ')} 칸이 비어 있습니다` : null
 }
 
-// 버전 표시 (11/11 — 저장 = 새 버전, [적용] 없음): 확정된 최신 = 현재 버전, 통화에 쓰는 버전 · AI 확인을 기다리는 버전
+// 버전 표시 (11/11 — 저장 = 새 버전, [적용] 없음): 통화에 쓰는 버전 · AI 확인을 기다리는 버전
 export const VERSION_BADGE = {
-  head: { label: '현재 버전', tone: 'idle' },
   ACTIVE: { label: '통화에 사용 중', tone: 'done' },
   PENDING: { label: '적용 대기', tone: 'wait' }, // AI가 확인하면 통화에 사용 중 (그동안 이전 버전이 계속 쓰임)
 } satisfies Record<string, { label: string; tone: Tone }>
