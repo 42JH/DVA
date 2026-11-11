@@ -48,7 +48,7 @@ def test_live_instructions_carry_policy_order_forbid_and_delegation():
     assert "payment" not in POLICY.fields and "결제 방식" not in procedure.split("## 하지 않는 것")[0]  # 결제는 묻지 않는다
     assert "수거 시각은 먼저 묻지 않는다" in text and text.startswith(default_persona()[:20])
     # 위임 정책은 페르소나 바로 뒤, 업무 규칙·상담 절차보다 앞(지시문 끝 쪽에 있을 때 Live가 값을 받고도 위임하지 않음)
-    assert len(default_persona()) < text.index("# 백엔드에 맡기기") < text.index("# 업무 규칙") < text.index("# 상담 절차")
+    assert len(default_persona()) < text.index("# 백엔드 위임(<|SpawnThinking|>)") < text.index("# 업무 규칙") < text.index("# 상담 절차")
 
 
 def test_persona_first_then_fixed_business_rules_and_fallback_on_blank():

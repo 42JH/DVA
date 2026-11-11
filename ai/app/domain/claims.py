@@ -11,7 +11,7 @@ from app.address.numbers import korean_to_int
 from app.domain.state import ConversationState, Place
 from app.policy.model import Policy
 
-READY_RECEIPT = re.compile(r"(?:네,?)?(?:이대로|그대로|그렇게)?택배가접수(?:됐|되었)습니다"
+READY_RECEIPT = re.compile(r"(?:네,?)?(?:이대로|그대로|그렇게)?택배(?:가|한건이?)?접수(?:됐|되었)습니다"
                            r"(?:,?더보내실택배가(?:있으세요|있으신가요))?")
 
 

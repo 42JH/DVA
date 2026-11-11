@@ -262,6 +262,10 @@ def test_ready_receipt_allows_only_one_parcel_acknowledgement():
     assert unverified_claims(receipt, s, P) == ["접수되었"]
     assert unverified_claims(f"{receipt}. {receipt}.", s, P, ready_receipt=True) == ["접수되었"]
     assert unverified_claims(f"{receipt}. 주문 접수 완료됐습니다.", s, P, ready_receipt=True) == ["접수되었"]
+    # 통화 504: "택배 한 건 접수됐습니다"가 오탐돼 N3 → 맞는 안내를 번복했다.
+    for said in ("택배 한 건 접수됐습니다", "택배 한 건이 접수되었습니다", "택배 접수됐습니다"):
+        assert unverified_claims(f"{said}. 더 보내실 택배가 있으세요?", s, P, ready_receipt=True) == []
+    assert unverified_claims("택배 두 건 접수됐습니다", s, P, ready_receipt=True) == ["접수되었"]
 
 
 def test_domain_and_policy_do_not_import_sdk_http_or_be_contract():
