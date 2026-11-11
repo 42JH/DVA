@@ -51,7 +51,13 @@ function Overlay({
   // 열 때 한 번 (onClose가 렌더마다 새 함수여도 다시 안 돎)
   useEffect(() => {
     const prev = document.activeElement as HTMLElement | null
-    ;(box.current?.querySelector<HTMLElement>(FIRST_FIELD) ?? box.current)?.focus()
+    // 확정 버튼(data-autofocus)이 먼저 — 확인 창에서 Enter = 확인 (첫 버튼 [취소]에 두면 Enter가 취소가 됨)
+    const el = box.current
+    ;(
+      el?.querySelector<HTMLElement>('[data-autofocus]') ??
+      el?.querySelector<HTMLElement>(FIRST_FIELD) ??
+      el
+    )?.focus()
     return () => prev?.focus()
   }, [])
 
@@ -61,6 +67,7 @@ function Overlay({
       const dialogs = document.querySelectorAll('[role="dialog"]')
       if (!el || dialogs[dialogs.length - 1] !== el) return
       if (e.key === 'Escape') return onClose()
+      if (e.key === 'Enter' && e.repeat) return e.preventDefault() // 창을 연 Enter를 꾹 눌러도 바로 확정되지 않게
       if (e.key !== 'Tab') return
       const els = [...el.querySelectorAll<HTMLElement>(FOCUSABLE)]
       const first = els[0]
@@ -197,6 +204,7 @@ export function ConfirmDialog({
             kind={okLabel === '삭제' ? 'danger' : big && okKind === 'primary' ? 'brand' : okKind}
             onClick={onOk}
             disabled={pending}
+            data-autofocus
           >
             {okLabel}
           </Button>
