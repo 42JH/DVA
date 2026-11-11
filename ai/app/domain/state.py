@@ -72,7 +72,7 @@ class Geo:
 
 @dataclass(frozen=True)
 class Place:
-    """받는 곳 후보(주소록 핀·이전 도착지·기업 사원). 주소록 값은 읽어 주지 않는다(README §5)."""
+    """받는 곳 후보(주소록 핀·이전 도착지·기업 사원). 주소록 값은 먼저 읽지 않고 고객이 물으면 get_state로 준다."""
     name: str
     phone: str
     address: str

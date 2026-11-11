@@ -20,7 +20,7 @@ from app.domain.rules import KST
 from app.domain.address_book import prefill_sender
 from app.domain.assess import assess, readback_facts
 from app.domain.candidates import apply_pick, offer, reject_candidates
-from app.domain.claims import truth, unverified_claims
+from app.domain.claims import truth, unverified_claims, unverified_values
 from app.domain.confirm import (ConfirmAnswer, Utterance, asks, asks_parcel_confirmation, check_gate, commit_parcel,
                                 explicitly_requests_parcel, issue_cancel_confirmation, issue_parcel_confirmation,
                                 release, take_cancel)
@@ -230,7 +230,7 @@ class LiveFlow:
             await self.judge(s, utt, prev)
 
     def _ai_done(self, s: CallSession) -> None:
-        """AI 발화 끝: 결과 문구 검사(LLM 없음, delegation.md §6.2-5)."""
+        """AI 발화 끝: 결과 문구 검사(LLM 없음, delegation.md §6.2-5)·말한 번호·호수 대조(기록만)."""
         rt = self.rt(s)
         rt.ai_end = None
         if not rt.ai:
@@ -238,6 +238,9 @@ class LiveFlow:
         spoken = rt.ai[-1]
         if rt.readback_id and spoken.readback_id == rt.readback_id and asks_parcel_confirmation(spoken.text):
             rt.readback_id = None
+        if wrong := unverified_values(spoken.text, s.state):  # 측정만: 기억으로 답했거나 잘못 읽은 번호·호수
+            s.note("값 대조", "서버 값에 없는 번호·호수", wrong)
+            log.warning("값 대조 불일치 %s %s", s.call_id, wrong)
         pid = spoken.ready_parcel_id
         ready_receipt = pid is not None and self.svc.intake.confirmed_status(s, pid) == "ready"
         if claims := unverified_claims(spoken.text, s.state, self.policy, ready_receipt=ready_receipt):

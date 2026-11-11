@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from app.domain.assess import assess, readback_facts
-from app.domain.claims import unverified_claims
+from app.domain.claims import unverified_claims, unverified_values
 from app.domain.confirm import ConfirmAnswer, Utterance, check_gate, commit_parcel, issue_parcel_confirmation, release
 from app.domain.outcome import decide_outcome
 from app.domain.state import ConversationState, Customer, FieldStatus, Geo, Items, Source
@@ -362,3 +362,15 @@ def test_unregistered_customer_name_not_prefilled():
     s = ConversationState(customer=Customer(customer_seq=None, name=None, caller_phone="01012345678"), intent="order")
     assert not s.field_of("sender_name").valid
 
+
+
+def test_unverified_values_spoken_phone_and_ho():
+    """말한 번호·호수가 서버 값에 없으면 잡는다(측정용). 한 자리씩 읽은 한글·자리 단위 호수도 맞춘다."""
+    s = ConversationState(customer=Customer(caller_phone="01055556666"), intent="order")
+    s.record("receiver_phone", "01012345678", Source.PIN)
+    s.record("receiver_address_detail", "1203호", Source.PIN)
+    assert unverified_values("연락처는 공일공 일이삼사 오육칠팔입니다", s) == {}
+    assert unverified_values("010-1234-5678로 되어 있어요. 천이백삼호입니다", s) == {}
+    assert unverified_values("일이공삼호요", s) == {}
+    assert unverified_values("공일공 일이삼사 오육칠구입니다. 1204호예요", s) == {"phone": ["010****5679"], "ho": 1}
+    assert unverified_values("일호선 타고 오세요. 이번 택배요. 삼호동 근처요", s) == {}  # 호선·일반 낱말은 번호가 아니다
