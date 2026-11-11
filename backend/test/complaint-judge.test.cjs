@@ -255,6 +255,7 @@ function testWorker(repository) {
     repository,
     { ask: async () => assert.fail('외부 모델 호출 금지') },
     { get: (key) => ({ AWS_REGION: 'ap-northeast-2', CALL_ANALYSIS_CONCURRENCY: 1 })[key] },
+    { recordFailure: async () => assert.fail('Unexpected worker failure') },
   );
   worker.logger = { log() {}, warn() {} };
   return worker;
