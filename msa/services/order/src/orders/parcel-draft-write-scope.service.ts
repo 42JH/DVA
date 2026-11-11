@@ -44,6 +44,7 @@ type ActiveWrite = {
   link: CallOrderLink | null;
   customerReceipt: RecipientReceipt | null;
   recipientAddresses: RecipientAddress[] | null;
+  recipientOrderSeq: number | null;
 };
 
 @Injectable()
@@ -91,6 +92,7 @@ export class ParcelDraftWriteScope {
       link: null,
       customerReceipt: null,
       recipientAddresses: null,
+      recipientOrderSeq: null,
     };
     this.writes.set(event.eventId, state);
     return this.local.run(state, async () => {
@@ -105,14 +107,16 @@ export class ParcelDraftWriteScope {
   private result(data: Record<string, unknown>): DraftWriteResult {
     const state = this.active;
     const result = { data, receipt: state.receipt };
-    return state.event.payload.command.operation === 'OrderSubmitted'
+    return ['OrderSubmitted', 'AdminParcelDraftSubmitted'].includes(
+      state.event.payload.command.operation,
+    )
       ? { ...result, customerReceipt: state.customerReceipt }
       : result;
   }
 
   recipients(scopeId: string, id: number): RecipientAddress[] {
     const state = this.writes.get(scopeId);
-    if (!state || state.event.payload.command.id !== id || state.recipientAddresses === null)
+    if (!state || state.recipientOrderSeq !== id || state.recipientAddresses === null)
       throw new ApiException(
         503,
         'DEPENDENCY_UNAVAILABLE',
@@ -130,6 +134,7 @@ export class ParcelDraftWriteScope {
     requestId: string,
   ) {
     this.active.recipientAddresses = addresses;
+    this.active.recipientOrderSeq = id;
     const pins = await this.reference<RecipientPin[]>('customer', 'RecipientPinsPrepared', {
       id,
       customerSeq,

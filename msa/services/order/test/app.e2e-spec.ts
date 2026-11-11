@@ -60,6 +60,7 @@ describe('Order read API (e2e)', () => {
         expect(Object.keys(body.paths).sort()).toEqual([
           '/api/admin/orders',
           '/api/admin/orders/{id}/retry',
+          '/api/admin/parcel-drafts/{id}/submit',
           '/api/customers/{id}/addresses',
           '/api/orders',
           '/api/orders/{id}',

@@ -58,3 +58,5 @@ export interface IntakeOrderResult {
 }
 export function validateOrderIntakeResultRead(event: unknown): asserts event is OrderIntakeResultReadEvent;
 export function requestOrderIntakeResult(url: string, token: string, event: OrderIntakeResultReadEvent): Promise<IntakeOrderResult | null>;
+
+export function orderIntakeResult(value:unknown,payload:{orderSeq:number;callSessionSeq:number|null}):boolean;

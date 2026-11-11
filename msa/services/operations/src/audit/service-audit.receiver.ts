@@ -157,6 +157,7 @@ function auditInput(
             'ORDER_CREATED',
             'ORDER_UPDATED',
             'ORDER_SUBMITTED',
+            'PARCEL_DRAFT_CONVERTED',
             'ORDER_DELETED',
             'PARCEL_DRAFT_DELETED',
             'ORDER_CANCELLED',
@@ -172,7 +173,8 @@ function auditInput(
         ? audit.targetType ===
           (billingInitialization || billingIncrease
             ? 'ORGANIZATION'
-            : draftMutation || audit.action === 'PARCEL_DRAFT_DELETED'
+            : draftMutation ||
+                ['PARCEL_DRAFT_DELETED', 'PARCEL_DRAFT_CONVERTED'].includes(audit.action as string)
               ? 'ORDER_PARCEL_DRAFT'
               : audit.action === 'ORDER_PARCEL_CANCELLED' && payload.result === 'SUCCESS'
                 ? 'ORDER_PARCEL'
@@ -279,6 +281,7 @@ function auditInput(
               : [
                     'ORDER_DELETED',
                     'PARCEL_DRAFT_DELETED',
+                    'PARCEL_DRAFT_CONVERTED',
                     'ORDER_PAYMENT_NOTIFICATION_RETRIED',
                     'ORDER_PAYMENT_COMPLETION_NOTIFICATION_RETRIED',
                   ].includes(audit.action as string)

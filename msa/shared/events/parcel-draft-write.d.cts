@@ -2,7 +2,7 @@ import type {RecipientReceipt} from './order-recipient-pins.cjs';
 import type { Event } from './index.cjs';
 
 export interface DraftWriteCommand {
-  operation: 'ParcelDraftCreated' | 'ParcelDraftUpdated' | 'OrderIntakeSealed' | 'OrderIntakeFinalized' | 'OrderUpdated' | 'OrderSubmitted';
+  operation: 'ParcelDraftCreated' | 'ParcelDraftUpdated' | 'OrderIntakeSealed' | 'OrderIntakeFinalized' | 'OrderUpdated' | 'OrderSubmitted' | 'AdminParcelDraftSubmitted';
   id: number | null;
   adminId: number | null;
   callSessionSeq: number | null;

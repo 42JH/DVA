@@ -8,6 +8,7 @@ test('the complete monolith route, migration and worker inventory matches the pi
   assert.equal(baseline.inventory.routes.length, 110);
   const keys = baseline.inventory.routes.map(r => `${r.method} ${r.path}`);
   assert.equal(new Set(keys).size, keys.length);
+  for (const route of baseline.inventory.routes.filter(r=>r.path.startsWith('/api/calls/:id/order-intake'))) assert.equal(route.service,'consultation');
   for (const required of ['GET /api/calls/active-count/stream', 'POST /webhooks/pbx/call-ended',
     'GET /api/companies/members/search', 'POST /api/calls/:id/order-intake/complete', 'GET /api/calls/:id/order-intake',
     'GET /api/parcel-drafts', 'POST /api/parcel-drafts', 'PATCH /api/parcel-drafts/:id',

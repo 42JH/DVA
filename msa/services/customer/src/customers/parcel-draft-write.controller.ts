@@ -127,7 +127,10 @@ export class ParcelDraftWriteController {
         const input = event.payload.input;
         if (event.payload.operation === 'RecipientPinsPrepared') {
           const active = this.active.get(scopeId)!;
-          if (active.command.operation !== 'OrderSubmitted' || active.command.id !== input.id)
+          if (
+            !['OrderSubmitted', 'AdminParcelDraftSubmitted'].includes(active.command.operation) ||
+            (active.command.operation === 'OrderSubmitted' && active.command.id !== input.id)
+          )
             throw new ApiException(403, 'FORBIDDEN', '주문 쓰기 범위를 확인해 주세요.');
           const addresses = await requestWriteReference<RecipientAddress[]>(
             readCallbackUrl(

@@ -25,9 +25,11 @@ const paymentRequestJson = `(SELECT jsonb_build_object('paymentRequestId',r.paym
 
 @Injectable()
 export class OrdersRepository {
-  async result(client: Pool | PoolClient, id: number, callId: number) {
+  async result(client: Pool | PoolClient, id: number, callId: number | null) {
     return (
-      await client.query<IntakeOrderResult>(
+      await client.query<
+        Omit<IntakeOrderResult, 'callSessionSeq'> & { callSessionSeq: number | null }
+      >(
         `SELECT order_seq AS "orderSeq",version,status,total_amount AS "totalAmount",parcel_no AS "parcelNo",$2::int AS "callSessionSeq",
          payment_due_at AS "paymentDueAt",${paymentRequestJson} AS "paymentRequest"
          FROM orders o WHERE order_seq=$1 AND o.deleted_at IS NULL

@@ -1260,7 +1260,7 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
     assert.deepEqual(await callRows(databases.consultation),await callRows(reference));
     const auditRows=async db=>(await db.query(
       'SELECT request_id,action,result,target_type,target_seq,actor_type,actor_seq,metadata FROM audit_logs '+
-      'WHERE request_id=ANY($1::uuid[]) ORDER BY request_id,action,target_seq',[requests],
+      'WHERE request_id=ANY($1::uuid[]) ORDER BY request_id,audit_log_seq',[requests],
     )).rows;
     assert.deepEqual(await auditRows(databases.operations),await auditRows(reference));
     const docs=await Promise.all(sides.map(async side=>(await fetch(side.base+'/api/docs-json')).json()));
@@ -3822,7 +3822,7 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
       const logs = async (db) =>
         (
           await db.query(
-            'SELECT actor_type,actor_seq,actor_name,action,result,target_type,target_seq,metadata,request_id FROM audit_logs WHERE request_id=ANY($1::uuid[]) ORDER BY request_id,action,target_seq',
+            'SELECT actor_type,actor_seq,actor_name,action,result,target_type,target_seq,metadata,request_id FROM audit_logs WHERE request_id=ANY($1::uuid[]) ORDER BY request_id,audit_log_seq',
             [requestIds],
           )
         ).rows;
@@ -3955,6 +3955,401 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
         'order submit HTTP pairs: ' +
           pairs +
           '; all states, caller permissions, card/month/group, recipient deduplication, stored addresses over 256KiB and real customer rollback recovery',
+      );
+    },
+  );
+
+  await t.test(
+    'administrator draft submission preserves standalone conversion, payment policy and replay',
+    async () => {
+      const started = Date.now(),
+        at = new Date().toISOString(),
+        owners = [
+          {
+            ...sides[0],
+            orders: reference,
+            calls: reference,
+            customers: reference,
+            audit: reference,
+          },
+          {
+            ...sides[1],
+            orders: databases.order,
+            calls: databases.consultation,
+            customers: databases.customer,
+            audit: databases.operations,
+          },
+        ];
+      for (const side of owners) {
+        for (const [table, column, value] of [
+          ['orders', 'order_seq', 70000],
+          ['order_parcel_drafts', 'draft_seq', 60000],
+          ['order_parcels', 'order_parcel_seq', 90000],
+        ])
+          await side.orders.query(
+            'SELECT setval(pg_get_serial_sequence($1,$2),$3,true)',
+            [table, column, value],
+          );
+        await side.customers.query(
+          "SELECT setval(pg_get_serial_sequence('personal_pins','personal_pin_seq'),300000,true)",
+        );
+        await side.calls.query(
+          "INSERT INTO call_sessions(call_session_seq,provider_call_id,caller_phone_number,customer_seq,incoming_at,registered_at,order_intake_enabled) OVERRIDING SYSTEM VALUE VALUES(99001,'admin-submit-call','01080808080',98001,$1,$1,true)",
+          [at],
+        );
+      }
+      const maps = [new Map(), new Map()],
+        requests = [];
+      let pairs = 0;
+      function normalize(value, index, key = '') {
+        if (value === null) return null;
+        if (value instanceof Date) value = value.toISOString();
+        if (
+          [
+            'paymentRequestId',
+            'payment_request_id',
+            'creation_request_id',
+          ].includes(key)
+        ) {
+          assert.match(value, /^[0-9a-f-]{36}$/i);
+          const map = maps[index];
+          if (!map.has(value)) map.set(value, 'uuid-' + map.size);
+          return map.get(value);
+        }
+        if (
+          [
+            'expiresAt',
+            'paymentDueAt',
+            'expires_at',
+            'payment_due_at',
+          ].includes(key)
+        ) {
+          assert.ok(
+            Date.parse(value) >= started + 86400000 - 1000 &&
+              Date.parse(value) <= Date.now() + 86400000 + 1000,
+          );
+          return '<24-hour deadline>';
+        }
+        if (
+          [
+            'createdAt',
+            'updatedAt',
+            'retentionStartedAt',
+            'created_at',
+            'updated_at',
+            'retention_started_at',
+            'paid_at',
+            'closed_at',
+            'submission_first_attempt_at',
+            'submission_last_attempt_at',
+            'deleted_at',
+            'occurred_at',
+          ].includes(key)
+        ) {
+          assert.ok(
+            Date.parse(value) >= started - 1000 &&
+              Date.parse(value) <= Date.now() + 1000,
+            key + ' ' + value,
+          );
+          return '<generated ' + key + '>';
+        }
+        if (Array.isArray(value))
+          return value.map((item) => normalize(item, index));
+        if (typeof value === 'object')
+          return Object.fromEntries(
+            Object.entries(value).map(([name, item]) => [
+              name,
+              normalize(item, index, name),
+            ]),
+          );
+        return value;
+      }
+      const { envelope, schema } = require('./final-parity.cjs');
+      const specs = [];
+      for (const side of owners)
+        specs.push(
+          await (
+            await fetch(
+              side.base +
+                (side.name === 'monolith' ? '/api' : '/order') +
+                '/docs-json',
+            )
+          ).json(),
+        );
+      const submitPath = '/api/admin/parcel-drafts/{id}/submit';
+      assert.deepEqual(
+        schema(specs[1].paths[submitPath].post, specs[1]),
+        schema(specs[0].paths[submitPath].post, specs[0]),
+      );
+      async function pair(method, path, input, status = 200, options = {}) {
+        const requestId = randomUUID(),
+          bodies = [];
+        requests.push(requestId);
+        for (const [index, side] of owners.entries()) {
+          const response = await fetch(side.base + path, {
+            method,
+            signal: AbortSignal.timeout(30000),
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Request-Id': requestId,
+              ...(options.ai
+                ? {
+                    Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN,
+                    call_session_seq: '99001',
+                  }
+                : {
+                    Cookie: 'dva_session=' + tokens[(options.admin ?? 1) - 1],
+                    Origin: 'http://localhost:5173',
+                  }),
+              ...options.headers,
+            },
+            ...(input === undefined ? {} : { body: JSON.stringify(input) }),
+          });
+          const body = status === 204 ? null : await response.json();
+          assert.equal(
+            response.status,
+            status,
+            side.name + ' ' + method + ' ' + path + ' ' + JSON.stringify(body),
+          );
+          assert.equal(response.headers.get('cache-control'), 'no-store');
+          bodies.push(normalize(envelope(body, requestId), index));
+        }
+        assert.deepEqual(bodies[1], bodies[0], method + ' ' + path);
+        pairs++;
+        return bodies[0]?.data;
+      }
+      const address = (name) => ({
+        name,
+        phoneNumber: '01080808080',
+        roadAddress: '관리자 접수 도로',
+        jibunAddress: '관리자 접수 지번',
+        detailAddress: '101호',
+        dongName: '동',
+        postalCode: '12345',
+      });
+      const create = (
+        label,
+        customerSeq = 98001,
+        status = 'READY',
+        options = {},
+      ) =>
+        pair(
+          'POST',
+          '/api/parcel-drafts',
+          {
+            clientParcelId: randomUUID(),
+            customerSeq,
+            status,
+            parcel: {
+              origin: address('발송인'),
+              destination: address(label),
+              documentCount: 1,
+              itemPrice: 1000,
+              notifiedPrice: 5000,
+            },
+          },
+          201,
+          options,
+        );
+      const submit = (
+        id,
+        input = { expectedVersion: 1, paymentMethodType: 'billing' },
+        status = 200,
+        options = {},
+      ) =>
+        pair(
+          'POST',
+          '/api/admin/parcel-drafts/' + id + '/submit',
+          input,
+          status,
+          options,
+        );
+      await submit(9999999, {}, 400);
+      await submit(9999999, { expectedVersion: 1 }, 404);
+      await submit(0, { expectedVersion: 1 }, 400);
+      await submit(9999999, { expectedVersion: 1 }, 401, {
+        ai: true,
+        headers: { Origin: 'http://localhost:5173' },
+      });
+      await submit(9999999, { expectedVersion: 1 }, 403, {
+        headers: { Origin: 'http://invalid.example' },
+      });
+      const editing = await create('미완료 관리자', 98001, 'EDITING');
+      await submit(editing.draftSeq, undefined, 409);
+      const linked = await create('통화 배송', 98001, 'READY', { ai: true });
+      await submit(linked.draftSeq, undefined, 409);
+      const ordinary = await create('카드 수령인');
+      await submit(
+        ordinary.draftSeq,
+        { expectedVersion: 1, unknown: true },
+        400,
+      );
+      await submit(
+        ordinary.draftSeq,
+        { expectedVersion: 2, paymentMethodType: 'billing' },
+        409,
+      );
+      await submit(ordinary.draftSeq, { expectedVersion: 1 }, 422);
+      await submit(
+        ordinary.draftSeq,
+        { expectedVersion: 1, paymentMethodType: 'cash' },
+        400,
+      );
+      await submit(
+        ordinary.draftSeq,
+        {
+          expectedVersion: 1,
+          paymentMethodType: 'billing',
+          pickupRequestedAt: '2026-02-30T00:00:00Z',
+        },
+        400,
+      );
+      const billed = await submit(ordinary.draftSeq);
+      assert.equal(billed.status, 'notPaid');
+      assert.equal(billed.orderSeq, ordinary.reservedOrderSeq);
+      assert.equal(billed.callSessionSeq, null);
+      assert.deepEqual(
+        await submit(ordinary.draftSeq, {
+          expectedVersion: 999,
+          paymentMethodType: 'credit',
+        }),
+        billed,
+      );
+      const credit = await create('월결제 수령인');
+      const paid = await submit(
+        credit.draftSeq,
+        {
+          expectedVersion: 1,
+          paymentMethodType: 'credit',
+          pickupRequestedAt: '2035-02-01T00:00:00Z',
+        },
+        200,
+        { admin: 2 },
+      );
+      assert.equal(paid.status, 'ACCEPTED');
+      assert.deepEqual(
+        await submit(credit.draftSeq, { expectedVersion: 999 }, 200, {
+          admin: 3,
+        }),
+        paid,
+      );
+      const group = await create('그룹 수령인', 98004);
+      assert.equal(
+        (
+          await submit(group.draftSeq, {
+            expectedVersion: 1,
+            paymentMethodType: 'groupBilling',
+            pickupRequestedAt: '2035-02-01T00:00:00Z',
+          })
+        ).status,
+        'ACCEPTED',
+      );
+      const ineligible = await create('일반 수령인', 98005);
+      await submit(
+        ineligible.draftSeq,
+        { expectedVersion: 1, paymentMethodType: 'credit' },
+        403,
+      );
+      const withdrawn = await create('접수 전 탈퇴');
+      for (const side of owners)
+        await side.customers.query(
+          "UPDATE customers SET status='WITHDRAWN' WHERE customer_seq=98001",
+        );
+      try {
+        await submit(withdrawn.draftSeq, undefined, 404);
+      } finally {
+        for (const side of owners)
+          await side.customers.query(
+            "UPDATE customers SET status='ACTIVE' WHERE customer_seq=98001",
+          );
+      }
+      const deleted = await create('삭제 초안');
+      await pair(
+        'DELETE',
+        '/api/parcel-drafts/' + deleted.draftSeq,
+        undefined,
+        204,
+      );
+      await submit(deleted.draftSeq, undefined, 404);
+      for (const side of owners) {
+        const client = await side.orders.connect();
+        try {
+          await client.query('BEGIN');
+          await client.query("SET LOCAL session_replication_role='replica'");
+          await client.query(
+            'UPDATE orders SET deleted_at=$2 WHERE order_seq=$1',
+            [billed.orderSeq, at],
+          );
+          await client.query('COMMIT');
+        } catch (error) {
+          await client.query('ROLLBACK');
+          throw error;
+        } finally {
+          client.release();
+        }
+      }
+      await submit(ordinary.draftSeq, undefined, 409);
+      const stored = async (side) => ({
+        drafts: (
+          await side.orders.query(
+            'SELECT to_jsonb(d) data FROM order_parcel_drafts d WHERE draft_seq>60000 AND draft_seq<60100 ORDER BY draft_seq',
+          )
+        ).rows,
+        orders: (
+          await side.orders.query(
+            'SELECT to_jsonb(o) data FROM orders o WHERE order_seq>70000 AND order_seq<70100 ORDER BY order_seq',
+          )
+        ).rows,
+        parcels: (
+          await side.orders.query(
+            'SELECT to_jsonb(p) data FROM order_parcels p WHERE order_seq>70000 AND order_seq<70100 ORDER BY order_seq,parcel_position',
+          )
+        ).rows,
+        payments: (
+          await side.orders.query(
+            'SELECT to_jsonb(p) data FROM order_payment_requests p WHERE order_seq>70000 AND order_seq<70100 ORDER BY order_seq',
+          )
+        ).rows,
+        charges: (
+          await side.orders.query(
+            'SELECT order_seq,organization_seq,customer_seq,billing_month::text,payment_method_type,amount,occurred_at FROM order_billing_charges WHERE order_seq>70000 AND order_seq<70100 ORDER BY order_seq',
+          )
+        ).rows,
+        pins: (
+          await side.customers.query(
+            'SELECT personal_pin_seq,customer_seq,label,address_data,version FROM personal_pins WHERE personal_pin_seq>300000 ORDER BY personal_pin_seq',
+          )
+        ).rows,
+        calls: (
+          await side.calls.query(
+            'SELECT call_session_seq,order_seq,customer_seq,order_intake_version FROM call_sessions WHERE call_session_seq=99001',
+          )
+        ).rows,
+      });
+      const original = await stored(owners[0]),
+        candidate = await stored(owners[1]);
+      assert.deepEqual(normalize(candidate, 1), normalize(original, 0));
+      assert.equal(candidate.orders.length, 3);
+      assert.equal(candidate.pins.length, 3);
+      assert.equal(candidate.charges.length, 2);
+      const logs = async (db) =>
+        (
+          await db.query(
+            'SELECT request_id,action,result,target_type,target_seq,actor_type,actor_seq,metadata FROM audit_logs WHERE request_id=ANY($1::uuid[]) ORDER BY request_id,audit_log_seq',
+            [requests],
+          )
+        ).rows;
+      const sourceLogs = await logs(reference);
+      for (let n = 0; n < 100; n++) {
+        if ((await logs(databases.operations)).length === sourceLogs.length)
+          break;
+        await pause(25);
+      }
+      assert.deepEqual(await logs(databases.operations), sourceLogs);
+      t.diagnostic(
+        'administrator draft HTTP pairs: ' +
+          pairs +
+          '; standalone/call scope, expected version, all three payment methods, current-order replay, deleted orders and exact pins/audits',
       );
     },
   );

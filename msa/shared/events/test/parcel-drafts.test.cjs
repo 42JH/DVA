@@ -531,3 +531,105 @@ test('order submission receipts bind recipients to the command and preserve unbo
     global.fetch = saved;
   }
 });
+
+
+test('administrator draft submissions bind the draft and separately reserved order to their receipt', async () => {
+  const {
+    validateDraftWrite,
+    requestDraftWrite,
+  } = require('../parcel-draft-write.cjs');
+  const event = {
+    eventId: randomUUID(),
+    source: 'order',
+    eventType: 'ParcelDraftWriteRequested',
+    payload: {
+      orderAddress: null,
+      command: {
+        operation: 'AdminParcelDraftSubmitted',
+        id: 5,
+        adminId: 1,
+        callSessionSeq: null,
+        input: { expectedVersion: 1, paymentMethodType: 'billing' },
+        requestId: randomUUID(),
+      },
+    },
+  };
+  validateDraftWrite(event, 'order');
+  for (const change of [{ adminId: null }, { callSessionSeq: 1 }])
+    assert.throws(() =>
+      validateDraftWrite(
+        {
+          ...event,
+          payload: {
+            ...event.payload,
+            command: { ...event.payload.command, ...change },
+          },
+        },
+        'order',
+      ),
+    );
+  const receipt = {
+    eventId: randomUUID(),
+    payload: {
+      writeEventId: event.eventId,
+      orderSeq: 42,
+      customerSeq: 3,
+      adminId: 1,
+      requestId: event.payload.command.requestId,
+      pins: [],
+    },
+  };
+  const result = {
+    data: {
+      orderSeq: 42,
+      callSessionSeq: null,
+      version: 2,
+      status: 'notPaid',
+      totalAmount: 5000,
+      parcelNo: null,
+      paymentDueAt: null,
+      paymentRequest: null,
+      draftSeq: 5,
+      orderParcelSeq: 9,
+    },
+    receipt: null,
+    customerReceipt: receipt,
+  };
+  const saved = global.fetch;
+  let response = result;
+  global.fetch = async (_url, options) =>
+    Response.json({
+      eventId: JSON.parse(options.body).eventId,
+      status: 'processed',
+      payload: response,
+    });
+  try {
+    assert.deepEqual(
+      await requestDraftWrite('http://consultation/private', token, event),
+      result,
+    );
+    for (const data of [
+      { draftSeq: 6 },
+      { callSessionSeq: 1 },
+      { orderParcelSeq: 0 },
+      { status: 'other' },
+    ]) {
+      response = { ...result, data: { ...result.data, ...data } };
+      await assert.rejects(
+        requestDraftWrite('http://consultation/private', token, event),
+      );
+    }
+    response = {
+      ...result,
+      customerReceipt: {
+        ...receipt,
+        payload: { ...receipt.payload, orderSeq: 5 },
+      },
+    };
+    await assert.rejects(
+      requestDraftWrite('http://consultation/private', token, event),
+    );
+  } finally {
+    global.fetch = saved;
+  }
+});

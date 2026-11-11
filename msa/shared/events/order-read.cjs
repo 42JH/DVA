@@ -166,7 +166,7 @@ async function requestRead(url, token, event, mode) {
   return value;
 }
 module.exports = {
-  validateOrderRead, requestOrderRead, OrderReadError, ORDER_STATUSES,
+  validateOrderRead, requestOrderRead, OrderReadError, ORDER_STATUSES,orderIntakeResult,
   validateAdminOrderRead, requestAdminOrderRead, requestDraftRead, requestDraftDeletion,
   validateOrderIntakeResultRead, requestOrderIntakeResult,
 };

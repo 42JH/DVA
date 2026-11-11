@@ -31,8 +31,8 @@ function inventory(root = join(__dirname, '../..')) {
       if (!['health', 'internal/metrics', 'webhooks/pbx/call-ended'].some(p => route === p || (p === 'health' && route === 'health/ready')))
         route = `api/${route}`;
       const method = match[1] === 'Sse' ? 'GET' : match[1].toUpperCase();
-      // The /api/calls ingress and the intake state both belong to consultation.
-      const owner = method === 'GET' && route === 'api/calls/:id/order-intake' ? 'consultation' : service;
+      // The /api/calls ingress owns intake reads and completion coordination.
+      const owner = ['api/calls/:id/order-intake','api/calls/:id/order-intake/complete'].includes(route) ? 'consultation' : service;
       return { method, path: `/${route}`, service: owner, stream: match[1] === 'Sse', file };
     });
   });

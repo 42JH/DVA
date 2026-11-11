@@ -468,7 +468,7 @@
       {
         "method": "POST",
         "path": "/api/calls/:id/order-intake/complete",
-        "service": "order",
+        "service": "consultation",
         "stream": false,
         "file": "backend/src/orders/order-intake.controller.ts"
       },

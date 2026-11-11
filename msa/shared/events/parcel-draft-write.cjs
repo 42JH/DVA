@@ -5,7 +5,7 @@ const { privateAddress } = require('./call-event-reference.cjs');
 const { validateReadScope } = require('./read-scope.cjs');
 const {validateRecipientAddresses,validateRecipientPins,validateRecipientReceipt}=require('./order-recipient-pins.cjs');
 const { validateDraftReadResult } = require('./parcel-drafts.cjs');
-const { OrderReadError } = require('./order-read.cjs');
+const { OrderReadError,orderIntakeResult } = require('./order-read.cjs');
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const keys = (value, expected) => object(value) && Object.keys(value).sort().join(',') === expected;
 const id = value => Number.isInteger(value) && value > 0 && value <= 2147483647;
@@ -32,13 +32,14 @@ function validateDraftWrite(event, source) {
   if (!['order','consultation','customer'].includes(source) || event.source !== source ||
       event.eventType !== 'ParcelDraftWriteRequested' || !keys(p, fields) ||
       !keys(c,'adminId,callSessionSeq,id,input,operation,requestId') ||
-      !['ParcelDraftCreated','ParcelDraftUpdated','OrderIntakeSealed','OrderIntakeFinalized','OrderUpdated','OrderSubmitted'].includes(c.operation) ||
+      !['ParcelDraftCreated','ParcelDraftUpdated','OrderIntakeSealed','OrderIntakeFinalized','OrderUpdated','OrderSubmitted','AdminParcelDraftSubmitted'].includes(c.operation) ||
       !(c.operation === 'ParcelDraftCreated' ? c.id === null : id(c.id)) ||
       !nullableId(c.adminId) || !(c.adminId === null ? id(c.callSessionSeq) : ['OrderUpdated','OrderSubmitted'].includes(c.operation) ? nullableId(c.callSessionSeq) : c.callSessionSeq === null) ||
       !object(c.input) || typeof c.requestId !== 'string' || c.requestId.length < 1 || c.requestId.length > 128 ||
       !address(p.orderAddress) || source !== 'order' && !address(p.consultationAddress) ||
       source === 'customer' && !address(p.customerAddress))
     throw new Error('Invalid draft write');
+  if(c.operation==='AdminParcelDraftSubmitted' && (c.adminId===null || c.callSessionSeq!==null))throw new Error('Invalid administrator draft submission');
   if (c.operation.startsWith('OrderIntake')) {
     if (c.adminId!==null || c.id!==c.callSessionSeq) throw new Error('Invalid intake scope');
     if(c.operation==='OrderIntakeSealed') validateCompletion(c.input);
@@ -74,7 +75,7 @@ function validateReceipt(value) {
 }
 
 function validateWriteResult(value, command, eventId) {
-  if (!keys(value,command.operation==='OrderSubmitted'?'customerReceipt,data,receipt':'data,receipt')) throw new Error('Invalid draft write result');
+  if (!keys(value,['OrderSubmitted','AdminParcelDraftSubmitted'].includes(command.operation)?'customerReceipt,data,receipt':'data,receipt')) throw new Error('Invalid draft write result');
   if (command.operation.startsWith('OrderIntake')) {
     if(value.receipt!==null) throw new Error('Invalid intake receipt');
     if(command.operation==='OrderIntakeSealed') {
@@ -85,6 +86,16 @@ function validateWriteResult(value, command, eventId) {
         validateFinalization(value.data.finalization);
         if(value.data.finalization.callSessionSeq!==command.id) throw new Error('Intake result mismatch');
       }
+    }
+    return;
+  }
+  if(command.operation==='AdminParcelDraftSubmitted') {
+    if(!keys(value.data,'callSessionSeq,draftSeq,orderParcelSeq,orderSeq,parcelNo,paymentDueAt,paymentRequest,status,totalAmount,version') || value.data.draftSeq!==command.id || !id(value.data.orderParcelSeq) || !id(value.data.orderSeq))throw new Error('Invalid administrator draft result');
+    const {draftSeq,orderParcelSeq,...order}=value.data;
+    if(!orderIntakeResult(order,{orderSeq:order.orderSeq,callSessionSeq:null}) || value.receipt!==null)throw new Error('Invalid administrator order result');
+    if(value.customerReceipt!==null) {
+      validateRecipientReceipt(value.customerReceipt);
+      if(value.customerReceipt.payload.orderSeq!==order.orderSeq || value.customerReceipt.payload.writeEventId!==eventId || value.customerReceipt.payload.adminId!==command.adminId || value.customerReceipt.payload.requestId!==command.requestId)throw new Error('Administrator recipient mismatch');
     }
     return;
   }

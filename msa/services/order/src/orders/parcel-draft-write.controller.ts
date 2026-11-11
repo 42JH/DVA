@@ -1,3 +1,4 @@
+import { AdminParcelDraftsService } from './admin-parcel-drafts.service';
 import { Headers } from '@nestjs/common';
 import { validateReadScope } from '@dva/events/read-scope.cjs';
 import { ParcelDraftWriteScope } from './parcel-draft-write-scope.service';
@@ -35,6 +36,7 @@ export class ParcelDraftWriteController {
     private readonly database: DatabaseService,
     private readonly drafts: ParcelDraftWritesService,
     private readonly scope: ParcelDraftWriteScope,
+    private readonly adminDrafts: AdminParcelDraftsService,
   ) {}
 
   @Post()
@@ -49,13 +51,15 @@ export class ParcelDraftWriteController {
     return {
       eventId: event.eventId,
       status: 'processed',
-      payload: await (event.payload.command.operation === 'OrderSubmitted'
-        ? this.orders.executeSubmission(event)
-        : event.payload.command.operation === 'OrderUpdated'
-          ? this.orders.executeUpdate(event)
-          : event.payload.command.operation.startsWith('OrderIntake')
-            ? this.intake.execute(event)
-            : this.drafts.execute(event)),
+      payload: await (event.payload.command.operation === 'AdminParcelDraftSubmitted'
+        ? this.adminDrafts.executeSubmit(event)
+        : event.payload.command.operation === 'OrderSubmitted'
+          ? this.orders.executeSubmission(event)
+          : event.payload.command.operation === 'OrderUpdated'
+            ? this.orders.executeUpdate(event)
+            : event.payload.command.operation.startsWith('OrderIntake')
+              ? this.intake.execute(event)
+              : this.drafts.execute(event)),
     };
   }
 
