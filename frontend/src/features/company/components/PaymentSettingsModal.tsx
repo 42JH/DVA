@@ -39,8 +39,8 @@ export function PaymentSettingsModal({ id, onClose }: { id: number; onClose: () 
         </Btn>
       }
     >
-      {/* fieldset disabled — 저장 중엔 창 안 모든 버튼을 한 번에 잠금 */}
-      <fieldset disabled={vm.locked} className="flex flex-col gap-4">
+      {/* fieldset disabled — 저장 중엔 창 안 모든 버튼을 한 번에 잠금. min-h: 부서 검색 목록(최대 240)이 창 안에 다 들어오게 */}
+      <fieldset disabled={vm.locked} className="flex min-h-[480px] flex-col gap-4">
         <Section title="월결제">
           {vm.monthlyEnabled !== undefined && (
             <div className="flex items-end gap-2">
