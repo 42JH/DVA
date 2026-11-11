@@ -35,11 +35,16 @@ export type ProcessingKind =
   | 'INQUIRY'
   | 'FAQ_ANSWERED'
 
+/** 고객 불만(DISSATISFACTION_EXPRESSION)의 대상 · 강도 (11/11 백엔드 !476). 다른 유형 · 그 전 판정은 null 또는 칸 없음 */
+export type ComplaintTarget = 'ai_service' | 'price_policy' | 'delivery_other'
+export type ComplaintLevel = 'explicit' | 'mild'
 interface CallComplaintDto {
   type: ComplaintType
-  evidenceText: string
+  evidenceText: string // 고객 불만이면 고객이 한 말 그대로
   offsetSeconds: number | null
   utteranceOrders: number[]
+  target?: ComplaintTarget | null
+  level?: ComplaintLevel | null
 }
 export interface CallAnalysisDto {
   result: ResultDto // 11/04 서버에서 빠짐 — 옛 화면(주문 상세 관련 통화)만 아직 읽음. 그 화면을 새 디자인으로 바꿀 때 지울 것
@@ -143,7 +148,8 @@ interface CallRow {
   callerNumber: string // 숫자만. 모르면 ''
   isNew: boolean | null // 신규 고객 (null = 모름)
   counts: Record<CallKind, number | null> | null // null = 분석 전
-  complaints: { type: ComplaintType; reason: string }[]
+  hasComplaint: boolean | null // null = 불만 판정 전 (분석 뒤 따로 판정)
+  complaints: Complaint[]
   persona: string | null // 실제로 받은 상담가 이름 (그 버전의 이름 — 분석 전이면 null)
   durationSec: number | null
   callbackAsked: boolean | null // 콜백 요청 (null = 모름 — 아님으로 보지 않기)
@@ -153,7 +159,9 @@ export interface Complaint {
   type: ComplaintType
   reason: string
   offsetSeconds: number | null
-  utteranceOrders: number[] // 스크립트에서 빨갛게 묶을 발화 순번 (빈 배열 = 모름)
+  utteranceOrders: number[] // 스크립트에서 묶을 발화 순번 (빈 배열 = 모름)
+  target: ComplaintTarget | null
+  level: ComplaintLevel | null
 }
 export interface Utterance {
   order: number
@@ -232,6 +240,7 @@ interface CallDetail {
   handoff: { status: HandoffDto['status']; reason: string } | null // 실제 이관 요청 기록
   callbackAsked: boolean | null // 04 줄과 같은 값
   handoffAsked: boolean | null // AI 판정 요구 — handoff(기록)와 다를 수 있음
+  hasComplaint: boolean | null
   complaints: Complaint[]
   utterances: Utterance[]
   actions: AiAction[]
@@ -239,6 +248,16 @@ interface CallDetail {
   aiActionCount: number
   recording: Recording | null // 첫 녹취 (url 있는 것 우선). 빈 배열(아직 연결 안 됨)이면 null
 }
+
+const toComplaints = (a: CallAnalysisDto | null | undefined): Complaint[] =>
+  (a?.complaints ?? []).map((c) => ({
+    type: c.type,
+    reason: c.evidenceText,
+    offsetSeconds: c.offsetSeconds,
+    utteranceOrders: c.utteranceOrders,
+    target: c.target ?? null,
+    level: c.level ?? null,
+  }))
 
 const digits = (phone: string | null) => (phone ?? '').replace(/\D/g, '')
 
@@ -264,7 +283,8 @@ export function toCallRow(d: CallListItemDto): CallRow {
     callerNumber: digits(d.callerPhoneNumber),
     isNew: isNewOf(d, a?.isNewCustomer),
     counts: countsOf(a),
-    complaints: (a?.complaints ?? []).map((c) => ({ type: c.type, reason: c.evidenceText })),
+    hasComplaint: a ? a.hasComplaint : null,
+    complaints: toComplaints(a),
     persona: a?.personaName ?? null,
     durationSec: durationSec(d.startedAt, d.endedAt),
     callbackAsked: a?.hasCallbackRequest ?? null,
@@ -317,12 +337,8 @@ export function toCallDetail(
       : null,
     callbackAsked: a?.hasCallbackRequest ?? null,
     handoffAsked: a?.hasHandoffRequest ?? null,
-    complaints: (a?.complaints ?? []).map((c) => ({
-      type: c.type,
-      reason: c.evidenceText,
-      offsetSeconds: c.offsetSeconds,
-      utteranceOrders: c.utteranceOrders,
-    })),
+    hasComplaint: a ? a.hasComplaint : null,
+    complaints: toComplaints(a),
     utterances: utterances.map((u) => ({
       order: u.utteranceOrder,
       atSec: u.offsetSeconds,

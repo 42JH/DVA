@@ -67,6 +67,32 @@ function CallBody({ callId }: { callId: number }) {
                   <Kinds kinds={s.kinds} />
                 </span>
               )}
+              {/* 판정 수 — 오른쪽 아래라 스크롤해야 보여서 위에도 (11/11 검수). 누르면 그 칸으로 */}
+              {[
+                {
+                  id: 'customer-complaints',
+                  n: s.customer.length,
+                  label: '고객 불만',
+                  tone: 'stop' as const,
+                },
+                { id: 'ai-errors', n: s.errors.length, label: 'AI 오류', tone: 'wait' as const },
+              ].map(
+                (x) =>
+                  x.n > 0 && (
+                    <button
+                      key={x.id}
+                      type="button"
+                      onClick={() =>
+                        document.getElementById(`c-${x.id}`)?.scrollIntoView({ behavior: 'smooth' })
+                      }
+                      className="rounded outline-none focus-visible:ring-2 focus-visible:ring-ops-route"
+                    >
+                      <Badge tone={x.tone}>
+                        {x.label} {x.n}
+                      </Badge>
+                    </button>
+                  ),
+              )}
               <span className="ml-auto">
                 <AiToggle on={showAi} onChange={setShowAi} />
               </span>
@@ -125,6 +151,7 @@ function Chat({ vm, arrival, showAi }: { vm: CallView; arrival: Arrival; showAi:
         time={l.time}
         on={l.key === vm.focusKey}
         marked={l.key === marked}
+        flag={l.complaint}
         onClick={l.onClick}
         dataKey={l.key}
       />
@@ -153,10 +180,10 @@ function Chat({ vm, arrival, showAi }: { vm: CallView; arrival: Arrival; showAi:
       )}
       {vm.segments.map((seg, i) =>
         seg.complaint ? (
-          // 불만 구간 — 왼쪽 빨간 줄 + 이름 (상자로 감싸지 않음)
-          <div key={i} className="my-1 flex flex-col gap-0.5 border-l-2 border-ops-stop">
-            <p className="px-3 pt-1 text-[12px] font-semibold text-ops-stop">
-              불만: {seg.complaint.label}
+          // AI 응대 오류 구간 — 왼쪽 주황 줄 + 이름 (상자로 감싸지 않음). 고객 불만은 그 고객 말만 표시(Talk flag)
+          <div key={i} className="my-1 flex flex-col gap-0.5 border-l-2 border-ops-wait">
+            <p className="px-3 pt-1 text-[12px] font-semibold text-ops-wait">
+              AI 오류: {seg.complaint.label}
             </p>
             {seg.lines.map(row)}
           </div>
@@ -288,16 +315,48 @@ function Contents({ vm }: { vm: CallView }) {
                 </ul>
               )}
             </Section>
-            <Section id="complaints" title="불만">
-              {s.complaints.length === 0 ? (
-                <Muted>{s.analyzed ? '불만이 없습니다.' : waitText}</Muted>
+            {/* 판정 (11/11): 고객 불만 = 대상 · 강도 · 고객이 한 말, AI 응대 오류 = 유형 · 근거. 판정 전('아직 분석 전') · 없음 · 통화 분석 전을 문구로 나눔 */}
+            <Section
+              id="customer-complaints"
+              title={s.customer.length ? `고객 불만 ${s.customer.length}` : '고객 불만'}
+            >
+              {s.customer.length === 0 ? (
+                <Muted>
+                  {!s.analyzed
+                    ? waitText
+                    : s.judging
+                      ? '아직 분석 전입니다.'
+                      : '고객 불만이 없습니다.'}
+                </Muted>
               ) : (
                 <ul className="flex flex-col gap-1.5 text-[13px]">
-                  {s.complaints.map((c, i) => (
-                    <li key={i} className="rounded-md bg-ops-stop-soft px-3 py-2">
-                      <p className="font-semibold text-ops-stop">{c.label}</p>
+                  {s.customer.map((c, i) => (
+                    <Judged key={i} tone="stop" head={c.label} time={c.time} go={c.go}>
+                      {c.level && <p className="text-[12px] text-ops-stop">{c.level}</p>}
+                      <p className="text-ops-ink/80">“{c.quote}”</p>
+                    </Judged>
+                  ))}
+                </ul>
+              )}
+            </Section>
+            <Section
+              id="ai-errors"
+              title={s.errors.length ? `AI 응대 오류 ${s.errors.length}` : 'AI 응대 오류'}
+            >
+              {s.errors.length === 0 ? (
+                <Muted>
+                  {!s.analyzed
+                    ? waitText
+                    : s.judging
+                      ? '아직 분석 전입니다.'
+                      : 'AI 응대 오류가 없습니다.'}
+                </Muted>
+              ) : (
+                <ul className="flex flex-col gap-1.5 text-[13px]">
+                  {s.errors.map((c, i) => (
+                    <Judged key={i} tone="wait" head={c.label} time={c.time} go={c.go}>
                       <p className="text-ops-ink/80">{c.reason}</p>
-                    </li>
+                    </Judged>
                   ))}
                 </ul>
               )}
@@ -370,6 +429,43 @@ function Section({ id, title, children }: { id: string; title: string; children:
       <h2 className="mb-2 text-[12px] font-semibold text-ops-sub">{title}</h2>
       {children}
     </section>
+  )
+}
+/** 판정 한 건 — 이름 · 시각(누르면 그 말부터 듣기) · 내용. 빨강 = 고객 불만, 주황 = AI 응대 오류 */
+function Judged({
+  tone,
+  head,
+  time,
+  go,
+  children,
+}: {
+  tone: 'stop' | 'wait'
+  head: string
+  time: string
+  go: () => void
+  children: ReactNode
+}) {
+  return (
+    <li
+      className={`rounded-md px-3 py-2 ${tone === 'stop' ? 'bg-ops-stop-soft' : 'bg-ops-wait-soft'}`}
+    >
+      <p className="flex items-center justify-between gap-2">
+        <span className={`font-semibold ${tone === 'stop' ? 'text-ops-stop' : 'text-ops-wait'}`}>
+          {head}
+        </span>
+        {time && (
+          <button
+            type="button"
+            onClick={go}
+            title="이 말부터 듣기"
+            className="rounded text-[11px] text-ops-faint tabular-nums outline-none hover:text-ops-route focus-visible:ring-2 focus-visible:ring-ops-route"
+          >
+            {time}
+          </button>
+        )}
+      </p>
+      {children}
+    </li>
   )
 }
 const Muted = ({ children }: { children: ReactNode }) => (

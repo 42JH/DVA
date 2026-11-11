@@ -17,6 +17,7 @@ export function Talk({
   marked = false,
   onClick,
   dataKey,
+  flag,
 }: {
   ai: boolean
   text: string
@@ -25,6 +26,7 @@ export function Talk({
   marked?: boolean // FAQ · 미답변에서 찾아온 말 (잠깐)
   onClick?: () => void // 이 말부터 듣기
   dataKey?: number
+  flag?: string // 고객 불만인 말 — 문장을 빨갛게 칠하고 아래에 이 글 (11/11)
 }) {
   const cls = `${GRID} w-full rounded-md px-3 py-2 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ops-route ${on ? 'bg-ops-route-soft' : marked ? 'bg-ops-wait-soft' : onClick ? 'hover:bg-ops-paper' : ''}`
   const inner = (
@@ -34,7 +36,16 @@ export function Talk({
       >
         {ai ? 'AI 상담가' : '고객'}
       </span>
-      <span className="text-[14px] leading-6 whitespace-pre-wrap">{text}</span>
+      {flag ? (
+        <span className="text-[14px] leading-6 whitespace-pre-wrap">
+          <span className="-mx-1 rounded bg-ops-stop-soft [box-decoration-break:clone] px-1 py-0.5">
+            {text}
+          </span>
+          <span className="block text-[12px] leading-5 font-semibold text-ops-stop">{flag}</span>
+        </span>
+      ) : (
+        <span className="text-[14px] leading-6 whitespace-pre-wrap">{text}</span>
+      )}
       <span className="pt-px text-right text-[11px] leading-6 text-ops-faint tabular-nums">
         {time}
       </span>

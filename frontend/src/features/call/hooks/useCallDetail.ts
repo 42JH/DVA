@@ -12,6 +12,7 @@ import {
 } from '@/shared/call/callApi'
 import { utteranceAt, utteranceForAction, type CallActionKind } from '@/shared/call/callDto'
 import { faqResultText, groupActions } from '@/shared/call/actionText'
+import { isCustomerComplaint, splitComplaints, TARGET_LABEL } from '@/shared/call/complaints'
 import { useRecordingPlayer } from './useRecordingPlayer'
 
 /** 스크립트 한 줄 (말만 — AI 동작은 오른쪽 처리 내용으로, 10/30). onClick = 이 말부터 듣기 (11/01, 시각을 모르면 없음) */
@@ -22,8 +23,9 @@ interface ScriptLine {
   who: 'AI' | '고객'
   text: string
   onClick?: () => void
+  complaint?: string // 고객 불만인 고객 말 — 그 문장만 칠하고 아래에 대상 (11/11)
 }
-/** 연속 구간: 불만이면 빨간 묶음으로 */
+/** 연속 구간: AI 응대 오류면 주황 줄로 묶음 */
 interface ScriptSegment {
   complaint: { label: string } | null
   lines: ScriptLine[]
@@ -53,17 +55,21 @@ function withLead(utterances: Utterance[]): Timed[] {
   })
 }
 
-/** 불만은 발화 순번(utteranceOrders)으로 묶음 (명세 §5.2: 실제 있는 발화만 강조) */
-function toSegments(utterances: Timed[], complaints: Complaint[]): ScriptSegment[] {
+/** 발화 순번(utteranceOrders)으로 (명세 §5.2: 실제 있는 발화만 강조) — AI 응대 오류는 구간으로 묶고, 고객 불만은 그 고객 말만 표시 */
+function toSegments(utterances: Timed[], all: Complaint[]): ScriptSegment[] {
+  const { customer, errors: complaints } = splitComplaints(all)
   const segments: ScriptSegment[] = []
   for (const u of utterances) {
-    const c = complaints.find((x) => x.utteranceOrders.includes(u.order))
+    const c = complaints.find((x) => x.utteranceOrders.includes(u.order)) ?? null
+    const said =
+      u.speaker === 'CUSTOMER' && customer.find((x) => x.utteranceOrders.includes(u.order))
     const line: ScriptLine = {
       key: u.order,
       atSec: u.atSec,
       time: u.labelSec === null ? '' : fmtClock(u.labelSec),
       who: u.speaker === 'AI' ? 'AI' : '고객',
       text: u.text,
+      ...(said ? { complaint: `고객 불만: ${TARGET_LABEL[said.target]}` } : {}),
     }
     const last = segments[segments.length - 1]
     const sameGroup =
@@ -187,6 +193,16 @@ export function useCallDetail(callId: number, fromFaq?: number) {
     setJump((j) => ({ key: u.order, n: (j?.n ?? 0) + 1 }))
     listenFrom(u.order, u.atSec)
   }
+  /** 판정 한 건의 첫 말로 (오른쪽 시각 · 재생 바 눈금) — 그 말이 없으면 판정 시각의 말 */
+  const goComplaint = (c: Complaint) => {
+    const sec = c.offsetSeconds
+    goLine(
+      timed.find((u) => c.utteranceOrders.includes(u.order)) ??
+        (sec === null ? undefined : timed.findLast((u) => u.atSec <= sec)),
+    )
+  }
+  const lengthSec = player.length || call?.durationSec || 0
+  const { customer, errors } = splitComplaints(call?.complaints ?? [])
 
   return {
     isLoading: detail.isPending,
@@ -224,7 +240,26 @@ export function useCallDetail(callId: number, fromFaq?: number) {
       src: player.src,
       handlers: player.handlers,
       text: recordingText, // 녹취가 없거나 못 들을 때 한 줄
+      // 고객 불만(빨강) · AI 응대 오류(주황) 시각 눈금 (11/11). 누르면 그 말로
+      marks: lengthSec
+        ? [...customer, ...errors].flatMap((c, i) => {
+            const sec =
+              c.offsetSeconds ?? says.find((u) => c.utteranceOrders.includes(u.order))?.labelSec
+            if (sec == null) return []
+            const cust = isCustomerComplaint(c)
+            return [
+              {
+                key: i,
+                at: Math.min(1, sec / lengthSec),
+                tone: cust ? ('stop' as const) : ('wait' as const),
+                title: `${cust ? `고객 불만: ${TARGET_LABEL[c.target]}` : COMPLAINT_LABEL[c.type]} ${fmtClock(Math.floor(sec))}`,
+                onClick: () => goComplaint(c),
+              },
+            ]
+          })
+        : [],
     },
+    goComplaint,
     audioRef: player.audioRef, // <audio>에 꽂을 ref — player와 따로 넘김 (렌더 중 ref 접근 규칙)
     // 대본 줄을 누르면 그 말부터 듣기 (11/01) — 시각을 아는 줄만
     segments: call

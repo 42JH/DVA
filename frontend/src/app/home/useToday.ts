@@ -5,7 +5,8 @@ import { useQuery } from '@tanstack/react-query'
 import { api, type ApiItem } from '@/shared/api/client'
 import { fmtPhone } from '@/shared/lib/format'
 import type { CallListItemDto } from '@/shared/call/callDto'
-import type { Cards } from '@/features/stats/api/dashboardApi'
+import { dashboardQueries, type Cards } from '@/features/stats/api/dashboardApi'
+import { complaintView } from '@/features/stats/complaintView'
 import { toScreen, type UnansweredDto } from '@/features/faq/api/unansweredApi'
 import { useShell } from '@/shared/lib/shell'
 import { dateTime } from '@/shared/lib/when'
@@ -40,7 +41,9 @@ export function useToday() {
     refetchInterval: 15_000, // 최근 통화(통화 중)가 너무 늦지 않게
   })
   const h = home.data
+  const complained = useQuery(dashboardQueries.complainedCalls()) // 통계 카드와 같은 캐시
   const pct = (n: number | null | undefined) => (n == null ? '—' : `${n.toFixed(1)}%`)
+  const pctOf = (v: string) => (v === '—' ? v : `${v}%`)
 
   return {
     queue: [
@@ -95,12 +98,20 @@ export function useToday() {
       name: c.customerName ?? '',
       at: dateTime(c.startedAt),
       live: !!c.startedAt && !c.endedAt,
-      complaint: (c.analysis?.complaints.length ?? 0) > 0,
+      // 고객 불만이 있을 때만 (AI 응대 오류 · 근거 없는 답변은 빼고, 11/11 Jira 148)
+      complaint: (c.analysis?.complaints ?? []).some(
+        (x) => x.type === 'DISSATISFACTION_EXPRESSION' && !!x.target, // 최신 판정본만
+      ),
     })),
     perf: [
+      // 통계 [AI 응대 오류] 탭과 같은 값 — 서버 비율은 AI 응대 불만까지 섞여 있어(11/11) 통계처럼 목록으로 셈
       {
-        label: '불편을 표현한 통화',
-        value: pct(h?.aiPerformance.complaintCalls.complaintRatePercent),
+        label: 'AI 응대 오류가 난 통화',
+        value: pctOf(
+          h && complained.data
+            ? complaintView(h.aiPerformance.complaintCalls, complained.data).tabs[0].value
+            : '—',
+        ),
       },
       { label: '중간에 끊은 통화', value: pct(h?.aiPerformance.stageDropoffs.dropoffRatePercent) },
       {

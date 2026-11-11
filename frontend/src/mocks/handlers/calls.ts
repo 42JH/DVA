@@ -108,7 +108,7 @@ const FIXED: Fixed[] = [
     '01033496021',
     'FAILED',
     '2:21',
-    ['말이 빠름', '천천히 말해 달라고 두 번 요청'],
+    ['배송 불만', '지난번 기사님이 늦게 왔다고 함'],
   ],
   [
     9101,
@@ -144,7 +144,7 @@ const FIXED: Fixed[] = [
     '01058213307',
     'SUCCESS',
     '3:22',
-    ['되묻기 반복', '상세주소를 두 번 다시 물음'],
+    ['요금 불만', '배송비가 비싸다고 함'],
   ],
   [
     9114,
@@ -503,6 +503,15 @@ const COMPLAINT_TALK: Record<string, [Utterance['speaker'], string][]> = {
     ['CUSTOMER', '여보세요? 왜 이렇게 대답이 늦어요?'],
     ['AI', '기다리시게 해서 죄송합니다.'],
   ],
+  '요금 불만': [
+    ['CUSTOMER', '배송비가 왜 이렇게 비싸요?'],
+    ['AI', '중박스 기준 요금이 적용됩니다.'],
+    ['CUSTOMER', '다른 데는 더 싸던데 좀 그렇네요.'],
+  ],
+  '배송 불만': [
+    ['CUSTOMER', '지난번에 기사님이 약속 시간보다 두 시간이나 늦게 왔어요.'],
+    ['AI', '불편을 드려 죄송합니다. 이번 접수에 요청 사항으로 남겨 둘게요.'],
+  ],
   'AI라서 거부': [
     ['CUSTOMER', '기계 말고 사람이랑 통화할래요.'],
     ['AI', '상담원 연결을 원하시면 도와드릴게요.'],
@@ -699,13 +708,32 @@ const RESULT: Record<Outcome, string> = {
   CANCELLED: 'CANCELLED',
   INQUIRY: 'INQUIRY',
 }
-const COMPLAINT_TYPE: Record<string, string> = {
-  '되묻기 반복': 'REPEATED_QUESTION',
-  '말이 빠름': 'SPEAKING_TOO_FAST',
-  '못 알아들음': 'RECOGNITION_FAILURE',
-  '답답함 · 느림': 'SLOW_RESPONSE',
-  'AI라서 거부': 'AI_REFUSAL',
+/** 가짜 불만 장면 → 판정 (11/11 Jira 148): AI 응대 오류 + 고객 불만(대상 · 강도, 근거 = 고객 말). '말이 빠름'은 옛 유형 그대로,
+ *  'AI라서 거부'는 대상 없는 옛 판정(화면 '불만'), 9101엔 화면에서 빼는 근거 없는 답변도 하나 */
+type Judge = { type: string; target?: string | null; level?: string | null }
+type Judged = Judge & {
+  evidenceText: string
+  offsetSeconds: number | null
+  utteranceOrders: number[]
 }
+const COMPLAINT_TYPE: Record<string, Judge[]> = {
+  '되묻기 반복': [
+    { type: 'INFORMATION_RECOGNITION_ERROR' },
+    { type: 'DISSATISFACTION_EXPRESSION', target: 'ai_service', level: 'explicit' },
+  ],
+  '말이 빠름': [{ type: 'SPEAKING_TOO_FAST' }],
+  '못 알아들음': [{ type: 'INTENT_RECOGNITION_ERROR' }, { type: 'INTERRUPTION' }],
+  '답답함 · 느림': [
+    { type: 'SLOW_RESPONSE' },
+    { type: 'DISSATISFACTION_EXPRESSION', target: 'ai_service', level: 'mild' },
+  ],
+  'AI라서 거부': [{ type: 'DISSATISFACTION_EXPRESSION', target: null, level: 'mild' }],
+  '요금 불만': [{ type: 'DISSATISFACTION_EXPRESSION', target: 'price_policy', level: 'mild' }],
+  '배송 불만': [
+    { type: 'DISSATISFACTION_EXPRESSION', target: 'delivery_other', level: 'explicit' },
+  ],
+}
+const judgeOf = (kind: string) => COMPLAINT_TYPE[kind] ?? COMPLAINT_TYPE['되묻기 반복']
 const PERSONA_SEQ = 6 // 빠른 접수형 v6의 DB 번호 (07 가짜와 맞춤)
 // 09 가짜 미답변 번호 · 사유 (faq.ts UA_SEED 순서 · reasonOf와 맞춤)
 const UNANSWERED_OF: Record<number, [number, 'KB_NO_ANSWER' | 'KB_UNAVAILABLE']> = {
@@ -861,25 +889,49 @@ const count = (scene: CallDetail | undefined, f: (x: ResultBlock) => boolean) =>
 /** 분석 — 장면이 있으면 불만 구간(fromSec~toSec)을 발화 순번으로, 없으면 목록 줄의 불만 한 건 */
 function analysisOf(r: CallRow) {
   const scene = sceneOf(r.callSessionSeq)
-  const complaints = scene
-    ? scene.complaints.map((c) => ({
-        type: COMPLAINT_TYPE[c.kind] ?? 'REPEATED_QUESTION',
-        evidenceText: c.reason,
-        offsetSeconds: c.fromSec,
-        utteranceOrders: scene.utterances
-          .map((u, i) => (c.fromSec <= u.atSec && u.atSec <= c.toSec ? i + 1 : 0))
-          .filter(Boolean),
-      }))
+  const complaints: Judged[] = scene
+    ? scene.complaints.flatMap((c) => {
+        const inside = scene.utterances
+          .map((u, i) => ({ u, order: i + 1 }))
+          .filter(({ u }) => c.fromSec <= u.atSec && u.atSec <= c.toSec)
+        const said = inside.findLast(({ u }) => u.speaker === 'CUSTOMER') // 고객 불만 근거 = 고객 말 그대로
+        return judgeOf(c.kind).map((j) =>
+          j.type === 'DISSATISFACTION_EXPRESSION'
+            ? {
+                ...j,
+                evidenceText: said?.u.text ?? c.reason,
+                offsetSeconds: said?.u.atSec ?? c.fromSec,
+                utteranceOrders: said ? [said.order] : [],
+              }
+            : {
+                ...j,
+                target: null,
+                level: null,
+                evidenceText: c.reason,
+                offsetSeconds: c.fromSec,
+                utteranceOrders: inside.map((x) => x.order),
+              },
+        )
+      })
     : r.complaint
-      ? [
-          {
-            type: COMPLAINT_TYPE[r.complaint.kind] ?? 'REPEATED_QUESTION',
-            evidenceText: r.complaint.reason,
-            offsetSeconds: null,
-            utteranceOrders: [],
-          },
-        ]
+      ? judgeOf(r.complaint.kind).map((j) => ({
+          target: null,
+          level: null,
+          ...j,
+          evidenceText: r.complaint!.reason,
+          offsetSeconds: null,
+          utteranceOrders: [],
+        }))
       : []
+  if (r.callSessionSeq === 9101)
+    complaints.push({
+      type: 'UNSUPPORTED_ANSWER', // 화면에 안 보여야 함
+      target: null,
+      level: null,
+      evidenceText: '착불 요금을 보내는 분이 낸다고 안내함',
+      offsetSeconds: 125,
+      utteranceOrders: [],
+    })
   const n = r.callSessionSeq // 통화 번호로 정해지는 가짜 요약 (새로고침해도 같음)
   return {
     result: RESULT[r.outcome], // 11/04 서버에서 빠짐 — 옛 화면(주문 상세 관련 통화)이 아직 읽어서 남김
@@ -899,7 +951,8 @@ function analysisOf(r: CallRow) {
     aiStartedAt: iso(r.startedAt),
     aiEndedAt: plus(r.startedAt, r.durationSec),
     repeatQuestionCount: complaints.some((c) => c.type === 'REPEATED_QUESTION') ? 3 : 0,
-    hasComplaint: complaints.length > 0,
+    // 불만 판정은 분석 뒤 따로 — 몇 통화는 아직 판정 전(null)
+    hasComplaint: complaints.length > 0 ? true : n % 11 === 0 ? null : false,
     complaints,
     analysedAt: plus(r.startedAt, r.durationSec + 20),
   }
@@ -1049,6 +1102,7 @@ export const callHandlers = [
     const orderSeq = p('orderSeq')
     const from = p('from')
     const to = p('to')
+    const complained = p('hasComplaint') === 'true' // 통계 카드가 불만 있는 통화만 받음 (11/11)
     if (elapsed() >= 75 && elapsed() < 90) return unavailable()
     const hit = rowsNow().filter((r) => {
       const t = Date.parse(r.startedAt)
@@ -1057,7 +1111,8 @@ export const callHandlers = [
         (!personaSeq || personaOf(r).seq === Number(personaSeq)) &&
         (!orderSeq || callOf(r).orderSeq === Number(orderSeq)) &&
         (!from || t >= Date.parse(from)) &&
-        (!to || t < Date.parse(to))
+        (!to || t < Date.parse(to)) &&
+        (!complained || (!pending(r) && analysisOf(r).hasComplaint === true))
       )
     })
     return HttpResponse.json(
