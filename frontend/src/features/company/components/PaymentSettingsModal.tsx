@@ -1,9 +1,9 @@
-// [결제 설정] 창 — 월결제 · 그룹 카드(부서 골라서 하나씩). 누르는 즉시 저장, 확인 창 없음 (11/11)
+// [결제 설정] 창 — 월결제 · 그룹 카드(부서 검색해서 하나씩). 누르는 즉시 저장, 확인 창 없음 (11/11)
 import type { ReactNode } from 'react'
 import { usePaymentForm } from '@/features/company/hooks/usePaymentForm'
 import { BILLING_LABEL } from '@/features/company/labels'
-import { Btn, SelectField } from '@/shared/ui'
-import { Choice, Err } from '@/shared/ui/Field'
+import { Btn } from '@/shared/ui'
+import { Choice, Err, SuggestInput } from '@/shared/ui/Field'
 import { Modal } from '@/shared/ui/Modal'
 import { SkeletonRows } from '@/shared/ui/ListFrame'
 
@@ -64,19 +64,26 @@ export function PaymentSettingsModal({ id, onClose }: { id: number; onClose: () 
             <Err>{vm.deptsError}</Err>
           ) : vm.deptsLoading ? (
             <SkeletonRows rows={3} />
-          ) : vm.deptOptions.length === 0 ? (
+          ) : !vm.deptsCount ? (
             <p className="py-4 text-center text-[13px] text-ops-sub">
               부서가 없습니다. CSV로 사원을 등록할 때 부서를 넣으면 부서가 생깁니다.
             </p>
           ) : (
             <>
-              <SelectField
-                compact
+              <SuggestInput
                 label="부서"
-                placeholder="부서 선택"
-                value={vm.deptValue}
-                options={vm.deptOptions}
-                onChange={vm.selectDept}
+                placeholder="부서 이름 검색 · 눌러서 목록에서 선택"
+                value={vm.query}
+                onChange={vm.setQuery}
+                items={vm.matches}
+                itemKey={(x) => x.departmentSeq}
+                renderItem={(x) => (
+                  <span className="flex justify-between gap-2">
+                    {x.name}
+                    <span className="text-ops-sub">{BILLING_LABEL(x.groupBillingEnabled)}</span>
+                  </span>
+                )}
+                onPick={vm.pickDept}
               />
               {vm.dept && (
                 <div className="flex flex-col gap-1">
