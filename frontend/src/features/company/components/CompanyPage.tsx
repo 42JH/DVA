@@ -32,7 +32,7 @@ export function CompanyPage() {
           label="사원 검색"
         />
         <span className="ml-auto flex gap-2">
-          <Btn onClick={vm.openPayment}>
+          <Btn kind="edit" onClick={vm.openPayment}>
             <Icon name="gear" />
             결제 설정
           </Btn>
