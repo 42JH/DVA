@@ -722,8 +722,69 @@ def test_place_resolves_to_address_then_book_confirms_or_new_receiver(corrector,
     # 같은 도로의 다른 건물번호는 핀과 다른 곳: 핀 주소를 쓰지 않고 해석한 주소로
     out = call(c, "find_destination", {"place": "구미시 인동9길 8"})
     assert out["code"] == "DEST_NEW_RECEIVER" and s.field_of("receiver_address").value == "경상북도 구미시 인동9길 8"
-    # 핀과 같은 건물이면 그 받는 분을 확인
-    assert call(c, "find_destination", {"place": "구미시 인동9길 7-3"})["facts"]["labels"] == ["박지점 구미시 y"]
+    # 나중에 같은 건물의 핀이 있어도 이미 기록한 받는 분이 다르면 핀으로 바꾸지 않는다.
+    assert call(c, "find_destination", {"place": "구미시 인동9길 7-3"})["code"] == "DEST_NEW_RECEIVER"
+    assert s.field_of("receiver_name").value == "박민수" and s.candidates is None
+
+
+@pytest.mark.parametrize("name", ["박민수", "김철수민"])
+@pytest.mark.parametrize(("tool", "address_field"), [("record_fields", "receiver_address"), ("find_destination", "place")])
+def test_same_address_does_not_offer_a_different_recipient(address, tool, address_field, name):
+    road = "서울특별시 강남구 테헤란로 212"
+    c = ctx(address=address)
+    complete_sender_address(c)
+    c.state.customer.places = (place("김철수", road),)
+    call(c, "record_fields", {"receiver_name": name})
+
+    # 한 번 더 호출해도 다른 받는 분을 자동 선택할 후보가 생기지 않는다.
+    for _ in range(2):
+        out = call(c, tool, {address_field: road})
+        assert out["status"] == "ok" and c.state.candidates is None
+        assert out["missing"][:2] == ["receiver_phone", "receiver_address_detail"]
+    draft = c.state.current
+    assert draft["receiver_name"].value == name and not draft["receiver_phone"].valid
+    assert draft["receiver_address"].value == road and not draft["receiver_address_detail"].valid
+
+
+def test_destination_search_cannot_replace_recorded_recipient_with_search_name(address):
+    road = "서울특별시 강남구 테헤란로 212"
+    c = ctx(address=address)
+    complete_sender_address(c)
+    c.state.customer.places = (place("김철수", road),)
+    call(c, "record_fields", {"receiver_name": "박민수"})
+
+    out = call(c, "find_destination", {"name": "김철수", "place": road})
+    assert out["code"] == "DEST_RECIPIENT_USE_RECORD" and c.state.candidates is None
+    assert c.state.current["receiver_name"].value == "박민수" and not c.state.current["receiver_phone"].valid
+
+
+def test_destination_search_respects_same_name_and_allows_address_first(address):
+    road = "서울특별시 강남구 테헤란로 212"
+    pins = (place("김철수", road), place("박민수 님", road, detail="2층"))
+    c = ctx(address=address)
+    complete_sender_address(c)
+    c.state.customer.places = pins
+
+    out = call(c, "find_destination", {"place": road})
+    assert out["code"] == "DEST_MANY" and c.state.candidates.items == pins
+    out = call(c, "record_fields", {"receiver_name": "박 민수"})
+    assert out["status"] == "needs_choice" and c.state.candidates.items == (pins[1],)
+    assert call(c, "find_destination", {"place": road})["code"] == "DEST_PICKED"
+    assert c.state.current["receiver_address_detail"].value == "2층"
+
+
+def test_unlisted_recipient_uses_collection_without_implicit_company_search():
+    class PersonalOrder(MockBackend):
+        async def search_company_places(self, *args, **kwargs):
+            raise AssertionError("개인 택배의 새 받는 분을 기업 주소에서 찾지 않는다")
+
+    c = ctx(PersonalOrder())
+    complete_sender_address(c)
+    c.state.customer.places = (place("김철수", "서울특별시 강남구 테헤란로 212"),)
+    call(c, "record_fields", {"receiver_name": "박민수"})
+
+    out = call(c, "find_destination", {"name": "박민수"})
+    assert out["status"] == "ok" and out["missing"][0] == "receiver_phone" and c.state.candidates is None
 
 
 def test_pin_labels_name_and_region_then_detail():
