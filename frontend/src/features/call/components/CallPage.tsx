@@ -54,8 +54,9 @@ function CallBody({ callId }: { callId: number }) {
           {s && (
             <div className="flex shrink-0 flex-wrap items-center gap-x-6 gap-y-2 border-b border-ops-line bg-white px-6 py-3">
               <span className="flex items-baseline gap-2">
-                <span className="text-[17px] font-bold">{s.name || '미등록 고객'}</span>
-                <span className="text-[14px] text-ops-sub tabular-nums">{s.phone}</span>
+                {/* 고객으로 못 찾은 번호(API customerSeq · customerName null)는 고객이 아님 → 번호를 이름 자리에 */}
+                <span className="text-[17px] font-bold tabular-nums">{s.name || s.phone}</span>
+                {s.name && <span className="text-[14px] text-ops-sub tabular-nums">{s.phone}</span>}
               </span>
               <Badge tone={s.state.tone}>{s.state.label}</Badge>
               <Fact label="시작">{s.startedAt}</Fact>
@@ -218,10 +219,19 @@ function Contents({ vm }: { vm: CallView }) {
           <p className="text-[13px] text-ops-sub">불러오는 중…</p>
         ) : (
           <div className="flex flex-col gap-6">
-            <Section id="customer" title="고객">
+            <Section id="customer" title={s.name ? '고객' : '발신자'}>
               <dl className="grid grid-cols-[72px_1fr] gap-y-1.5 text-[13px]">
-                <dt className="text-ops-sub">이름</dt>
-                <dd className="font-medium">{s.name || '미등록 고객'}</dd>
+                {s.name ? (
+                  <>
+                    <dt className="text-ops-sub">이름</dt>
+                    <dd className="font-medium">{s.name}</dd>
+                  </>
+                ) : (
+                  <>
+                    <dt className="text-ops-sub">고객 정보</dt>
+                    <dd className="text-ops-sub">등록되지 않은 번호</dd>
+                  </>
+                )}
                 <dt className="text-ops-sub">전화번호</dt>
                 <dd className="tabular-nums">{s.phone}</dd>
                 {/* 모르는 값은 '모름' 대신 줄을 뺌 — 미등록 발신자는 소속이 없고, 신규 여부는 분석 뒤에 옴 */}
