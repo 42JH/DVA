@@ -91,7 +91,8 @@ function auditInput(
     service === 'order' &&
     object(audit) &&
     audit.action === 'ORDER_CANCELLED' &&
-    audit.actorType === 'SYSTEM';
+    audit.actorType === 'SYSTEM' &&
+    payload.result === 'SUCCESS';
   const draftMutation =
     service === 'order' &&
     object(audit) &&
