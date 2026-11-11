@@ -16,6 +16,7 @@ import { inlineDiff, type Part } from '@/features/persona/hooks/lineDiff'
 import { useVoiceOptions } from '@/features/persona/hooks/useVoiceOptions'
 import {
   ConfirmError,
+  deletePersona,
   PERSONA_DEMO,
   personaQueries,
   PROMPT_KEYS,
@@ -35,6 +36,7 @@ export interface PersonaItem {
   voice: string // 'marin' — 음성 이름만
   note: string | null // '통화엔 이전 버전 사용 중' — 사용 중인 상담가에 더 새 버전이 있을 때
   useLabel: string | null // [통화에 사용하기] · [새 버전 통화에 사용하기] 문구. null = 버튼 없음
+  deletable: boolean // [삭제] 버튼 — 관리 권한 + 통화에 사용 중도 적용 대기도 아닐 때만
 }
 
 type Badge = { label: string; tone: Tone }
@@ -68,8 +70,12 @@ interface PromptView {
   reuse: { disabled: boolean; hint: string | undefined } | null // [이 버전 다시 쓰기] — 관리자가 지난 버전을 볼 때만
 }
 
-/** [통화에 사용하기] · [이 버전 다시 쓰기] 확인 창 */
-type Confirming = { kind: 'use'; personaSeq: number } | { kind: 'reuse'; version: number } | null
+/** [통화에 사용하기] · [이 버전 다시 쓰기] · [삭제] 확인 창 */
+type Confirming =
+  | { kind: 'use'; personaSeq: number }
+  | { kind: 'reuse'; version: number }
+  | { kind: 'delete'; personaSeq: number }
+  | null
 
 const POLL_MS = 2000 // 적용 대기 중일 때만 다시 받는 간격 (AI 확인으로 서버 상태가 바뀌므로)
 // '친절 안내형을' · '빠른 접수형을' — 이름 끝 글자의 받침으로 을/를
@@ -153,6 +159,7 @@ export function usePersonaPage() {
         if (p) await requestApply(p.personaSeq, p.head)
         return
       }
+      if (c.kind === 'delete') return deletePersona(c.personaSeq)
       const v = all.find((x) => x.version === c.version)
       const d = v && reuseDiff(v)
       if (!persona || !d) return
@@ -171,9 +178,20 @@ export function usePersonaPage() {
       if (c.kind === 'reuse') {
         setVersion(null) // 새로 생긴 현재 버전을 보여 줌
       }
+      if (c.kind === 'delete' && c.personaSeq === persona?.personaSeq) {
+        // 지운 상담가를 보고 있었으면 통화에 사용 중인 상담가로 돌아감 (persona 계산이 못 찾으면 inUse로 넘김)
+        setPersonaSeq(null)
+        setVersion(null)
+        setHistoryOpen(false)
+      }
     },
-    onError: (e) => {
+    onError: (e, c) => {
       if (e instanceof ConfirmError) void qc.invalidateQueries({ queryKey: personaQueries.all() })
+      // 삭제는 그새 바뀐 경우(404 이미 지움 · 409 그새 적용됨) 최신 목록을 다시 받음. 이미 없으면 창도 닫음
+      if (c.kind === 'delete' && e instanceof ApiError && (e.status === 404 || e.status === 409)) {
+        void qc.invalidateQueries({ queryKey: personaQueries.all() })
+        if (e.status === 404) setConfirming(null)
+      }
     },
   })
 
@@ -222,7 +240,22 @@ export function usePersonaPage() {
         }
       : null
 
-  const confirmView = ((): { title: string; note: string; okLabel: string } | null => {
+  const confirmView = ((): {
+    title: string
+    note: string
+    okLabel: string
+    danger?: boolean // 확인 버튼을 빨간색으로
+  } | null => {
+    if (confirming?.kind === 'delete') {
+      const p = list.find((x) => x.personaSeq === confirming.personaSeq)
+      if (!p) return null
+      return {
+        title: `${nameEul(p.name)} 삭제할까요?`,
+        note: '삭제하면 상담가 목록에서 사라집니다.',
+        okLabel: '삭제',
+        danger: true,
+      }
+    }
     if (confirming?.kind === 'use') {
       const p = list.find((x) => x.personaSeq === confirming.personaSeq)
       if (!p) return null
@@ -315,6 +348,10 @@ export function usePersonaPage() {
       confirm.reset()
       if (viewing) setConfirming({ kind: 'reuse', version: viewing.version })
     },
+    askDelete: (seq: number) => {
+      confirm.reset()
+      setConfirming({ kind: 'delete', personaSeq: seq })
+    },
     confirmOk: () => confirming && confirm.mutate(confirming),
     confirmCancel: () => setConfirming(null),
     confirmBusy: confirm.isPending,
@@ -324,7 +361,9 @@ export function usePersonaPage() {
         ? '내용은 저장됐지만 새 버전으로 올리지 못했습니다. 다시 시도해 주세요.'
         : (unsupportedText(confirm.error) ??
           (confirm.error instanceof ApiError && confirm.error.status === 409
-            ? conflictText
+            ? confirming?.kind === 'delete'
+              ? '통화에 사용 중이거나 적용 대기 중인 상담가는 삭제할 수 없습니다.'
+              : conflictText
             : '요청을 보내지 못했습니다. 잠시 뒤 다시 시도해 주세요.')),
 
     adding,
@@ -364,6 +403,7 @@ export function usePersonaPage() {
           ? `${VERSION_BADGE.PENDING.label}${p.applyError ? ' · AI 반영 오류' : ''}`
           : null,
         voice: voiceName(p.voice.voice),
+        deletable: canManage && !p.inUse && !p.applyingVersion,
         note: newer ? '통화엔 이전 버전 사용 중' : null,
         useLabel:
           !canManage || p.applyingVersion

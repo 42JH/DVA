@@ -82,6 +82,7 @@ function PersonasView() {
         <Confirm
           title={vm.confirm.title}
           ok={vm.confirm.okLabel}
+          danger={vm.confirm.danger}
           busy={vm.confirmBusy}
           error={vm.confirmError}
           onOk={vm.confirmOk}
@@ -143,7 +144,7 @@ function Personas({ vm }: { vm: Vm }) {
   )
 }
 
-// 이름 · 태그 → 음성 → (사용 중인데 새 버전이 있으면) 안내 → [통화에 사용하기]
+// 이름 · 태그 → 음성 → (사용 중인데 새 버전이 있으면) 안내 → [통화에 사용하기] · [삭제](빨강, 사용 중 · 적용 대기가 아닐 때)
 function PersonaCard({ p, vm }: { p: PersonaItem; vm: Vm }) {
   return (
     <div
@@ -164,10 +165,19 @@ function PersonaCard({ p, vm }: { p: PersonaItem; vm: Vm }) {
         <span className="mt-1 block text-[13px] text-ops-sub">{p.voice}</span>
         {p.note && <span className="mt-1 block text-[13px] text-ops-wait">{p.note}</span>}
       </button>
-      {p.useLabel && (
-        <Btn kind="lineBadge" className="mt-3" onClick={() => vm.askUse(p.personaSeq)}>
-          {p.useLabel}
-        </Btn>
+      {(p.useLabel || p.deletable) && (
+        <div className="mt-3 flex gap-2">
+          {p.useLabel && (
+            <Btn kind="lineBadge" onClick={() => vm.askUse(p.personaSeq)}>
+              {p.useLabel}
+            </Btn>
+          )}
+          {p.deletable && (
+            <Btn kind="dangerBadge" onClick={() => vm.askDelete(p.personaSeq)}>
+              삭제
+            </Btn>
+          )}
+        </div>
       )}
     </div>
   )
