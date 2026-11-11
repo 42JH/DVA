@@ -42,15 +42,16 @@ export function Modal({
       style={{ width }}
       className="m-auto hidden max-h-[calc(100dvh-48px)] max-w-[calc(100vw-32px)] flex-col rounded-lg bg-white p-0 text-ops-ink shadow-lg backdrop:bg-ops-ink/40 open:flex motion-safe:animate-pop-in"
     >
-      <div className="flex h-14 shrink-0 items-center gap-2 border-b border-ops-line px-6">
-        <h2 className="text-[16px] font-bold">{title}</h2>
+      {/* min-h + py: 제목이 길어 두 줄이 되어도 위아래 여유가 남음. 한 줄이면 예전처럼 56 */}
+      <div className="flex min-h-14 shrink-0 items-center gap-2 border-b border-ops-line px-6 py-3">
+        <h2 className="min-w-0 text-[16px] font-bold break-words">{title}</h2>
         {extra}
         {sub && <span className="truncate text-[13px] text-ops-sub">{sub}</span>}
         <button
           type="button"
           onClick={onClose}
           aria-label="닫기"
-          className="ml-auto grid size-8 place-items-center rounded-md text-ops-sub hover:bg-ops-paper hover:text-ops-ink"
+          className="ml-auto grid size-8 shrink-0 place-items-center rounded-md text-ops-sub hover:bg-ops-paper hover:text-ops-ink"
         >
           <Icon name="x" />
         </button>
