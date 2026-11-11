@@ -53,11 +53,11 @@ class FakeDecisions:
         return SimpleNamespace(answers=answers)
 
 
-def flow(tmp_path=None):
+def flow(tmp_path=None, **cfg):
     client = FakeClient()
     client.decisions = FakeDecisions()
-    svc = service(client, utterance_gap_ms=40, commit_delay_ms=30, notify_quiet_ms=30, response_fallback_sec=0.2,
-                  closing_quiet_ms=1000, closing_max_sec=3.0)
+    svc = service(client, **{"utterance_gap_ms": 40, "commit_delay_ms": 30, "notify_quiet_ms": 30,
+                             "response_fallback_sec": 0.2, "closing_quiet_ms": 1000, "closing_max_sec": 3.0} | cfg)
     LiveFlow(svc)
     if tmp_path is not None:  # S6: 결과·인사이트까지
         from app.calls.results import ResultService
@@ -72,7 +72,8 @@ async def say(conn, text, start_ms):
     for i, part in enumerate(text.split(" ")):
         conn.push({"type": "session.input_transcript.delta", "delta": part + " ", "start_ms": start_ms + i * 100,
                    "end_ms": start_ms + i * 100 + 90})
-        await asyncio.sleep(0.005)
+    # 낱말 사이에 쉬지 않고 한꺼번에 넣는다. 사이에 쉬면 느린 CI에서 이벤트 루프가 gap(40ms)보다 오래 멈춰
+    # 한 발화가 둘로 쪼개지고, 시나리오가 의도하지 않은 경로로 간다(Jenkins 156에서 4건 실패).
     await asyncio.sleep(0.12)  # 발화 끝(gap) + Decision
 
 
@@ -552,7 +553,8 @@ def test_agent_greets_first_on_session_start():
 
 def test_late_result_and_n2_wait_while_customer_is_speaking():
     """끼어들기: 고객이 말하는 동안 앞선 위임 결과로 재개(response.create)하거나 N2를 보내지 않는다. 말이 끝나면 보낸다."""
-    svc, client = flow()
+    # 고객이 시간을 두고 계속 말해야 하는 시나리오라 낱말 사이에 쉰다. 느린 CI의 멈춤을 견디도록 gap을 넉넉히 둔다
+    svc, client = flow(utterance_gap_ms=300)
 
     async def scenario():
         task = asyncio.create_task(svc.on_incoming(incoming()))
@@ -985,8 +987,10 @@ def test_greeting_sender_name_change_asks_only_for_unanswered_choices(
                 reply += " 서울 강남구 테헤란로 212 3층에서 보낼게요"
                 fields["sender_address"] = FULL["sender_address"]
                 fields["sender_address_detail"] = "3층"
+            turns = len(s.rt.customer_turns)
             customer = asyncio.create_task(say(conn, reply, name_turn))
-            await until(lambda: s.rt.cust is not None)
+            # 말하는 중(rt.cust)은 gap 동안만 참이라 느린 CI에서 폴링이 놓친다. 발화가 생겼는지로 기다린다
+            await until(lambda: len(s.rt.customer_turns) > turns)
             out = await record("sender-name", name_turn, fields)
             await customer
             assert sum('"greeting_confirmation"' in e.get("content", "") for e in conn.sent) == int(name_turn == 2000)
@@ -1074,8 +1078,9 @@ def test_late_sender_name_uses_scope_from_the_correct_turn(scope_case):
             await ai(conn, "보내는 분 성함을 알려주시겠어요?", 3200)
         offset = 4200 if scope_first else 1500
         text = "이번 택배만 보내는 분은 박영희로 할게요" if scope_case == "once" else "보내는 분은 박영희로 할게요"
+        turns = len(s.rt.customer_turns) if s.rt else 0
         customer = asyncio.create_task(say(conn, text, offset))
-        await until(lambda: s.rt.cust is not None)
+        await until(lambda: s.rt and len(s.rt.customer_turns) > turns)  # 말하는 중(rt.cust)은 gap 동안만 참이다
         conn.push({"type": "session.delegation.created", "delegation": {"id": "late-name"}, "offset_ms": offset})
         conn.push({"type": "response.event", "delegation_id": "late-name", "event": {
             "type": "response.output_item.done", "item": {"type": "function_call", "call_id": "late-name",
