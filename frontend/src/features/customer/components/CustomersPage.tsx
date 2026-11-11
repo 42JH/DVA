@@ -7,6 +7,7 @@ import { rowKeys, useEscape } from '@/shared/lib/keys'
 import { SearchBox } from '@/shared/ui/ListFrame'
 import { Pagination } from '@/shared/ui/Pagination'
 import { useScrollable } from '@/shared/lib/useScrollable'
+import { useKeepScroll } from '@/shared/lib/keepScroll'
 import { useCustomer, useCustomers } from '../hooks/useCustomers'
 import { CustomerEditForm } from './CustomerEditForm'
 
@@ -14,6 +15,7 @@ export function CustomersPage() {
   const vm = useCustomers()
   const box = useRef<HTMLDivElement>(null)
   const scrollable = useScrollable(box, [vm.rows])
+  useKeepScroll(box, 'list')
   return (
     <>
       <PageHead title="고객">
@@ -116,6 +118,8 @@ export function CustomersPage() {
 
 function CustomerPanel({ seq, onClose }: { seq: number; onClose: () => void }) {
   const v = useCustomer(seq)
+  const panel = useRef<HTMLDivElement>(null)
+  useKeepScroll(panel, 'panel')
   useEscape(v.editing ? v.stopEdit : onClose) // 수정 중 Esc는 수정만 취소 (적던 내용을 패널째 잃지 않게)
   return (
     <aside
@@ -138,7 +142,7 @@ function CustomerPanel({ seq, onClose }: { seq: number; onClose: () => void }) {
           <Icon name="x" />
         </button>
       </div>
-      <div className="min-h-0 flex-1 [scrollbar-width:thin] overflow-y-auto px-5 py-4">
+      <div ref={panel} className="min-h-0 flex-1 [scrollbar-width:thin] overflow-y-auto px-5 py-4">
         {!v.c ? (
           <p className="py-10 text-center text-[14px] text-ops-sub">{v.error ?? '불러오는 중…'}</p>
         ) : v.editing && v.dto ? (

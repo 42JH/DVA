@@ -1,5 +1,6 @@
 // 홈 (11/06): 운영팀이 출근해서 먼저 여는 화면. 위에서부터 처리할 일, 지금 상황(최근 통화, 미완료, 미답변), AI 상담 성능
-import type { ReactNode } from 'react'
+import { useRef, type ReactNode } from 'react'
+import { useKeepScroll } from '@/shared/lib/keepScroll'
 import { Link } from 'react-router'
 import { PageHead } from '@/shared/ui'
 import { useToday } from './useToday'
@@ -8,6 +9,8 @@ const TONE_TEXT = { idle: 'text-ops-ink', stop: 'text-ops-stop', wait: 'text-ops
 
 export function TodayPage() {
   const vm = useToday()
+  const box = useRef<HTMLDivElement>(null)
+  useKeepScroll(box, 'page')
   return (
     <>
       <PageHead title="홈">
@@ -27,7 +30,7 @@ export function TodayPage() {
         </dl>
       </PageHead>
       {/* 화면 폭 · 높이를 다 씀 (1920에서 가운데만 쓰던 것) — 가운데 세 칸이 남는 높이를 채우고, 줄은 들어가는 만큼 */}
-      <div className="min-h-0 flex-1 [scrollbar-width:thin] overflow-y-auto px-6 py-5">
+      <div ref={box} className="min-h-0 flex-1 [scrollbar-width:thin] overflow-y-auto px-6 py-5">
         <div className="flex h-full flex-col gap-6 max-xl:h-auto">
           <section aria-label="처리할 일">
             <h2 className="mb-2 text-[14px] font-bold">처리할 일</h2>

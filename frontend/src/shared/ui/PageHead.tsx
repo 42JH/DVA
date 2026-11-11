@@ -1,6 +1,7 @@
 // 화면 위 줄 — 제목(상세면 '<' 뒤로) · 화면별 내용(검색 등) · 오른쪽 지금 AI 상담가와 진행 통화 수
 import type { ReactNode } from 'react'
-import { Link } from 'react-router'
+import { Link, useNavigate } from 'react-router'
+import { prevIs } from '@/shared/lib/keepScroll'
 import { useShell } from '@/shared/lib/shell'
 import { Icon } from './controls'
 
@@ -16,12 +17,19 @@ export function PageHead({
   children?: ReactNode
 }) {
   const s = useShell()
+  const navigate = useNavigate()
   return (
     <header className="flex h-14 shrink-0 items-center gap-4 border-b border-ops-line bg-white px-6">
       <h1 className="flex items-center gap-1 text-[18px] font-bold">
         {back && (
           <Link
             to={back.to}
+            // 바로 전이 그 목록이면 뒤로가기 — 보던 필터 · 쪽 · 스크롤 그대로 (링크로 가면 새 기록이라 맨 위)
+            onClick={(e) => {
+              if (e.button || e.ctrlKey || e.metaKey || e.shiftKey || !prevIs(back.to)) return
+              e.preventDefault()
+              void navigate(-1)
+            }}
             aria-label={back.label}
             title={back.label}
             className="-ml-2 grid size-8 place-items-center rounded-md text-ops-sub hover:bg-ops-paper hover:text-ops-ink"

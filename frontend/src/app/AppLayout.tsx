@@ -3,6 +3,7 @@ import { Link, NavLink, Outlet, useLocation, useNavigation } from 'react-router'
 import logo from '@/shared/assets/logo-dva.png'
 import { Icon, type IconName } from '@/shared/ui'
 import { ShellContext } from '@/shared/lib/shell'
+import { useTrackHistory } from '@/shared/lib/keepScroll'
 import { useShellState } from './useShellState'
 
 type Item = {
@@ -17,6 +18,7 @@ export function AppLayout() {
   const s = useShellState()
   const { pathname } = useLocation()
   const nav = useNavigation()
+  useTrackHistory()
   const groups: { title: string; items: Item[] }[] = [
     {
       title: '운영',

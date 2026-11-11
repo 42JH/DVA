@@ -9,6 +9,7 @@ import { PageHead } from '@/shared/ui'
 import { Badge, Btn, Icon, Segments } from '@/shared/ui'
 import { SearchBox, SkeletonRows } from '@/shared/ui/ListFrame'
 import { useScrollable } from '@/shared/lib/useScrollable'
+import { useKeepScroll } from '@/shared/lib/keepScroll'
 import { Pagination } from '@/shared/ui/Pagination'
 import { usePageSize } from '@/shared/lib/paging'
 import { fmtDate, fmtDateTime, fmtPhone } from '@/shared/lib/format'
@@ -254,6 +255,7 @@ function TabHead({ vm }: { vm: VM }) {
 function useBox(dep: unknown) {
   const box = useRef<HTMLDivElement>(null)
   const scrollable = useScrollable(box, [dep])
+  useKeepScroll(box, 'table')
   return { ref: box, 'data-scrollable': scrollable || undefined }
 }
 
