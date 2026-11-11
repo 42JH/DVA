@@ -22,7 +22,7 @@ const STATUS: Record<OrderDetail['paymentState'], OrderStatusDto> = {
   UNPAID: 'notPaid',
   CANCELLED_BEFORE_PAYMENT: 'CANCELLED',
 }
-/** 목록 칩을 다 볼 수 있게 결제 완료 몇 건을 번호로 미완료 · 접수 실패로 섞음 (상세도 같은 상태) */
+/** 목록 칩을 다 볼 수 있게 결제 완료 몇 건을 번호로 미완료 · 접수 실패 · 결제 완료(디버 전)로 섞음 (상세도 같은 상태) */
 const statusOf = (o: OrderDetail): OrderStatusDto =>
   o.cancelled
     ? 'CANCELLED'
@@ -32,7 +32,9 @@ const statusOf = (o: OrderDetail): OrderStatusDto =>
         ? 'COLLECTING'
         : o.orderSeq % 13 === 5
           ? 'SUBMISSION_FAILED'
-          : 'ACCEPTED'
+          : o.orderSeq % 5 === 2
+            ? 'PAID'
+            : 'ACCEPTED'
 const address = (p: OrderDetail['sender']) => ({
   name: p.name || null,
   phoneNumber: p.phoneNumber || null,
@@ -116,10 +118,9 @@ function toListItem(o: OrderDetail) {
   }
 }
 
-// 서버 statusGroup 규칙 (admin-order-list.dto): 결제 완료 = PAID · SUBMITTING · ACCEPTED, 접수 실패 = 재시도 중 실패 · 최종 실패
+// 서버 statusGroup 규칙 (admin-order-list.dto, 11/11): 결제 완료 = PAID · SUBMITTING · 재시도 중 실패, 접수 완료 = ACCEPTED, 접수 실패 = 최종 실패만
 const GROUP: Record<string, OrderStatusDto[]> = {
-  PAID: ['PAID', 'SUBMITTING', 'ACCEPTED'],
-  SUBMISSION_FAILED: ['SUBMITTING_FAILED', 'SUBMISSION_FAILED'],
+  PAID: ['PAID', 'SUBMITTING', 'SUBMITTING_FAILED'],
 }
 
 // ---------- 배송 초안 (055) — 가짜 미완료 주문을 초안으로 (draftSeq = 옛 주문번호, legacyOrderSeq도 같음) ----------
@@ -302,6 +303,7 @@ export const orderHandlers = [
       incomplete: listed.filter(inGroup('COLLECTING')).length,
       notPaid: listed.filter(inGroup('notPaid')).length,
       paid: listed.filter(inGroup('PAID')).length,
+      accepted: listed.filter(inGroup('ACCEPTED')).length,
       submissionFailed: listed.filter(inGroup('SUBMISSION_FAILED')).length,
       cancelled: listed.filter(inGroup('CANCELLED')).length,
     }
