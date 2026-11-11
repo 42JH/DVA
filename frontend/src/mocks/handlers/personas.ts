@@ -17,6 +17,13 @@ const ver = (
   version,
   name: '빠른 접수형',
   promptText: '빠르고 정확하게 택배 접수를 돕는 상담원입니다.',
+  // 프롬프트 6칸 (백엔드 persona-response.dto — 늘 글자). 없으면 수정 · 음성 세부 조절 화면이 깨졌음 (11/11 QA)
+  role: '택배 접수를 돕는 AI 상담원',
+  personality: '친절하고 차분함',
+  tone: '존댓말, 짧고 분명하게',
+  speedInstruction: '보통 속도로 또박또박',
+  backchannel: '네, 알겠습니다',
+  interruption: '고객이 말하면 바로 멈추고 듣기',
   voiceId: null,
   speakingRate: null,
   turnWaitLevel: 'NORMAL',
@@ -72,6 +79,19 @@ const personas = () => [
 ]
 
 export const personaHandlers = [
+  // AI가 지원하는 음성 설정 (GET /api/ai/options) — 없으면 목업에서 진짜 서버로 넘어가 401 → 로그아웃 (11/11 QA)
+  http.get(`${API_BASE_URL}/ai/options`, () =>
+    HttpResponse.json({
+      data: {
+        voices: [
+          { id: 'ko-KR-female-1', label: '여성 1' },
+          { id: 'ko-KR-male-1', label: '남성 1' },
+        ],
+        speakingRate: { min: 0.8, max: 1.2 },
+        turnWaitLevels: ['SHORT', 'NORMAL', 'LONG'],
+      },
+    }),
+  ),
   http.get(`${API_BASE_URL}/personas`, () => HttpResponse.json(page(personas()))),
   http.get(`${API_BASE_URL}/personas/:id`, ({ params }) => {
     const p = personas().find((x) => x.aiPersonaSeq === Number(params.id))

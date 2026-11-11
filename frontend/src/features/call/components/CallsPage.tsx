@@ -149,6 +149,8 @@ function Row({ r, from, onWarm }: { r: CallsRow; from: string; onWarm: () => voi
         to={to}
         state={{ from }}
         tabIndex={first ? 0 : -1}
+        // 줄 전체를 누를 수 있게 칸마다 같은 링크 — 읽기 프로그램엔 첫 칸 하나만 (빈 칸 링크가 이름 없는 링크로 수십 개 읽히던 것, 11/11 QA)
+        aria-hidden={first ? undefined : true}
         className={`flex h-11 min-w-0 items-center ${align === 'left' ? 'justify-start' : 'justify-center'} outline-none`}
       >
         {child}
