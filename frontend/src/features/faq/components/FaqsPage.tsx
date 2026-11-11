@@ -217,10 +217,10 @@ function Opened({ f, open, onEdit }: { f: Faq; open: boolean; onEdit: () => void
         </div>
       )}
       <div className="mt-4 flex items-center gap-2">
-        <Btn kind="warning" onClick={onEdit}>
+        <Btn kind="edit" onClick={onEdit}>
           수정
         </Btn>
-        <Btn kind="dangerBadge" onClick={del.ask}>
+        <Btn kind="danger" onClick={del.ask}>
           삭제
         </Btn>
         <span className="ml-auto text-[12px] text-ops-faint tabular-nums">
