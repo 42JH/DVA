@@ -229,7 +229,9 @@ def test_customer_info_offer_and_save(tmp_path):
     st.customer.customer_seq = db.add_customer(CALLER, "김옛이름")
     st.customer.default_address = "서울 강남구 테헤란로 1"  # 기본 주소와 다른 출발지
     assert save_offer(st) == {"sender": True, "receiver": True}
-    st.customer.name = "김옛이름"  # 보내는 분 성함이 등록 이름과 다름 → 이름도 갱신
+    st.customer.name = "김옛이름"
+    assert save_offer(st) == {"sender": True, "receiver": True}
+    st.current.save_sender_name = True  # 이 택배의 보내는 분 성함에 동의한 뒤 이름 저장
     assert save_offer(st) == {"name": True, "sender": True, "receiver": True}
     st.record("receiver_address", "부산 해운대구 센텀로 10", Source.PIN)  # 주소록에서 고른 받는 곳 → 추가 제안 없음
     assert save_offer(st) == {"name": True, "sender": True}

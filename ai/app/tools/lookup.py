@@ -9,8 +9,10 @@ import time
 
 from pydantic import Field
 
+from app.address.parse import detail_text
+from app.domain.address_book import receiver_questions_deferred
 from app.domain.candidates import apply_pick, offer
-from app.domain.state import DOCUMENT_ITEM_PRICE, Items, Place, Source
+from app.domain.state import DOCUMENT_ITEM_PRICE, CandidateSet, Items, ParcelDraft, Place, Source
 from app.integrations.backend.gateway import BackendFailure
 from app.observability.trace import observe_latency
 from app.rag.schemas import Evidence, SearchContext
@@ -29,7 +31,7 @@ log = logging.getLogger(__name__)
 class DestinationArgs(Args):
     name: str | None = Field(None, max_length=30, description="고객이 말한 받는 분 이름(조사·호칭 빼고)")
     place: str | None = Field(None, max_length=80, description="고객이 말한 지역·도로명·건물명(조사 빼고)")
-    detail: str | None = Field(None, max_length=40, description="고객이 말한 층·동·호수")
+    detail: str | None = Field(None, max_length=40, description="고객이 말한 층·동·호수. 없다고 답하면 빈 문자열")
     organization: str | None = Field(None, max_length=80, description="찾을 기업명. 개인 주소록과 별도로 기업 사원을 검색")
     department: str | None = Field(None, max_length=80, description="찾을 부서명")
 
@@ -56,7 +58,13 @@ async def find_destination(ctx: ToolContext, args: DestinationArgs) -> ToolOutco
         return ToolOutcome("needs_input", "NOTHING_TO_RECORD")
     name, place, detail = said.get("name"), said.get("place"), said.get("detail")
     company = said.get("organization") or said.get("department")
-    places = list(ctx.state.customer.places)
+    async with ctx.lock:
+        ctx.state.field_of("sender_name")
+        draft = ctx.state.current
+        draft.deferred_destination = None  # 새 검색은 같은 택배의 앞선 검색을 대신한다.
+        draft.destination_search_id += 1
+        search = (draft, draft.destination_search_id)
+        places = list(ctx.state.customer.places)
     be = [_to_be(p) for p in places]
     # 상호·건물명·도로명 → 실제 주소(주소DB, 없으면 카카오 키워드). 핀 문자열은 상호를 담지 않으므로 주소로 대조한다
     # (통화 67d29423: "다이소 구미 인동점"이 낱말 겹침으로 다른 건물의 핀 3건을 불러왔다)
@@ -64,27 +72,41 @@ async def find_destination(ctx: ToolContext, args: DestinationArgs) -> ToolOutco
     if resolved and resolved.status in ("confirmed", "ambiguous"):
         found = match_places(be, name, resolved.address, detail)  # 도로명·건물번호가 맞는 핀만(번호가 다르면 제외)
         if found:  # 기존 수신인: 확인을 거친다
-            return await _offer(ctx, [places[be.index(p)] for p in found])
-        return await _new_receiver(ctx, name, detail or resolved.detail, resolved)
+            return await _offer(ctx, search, [places[be.index(p)] for p in found])
+        return await _new_receiver(ctx, search, name, resolved.detail or args.detail, resolved)
     if not company:  # 주소로 못 바꾼 말(지역·약칭): 들은 낱말로 주소록 대조
         found = match_places(be[:ctx.pin_recent_count], name, place, detail) or match_places(be, name, place, detail)
         if found:  # 최근 N개에서 먼저
-            return await _offer(ctx, [places[be.index(p)] for p in found])
+            return await _offer(ctx, search, [places[be.index(p)] for p in found])
     if resolved and resolved.status == "region_needed":
-        return ToolOutcome("needs_input", "ADDRESS_REGION_NEEDED", {"found": 0}, [
+        return await _destination_problem(ctx, search, ToolOutcome("needs_input", "ADDRESS_REGION_NEEDED", {"found": 0}, [
             {"field": "receiver_address", "reason": "ADDRESS_REGION_NEEDED", "regions": list(resolved.alternatives),
-             "heard": place}])
+             "heard": place}]))
     query = " ".join(said[k] for k in ("organization", "department", "name", "place", "detail") if k in said)
     page = await ctx.backend.read("company_search", ctx.backend.api.search_company_places, query,
                                   limit=ctx.max_pin_options + 1)
     if page.has_next or page.total_count > ctx.max_pin_options:
-        return ToolOutcome("needs_input", "DEST_TOO_MANY", {"found": page.total_count},
-                           [{"field": "receiver_place", "reason": "DEST_TOO_MANY"}])
+        return await _destination_problem(ctx, search, ToolOutcome("needs_input", "DEST_TOO_MANY", {"found": page.total_count},
+                           [{"field": "receiver_place", "reason": "DEST_TOO_MANY"}]))
     if page.places:
-        return await _offer(ctx, [_from_be(p, Source.COMPANY) for p in page.places], page.places)
+        return await _offer(ctx, search, [_from_be(p, Source.COMPANY) for p in page.places], page.places)
     ask = "receiver_place" if name and not place else "receiver_name" if place and not name else None
-    return ToolOutcome("needs_input", "DEST_NONE", {"found": 0},
-                       [{"field": ask, "reason": "DEST_NONE"}] if ask else [])
+    return await _destination_problem(ctx, search, ToolOutcome("needs_input", "DEST_NONE", {"found": 0},
+                       [{"field": ask, "reason": "DEST_NONE"}] if ask else []))
+
+
+def _current_search(ctx: ToolContext, search: tuple[ParcelDraft, int]) -> bool:
+    draft, search_id = search
+    return ctx.state.current is draft and draft.destination_search_id == search_id
+
+
+async def _destination_problem(ctx: ToolContext, search: tuple[ParcelDraft, int], outcome: ToolOutcome) -> ToolOutcome:
+    async with ctx.lock:
+        if not _current_search(ctx, search):
+            return ToolOutcome("needs_input", "RESULT_SUPERSEDED", summary=state_summary(ctx.state, ctx.policy))
+        if receiver_questions_deferred(ctx.state):
+            return ToolOutcome("ok", summary=state_summary(ctx.state, ctx.policy))
+        return outcome
 
 
 async def _resolve(ctx: ToolContext, heard: str):
@@ -97,11 +119,14 @@ async def _resolve(ctx: ToolContext, heard: str):
         observe_latency("ADDRESS_LOOKUP", (time.monotonic() - t0) * 1000)
 
 
-async def _new_receiver(ctx: ToolContext, name: str | None, detail: str | None, resolved) -> ToolOutcome:
+async def _new_receiver(ctx: ToolContext, search: tuple[ParcelDraft, int],
+                        name: str | None, detail: str | None, resolved) -> ToolOutcome:
     """그 주소에 저장된 받는 분이 없음: 주소·geo는 해석 결과로, 성함은 고객 말로(없으면 missing이 묻는다).
     주소 출처는 RESOLVER — PIN이면 save_offer가 새 받는 분 핀을 저장하지 않는다."""
     async with ctx.lock:
         s = ctx.state
+        if not _current_search(ctx, search):
+            return ToolOutcome("needs_input", "RESULT_SUPERSEDED", summary=state_summary(s, ctx.policy))
         s.candidates = None
         if name:
             s.record("receiver_name", name, Source.CUSTOMER)
@@ -110,13 +135,15 @@ async def _new_receiver(ctx: ToolContext, name: str | None, detail: str | None, 
         s.record("receiver_address", resolved.address, Source.RESOLVER)
         if resolved.status == "ambiguous":
             s.field_of("receiver_address").candidates = resolved.alternatives  # P6: 나머지 후보 보관
-        if detail:
-            s.record("receiver_address_detail", detail, Source.CUSTOMER)
+        if detail is not None:
+            s.record("receiver_address_detail", detail_text(detail), Source.CUSTOMER)
         elif changed:
             s.clear("receiver_address_detail")
         s.current.receiver_geo = resolved.geo
         s.bump()
         summary = state_summary(s, ctx.policy)
+        if receiver_questions_deferred(s):
+            return ToolOutcome("ok", "DEST_NEW_RECEIVER", summary=summary)
     return ToolOutcome("ok", "DEST_NEW_RECEIVER", {
         "address": resolved.address,
         "guidance": "주소록에 없는 받는 곳. 주소를 그 주소로 기록했으니 받는 분 성함·주소를 확인하고 빠진 항목만 묻는다."},
@@ -136,23 +163,57 @@ def offer_destination(state, found: list[Place], max_options: int, be_places: li
     labels = pin_labels(be_places[:max_options] if be_places else [_to_be(p) for p in chosen])
     if len(set(labels)) != len(labels):  # 구별되지 않는 이름표는 번호로
         labels = [f"{i}번 {label}" for i, label in enumerate(labels, 1)]
-    offer(state, "destination", tuple(labels), tuple(chosen))
-    facts = {"found": len(found), "labels": labels}
-    if len(chosen) == 1:  # 서술형("확인했습니다")으로 넘어가면 고객의 답이 pick으로 들어올 자리가 없다(통화 d9b5208e)
+    candidates = CandidateSet("destination", tuple(labels), tuple(chosen), len(found))
+    if receiver_questions_deferred(state):
+        state.current.deferred_destination = candidates
+        if state.candidates and state.candidates.kind == "destination":
+            state.candidates = None
+        return ToolOutcome("ok")
+    return _activate_destination(state, candidates)
+
+
+def _activate_destination(state, candidates: CandidateSet) -> ToolOutcome:
+    labels = list(candidates.labels)
+    offer(state, "destination", candidates.labels, candidates.items, total=candidates.total)
+    facts = {"found": candidates.total or len(labels), "labels": labels}
+    if len(labels) == 1:
         facts["guidance"] = f"주소록 후보 1건. '{labels[0]}(으)로 보내시는 거 맞나요?'처럼 질문으로 확인하고 답은 서버가 듣는다."
-    return ToolOutcome("needs_choice", "DEST_MANY" if len(chosen) > 1 else None, facts)
+    return ToolOutcome("needs_choice", "DEST_MANY" if len(labels) > 1 else None, facts)
 
 
-async def _offer(ctx: ToolContext, found: list[Place], be_places: list | None = None) -> ToolOutcome:
+def resume_destination(state) -> ToolOutcome | None:
+    draft = state.current
+    if draft is None or state.intent != "order":
+        return None
+    if receiver_questions_deferred(state):
+        if state.candidates and state.candidates.kind == "destination":
+            draft.deferred_destination = draft.deferred_destination or state.candidates
+            state.candidates = None
+        return None
+    if draft.deferred_destination and state.candidates is None:
+        candidates, draft.deferred_destination = draft.deferred_destination, None
+        if state.pending and state.pending.kind == "parcel":
+            state.pending = None
+        return _activate_destination(state, candidates)
+    return None
+
+
+async def _offer(ctx: ToolContext, search: tuple[ParcelDraft, int],
+                 found: list[Place], be_places: list | None = None) -> ToolOutcome:
     async with ctx.lock:
         s, c = ctx.state, ctx.state.candidates
-        if len(found) == 1 and c is not None and c.kind == "destination" and found[0] in c.items:
+        if not _current_search(ctx, search):
+            return ToolOutcome("needs_input", "RESULT_SUPERSEDED", summary=state_summary(s, ctx.policy))
+        if (not receiver_questions_deferred(s) and len(found) == 1 and c is not None
+                and c.kind == "destination" and found[0] in c.items):
             # 이미 제시한 후보 중 하나로 좁혀짐 = 고객이 고른 것(모델이 find_destination으로 전달). 재제시하면 Decision pick이
             # 하한에 걸렸을 때 받는 곳이 빈 채 도로명 주소를 다시 묻게 된다(통화 d9b5208e) — 서버가 바로 적용한다
             apply_pick(s, c.labels[c.items.index(found[0])])
             return ToolOutcome("ok", "DEST_PICKED", {"guidance": "고객이 고른 주소록의 받는 분으로 기록했다. 다시 확인하지 않고 빠진 항목만 묻는다."},
                                summary=state_summary(s, ctx.policy))
-        return offer_destination(s, found, ctx.max_pin_options, be_places)
+        outcome = offer_destination(s, found, ctx.max_pin_options, be_places)
+        outcome.summary = state_summary(s, ctx.policy)
+        return outcome
 
 
 # --- lookup_orders ---

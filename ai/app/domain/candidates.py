@@ -6,8 +6,8 @@ from app.domain.store import open_for_edit
 ROLE_FIELDS = ("name", "phone", "address", "address_detail")
 
 
-def offer(state: ConversationState, kind: str, labels: tuple[str, ...], items: tuple) -> None:
-    state.candidates = CandidateSet(kind, labels, items)
+def offer(state: ConversationState, kind: str, labels: tuple[str, ...], items: tuple, *, total: int | None = None) -> None:
+    state.candidates = CandidateSet(kind, labels, items, total)
     state.bump()
 
 

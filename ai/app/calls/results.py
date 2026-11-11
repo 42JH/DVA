@@ -141,8 +141,8 @@ class ResultService:
             s.note("고객 등록 실패", e.code)
 
     async def save_addresses(self, s: CallSession, call_session_seq, snap: dict, offer: dict) -> None:
-        """택배를 담으면 묻지 않고 저장(사용자 결정 2026-11-06): 고객 이름·기본 주소 PATCH 한 번(통화 중, call_session_seq
-        헤더) 뒤 통화 중 고객 정보도 갱신, 받는 곳 PIN 추가(같은 주소 409 DUPLICATE_RESOURCE는 이미 있음).
+        """택배를 담으면 동의받은 고객 이름과 기본 주소를 PATCH 한 번으로 저장하고(통화 중, call_session_seq 헤더),
+        통화 중 고객 정보도 갱신한다. 받는 곳 PIN은 별도로 추가한다(같은 주소 409 DUPLICATE_RESOURCE는 이미 있음).
         실패는 주문에 영향 없음(관측만)."""
         try:
             seq = await call_session_seq(s)

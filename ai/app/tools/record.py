@@ -32,7 +32,7 @@ from app.observability.trace import observe_latency
 from app.policy.model import InputLimits, Policy
 from app.tools.context import ToolContext
 from app.tools.executor import Args, model_tool
-from app.tools.lookup import book_matches, offer_destination
+from app.tools.lookup import book_matches, offer_destination, resume_destination
 from app.tools.outcome import ToolOutcome, state_summary
 
 TEXT = ("sender_name", "sender_address_detail", "receiver_name", "receiver_address_detail")
@@ -214,13 +214,15 @@ async def record_fields(ctx: ToolContext, args: RecordArgs, *, expected_box: Box
             if name == "sender_name" and value and value != s.customer.name and sender_change_available(s):
                 begin_sender_name_change(s)
             if s.record(name, value):
-                if name == "sender_name" and s.current.sender_name_for_parcel:
+                if name == "sender_name" and s.customer.customer_seq and was != value:
+                    scope = ctx.sender_name_scope or s.current.sender_name_scope_pending
+                    s.current.sender_name_scope_pending = None
                     if value == s.customer.name:
                         s.current.ask_customer_name_save = False
                         s.current.save_sender_name = False
-                    elif was is not None and was != value and s.current.save_sender_name:
-                        s.current.ask_customer_name_save = True
-                        s.current.save_sender_name = False
+                    elif scope or was is not None or not s.current.sender_name_for_parcel:
+                        s.current.ask_customer_name_save = scope is None
+                        s.current.save_sender_name = scope == "save"
                 facts["recorded"].append(name)
                 if was not in (None, ""):
                     facts["changed"].append(name)
@@ -249,10 +251,18 @@ async def record_fields(ctx: ToolContext, args: RecordArgs, *, expected_box: Box
         address_pending = next_sender in ("sender_address", "sender_address_detail")
         address_completed = (sender_address_pending and s.current is draft and
                              all(draft[name].valid for name in ("sender_address", "sender_address_detail")))
+        receiver_keys = {"receiver_name", "receiver_address"}
+        if s.current and receiver_keys.intersection(facts["changed"]):
+            s.current.deferred_destination = None
+            s.current.destination_search_id += 1
+        if not needs and (resumed := resume_destination(s)):
+            resumed.facts |= {k: v for k, v in facts.items() if v}
+            resumed.summary = state_summary(s, policy)
+            return resumed
         # 받는 분 성함·주소는 자동으로 주소록과 대조한다. 발송 주소 변경 중 들은 값은 변경을 마친 뒤 대조한다.
         # 핀에서 고른 받는 곳이면 다시 찾지 않는다.
-        if (not address_pending and not needs and not s.pending and s.customer.places
-                and ({"receiver_name", "receiver_address"} & set(facts["recorded"])
+        if (not needs and not s.pending and s.customer.places
+                and (receiver_keys.intersection(facts["recorded"])
                      or address_completed and not s.candidates)
                 and s.field_of("receiver_address").source not in (Source.PIN, Source.HISTORY, Source.COMPANY)):
             rn, ra = s.field_of("receiver_name"), s.field_of("receiver_address")
@@ -260,13 +270,14 @@ async def record_fields(ctx: ToolContext, args: RecordArgs, *, expected_box: Box
                      if rn.valid or ra.valid else [])
             if found:
                 out = offer_destination(s, found, ctx.max_pin_options)
-                out.facts |= {k: v for k, v in facts.items() if v}
-                out.facts["guidance"] = ("주소록에 같은 받는 분이나 같은 주소가 있음. 그분(그곳)께 보내는지 확인한다. "
-                                         "아니라고 하면 들은 값 그대로 진행한다.")
-                out.summary = state_summary(s, policy)
-                return out
+                if out.status == "needs_choice":
+                    out.facts |= {k: v for k, v in facts.items() if v}
+                    out.facts["guidance"] = ("주소록에 같은 받는 분이나 같은 주소가 있음. 그분(그곳)께 보내는지 확인한다. "
+                                             "아니라고 하면 들은 값 그대로 진행한다.")
+                    out.summary = state_summary(s, policy)
+                    return out
         # 같은 값을 다시 말했는데 확인 대기가 풀려 있으면(no·change 뒤) 되읽기로 다시 연다(운영 통화 56c133c8)
-        pending = issue_parcel_confirmation(s, policy, ctx.clock()) if not needs else None
+        pending = issue_parcel_confirmation(s, policy, ctx.clock()) if not needs and not s.candidates else None
         moved = False
         if pending and not s.pickup_at.valid:  # 되읽기 때 기본 수거 시각을 정해 함께 안내
             iso, moved = default_pickup(ctx.now(), rule)

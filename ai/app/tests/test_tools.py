@@ -321,6 +321,98 @@ def test_ordinary_sender_and_receiver_use_same_short_detail_question(address):
     assert out["address_detail_question"] == "상세주소를 알려주시겠어요?"
 
 
+def test_registered_name_scope_after_receiver_and_after_another_correction():
+    from dataclasses import replace
+
+    from app.domain.address_book import save_offer
+
+    c = ctx()
+    call(c, "record_fields", {"receiver_name": "이영희"})
+    out = call(replace(c, sender_name_scope="once"), "record_fields", {"sender_name": "박영희"})
+    assert "sender_change_next" not in out and "name" not in save_offer(c.state)
+    assert not c.state.current.sender_name_for_parcel  # 접수 초반 주소 확인을 다시 열지 않는다.
+    out = call(replace(c, sender_name_scope="save"), "record_fields", {"sender_name": "최영희"})
+    assert "sender_change_next" not in out and save_offer(c.state)["name"]
+    out = call(c, "record_fields", {"sender_name": "한영희"})
+    assert out["sender_change_next"] == "ask_name_save" and "name" not in save_offer(c.state)
+
+
+def test_sender_name_scope_starts_after_first_registration():
+    from app.domain.address_book import save_offer
+
+    customer = Customer(status="UNREGISTERED", caller_phone=CALLER)
+    c = ctx(customer=customer)
+    out = call(c, "record_fields", {"sender_name": "김철수"})
+    assert "sender_change_next" not in out and not save_offer(c.state)
+
+    customer.status, customer.customer_seq, customer.name = "REGISTERED", 12, "김철수"
+    out = call(c, "record_fields", {"sender_name": "박영희"})
+    assert out["sender_change_next"] == "ask_name_save" and "name" not in save_offer(c.state)
+
+
+def test_explicit_destination_waits_for_sender_and_is_not_carried_to_another_draft(address):
+    from app.domain.address_book import request_sender_address_change
+    from app.domain.state import copy_draft
+
+    c = ctx(address=address)
+    st = c.state
+    st.customer.places = (Place("이영희", CALLER, "서울특별시 강남구 테헤란로 212", "5층", source=Source.PIN),)
+    request_sender_address_change(st)
+    out = call(c, "find_destination", {"name": "이영희"})
+    assert out["missing"] == ["sender_address"] and st.candidates is None
+    assert "labels" not in out.get("facts", {}) and st.current.deferred_destination
+    assert copy_draft(st.current).deferred_destination is None
+    out = call(c, "record_fields", {"sender_address": "서울 강남구 테헤란로 211"})
+    assert out["missing"] == ["sender_address_detail"] and st.candidates is None
+    assert call(c, "get_state", {"include_values": True}).get("facts", {}).get("candidates") is None
+    out = call(c, "record_fields", {"sender_address_detail": ""})
+    assert out["status"] == "needs_choice" and st.candidates.kind == "destination"
+    assert st.current.deferred_destination is None
+    assert call(c, "get_state", {})["destination_choices"] == list(st.candidates.labels)
+
+
+@pytest.mark.parametrize(("detail", "expected"), [(None, None), ("", ""), ("삼층", "3층")])
+def test_find_destination_preserves_new_receiver_detail_state(address, detail, expected):
+    c = ctx(address=address)
+    fields = {"place": "서울 강남구 테헤란로 212", "name": "이영희"}
+    if detail is not None:
+        fields["detail"] = detail
+    out = call(c, "find_destination", fields)
+    field = c.state.current["receiver_address_detail"]
+    assert field.value == expected and field.valid is (detail is not None)
+    assert ("receiver_address_detail" in out["missing"]) is (detail is None)
+
+
+@pytest.mark.parametrize("new_draft", [False, True])
+def test_stale_destination_search_cannot_replace_newer_choices(address, new_draft):
+    from app.domain.state import copy_draft
+
+    async def scenario():
+        started, release = asyncio.Event(), asyncio.Event()
+
+        class SlowAddress:
+            async def resolve(self, heard):
+                started.set()
+                await release.wait()
+                return await address.resolve(heard)
+
+        c = ctx(address=SlowAddress())
+        c.state.customer.places = (Place("이영희", CALLER, "서울특별시 강남구 테헤란로 212", "5층", source=Source.PIN),)
+        old = asyncio.create_task(run_tool(c, "find_destination",
+                                           json.dumps({"place": "서울 강남구 테헤란로 211"}), "old"))
+        await started.wait()
+        if new_draft:
+            async with c.lock:
+                c.state.current = copy_draft(c.state.current)
+        newer = await run_tool(c, "find_destination", json.dumps({"name": "이영희"}), "new")
+        assert newer["status"] == "needs_choice"
+        release.set()
+        assert (await old)["code"] == "RESULT_SUPERSEDED"
+        assert c.state.candidates.items[0].name == "이영희"
+
+    run(scenario())
+
+
 def test_server_splits_detail_from_heard_sentence_and_converts_numerals(corrector, address):
     c = ctx(address=address)
     s = c.state

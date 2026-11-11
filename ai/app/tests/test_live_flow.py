@@ -611,7 +611,7 @@ def test_readback_handoff_or_end_takes_priority_over_yes(customer_request, inten
 
     run(lf.judge(session, utterance, previous))
 
-    assert client.decisions.calls[0][1] == ["confirm", "switch"]
+    assert client.decisions.calls[0][1] == ["confirm", "switch", "sender_name_scope"]
     lf._follow.assert_awaited_once_with(session, "intent", intent)
     assert state.pending is pending and not state.parcels and lf.rt(session).commit is None
 
@@ -832,7 +832,7 @@ def test_greeting_sender_name_change_asks_only_for_unanswered_choices(
             return SimpleNamespace(answers=answers)
         if "등록 이름도" in input:
             assert "sender_name_scope" in names
-            return SimpleNamespace(answers=[choice("sender_name_scope", save_answer)])
+            return SimpleNamespace(answers=[choice("sender_name_scope", f"confirm_{save_answer}")])
         origin = address_answer if "발송 주소도" in input and address_answer in ("yes", "no") else "not_answer"
         return SimpleNamespace(answers=[choice("origin", origin)])
 
@@ -927,6 +927,65 @@ def test_greeting_sender_name_change_asks_only_for_unanswered_choices(
             assert not s.state.current.ask_customer_name_save
         assert ("name" in save_offer(s.state)) == (save_answer == "save")
         assert s.state.customer.name == "김철수"
+        conn.push({"type": "session.closed", "reason": "remote_hangup"})
+        await task
+
+    run(scenario())
+
+
+@pytest.mark.parametrize("scope_case", ["once", "once_pending", "confirm"])
+def test_late_sender_name_uses_scope_from_the_correct_turn(scope_case):
+    from app.domain.address_book import save_offer
+
+    svc, client = flow()
+    svc.d.backend.api.add_customer(CALLER, "김철수")
+    scope_first = scope_case == "once_pending"
+    scope = "not_answer" if scope_case == "confirm" else scope_case
+    client.decisions.create = AsyncMock(return_value=SimpleNamespace(
+        answers=[choice("sender_name_scope", scope), choice("switch", "none")]))
+
+    async def scenario():
+        task = asyncio.create_task(svc.on_incoming(incoming()))
+        await until(lambda: client.conns)
+        conn = client.conns[0]
+        conn.push(started())
+        await until(lambda: svc.registry.calls["live_1"].phase == Phase.ACTIVE)
+        s = svc.registry.calls["live_1"]
+        async with s.lock:
+            s.state.intent = "order"
+            s.state.record("receiver_name", "이영희")
+        if scope_first:
+            await say(conn, "보내는 분 이름은 이번에만 다른 이름으로 할게요", 1500)
+            await until(lambda: any('"sender_change_next": "sender_name"' in e.get("content", "") for e in conn.sent))
+            client.decisions.create.return_value = SimpleNamespace(
+                answers=[choice("sender_name_scope", "not_answer"), choice("switch", "none")])
+            await ai(conn, "보내는 분 성함을 알려주시겠어요?", 3200)
+        offset = 4200 if scope_first else 1500
+        text = "이번 택배만 보내는 분은 박영희로 할게요" if scope_case == "once" else "보내는 분은 박영희로 할게요"
+        customer = asyncio.create_task(say(conn, text, offset))
+        await until(lambda: s.rt.cust is not None)
+        conn.push({"type": "session.delegation.created", "delegation": {"id": "late-name"}, "offset_ms": offset})
+        conn.push({"type": "response.event", "delegation_id": "late-name", "event": {
+            "type": "response.output_item.done", "item": {"type": "function_call", "call_id": "late-name",
+                                                         "name": "record_fields",
+                                                         "arguments": json.dumps({"sender_name": "박영희"})}}})
+        conn.push({"type": "response.event", "delegation_id": "late-name", "event": {"type": "response.completed"}})
+        await customer
+        await until(lambda: any(e.get("item", {}).get("call_id") == "late-name" for e in conn.sent))
+        out = json.loads(next(e["item"]["output"] for e in conn.sent if e.get("item", {}).get("call_id") == "late-name"))
+        assert s.state.current["sender_name"].value == "박영희" and "name" not in save_offer(s.state)
+        if scope_case == "confirm":
+            assert out["sender_change_next"] == "ask_name_save"
+            await until(lambda: "response.create" in sent_types(conn))
+            conn.push({"type": "response.event", "delegation_id": "late-name", "event": {"type": "response.completed"}})
+            client.decisions.create.return_value = SimpleNamespace(
+                answers=[choice("sender_name_scope", "confirm_save"), choice("switch", "none")])
+            await ai(conn, "등록 이름도 바꿔드릴까요?", 3200)
+            await say(conn, "네", 4200)
+            await until(lambda: save_offer(s.state).get("name"))
+        else:
+            assert "sender_change_next" not in out
+        assert s.state.customer.name == "김철수" and s.state.current["receiver_name"].value == "이영희"
         conn.push({"type": "session.closed", "reason": "remote_hangup"})
         await task
 

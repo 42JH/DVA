@@ -87,6 +87,7 @@ class CandidateSet:
     kind: Literal["destination", "order", "parcel"]   # parcel: 고칠 담은 택배(P5)
     labels: tuple[str, ...]
     items: tuple[Any, ...]         # destination: Place, order: 조회 결과 dict
+    total: int | None = None
 
 
 @dataclass
@@ -120,7 +121,10 @@ class ParcelDraft:
     sender_name_for_parcel: bool = False  # 등록 이름과 별도로 이번 택배에만 쓰는 보내는 분 성함
     ask_customer_name_save: bool = False # 고객의 등록 이름도 바꿀지 아직 정하지 않음
     save_sender_name: bool = False       # 고객이 이번 택배의 새 이름을 등록 이름에도 쓰겠다고 답함
+    sender_name_scope_pending: str | None = None  # 범위를 먼저 말했고 새 성함을 기다리는 중
     sender_address_change: bool = False  # 접수 시작에서 새 발송 주소를 먼저 받는 중
+    deferred_destination: CandidateSet | None = None  # 보내는 분 정보를 받은 뒤 제시할 받는 곳
+    destination_search_id: int = 0
 
     def __getitem__(self, name: str) -> FieldState:
         return self.fields[name]
@@ -289,5 +293,5 @@ def draft_snapshot(draft: ParcelDraft) -> dict:
 
 def copy_draft(draft: ParcelDraft) -> ParcelDraft:
     return replace(draft, fields={k: replace(v) for k, v in draft.fields.items()},
-                   item_issues=draft.item_issues.copy(), box_proposal=None,
+                   item_issues=draft.item_issues.copy(), box_proposal=None, deferred_destination=None,
                    item_addition_turns=draft.item_addition_turns.copy())
