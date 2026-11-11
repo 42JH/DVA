@@ -422,6 +422,65 @@ def test_partial_destination_address_retry_preserves_recipient_and_uses_new_addr
     assert draft.receiver_geo is not None and draft.destination_partial_change is None
 
 
+@pytest.mark.parametrize("heard", ["이번에는 다른 주소", "딴 데로 보내 주세요", "배송지만 바꿀게요",
+                                    "이사 간 집으로요", "지난번에 보낸 데 말고요", "3층"])
+def test_partial_destination_does_not_record_intent_when_resolver_times_out(heard):
+    from app.domain.candidates import apply_destination_change
+    from app.integrations.address import AddressResult
+
+    class TimedOutAddress:
+        async def resolve(self, text):
+            return AddressResult("error", text, (), None)
+
+    c = ctx(address=TimedOutAddress())
+    complete_sender_address(c)
+    pin = place("이영희", "서울특별시 강남구 테헤란로 212")
+    offer(c.state, "destination", ("이영희",), (pin,))
+    apply_destination_change(c.state, 0, "address")
+
+    out = call(c, "record_fields", {"receiver_address": heard})
+    assert out["code"] == "RECEIVER_ADDRESS_VALUE_REQUIRED" and out["missing"][0] == "receiver_address"
+    assert "address_detail_question" not in out and c.state.current["receiver_address"].value is None
+    assert c.state.current["receiver_phone"].value == pin.phone
+
+
+def test_partial_destination_validates_buffered_intent_and_accepts_resolved_place():
+    from dataclasses import replace
+
+    from app.domain.candidates import apply_destination_change
+    from app.integrations.address import AddressResult
+    from app.tools.record import RecordArgs, record_fields
+
+    road = "서울특별시 강남구 테헤란로 152"
+
+    class Address:
+        async def resolve(self, text):
+            if text == "강남파이낸스센터":
+                return AddressResult("confirmed", road, (), None)
+            return AddressResult("error", text, (), None)
+
+    c = ctx(address=Address())
+    complete_sender_address(c)
+    pin = place("이영희", "서울특별시 강남구 테헤란로 212")
+    offer(c.state, "destination", ("이영희",), (pin,))
+    c.state.candidates = replace(c.state.candidates, destination_clarification="recipient")
+
+    out = call(c, "record_fields", {"receiver_address": "이번에는 다른 주소"})
+    assert out["destination_change_question"] == "받는 분은 이영희 님 그대로 하시는 거죠?"
+    buffered = c.state.candidates.destination_buffer
+    apply_destination_change(c.state, 0, "address")
+    replay = run(record_fields(c, RecordArgs(**buffered), expected_draft=c.state.current))
+    assert replay.code == "RECEIVER_ADDRESS_VALUE_REQUIRED"
+
+    spoken_address = "구미시 인동구길 이십이 다시 일"
+    out = call(c, "record_fields", {"receiver_address": spoken_address})
+    assert out["missing"][0] == "receiver_address_detail"
+    assert c.state.current["receiver_address"].value == spoken_address
+
+    out = call(c, "record_fields", {"receiver_address": "강남파이낸스센터"})
+    assert out["missing"][0] == "receiver_address_detail" and c.state.current["receiver_address"].value == road
+
+
 def test_no_destination_match_keeps_early_receiver_name(address):
     c = ctx(address=address)
     call(c, "record_fields", {"receiver_phone": CALLER, "sender_address": "서울 강남구 테헤란로 211"})

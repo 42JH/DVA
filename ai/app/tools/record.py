@@ -16,12 +16,12 @@ from functools import lru_cache
 from typing import Literal
 from pydantic import Field, create_model, model_validator
 
-from app.address.parse import detail_text
+from app.address.parse import detail_text, has_numbered_address
 from app.domain.address_book import (begin_sender_name_change, origin_confirmation, prefill_sender,
                                      request_sender_address_change, save_offer, sender_change_available,
                                      sender_change_next)
 from app.domain.assess import area_label, readback_facts
-from app.domain.candidates import DESTINATION_CHANGE_FIELDS, buffer_destination_fields
+from app.domain.candidates import DESTINATION_CHANGE_FIELDS, buffer_destination_fields, destination_changes
 from app.domain.confirm import issue_parcel_confirmation
 from app.domain.parcel_items import (ItemIssue, contextual_keyword, excluded_evidence, measurements, mentions,
                                      size_issues, supported_box_correction, unclassified_mentions)
@@ -237,11 +237,14 @@ async def record_fields(ctx: ToolContext, args: RecordArgs, *, expected_box: Box
             s.field_of("sender_name")  # current 보장
             s.current.client_comment = given["client_comment"].strip() or None
             facts["recorded"].append("client_comment")
+        require_destination_address = (expected_draft is not None or draft.destination_partial_change == "address"
+                                       or bool(destination_changes(s.candidates)))
         for addr, r in results.items():
             if s.field_of(addr).version != deps[addr]:
                 needs.append({"field": addr, "reason": "RESULT_SUPERSEDED"})  # 그사이 다른 값으로 바뀜
                 continue
-            _apply_address(ctx, addr, r, given, facts, needs)
+            _apply_address(ctx, addr, r, given, facts, needs,
+                           require_address_value=addr == "receiver_address" and require_destination_address)
         if keep_origin:
             s.origin_answer = s.origin_applied = True
             facts["recorded"].extend(prefill_sender(s, full=True))
@@ -524,7 +527,8 @@ async def _resolve(ctx: ToolContext, heard: str):
         observe_latency("ADDRESS_LOOKUP", (time.monotonic() - t0) * 1000)
 
 
-def _apply_address(ctx: ToolContext, addr: str, r, given: dict, facts: dict, needs: list) -> None:
+def _apply_address(ctx: ToolContext, addr: str, r, given: dict, facts: dict, needs: list, *,
+                   require_address_value: bool = False) -> None:
     s = ctx.state
     role = addr.removesuffix("_address")
     detail = f"{role}_address_detail"
@@ -542,6 +546,9 @@ def _apply_address(ctx: ToolContext, addr: str, r, given: dict, facts: dict, nee
         needs.append(need)
         return
     value = r.address if r else given[addr].strip()
+    if require_address_value and not (value and (has_numbered_address(value) or r and r.geo)):
+        needs.append({"field": addr, "reason": "RECEIVER_ADDRESS_VALUE_REQUIRED"})
+        return
     source = Source.RESOLVER if r and r.status in ("confirmed", "ambiguous") and value != given[addr].strip() \
         else Source.CUSTOMER
     before = s.field_of(addr)

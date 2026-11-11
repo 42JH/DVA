@@ -1424,14 +1424,19 @@ def test_destination_partial_change_keeps_only_confirmed_fields(change, mode):
             if mode == "buffer":
                 result = await run_tool(s.tools, "record_fields", json.dumps(fields), "before-clarification")
                 assert "destination_change_question" in result and s.state.candidates.destination_buffer == fields
-            await ai(conn, "받는 분은 주소록에 있는 그분이 맞으세요?" if change == "address"
+            expected_question = ("받는 분은 이영희 님 그대로 하시는 거죠?" if change == "address"
+                                 else "받는 곳은 주소록에 있는 주소가 맞으세요?")
+            assert any(expected_question in e.get("content", "") for e in conn.sent)
+            await ai(conn, "받는 분은 이영희 님 그대로 하시는 거죠?" if change == "address"
                      else "받는 곳은 주소록에 있는 주소가 맞으세요?", 3500)
         if change == "address":
             text = f"네 {new_address}로요"
             if mode == "direct":
-                await say(conn, "아, 네. 근데 그 이영희한테 그대로 보내긴 할 텐데, 다른 주소로 보내려구요, 이번에는", 1200)
+                await say(conn, "어 네, 근데 그 같은 사람인데 이번에는 다른 주소로 보내고 싶어요", 1200)
                 await until(lambda: s.state.current.destination_partial_change == "address")
                 assert s.state.current["receiver_phone"].value == pin.phone
+                result = await run_tool(s.tools, "record_fields", '{"receiver_address":"이번에는 다른 주소"}', "intent-only")
+                assert result["code"] == "RECEIVER_ADDRESS_VALUE_REQUIRED" and result["missing"][0] == "receiver_address"
                 await ai(conn, "새 받는 곳 주소를 알려주시겠어요?", 3500)
         else:
             text = "네 받는 분은 박민수예요" if clarify else "네 주소는 그대로고 받는 분만 바꿀게요. 박민수예요"
@@ -1459,3 +1464,21 @@ def test_destination_partial_change_keeps_only_confirmed_fields(change, mode):
         await task
 
     run(scenario())
+
+
+@pytest.mark.parametrize(("text", "pick"), [
+    ("같은 사람인데 이번에는 다른 주소로 보내고 싶어요", "new_address_1"),
+    ("받는 사람은 그대로인데 이사 간 데로 보내 주세요", "new_address_1"),
+    ("그분은 맞는데 딴 데로요", "new_address_1"),
+    ("배송지만 변경할게요", "new_address_1"),
+    ("이번에는 딴 데로 보내 주세요", "clarify_recipient"),
+    ("같은 사람이 아니고 새 배송지로요", None),
+    ("같은 사람인데 다른 주소로 보내기 전에 주문 조회해 주세요", None),
+])
+def test_partial_destination_recognizes_varied_change_requests(text, pick):
+    from app.calls.live import _explicit_destination_reply
+    from app.domain.state import CandidateSet, Place, Source
+
+    pin = Place("이영희", "01055556666", "부산 서구 대신공원로 1", "201호", source=Source.PIN)
+    candidates = CandidateSet("destination", ("이영희 서구",), (pin,))
+    assert _explicit_destination_reply(candidates, "이영희 님께 보내시는 거 맞으세요?", text) == pick
