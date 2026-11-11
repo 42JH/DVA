@@ -79,7 +79,15 @@ const draftOf = (p: Party): PartyDraft => ({
 })
 
 const digits = (v: string, max: number) => v.replace(/\D/g, '').slice(0, max)
-const phoneOk = (p: string) => p.length === 10 || p.length === 11
+// 서버 규칙 (11/11): 보내는 분 = 휴대전화만, 받는 분 = 휴대전화 + 02(9~10) + 기타 지역번호(10~11) + 070(11)
+const PHONE_RULE: Record<Side, { re: RegExp; message: string }> = {
+  sender: { re: /^01[016-9]\d{8}$/, message: '010 등으로 시작하는 휴대전화 11자리로 입력해 주세요.' },
+  receiver: {
+    re: /^(?:01[016-9]\d{8}|02\d{7,8}|0[3-6][1-5]\d{7,8}|070\d{8})$/,
+    message: '휴대전화 또는 지역번호를 포함한 전화번호로 입력해 주세요.',
+  },
+}
+const phoneOk = (side: Side, p: string) => PHONE_RULE[side].re.test(p)
 
 /** 03 주문 추가(수기 접수) · 주문 수정 창 훅 (와이어프레임 03_주문내역_주문추가 · _주문수정, 10/31)
  * order를 주면 수정: 칸을 그 주문(누른 배송 상세, parcelSeq) 값으로 채우고 [저장] = PATCH(바뀐 칸만 + 버전, 11/01). 없으면 추가: 빈 칸 · [접수]
@@ -157,8 +165,8 @@ export function useOrderForm(
   )
   // 기타 품목만 있으면 0원 → 서버가 1원 이상 필수라 접수 못 함
   const feeMissing = etcItem.trim() !== '' && shippingFee === 0
-  const partyOk = (p: PartyDraft) =>
-    p.name.trim() !== '' && phoneOk(p.phone) && p.roadAddress !== ''
+  const partyOk = (side: Side, p: PartyDraft) =>
+    p.name.trim() !== '' && phoneOk(side, p.phone) && p.roadAddress !== ''
   // 결제 방식은 접수 중단(COLLECTING)일 때만 바꿀 수 있음 (명세 4.3, 11/01). 가짜 주문(status 없음)은 그대로
   const paymentLocked = !!order?.status && order.status !== 'COLLECTING'
   // 접수 중단 주문 수정 = 저장하면서 접수 (11/01 결정: 버튼 이름 [접수], 조건이 다 채워져야 켜짐)
@@ -170,7 +178,7 @@ export function useOrderForm(
   const senderPhone = parties.sender.phone
   const payCtx = useQuery({
     ...orderQueries.payContext(senderPhone),
-    enabled: phoneOk(senderPhone) && !paymentLocked,
+    enabled: phoneOk('sender', senderPhone) && !paymentLocked,
   }).data
   const isCompany = !!payCtx && payCtx.company !== null
   const canAddMonthly = !!payCtx && !isCompany && !payCtx.available.includes('MONTHLY')
@@ -356,8 +364,8 @@ export function useOrderForm(
       phone: p.phone,
       setPhone: (v: string) => set({ phone: digits(v, 11) }),
       phoneError:
-        p.phone && !phoneOk(p.phone)
-          ? '10~11자리 숫자로 입력해 주세요.'
+        p.phone && !phoneOk(side, p.phone)
+          ? PHONE_RULE[side].message
           : fieldError(`${side}.phoneNumber`),
       // 모자란 주소는 빨간 오류가 아니라 버튼 옆 회색 '접수하려면: … 주소(다시 검색)'로만 (다른 모자란 칸과 같게, 11/01)
       addressError: fieldError(`${side}.roadAddress`),
@@ -471,8 +479,8 @@ export function useOrderForm(
     closeSearch: () => setSearching(null),
 
     canSubmit:
-      partyOk(parties.sender) &&
-      partyOk(parties.receiver) &&
+      partyOk('sender', parties.sender) &&
+      partyOk('receiver', parties.receiver) &&
       hasItem &&
       (order !== undefined || shippingFee >= 1) && // 추가: 배송비 필수 (명세 4.4)
       (order !== undefined || (!!parties.sender.picked && !!parties.receiver.picked)) && // 추가: 주소는 검색으로 고른 것만

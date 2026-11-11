@@ -73,6 +73,8 @@ export function fmtClock(seconds: number): string {
 /** 숫자 문자열 전화번호 → 010-1234-5678 (명세서: 전달 · 저장은 숫자만) */
 export function fmtPhone(digits: string): string {
   const d = digits.replace(/\D/g, '')
+  // 서울 02는 지역번호가 2자리라 따로 끊음 (02-123-4567 · 02-1234-5678)
+  if (/^02\d{7,8}$/.test(d)) return `02-${d.slice(2, -4)}-${d.slice(-4)}`
   if (d.length === 11) return `${d.slice(0, 3)}-${d.slice(3, 7)}-${d.slice(7)}`
   if (d.length === 10) return `${d.slice(0, 3)}-${d.slice(3, 6)}-${d.slice(6)}`
   return digits
