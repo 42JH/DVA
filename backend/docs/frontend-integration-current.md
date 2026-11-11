@@ -6,7 +6,7 @@ DELETE의 최신 URL·배열 body·권한은 [전체 DELETE 통합 명세](delet
 
 로그인·가입·비밀번호 처리의 429는 `RATE_LIMITED`와 초 단위 `Retry-After`로 안내한다. 이름·새 비밀번호 상한과 기존 비밀번호 입력 호환성은 [S04 인증 제한 계약](auth-request-limits.md)을 따른다. 기존 성공 응답·쿠키·업무 API 요청 형식은 유지한다.
 
-[휴대전화 번호 입력 계약](mobile-phone-integration.md): 업무 전화번호는 정확히 11자리 숫자 문자열이다. 폼의 10~11자리 허용을 11자리로 맞춘다. 고객·직원·PIN·주문 입력과 완성 전화번호 필터에 적용한다.
+[전화번호 입력 계약](mobile-phone-integration.md): 고객 식별은 기존 11자리, 배송 발송인은 휴대전화 11자리, 수령인·PIN은 지역번호·070도 허용한다. 폼 검증과 전송값은 최신 통합 명세를 따른다.
 
 코드 기준: `feature/ai-dashboard`, DB migration `050`까지. 운영 API에 적용된 상태는 별도 확인한다. 이번 문서는 실제 요청·표시·갱신에 필요한 현재 계약을 모으며, 구버전 문서의 수거 시각·콜백·좌표·통화 분류·기본 결제수단·물리 삭제 설명보다 우선한다.
 
@@ -198,7 +198,7 @@ BE가 삭제·만료 조건을 적용하므로 프론트는 DB에 직접 쿼리�
 | --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
 | `DELETE /api/orders` + `{ orderSeqs: [id] }` | 관리자, 본문 없음. COLLECTING/CANCELLED/ACCEPTED 중 진행 통화·승인·안내 발송 등 차단 조건이 없을 때 숨김. 결제 취소·청구 금액 변경 아님 |
 | `DELETE /api/calls` + `{ callSessionSeqs: [id] }` | 관리자, 본문 없음. PBX 종료 확인 + 연결 녹취 저장 완료 후 숨김. 주문은 보존                                                             |
-| `DELETE /api/admins` + `{ adminUserSeqs: [id] }` | SYSTEM_ADMIN만 OPERATOR/SUPERVISOR 삭제, 대상 세션 즉시 폐기. SYSTEM_ADMIN 삭제 금지                                                    |
+| `DELETE /api/admins` + `{ adminUserSeqs: [id] }` | SYSTEM_ADMIN만 OPERATOR 삭제, 대상 세션 즉시 폐기. SYSTEM_ADMIN 삭제 금지                                                    |
 | `DELETE /api/companies` + `{ organizationSeqs: [id] }` | 기업·부서·소속·기업 PIN을 함께 숨김                                                                                                     |
 | `DELETE /api/departments` + `{ departmentSeqs: [id] }` | 부서·그 소속·해당 기업 PIN을 숨김                                                                                                       |
 | `DELETE /api/members` + `{ membershipSeqs: [id] }` | 소속만 숨김. 고객 보존                                                                                                                  |
@@ -213,7 +213,7 @@ BE가 삭제·만료 조건을 적용하므로 프론트는 DB에 직접 쿼리�
 
 ### 관리자
 
-`PATCH /api/admins/{id}`에 `{ "role": "SUPERVISOR" }`를 보내 권한을 바꾼다. role 생략 시 기존 권한, status 생략 시 기존 상태를 유지한다. role/status 중 하나 이상 필요하며 SYSTEM_ADMIN 승격·SYSTEM_ADMIN 대상 변경은 허용하지 않는다. 비활성화·삭제·비밀번호 변경의 세션 종료 동작을 유지한다.
+`PATCH /api/admins/{id}`에 `{ "role": "OPERATOR" }`를 보내 권한을 바꾼다. role 생략 시 기존 권한, status 생략 시 기존 상태를 유지한다. role/status 중 하나 이상 필요하며 SYSTEM_ADMIN 승격·SYSTEM_ADMIN 대상 변경은 허용하지 않는다. 비활성화·삭제·비밀번호 변경의 세션 종료 동작을 유지한다.
 
 ### FAQ·미답변
 

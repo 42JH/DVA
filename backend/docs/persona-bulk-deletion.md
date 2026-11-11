@@ -9,7 +9,7 @@
 `DELETE /api/personas`
 
 - 기존 로그인 세션 쿠키(`credentials: 'include'`)를 사용합니다.
-- 기존 페르소나 쓰기 권한인 **활성 OPERATOR·SYSTEM_ADMIN**에게 허용합니다. OPERATOR와 AI Bearer만으로는 삭제할 수 없습니다.
+- 기존 페르소나 쓰기 권한인 **활성 OPERATOR·SYSTEM_ADMIN**에게 허용합니다. AI Bearer만으로는 삭제할 수 없습니다.
 - `Content-Type: application/json`. 변경 요청에는 기존과 같이 허용된 Origin이 필요합니다. 브라우저가 자동으로 전송합니다.
 - `aiPersonaSeqs`: **분류 번호** 배열, 1~100개, 중복 없는 양의 정수(int32). 버전 번호를 보내지 않습니다.
 

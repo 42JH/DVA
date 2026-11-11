@@ -27,7 +27,7 @@
 
 ## 관리자 API
 
-목록·상세·버전 이력 조회는 ACTIVE 상태의 OPERATOR·SYSTEM_ADMIN 세션으로 접근할 수 있다. 생성·수정·publish와 AI 지원 옵션 조회는 ACTIVE인 SUPERVISOR(개발자)·SYSTEM_ADMIN에게 허용하며 변경 요청에는 허용 Origin이 필요하다. 역할 코드 추가·변경은 없다. AI 토큰만으로 관리자 조회·편집·publish를 할 수 없다.
+목록·상세·버전 이력 조회는 ACTIVE 상태의 OPERATOR·SYSTEM_ADMIN 세션으로 접근할 수 있다. 생성·수정·publish와 AI 지원 옵션 조회는 ACTIVE인 OPERATOR·SYSTEM_ADMIN에게 허용하며 변경 요청에는 허용 Origin이 필요하다. SUPERVISOR 이관은 통합 권한 명세를 따른다. AI 토큰만으로 관리자 조회·편집·publish를 할 수 없다.
 
 | 동작 | API | 결과 |
 | --- | --- | --- |
