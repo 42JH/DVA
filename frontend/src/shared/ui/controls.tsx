@@ -26,9 +26,9 @@ export function Badge({ tone, children }: { tone: Tone; children: ReactNode }) {
 
 // 버튼 모양 · 색 규칙은 actionBadge.ts BUTTON_LOOK. kind = 속성, 이름이 …Badge로 끝나면 목록 줄 안에 넣는 22px (나머지 32px)
 const BTN = {
-  primary: BUTTON_LOOK.solid, // 만들기 · 저장 · 확정 — 그 칸 · 창의 주 버튼 하나
-  line: BUTTON_LOOK.line, // 보조 만들기 (CSV로 등록)
-  lineBadge: BUTTON_LOOK.line, // 줄 안 승인 · 적용 · 등록
+  primary: BUTTON_LOOK.solid, // 만들기 · 등록 · 저장 · 확정 (11/11 사용자: 같은 '등록'은 크기 · 자리와 상관없이 같은 진한 파랑)
+  primaryBadge: BUTTON_LOOK.solid, // 줄 안 등록 (미답변 줄 FAQ 등록)
+  lineBadge: BUTTON_LOOK.line, // 줄 안 승인 · 적용
   edit: BUTTON_LOOK.edit, // 수정 · 설정 열기
   editBadge: BUTTON_LOOK.edit,
   danger: BUTTON_LOOK.danger, // 삭제 · 탈퇴 · 끝내기 (되돌릴 수 없음)
