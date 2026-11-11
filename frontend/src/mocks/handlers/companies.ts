@@ -347,6 +347,23 @@ export const companyHandlers = [
     upsert(id, b.members ?? [], byName)
     return created({ organizationSeq: id })
   }),
+  // 월 사용액 (API-34, month 'YYYY-MM' · 생략 = 이번 달). 가짜 금액은 기업 번호로 고정
+  // 이 처리가 없으면 목업에서 진짜 서버로 넘어가 401 → 로그아웃돼 기업 상세를 못 봤음 (11/11 QA)
+  http.get(`${API_BASE_URL}/companies/:id/billing`, ({ params, request }) => {
+    const o = orgOf(params.id)
+    if (!o) return notFound()
+    const id = Number(params.id)
+    return HttpResponse.json({
+      data: {
+        organizationSeq: id,
+        organizationName: o.name,
+        month:
+          new URL(request.url).searchParams.get('month') ?? new Date().toISOString().slice(0, 7),
+        monthlyAmount: (id % 5) * 184000,
+        groupBillingAmount: (id % 3) * 56000,
+      },
+    })
+  }),
   http.get(`${API_BASE_URL}/companies/:id`, ({ params }) => {
     const o = orgOf(params.id)
     return o ? HttpResponse.json({ data: summary(o) }) : notFound()
