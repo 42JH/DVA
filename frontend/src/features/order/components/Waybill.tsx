@@ -92,8 +92,8 @@ export function WaybillPanel({
         <div className="flex shrink-0 flex-col gap-2 border-t border-ops-line px-5 py-3">
           <div className="flex items-center gap-2">
             {w.canEdit && (
-              <Btn kind={w.missing.size ? 'primary' : 'warning'} onClick={() => setEditing(true)}>
-                {w.missing.size ? '빈 칸 채우기' : '수정'}
+              <Btn kind="edit" onClick={() => setEditing(true)}>
+                수정
               </Btn>
             )}
             {w.canRetry && (

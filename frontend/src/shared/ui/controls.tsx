@@ -24,6 +24,8 @@ export function Badge({ tone, children }: { tone: Tone; children: ReactNode }) {
   )
 }
 
+// 색 = 뜻 (11/11 사용자: 색이 같으면 모양도 같게) — 파랑 저장 · 입력, 노랑 수정, 빨강 삭제 · 취소, 회색 그 밖
+// 버튼은 32px 연한 채움, *Badge는 목록 줄 안에 넣는 22px
 const BTN = {
   primary: 'bg-ops-route-soft text-ops-route hover:bg-[#d6e4ff]',
   primaryLime: 'bg-[#eaf5d3] text-[#4d7a1f] hover:bg-[#dcebb4]',
@@ -32,8 +34,8 @@ const BTN = {
   infoBadge: ACTION_BADGE_COLOR.info,
   neutralBadge: ACTION_BADGE_COLOR.neutral,
   plain: 'bg-white text-ops-ink ring-1 ring-ops-line ring-inset hover:bg-ops-paper',
-  danger: 'bg-white text-ops-stop ring-1 ring-ops-line ring-inset hover:bg-ops-stop-soft',
-  dangerFill: 'bg-ops-stop text-white hover:bg-[#c23030]', // 확인 창의 삭제 · 취소처럼 되돌릴 수 없는 일
+  edit: ACTION_BADGE_COLOR.edit,
+  danger: ACTION_BADGE_COLOR.delete,
   ghost: 'text-ops-sub hover:bg-ops-paper hover:text-ops-ink',
 }
 
