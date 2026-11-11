@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { useLocation, useNavigate } from 'react-router'
+import { useNavigate } from 'react-router'
 import { FETCH_ALL_MAX } from '@/shared/api/paging'
 import { ymd } from '@/shared/lib/dateRange'
 import { fmtListTime, fmtMonthDay, fmtPhone, fmtTime } from '@/shared/lib/format'
@@ -24,7 +24,7 @@ const DEFAULTS = { q: '', call: '', from: '' }
 
 type Group = { day: string; label: string; rows: UnansweredRow[] }
 
-type Modal = { kind: 'delete'; item: UnansweredQuestion } | null
+type Modal = { kind: 'delete' | 'faq'; item: UnansweredQuestion } | null
 
 /** 09 AI 미답변 문의 훅 (Figma 'FAQ 미답변' 11/06) — 처리 안 된 질문만 · 오래된 순(먼저 쌓인 것부터 처리) · 통화 날짜별로 묶음, 쪽 없이 스크롤
  * 검색 = 질문 · 이름 · 전화번호. 줄마다 [+](FAQ 화면 맨 위 추가 칸 → 저장하면 처리됨) · [휴지통](확인 창). 줄을 누르면 그 통화의 06
@@ -32,7 +32,6 @@ type Modal = { kind: 'delete'; item: UnansweredQuestion } | null
 export function useUnansweredList() {
   const qc = useQueryClient()
   const navigate = useNavigate()
-  const { pathname, search } = useLocation()
   const { params, set } = useListParams(DEFAULTS)
   const [modal, setModal] = useState<Modal>(null)
   const list = useQuery(unansweredQueries.list())
@@ -100,9 +99,8 @@ export function useUnansweredList() {
     openCall: (u: UnansweredQuestion) => navigate(`/calls/${u.callSessionSeq}`),
 
     modal,
-    // [+] = FAQ 화면 맨 위 추가 칸(11/06)으로 — 질문 칸에 고객이 한 말을 채우고, 저장하면 이 질문이 처리됨(API-27) · 여기로 돌아옴
-    openAdd: (u: UnansweredQuestion) =>
-      navigate('/faqs', { state: { from: u, back: pathname + search } }),
+    // [FAQ 등록] = 이 화면에서 바로 창으로 (11/11 — FAQ 화면으로 넘어갔다 오던 것). 질문 칸은 고객이 한 말, 저장하면 이 질문이 처리됨(API-27)
+    openAdd: (u: UnansweredQuestion) => setModal({ kind: 'faq', item: u }),
     openDelete: (u: UnansweredQuestion) => {
       remove.reset()
       setModal({ kind: 'delete', item: u })
