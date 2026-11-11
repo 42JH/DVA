@@ -15,9 +15,10 @@ const COLS = [
   { label: '고객', className: 'w-[150px]' },
   { label: '구분', className: 'w-[80px] max-[1600px]:hidden' }, // 1600 아래에선 숨김 (통화 상세에 있음)
   { label: '전화번호', className: 'w-[130px]' },
-  { label: '접수 주문', className: 'w-[110px]' },
-  { label: '고객 용건', className: '', chips: 'kinds' }, // 폭은 useChipColumns가 칩에 맞춰 정함
-  { label: '고객 불만', className: '', chips: 'complaints' }, // 남는 자리 전부
+  { label: '접수 주문', className: 'w-[100px]' },
+  // 칩 칸 둘은 머리 글 · 칩 모두 왼쪽(칸 안 여백 15 = td와 같게) — 칩 수가 줄마다 달라 왼쪽에 모아야 훑기 쉬움 (11/11 사용자: 정렬 기준)
+  { label: '고객 용건', className: 'pl-[15px] text-left!', chips: 'kinds' }, // 남는 자리 전부 (바닥 KINDS_BASE)
+  { label: '고객 불만', className: 'pl-[15px] text-left!', chips: 'complaints' }, // 대상 칩 셋이 다 들어가는 폭으로 고정
   { label: '통화 시간', className: 'w-[90px] max-[1600px]:hidden' },
 ]
 
@@ -25,7 +26,7 @@ export function CallsPage() {
   const vm = useCalls()
   const from = useLocation().search
   const table = useRef<HTMLTableElement>(null)
-  const { minWidth, kindsWidth } = useChipColumns(table, vm.rows)
+  const { minWidth, complaintsWidth } = useChipColumns(table, vm.rows)
   return (
     <>
       <PageHead title="통화">
@@ -75,7 +76,7 @@ export function CallsPage() {
                       key={c.label}
                       scope="col"
                       data-chips-col={c.chips}
-                      style={c.chips === 'kinds' ? { width: kindsWidth } : undefined}
+                      style={c.chips === 'complaints' ? { width: complaintsWidth } : undefined}
                       className={`${c.className} font-semibold`}
                     >
                       {c.label}
@@ -96,14 +97,16 @@ export function CallsPage() {
   )
 }
 
-// 한 자리 숫자 칩 4개(택배 접수 · 주문 확인 · 접수 취소 · 문의)가 들어가는 폭 — 쪽마다 칩 수에 따라 칸이 줄었다 늘었다 하지 않게 바닥으로
-const KINDS_BASE = 340
+// 칩이 다 생겼을 때를 바닥으로 — 쪽마다 칩 수에 따라 칸이 줄었다 늘었다 하지 않게 (11/11 사용자: 모든 칩이 생겼을 때 기준)
+// 고객 용건: 한 자리 숫자 칩 4개(택배 접수 · 주문 확인 · 접수 취소 · 문의). 고객 불만: 대상 칩 3개(AI 응대 · 요금 정책 · 배송)
+const KINDS_BASE = 310
+const COMPLAINTS_BASE = 172
 
-/** 고객 용건 칸은 칩 폭에 맞추고(바닥 KINDS_BASE, 더 긴 줄이 있을 때만 늘림), 불만 칸은 남는 자리 전부(table-layout fixed).
- *  불만 칩이 남는 자리에 안 들어가면 표 최소 너비를 늘려 가로 스크롤 */
+/** 고객 불만 칸은 칩 셋 폭으로 고정(더 긴 줄이 있을 때만 늘림), 고객 용건 칸이 남는 자리 전부(table-layout fixed) — 용건이 더 넓음.
+ *  용건 칩이 남는 자리(바닥 KINDS_BASE)에 안 들어가면 표 최소 너비를 늘려 가로 스크롤 */
 function useChipColumns(ref: RefObject<HTMLTableElement | null>, rows: unknown) {
   const [minWidth, setMinWidth] = useState(1120)
-  const [kindsWidth, setKindsWidth] = useState(KINDS_BASE)
+  const [complaintsWidth, setComplaintsWidth] = useState(COMPLAINTS_BASE)
   useLayoutEffect(() => {
     const t = ref.current
     if (!t) return
@@ -118,16 +121,16 @@ function useChipColumns(ref: RefObject<HTMLTableElement | null>, rows: unknown) 
       const fixed = [...t.querySelectorAll<HTMLElement>('thead th')]
         .filter((th) => !th.dataset.chipsCol && th.offsetWidth > 0) // 숨긴 칸(1600 아래 구분 · 통화 시간)은 0
         .reduce((sum, th) => sum + th.offsetWidth, 0)
-      const kinds = Math.max(KINDS_BASE, widest('kinds'))
-      setKindsWidth(kinds)
-      setMinWidth(Math.max(1120, fixed + kinds + widest('complaints')))
+      const complaints = Math.max(COMPLAINTS_BASE, widest('complaints'))
+      setComplaintsWidth(complaints)
+      setMinWidth(Math.max(1120, fixed + Math.max(KINDS_BASE, widest('kinds')) + complaints))
     }
     measure()
     const ro = new ResizeObserver(measure)
     ro.observe(t.parentElement ?? t)
     return () => ro.disconnect()
   }, [ref, rows])
-  return { minWidth, kindsWidth }
+  return { minWidth, complaintsWidth }
 }
 
 function Row({ r, from, onWarm }: { r: CallsRow; from: string; onWarm: () => void }) {
@@ -218,7 +221,7 @@ function Row({ r, from, onWarm }: { r: CallsRow; from: string; onWarm: () => voi
           )}
         </span>,
         false,
-        'center', // 칩이 한두 개라 머리 글과 같이 가운데 (11/11 사용자: 왼쪽에 붙어 정렬이 어긋나 보임)
+        'left',
       )}
       {cell(
         <span className="w-full text-center text-[13px] whitespace-nowrap text-ops-sub tabular-nums">
