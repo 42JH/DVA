@@ -428,7 +428,7 @@ def test_kakao_search_returns_top_road_addresses(monkeypatch):
     monkeypatch.setenv("KAKAO_REST_API_KEY", "k")
     docs = [{"place_name": "국회의사당", "road_address_name": "서울 영등포구 의사당대로 1"}, {"place_name": "x", "road_address_name": ""}]
     transport, seen = kakao_api(lambda req: httpx2.Response(200, json={"documents": docs}))
-    assert run(kakao.search_places("국회의사당", 3.0, transport)) == ["서울 영등포구 의사당대로 1"]
+    assert run(kakao.search_places("국회의사당", 3.0, transport)) == [("서울 영등포구 의사당대로 1", "국회의사당")]
     assert seen[0].url.path.endswith("keyword.json") and seen[0].url.params["query"] == "국회의사당"
     docs = [{"road_address": {"address_name": "서울 강남구 테헤란로 212"}}, {"road_address": None}]
     transport, seen = kakao_api(lambda req: httpx2.Response(200, json={"documents": docs}))
@@ -444,7 +444,7 @@ def witness(monkeypatch, places=(), addresses=()):
 
     async def fake_places(q, *a, **k):
         seen.append(("places", q))
-        return list(places)
+        return [(p, "") if isinstance(p, str) else p for p in places]  # 문자열만 주면 장소명 없음
 
     async def fake_addresses(q, *a, **k):
         seen.append(("addresses", q))
@@ -508,7 +508,7 @@ def test_witness_search_overlaps_local_correction(db_path, fake_kakao, monkeypat
 
     async def slow_places(q, *a, **k):
         await asyncio.sleep(0.3)
-        return ["서울 강남구 테헤란로 212"]
+        return [("서울 강남구 테헤란로 212", "")]
 
     witness(monkeypatch)
     monkeypatch.setattr(matcher, "resolve_detail", slow_local)
@@ -558,3 +558,17 @@ def test_service_uses_local_geo_and_falls_back_to_kakao(db_path, monkeypatch):
     assert r.geo == Geo("서울 강남구 역삼동 737", "역삼동", "06220") and not calls  # 로컬에서, 카카오 호출 없음
     r = run(svc.resolve("서울 강남구 테헤란로 211"))
     assert r.geo == Geo("카카오", "카카오동", "00000") and calls == ["서울특별시 강남구 테헤란로 211"]  # 로컬에 없으면 카카오
+
+
+def test_place_name_only_when_found_by_name(db_path, fake_kakao, monkeypatch):
+    """건물명·상호명(번호 없음)으로 확정하면 검색이 찾은 이름을 싣는다: 주소DB 건물명 또는 카카오 장소명(인식 오류를 고친 이름)."""
+    svc = AddressService(open_db(db_path))
+    assert run(svc.resolve("서울 포스코 센타")).place == "포스코센터"  # 주소DB 건물명(고객 발음 아님)
+    witness(monkeypatch, places=[("서울 강남구 테헤란로 212", "무슨빌딩 본점")])
+    r = run(svc.resolve("무슨빌딩"))
+    assert (r.status, r.address, r.place) == ("confirmed", "서울특별시 강남구 테헤란로 212", "무슨빌딩 본점")
+    witness(monkeypatch, places=[("서울 강남구 테헤란로1길 10", "어떤가게")])
+    assert run(svc.resolve("테헤란로 일길 10 무슨빌딩")).place is None  # 번호로 찾은 주소: 같은 자리의 상호를 붙이지 않는다
+    assert run(svc.resolve("서울 강남구 테헤란로 212")).place is None
+    witness(monkeypatch, places=[("경기 성남시 분당구 판교역로 166", "판교점"), ("서울 강남구 테헤란로 212", "본점")])
+    assert run(svc.resolve("어딘가")).place is None  # 되묻기

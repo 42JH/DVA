@@ -58,10 +58,11 @@ async def geocode(address: str, timeout_sec: float, transport: httpx2.AsyncBaseT
 
 
 async def search_places(query: str, timeout_sec: float, transport: httpx2.AsyncBaseTransport | None = None,
-                        http: httpx2.AsyncClient | None = None) -> list[str]:
-    """키워드 장소 검색 -> 상위 결과의 도로명주소("서울 송파구 올림픽로 300")들. 상호·약칭("서울시청")·POI를 받아 준다."""
+                        http: httpx2.AsyncClient | None = None) -> list[tuple[str, str]]:
+    """키워드 장소 검색 -> 상위 결과의 (도로명주소("서울 송파구 올림픽로 300"), 장소명("롯데월드타워"))들.
+    상호·약칭("서울시청")·POI를 받아 준다. 장소명은 상세주소 앞에 붙인다(AddressResult.place)."""
     docs = await _documents(KEYWORD_URL, {"query": query, "size": 5}, timeout_sec, transport, http)
-    return [d["road_address_name"] for d in docs or [] if d.get("road_address_name")][:WITNESS_TOP]
+    return [(d["road_address_name"], d.get("place_name") or "") for d in docs or [] if d.get("road_address_name")][:WITNESS_TOP]
 
 
 async def search_addresses(query: str, timeout_sec: float, transport: httpx2.AsyncBaseTransport | None = None,

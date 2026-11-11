@@ -128,9 +128,19 @@ class ParcelDraft:
     deferred_destination: CandidateSet | None = None  # 보내는 분 정보를 받은 뒤 제시할 받는 곳
     destination_search_id: int = 0
     destination_partial_change: Literal["address", "recipient"] | None = None
+    places: dict[str, tuple[str, str]] = field(default_factory=dict)  # 역할 -> (건물명·상호명으로 찾은 기본주소, 그 이름)
 
     def __getitem__(self, name: str) -> FieldState:
         return self.fields[name]
+
+    def place_detail(self, role: str, detail: str | None) -> str | None:
+        """기본주소를 건물명·상호명으로 찾았으면 상세주소 앞에 검색이 찾은 이름을 붙인다("국회의사당 3층", 없다고 하면 이름만).
+        그 뒤 기본주소가 바뀌었거나 이미 이름으로 시작하면 그대로 둔다."""
+        address, name = self.places.get(role, ("", ""))
+        field_ = self.fields[f"{role}_address"]
+        if detail is None or not name or not field_.valid or field_.value != address                 or detail.replace(" ", "").startswith(name.replace(" ", "")):
+            return detail
+        return f"{name} {detail}".strip()
 
     def documents_only(self) -> bool:
         items = self["items"]
@@ -297,4 +307,4 @@ def draft_snapshot(draft: ParcelDraft) -> dict:
 def copy_draft(draft: ParcelDraft) -> ParcelDraft:
     return replace(draft, fields={k: replace(v) for k, v in draft.fields.items()},
                    item_issues=draft.item_issues.copy(), box_proposal=None, deferred_destination=None,
-                   item_addition_turns=draft.item_addition_turns.copy())
+                   item_addition_turns=draft.item_addition_turns.copy(), places=draft.places.copy())

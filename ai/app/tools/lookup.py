@@ -172,8 +172,12 @@ async def _new_receiver(ctx: ToolContext, search: tuple[ParcelDraft, int],
         s.record("receiver_address", resolved.address, Source.RESOLVER)
         if resolved.status == "ambiguous":
             s.field_of("receiver_address").candidates = resolved.alternatives  # P6: 나머지 후보 보관
+        if resolved.place:
+            s.current.places["receiver"] = (resolved.address, resolved.place)
+        else:
+            s.current.places.pop("receiver", None)
         if detail is not None:
-            s.record("receiver_address_detail", detail_text(detail), Source.CUSTOMER)
+            s.record("receiver_address_detail", s.current.place_detail("receiver", detail_text(detail)), Source.CUSTOMER)
         elif changed:
             s.clear("receiver_address_detail")
         s.current.receiver_geo = resolved.geo
