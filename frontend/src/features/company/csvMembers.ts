@@ -1,7 +1,7 @@
 // 08 사원 CSV → 등록 항목 (CSV로 기업 등록 · CSV로 사원 추가 공용). React를 모르는 순수 함수 — csvMembers.test.ts
-// 모양 (11/01 결정): 사번,사원명,전화번호,대표자,부서,도로명 주소,지번 주소,동,우편번호,상세주소
-//   우편번호까지 9열 필수(상세주소 열만 생략 가능) · 값은 사번 · 사원명 · 전화 · 주소 4칸 필수, 대표자 · 부서 · 상세주소는 빈칸 가능 (11/01 결정)
-//   대표자 'Y'(여러 명) · 주소는 카카오 검색 결과의 칸을 그대로
+// 모양 (11/01 결정): 사번,사원명,전화번호,담당자(예전 파일의 '대표자'도 받음),부서,도로명 주소,지번 주소,동,우편번호,상세주소
+//   우편번호까지 9열 필수(상세주소 열만 생략 가능) · 값은 사번 · 사원명 · 전화 · 주소 4칸 필수, 담당자 · 부서 · 상세주소는 빈칸 가능 (11/01 결정)
+//   담당자 'Y'(여러 명) · 주소는 카카오 검색 결과의 칸을 그대로
 // 서버에 파일을 보내지 않고 JSON으로 바꿔 보냄 (명세 7장: CSV API 없음). 행 번호는 머리줄 = 1행
 import { parseCsv } from '@/shared/lib/csv'
 import type { Member, MemberInput } from '@/features/company/api/companyApi'
@@ -11,7 +11,7 @@ const CSV_HEADER = [
   '사번',
   '사원명',
   '전화번호',
-  '대표자',
+  '담당자',
   '부서',
   '도로명 주소',
   '지번 주소',
@@ -31,6 +31,7 @@ const EXAMPLE_ROWS = [
   ['003', '박테스트', '010-0000-0003', '', '개발팀', ...ADDR, ''],
 ]
 const KEEP_ZERO = new Set([0, 8]) // 사번 · 우편번호 열
+const LEGACY_ROLE_COL = 3 // 담당자 열 — 예전 이름 '대표자'
 const csvCell = (v: string) => (/[",\r\n]/.test(v) ? `"${v.replaceAll('"', '""')}"` : v)
 /** 예시 CSV 글 (테스트에서 이 글을 그대로 읽어 봄) */
 export function exampleCsv(): string {
@@ -117,7 +118,7 @@ export interface CsvAddress {
 }
 
 export interface CsvMember extends MemberInput {
-  leader: boolean // 대표자 Y → role=ORG_ADMIN
+  leader: boolean // 담당자 Y → role=ORG_ADMIN
   department: string | null // 부서 이름 (없으면 부서 없음)
   address: CsvAddress
   line: number // 파일의 행 번호 (오류 안내용)
@@ -147,7 +148,12 @@ function readMembersRows(rows: string[][]): CsvResult {
   const headOk =
     head !== undefined &&
     head.length >= REQUIRED_COLUMNS &&
-    head.every((h, i) => h === (CSV_HEADER[i] ?? '') || (i >= REQUIRED_COLUMNS && h === ''))
+    head.every(
+      (h, i) =>
+        h === (CSV_HEADER[i] ?? '') ||
+        (i === LEGACY_ROLE_COL && h === '대표자') || // 11/11 이전 예시 파일
+        (i >= REQUIRED_COLUMNS && h === ''),
+    )
   if (!headOk) return fail([`첫 줄은 '${CSV_HEADER.join(',')}'여야 합니다.`])
   if (body.length === 0) return fail(['사원이 한 명도 없습니다.'])
   if (body.length > MAX_MEMBERS)
@@ -167,7 +173,7 @@ function readMembersRows(rows: string[][]): CsvResult {
     const badPhone = phoneError(digits)
     if (badPhone) return errors.push(`${line}행 ${badPhone}`)
     if (leader !== '' && leader.toUpperCase() !== 'Y')
-      return errors.push(`${line}행 대표자는 Y 또는 빈칸이어야 합니다.`)
+      return errors.push(`${line}행 담당자는 Y 또는 빈칸이어야 합니다.`)
     if (dept.length > MAX_DEPARTMENT_NAME)
       return errors.push(`${line}행 부서 이름은 ${MAX_DEPARTMENT_NAME}자까지입니다.`)
     const [road = '', jibun = '', dong = '', postal = '', detail = ''] = addr
@@ -219,8 +225,8 @@ export function serverRowErrors(
 
 /** CSV 사원 추가 미리 보기 (11/01 결정 B) — 기존 사원과 비교해 신규 · 바뀜 · 변경 없음으로 나눔
  * 서버는 같은 사번이면 조용히 덮어써서, 무엇이 바뀌는지 [등록] 전에 보여 줌
- * 비교 칸 (11/01 결정): 이름 · 전화 · 대표자 · 부서 · 주소(좌표 빼고) */
-type ChangedField = '사원명' | '전화번호' | '대표자' | '부서' | '주소'
+ * 비교 칸 (11/01 결정): 이름 · 전화 · 담당자 · 부서 · 주소(좌표 빼고) */
+type ChangedField = '사원명' | '전화번호' | '담당자' | '부서' | '주소'
 export interface CsvChange {
   row: CsvMember
   before: {
@@ -235,7 +241,7 @@ export interface CsvPreview {
   added: CsvMember[] // 새 사번
   changed: CsvChange[] // 같은 사번, 하나라도 다름 → 덮어씀
   same: CsvMember[] // 같은 사번, 그대로 → 보내지 않음
-  leaders: string[] // 대표자로 새로 지정할 사번 (이미 대표자면 뺌). 빈칸은 '지정 안 함' — 기존 대표자를 내리지 않음
+  leaders: string[] // 담당자로 새로 지정할 사번 (이미 담당자면 뺌). 빈칸은 '지정 안 함' — 기존 담당자를 내리지 않음
   errors: string[] // 보내면 서버가 전체를 거절할 줄 (다른 사원이 쓰는 전화)
 }
 
@@ -293,8 +299,8 @@ export function previewAgainst(
     const fields: ChangedField[] = []
     if (old.customer.name !== r.name) fields.push('사원명')
     if (old.customer.phoneNumber !== r.phoneNumber) fields.push('전화번호')
-    if (newLeader) fields.push('대표자')
-    // 서버는 부서를 빼고 보내면 '부서 없음' → 빈칸도 바뀜으로 보여 줌 (대표자 빈칸과 다름)
+    if (newLeader) fields.push('담당자')
+    // 서버는 부서를 빼고 보내면 '부서 없음' → 빈칸도 바뀜으로 보여 줌 (담당자 빈칸과 다름)
     if (department !== r.department) fields.push('부서')
     if (!addr || ADDRESS_KEYS.some((k) => (addr[k] ?? '') !== r.address[k])) fields.push('주소')
     if (fields.length === 0) out.same.push(r)

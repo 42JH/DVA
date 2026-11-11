@@ -26,7 +26,7 @@ type Picked =
 
 /** 08 CSV로 사원 추가 훅 (기존 기업) — 파일 → 검사 → 기존 사원과 비교한 미리 보기 → [등록]
  * 같은 사번은 서버가 덮어씀 → '신규 · 바뀜 · 변경 없음'을 먼저 보여 줌 (11/01 결정 B). 변경 없는 줄은 보내지 않음
- * 등록 (11/01): 없는 부서 만들기 → 사원 등록 한 번(대표자 role · departmentSeq 포함) → 주소가 새로 · 바뀐 사원만 주소 저장 */
+ * 등록 (11/01): 없는 부서 만들기 → 사원 등록 한 번(담당자 role · departmentSeq 포함) → 주소가 새로 · 바뀐 사원만 주소 저장 */
 export function useMemberCsv(companyId: number, onDone: () => void) {
   const qc = useQueryClient()
   const [picked, setPicked] = useState<Picked>({ kind: 'none' })
@@ -46,7 +46,7 @@ export function useMemberCsv(companyId: number, onDone: () => void) {
       const seqOf = new Map(deps.data?.map((d) => [d.name, d.departmentSeq]))
       for (const name of new Set(toSend.flatMap((r) => (r.department ? [r.department] : []))))
         if (!seqOf.has(name)) seqOf.set(name, await createDepartment(companyId, name))
-      // 2) 사원 한 번에 — 대표자 빈칸은 role을 빼서 기존 역할 유지, 부서 빈칸은 null = 부서 없음
+      // 2) 사원 한 번에 — 담당자 빈칸은 role을 빼서 기존 역할 유지, 부서 빈칸은 null = 부서 없음
       await addMembers(
         companyId,
         toSend.map((r) => ({
@@ -121,7 +121,7 @@ export function useMemberCsv(companyId: number, onDone: () => void) {
               `신규 ${pv.added.length}명`,
               `바뀜 ${pv.changed.length}명`,
               `변경 없음 ${pv.same.length}명`,
-              ...(pv.leaders.length ? [`대표자 지정 ${pv.leaders.length}명`] : []),
+              ...(pv.leaders.length ? [`담당자 지정 ${pv.leaders.length}명`] : []),
             ].join(' · '),
             changes: pv.changed.slice(0, SHOW_CHANGES).map((c) => ({
               key: c.row.employeeNo,
@@ -130,7 +130,7 @@ export function useMemberCsv(companyId: number, onDone: () => void) {
                 c.fields.includes('사원명') ? `${c.before.name} → ${c.row.name}` : c.row.name,
                 c.fields.includes('전화번호') &&
                   `${fmtPhone(c.before.phoneNumber)} → ${fmtPhone(c.row.phoneNumber)}`,
-                c.fields.includes('대표자') && '대표자 지정',
+                c.fields.includes('담당자') && '담당자 지정',
                 c.fields.includes('부서') &&
                   `부서 ${c.before.department ?? '없음'} → ${c.row.department ?? '없음'}`,
                 c.fields.includes('주소') &&

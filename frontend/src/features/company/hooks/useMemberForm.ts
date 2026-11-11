@@ -18,7 +18,7 @@ import { errorText } from '@/features/company/labels'
 type Role = Member['membership']['role']
 
 /** 08 사원 추가 · 수정 창 훅 — 사번 · 사원명 · 전화번호 · 역할 · 주소(검색) · 상세주소 (주소는 11/01 추가)
- * 추가 = 등록(+대표자면 PATCH) · 수정 = 같은 사번으로 재등록(이름 · 전화 갱신) + 역할이 바뀌면 PATCH. 사번은 수정 불가
+ * 추가 = 등록(+담당자면 PATCH) · 수정 = 같은 사번으로 재등록(이름 · 전화 갱신) + 역할이 바뀌면 PATCH. 사번은 수정 불가
  * 주소는 고객 정보라 사원 저장 뒤 따로 PATCH /customers/{customerSeq} → 주소만 실패하면 주소만 다시 보냄 */
 export function useMemberForm(companyId: number, target: Member | null, onDone: () => void) {
   const qc = useQueryClient()
@@ -63,6 +63,12 @@ export function useMemberForm(companyId: number, target: Member | null, onDone: 
   // 주소 필수 — CSV 추가와 같은 규칙 · 상단바 사원 검색(DIR-01)이 주소 있는 사원만 찾음 (11/06).
   // 수정에서 원래 주소가 있으면 road가 그 주소라 통과, 없으면 새로 골라야 함
   const noAddress = road === ''
+  // 기업마다 담당자 1명 이상 (11/11 사용자) — 마지막 담당자를 사원으로 내리지 못하게
+  const lastManager =
+    editing &&
+    target.membership.role === 'ORG_ADMIN' &&
+    form.role === 'MEMBER' &&
+    all.filter((m) => m.membership.role === 'ORG_ADMIN').length <= 1
 
   const save = useMutation({
     mutationFn: async (): Promise<'ok' | 'addressFailed'> => {
@@ -81,7 +87,7 @@ export function useMemberForm(companyId: number, target: Member | null, onDone: 
           await setMemberRole(target.membership.membershipSeq, form.role)
       } else if (form.role === 'ORG_ADMIN' && (await assignLeaders(companyId, [no])) > 0)
         throw new Error(
-          '사원은 추가했지만 대표자로 지정하지 못했습니다. [수정]에서 다시 지정해 주세요.',
+          '사원은 추가했지만 담당자로 지정하지 못했습니다. [수정]에서 다시 지정해 주세요.',
         )
       if (!address) return 'ok'
       // 추가: 등록 응답에 번호가 없어 전체를 다시 받아 사번으로 고객 번호를 찾음 (backend-todo 10)
@@ -152,8 +158,9 @@ export function useMemberForm(companyId: number, target: Member | null, onDone: 
           ? `${samePhone.customer.name}(사번 ${samePhone.membership.employeeNo}) 님이 쓰는 번호입니다.`
           : undefined),
       detail: detailWithoutRoad ? '주소를 먼저 검색해 골라 주세요.' : undefined,
+      role: lastManager ? '기업마다 담당자가 1명 이상 있어야 합니다.' : undefined,
     },
-    // 대표자 지정 · 주소 번호 찾기 실패는 우리가 만든 문장(Error), 서버 오류는 설명으로 바꿈
+    // 담당자 지정 · 주소 번호 찾기 실패는 우리가 만든 문장(Error), 서버 오류는 설명으로 바꿈
     errorMessage: !err
       ? null
       : err instanceof ApiError
@@ -173,6 +180,7 @@ export function useMemberForm(companyId: number, target: Member | null, onDone: 
       !samePhone &&
       !detailWithoutRoad &&
       !noAddress &&
+      !lastManager &&
       changed && // 수정에서 아무것도 안 바꿨으면 [저장] 꺼짐 (11/01 결정)
       !addressFail && // 사원은 이미 저장됨 → 주소 재시도 · 닫기만
       !save.isPending,

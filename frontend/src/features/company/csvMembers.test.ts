@@ -211,7 +211,7 @@ assert.deepEqual(
 assert.deepEqual(
   pv.changed.map((c) => [c.row.employeeNo, c.fields, c.before.department]),
   [
-    ['00134', ['전화번호', '대표자'], null],
+    ['00134', ['전화번호', '담당자'], null],
     ['00180', ['부서', '주소'], '개발팀'],
   ],
 )
@@ -246,7 +246,7 @@ assert.equal(
 assert.match(errorText({ status: 422, details: [] }, '등록'), /등록 조건에 맞지 않아/)
 
 // 부서 · 주소 열 (11/01): 주소 4칸 필수, 부서 · 상세주소는 빈칸 가능, 상세주소 열은 생략 가능
-const FULL = '사번,사원명,전화번호,대표자,부서,도로명 주소,지번 주소,동,우편번호,상세주소'
+const FULL = '사번,사원명,전화번호,담당자,부서,도로명 주소,지번 주소,동,우편번호,상세주소'
 const withAddr = ok(
   [
     FULL,
