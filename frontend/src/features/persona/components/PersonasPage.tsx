@@ -1,12 +1,12 @@
 // AI 상담가 (11/06) — 가운데 시스템 프롬프트(또는 비교) | 오른쪽 상담가 카드
-// 11/11: 저장 = 새 버전, [적용] 없음. 카드 케밥(⋮) → 오른쪽이 그 상담가의 버전 기록(저장 시각 · 수정한 사람), 고른 버전이 가운데
+// 11/11: 저장 = 새 버전, [적용] 없음. 오른쪽 위 탭([AI 상담가 유형] · [버전 히스토리]) → 버전 히스토리는 고른 상담가의 버전 기록(저장 시각 · 수정한 사람), 고른 버전이 가운데
 // 데이터 · 규칙은 usePersonaPage. 등록 · 수정 · 시험 통화 창은 기존 부품을 그대로 씀
 import { usePersonaPage, type PersonaItem } from '@/features/persona/hooks/usePersonaPage'
 import { AddPersona } from './AddPersona'
 import { PromptEditor } from './PromptEditor'
 import { TestCallModal } from './TestCallModal'
 import { PageHead } from '@/shared/ui'
-import { Badge, Btn, Icon, KebabMenu } from '@/shared/ui'
+import { Badge, Btn, Icon } from '@/shared/ui'
 import { Confirm } from '@/shared/ui/Modal'
 import { Markdown } from '@/shared/ui/Markdown'
 
@@ -65,7 +65,10 @@ export function PersonasPage() {
               <Prompt vm={vm} />
             )}
           </section>
-          {vm.historyOpen ? <History vm={vm} /> : <Personas vm={vm} />}
+          <aside aria-label="오른쪽 패널" className={ASIDE}>
+            <PanelTabs vm={vm} />
+            {vm.historyOpen ? <History vm={vm} /> : <Personas vm={vm} />}
+          </aside>
         </div>
       )}
       {vm.confirm && (
@@ -95,26 +98,54 @@ export function PersonasPage() {
 const ASIDE =
   'flex w-96 shrink-0 [scrollbar-width:thin] flex-col gap-2 overflow-y-auto border-l border-ops-line bg-white p-4 max-xl:w-80'
 
-function Personas({ vm }: { vm: Vm }) {
+// 오른쪽 위 탭 — 밑줄이 따라다니는 모양 (11/11 사용자 시안). 이 화면에서만 써서 shared/ui엔 안 올림
+function PanelTabs({ vm }: { vm: Vm }) {
+  const tabs = [
+    { label: 'AI 상담가 유형', on: !vm.historyOpen, pick: vm.closeHistory },
+    { label: '버전 히스토리', on: vm.historyOpen, pick: vm.openHistory },
+  ]
   return (
-    <aside aria-label="상담가" className={ASIDE}>
-      {vm.personas.map((p) => (
-        <PersonaCard key={p.personaSeq} p={p} vm={vm} />
+    <div
+      role="tablist"
+      aria-label="오른쪽 패널"
+      className="flex gap-5 border-b border-ops-line px-1"
+    >
+      {tabs.map((t) => (
+        <button
+          key={t.label}
+          type="button"
+          role="tab"
+          aria-selected={t.on}
+          onClick={t.pick}
+          className={`-mb-px border-b-2 pb-2 text-[15px] font-bold outline-none focus-visible:text-ops-route ${t.on ? 'border-ops-route text-ops-route' : 'border-transparent text-ops-sub hover:text-ops-ink'}`}
+        >
+          {t.label}
+        </button>
       ))}
-    </aside>
+    </div>
   )
 }
 
-// 이름 · 태그 → 음성 → (사용 중인데 새 버전이 있으면) 안내 → [통화에 사용하기]. 오른쪽 위 ⋮ = 메뉴 → 버전 기록 (11/11)
+function Personas({ vm }: { vm: Vm }) {
+  return (
+    <div className="flex flex-col gap-2 pt-1">
+      {vm.personas.map((p) => (
+        <PersonaCard key={p.personaSeq} p={p} vm={vm} />
+      ))}
+    </div>
+  )
+}
+
+// 이름 · 태그 → 음성 → (사용 중인데 새 버전이 있으면) 안내 → [통화에 사용하기]
 function PersonaCard({ p, vm }: { p: PersonaItem; vm: Vm }) {
   return (
     <div
-      className={`relative rounded-xl px-5 py-4 ${p.selected ? 'bg-ops-route-soft' : 'hover:bg-ops-paper'}`}
+      className={`rounded-xl px-5 py-4 ${p.selected ? 'bg-ops-route-soft' : 'hover:bg-ops-paper'}`}
     >
       <button
         type="button"
         onClick={() => vm.selectPersona(p.personaSeq)}
-        className="w-full pr-8 text-left"
+        className="w-full text-left"
       >
         <span className="flex flex-wrap items-center gap-2">
           <span className={`text-[15px] font-bold ${p.selected ? 'text-ops-route' : ''}`}>
@@ -126,12 +157,6 @@ function PersonaCard({ p, vm }: { p: PersonaItem; vm: Vm }) {
         <span className="mt-1 block text-[13px] text-ops-sub">{p.voice}</span>
         {p.note && <span className="mt-1 block text-[13px] text-ops-wait">{p.note}</span>}
       </button>
-      <div className="absolute top-3 right-3">
-        <KebabMenu
-          label={`${p.name} 메뉴`}
-          items={[{ label: '버전 기록', onSelect: () => vm.openHistory(p.personaSeq) }]}
-        />
-      </div>
       {p.useLabel && (
         <Btn kind="lineBadge" className="mt-3" onClick={() => vm.askUse(p.personaSeq)}>
           {p.useLabel}
@@ -144,21 +169,8 @@ function PersonaCard({ p, vm }: { p: PersonaItem; vm: Vm }) {
 // 버전 기록 (11/11, Notion 버전 기록처럼) — 저장 시각 · 태그 → 그 버전의 음성 → 수정한 사람(모르면 줄 숨김). 누르면 가운데에 그 버전
 function History({ vm }: { vm: Vm }) {
   return (
-    <aside aria-label="버전 기록" className={ASIDE}>
-      <header className="flex items-start gap-2 px-1 pb-2">
-        <button
-          type="button"
-          aria-label="버전 기록 닫기"
-          onClick={vm.closeHistory}
-          className="grid size-8 shrink-0 place-items-center rounded-md text-ops-sub hover:bg-ops-paper hover:text-ops-ink"
-        >
-          <Icon name="arrowLeft" />
-        </button>
-        <span className="min-w-0">
-          <span className="block text-[12px] text-ops-sub">버전 기록</span>
-          <span className="block truncate text-[16px] font-bold">{vm.historyTitle}</span>
-        </span>
-      </header>
+    <div className="flex flex-col gap-2 pt-1">
+      <p className="truncate px-1 text-[13px] text-ops-sub">{vm.historyTitle}</p>
       <ol className="flex flex-col gap-1">
         {vm.history.map((h) => (
           <li key={h.version}>
@@ -189,7 +201,7 @@ function History({ vm }: { vm: Vm }) {
           </li>
         ))}
       </ol>
-    </aside>
+    </div>
   )
 }
 

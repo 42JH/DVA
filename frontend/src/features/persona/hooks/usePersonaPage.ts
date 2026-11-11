@@ -99,7 +99,7 @@ const conflictText =
   '그새 다른 관리자가 이 상담가를 저장했습니다. 창을 닫고 최신 버전을 확인해 주세요.'
 
 /** 07 AI 상담가 훅 (11/11 — 저장 = 새 버전, [적용] 없음)
- * 가운데 = 고른 상담가의 현재 버전(확정된 최신). 카드 케밥 → 오른쪽이 그 상담가의 버전 기록, 고른 버전이 가운데
+ * 가운데 = 고른 상담가의 현재 버전(확정된 최신). 오른쪽 위 탭 [버전 히스토리] → 오른쪽이 고른 상담가의 버전 기록, 고른 버전이 가운데
  * 지난 버전: 보기 · 현재 버전과 비교 · [이 버전 다시 쓰기](그 내용을 새 버전으로 저장)
  * 통화 상담가 바꾸기 · 새 버전 반영은 [통화에 사용하기]로만. 시험 통화는 따로 (안 해도 사용 가능, 11/11 사용자) */
 export function usePersonaPage() {
@@ -310,7 +310,7 @@ export function usePersonaPage() {
     startCompare: () => setComparing(true),
     closeCompare: () => setComparing(false),
 
-    // 버전 기록 (카드 케밥)
+    // 버전 기록 (오른쪽 위 탭)
     historyOpen,
     historyTitle: persona?.name ?? '',
     history: all
@@ -323,8 +323,7 @@ export function usePersonaPage() {
         badges: badges(v),
         selected: v === viewing,
       })),
-    openHistory: (seq: number) => {
-      setPersonaSeq(seq)
+    openHistory: () => {
       setVersion(null)
       setComparing(false)
       setHistoryOpen(true)
