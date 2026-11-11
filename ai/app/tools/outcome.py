@@ -49,6 +49,8 @@ def state_summary(state: ConversationState, policy: Policy) -> dict:
             summary["sender_change_question"] = "발송 주소도 바꾸시겠어요?"
     elif origin := origin_confirmation(state):
         summary.update(origin_confirm=origin, missing=[], can_proceed=False)
+    if summary["missing"][:1] in (["sender_address_detail"], ["receiver_address_detail"]):
+        summary["address_detail_question"] = "상세주소를 알려주시겠어요?"
     if state.current and state.current.box_size_pending:
         fields["items"] = FieldStatus.PENDING_CHOICE.value
         summary["box_size_pending"] = True

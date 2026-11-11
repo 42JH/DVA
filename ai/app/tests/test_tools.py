@@ -277,6 +277,50 @@ def test_sender_address_change_finishes_before_receiver_questions(address, has_p
         assert not c.state.candidates
 
 
+@pytest.mark.parametrize("direct_address", ["same", "new_with_detail", "invalid_with_detail"])
+def test_spoken_address_answers_pending_origin_choice(address, direct_address):
+    from app.domain.address_book import begin_sender_name_change, prefill_sender
+
+    c = ctx(address=address)
+    st = c.state
+    st.customer.origin_place = Place("김철수", CALLER, "서울특별시 강남구 테헤란로 212", "1201호", source=Source.PROFILE)
+    prefill_sender(st, full=True)
+    begin_sender_name_change(st)
+    assert call(c, "record_fields", {"sender_name": "박영희"})["sender_change_next"] == "ask_address_change"
+
+    fields = {"sender_address": {"same": "서울 강남구 테헤란로 212",
+                                "new_with_detail": "서울 강남구 테헤란로 211",
+                                "invalid_with_detail": "서울 강남구 없는로 12"}[direct_address]}
+    if direct_address != "same":
+        fields["sender_address_detail"] = "3층"
+    out = call(c, "record_fields", fields)
+    if direct_address == "same":
+        assert st.origin_answer is True and not st.current.sender_address_change
+        assert st.current["sender_address_detail"].value == "1201호"
+    else:
+        assert st.origin_answer is False and st.current.sender_address_change
+        assert st.current["sender_address_detail"].value == "3층"
+    if direct_address == "invalid_with_detail":
+        assert out["code"] == "ADDRESS_NOT_FOUND" and out["missing"] == ["sender_address"]
+        assert not st.current["sender_address"].valid
+        out = call(c, "record_fields", {"sender_address": "서울 강남구 테헤란로 211"})
+        assert st.current["sender_address_detail"].value == "3층"
+    assert out["sender_change_next"] == "ask_name_save"
+    assert "address_detail_question" not in out
+
+
+def test_ordinary_sender_and_receiver_use_same_short_detail_question(address):
+    c = ctx(address=address)
+    out = call(c, "record_fields", {"sender_address": "서울 강남구 테헤란로 211",
+                                    "receiver_name": "이영희", "receiver_phone": CALLER,
+                                    "receiver_address": "서울 강남구 테헤란로 212"})
+    assert out["missing"][0] == "sender_address_detail"
+    assert out["address_detail_question"] == "상세주소를 알려주시겠어요?"
+    out = call(c, "record_fields", {"sender_address_detail": ""})
+    assert out["missing"][0] == "receiver_address_detail"
+    assert out["address_detail_question"] == "상세주소를 알려주시겠어요?"
+
+
 def test_server_splits_detail_from_heard_sentence_and_converts_numerals(corrector, address):
     c = ctx(address=address)
     s = c.state
