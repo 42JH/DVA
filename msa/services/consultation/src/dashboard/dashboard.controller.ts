@@ -54,7 +54,7 @@ export class DashboardController {
   @ApiOperation({
     summary: '고객 불편 표현 통화율·유형별 집계',
     description:
-      '판정 완료 통화가 분모입니다. 같은 통화·같은 유형은 한 번, 서로 다른 유형은 각각 집계합니다. 도넛은 화면 6개 유형, 과거 유형은 별도 건수로 제공합니다. RAG/미답변 사유와 독립적입니다.',
+      '판정 완료 통화가 분모입니다. AI 응대 오류 4유형과 ai_service 고객 불만만 품질 비율·5유형 도넛에 포함합니다. 같은 통화·같은 유형은 한 번 집계합니다. 다른 책임의 불만·근거 없는 답변은 통화 목록/상세 참고이며 과거 유형 건수도 운영 참고로 제공합니다. RAG/미답변 사유와 독립적입니다.',
   })
   @ApiOkResponse({ type: ComplaintCallsResponseDto })
   complaintCalls(@Query() query: DashboardQueryDto) {

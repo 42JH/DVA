@@ -481,6 +481,28 @@ test('call reference owners and public APIs preserve original joins, filters and
       VALUES($1,$2,'2026-11-01T01:00:01Z','2026-11-01T01:02:50Z',1,$3,$4,$5,'2026-11-01T01:04:00Z')`,[callIds[n],versionId,n===4,JSON.stringify(n===4?[{type:'DISSATISFACTION_EXPRESSION',evidenceText:'원본 근거',offsetSeconds:0,utteranceOrders:[1]}]:[]),'a'.repeat(64)]);
     for(let n=0;n<2;n++)await db.query('INSERT INTO recordings(recording_seq,call_session_seq,object_key,created_at) OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,$4)',[9306001+n,callIds[0],'recordings/reference-'+n+'.wav','2026-11-01T01:04:'+(n?'00':'30')+'Z']);
   }
+  const qualityTypes=['INFORMATION_RECOGNITION_ERROR','INTENT_RECOGNITION_ERROR','SLOW_RESPONSE','INTERRUPTION','DISSATISFACTION_EXPRESSION'];
+  async function complaintExpected(source,path){
+    const customerType=new URL(path,'http://fixture').searchParams.get('customerType')??'ALL';
+    // The frozen source supplies unchanged eligibility/coverage; the new criterion is checked in JS, independently of the SQL.
+    const rows=(await mono.query(`SELECT a.has_complaint,a.complaints FROM call_sessions c LEFT JOIN call_analyses a USING(call_session_seq)
+      WHERE c.deleted_at IS NULL AND(c.incoming_at IS NULL OR c.incoming_at>transaction_timestamp()-interval '5 years')
+      AND COALESCE(c.ended_at,a.ai_ended_at) IS NOT NULL
+      AND($1='ALL' OR($1='NEW' AND a.is_new_customer IS TRUE)OR($1='EXISTING' AND a.is_new_customer IS FALSE))`,[customerType])).rows;
+    const counts=new Map(qualityTypes.map(type=>[type,0]));let complained=0;
+    for(const row of rows){
+      const found=new Set();
+      if(row.has_complaint===true)for(const item of row.complaints??[])
+        if(counts.has(item?.type)&&(item.type!=='DISSATISFACTION_EXPRESSION'||item.target==='ai_service'))found.add(item.type);
+      if(found.size)complained++;
+      for(const type of found)counts.set(type,counts.get(type)+1);
+    }
+    const total=[...counts.values()].reduce((a,b)=>a+b,0),expected=structuredClone(source);
+    Object.assign(expected.data,{complaintCallCount:complained,
+      complaintRatePercent:source.data.assessedCallCount?complained*100/source.data.assessedCallCount:null,typeTotalCount:total,
+      types:qualityTypes.map(type=>({type,callCount:counts.get(type),sharePercent:total?counts.get(type)*100/total:null}))});
+    return expected;
+  }
   let apiPairs=0;
   async function get(path,status=200,headers={}){
     const requestId=randomUUID(),responses=[];
@@ -489,7 +511,8 @@ test('call reference owners and public APIs preserve original joins, filters and
       const body=await response.json();assert.equal(response.status,status,JSON.stringify(body));
       assert.equal(response.headers.get('cache-control'),'no-store');responses.push(body);
     }
-    assert.deepEqual(responses[1],responses[0]);apiPairs++;return responses[0];
+    const expected=status===200&&path.split('?')[0]==='/api/dashboard/complaint-calls'?await complaintExpected(responses[0],path):responses[0];
+    assert.deepEqual(responses[1],expected);apiPairs++;return responses[1];
   }
   const ids={order:orderIds,customer:customerIds,persona:[versionId,2147483647]};
   const read=kind=>requestReferences(kind,endpoints[kind][0]+'/internal/call-read-references',endpoints[kind][1],ids[kind]);
@@ -583,13 +606,44 @@ test('call reference owners and public APIs preserve original joins, filters and
       total_wait_ms,latency_stats,response_wait_payload_hash,response_wait_received_at) VALUES($1,$2,$3,'2026-11-01T01:04:00Z',$4,$5,$3,'2026-11-01T01:04:00Z')`,
       [callIds[n],stage,'c'.repeat(64),wait,JSON.stringify(wait?[{processType:'FAQ_LOOKUP',measurementCount:2,totalLatencyMs:wait}]:[])]);
   }
+  const beforeQuality=(await get('/api/dashboard/complaint-calls')).data;
+  const metricItem=(type,target)=>({type,evidenceText:'통계 근거 보존',offsetSeconds:0,utteranceOrders:[1],
+    ...(target===undefined?{}:{target,level:target===null?null:'mild'})});
+  const dsf=target=>metricItem('DISSATISFACTION_EXPRESSION',target);
+  const qualityCases=[
+    {n:510,items:[dsf('ai_service')],fresh:true},
+    {n:511,items:[dsf('price_policy')],fresh:false},
+    {n:512,items:[dsf('delivery_other')],fresh:true},
+    {n:513,items:[metricItem('UNSUPPORTED_ANSWER')],fresh:false},
+    {n:514,items:[dsf(null)],fresh:null},
+    {n:515,items:[metricItem(qualityTypes[0]),dsf('price_policy')],fresh:true},
+    {n:516,items:[dsf('price_policy'),...qualityTypes.map(type=>metricItem(type,type===qualityTypes[4]?'ai_service':undefined)),metricItem('UNSUPPORTED_ANSWER'),metricItem(qualityTypes[0])],fresh:false},
+    {n:517,items:[],fresh:null,assessed:false},
+    {n:518,items:[],fresh:true,assessed:false},
+    {n:519,items:[],fresh:false,assessed:null},
+    {n:528,items:[dsf('ai_service')],fresh:true},
+    {n:529,items:[metricItem(qualityTypes[0])],fresh:false},
+    {n:520,items:[metricItem(qualityTypes[2])],fresh:true,ended:false},
+    {n:521,items:[metricItem('REPEATED_QUESTION')],fresh:true},
+  ];
+  for(const db of [mono,cons])for(const row of qualityCases)if(row.ended!==false)await db.query(`INSERT INTO call_analyses(call_session_seq,ai_persona_version_seq,ai_started_at,ai_ended_at,
+    is_new_customer,has_complaint,complaints,payload_hash,analysed_at) VALUES($1,$2,'2026-11-01T01:00:00Z',$3,$4,$5,$6,$7,'2026-11-01T01:04:00Z')`,
+    [callIds[row.n],versionId,row.ended===false?null:'2026-11-01T01:03:00Z',row.fresh,Object.hasOwn(row,'assessed')?row.assessed:true,JSON.stringify(row.items),'a'.repeat(64)]);
+  const afterQuality=(await get('/api/dashboard/complaint-calls')).data;
+  for(const [key,delta]of Object.entries({endedCallCount:11,assessedCallCount:10,unassessedCallCount:1,unclassifiedCustomerCallCount:2,complaintCallCount:3,typeTotalCount:7,legacyTypeCallCount:1}))
+    assert.equal(afterQuality[key]-beforeQuality[key],delta,'MR476 literal fixture delta '+key);
+  for(const [i,delta]of [2,1,1,1,2].entries())assert.equal(afterQuality.types[i].callCount-beforeQuality.types[i].callCount,delta,'MR476 unique type counts');
+  for(const n of [511,512,513]){
+    const detail=(await get('/api/calls/'+callIds[n])).data;
+    assert.deepEqual(detail.analysis.complaints,qualityCases.find(row=>row.n===n).items,'reference complaints remain in call detail');
+  }
   for(const route of statistics){for(const customerType of ['ALL','NEW','EXISTING'])await get('/api/dashboard/'+route+'?customerType='+customerType);
     for(const query of ['?customerType=OTHER','?customerType=ALL&customerType=NEW','?from=2026-11-01'])await get('/api/dashboard/'+route+query,400);
     await get('/api/dashboard/'+route,401,{Cookie:''});}
   const registration=(await get('/api/dashboard/registration-time')).data;
   assert.equal(registration.comparison.current.aiPersonaVersionSeq,versionId);assert.equal(registration.comparison.previous.aiPersonaVersionSeq,versionId+1);
   assert.ok(registration.registeredParcelCount>registration.comparison.current.registeredParcelCount+registration.comparison.previous.registeredParcelCount,'other historical versions contribute only to the overall total');
-  const complaint=(await get('/api/dashboard/complaint-calls')).data;assert.ok(complaint.legacyTypeCallCount>=1);assert.equal(complaint.types.length,6);
+  const complaint=(await get('/api/dashboard/complaint-calls')).data;assert.ok(complaint.legacyTypeCallCount>=1);assert.equal(complaint.types.length,5);
   assert.ok((await get('/api/dashboard/response-wait')).data.invalidWaitCallCount>=1);
   for(const db of [mono,ops])await db.query('UPDATE ai_persona_versions SET previous_active_version_seq=NULL WHERE ai_persona_version_seq=$1',[versionId]);
   assert.equal((await get('/api/dashboard/registration-time')).data.comparison.previous,null);
@@ -597,9 +651,30 @@ test('call reference owners and public APIs preserve original joins, filters and
   const noActive=(await get('/api/dashboard/registration-time')).data;assert.equal(noActive.comparison.current,null);assert.equal(noActive.comparison.previous,null);
   const docs=await Promise.all(['http://monolith-app:3000','http://consultation-app:3004'].map(async base=>(await fetch(base+'/api/docs-json')).json()));
   for(const path of ['/api/calls','/api/calls/{id}','/api/unanswered-questions'])assert.deepEqual(docs[1].paths[path],docs[0].paths[path]);
-  for(const name of ['CallDto','CallListItemDto','CallListResponseDto','CallDetailDto','CallDetailResponseDto','CallAnalysisDto','CallComplaintDto','RecordingDto','UnansweredQuestionDto','UnansweredQuestionListResponseDto']){assert.ok(docs[0].components.schemas[name],name+' missing in source');assert.deepEqual(docs[1].components.schemas[name],docs[0].components.schemas[name]);}
-  for(const route of statistics)assert.deepEqual(docs[1].paths['/api/dashboard/'+route],docs[0].paths['/api/dashboard/'+route]);
-  for(const name of Object.keys(docs[0].components.schemas).filter(name=>/^(StageDropoff|RegistrationTime|PersonaRegistrationTime|ComplaintCalls|ComplaintType|ResponseWait|ProcessLatency)/.test(name)))assert.deepEqual(docs[1].components.schemas[name],docs[0].components.schemas[name],name);
+  for(const name of ['CallDto','CallListItemDto','CallListResponseDto','CallDetailDto','CallDetailResponseDto','CallAnalysisDto','CallComplaintDto','RecordingDto','UnansweredQuestionDto','UnansweredQuestionListResponseDto']){
+    assert.ok(docs[0].components.schemas[name],name+' missing in source');
+    const expected=structuredClone(docs[0].components.schemas[name]);
+    // MR !476 adds these two fields; every other frozen source schema remains exact.
+    if(name==='CallComplaintDto')Object.assign(expected.properties,{
+      target:{type:'string',enum:['ai_service','price_policy','delivery_other'],nullable:true,description:'고객 불만 책임 대상. 다른 유형은 null.'},
+      level:{type:'string',enum:['explicit','mild'],nullable:true,description:'고객 불만 강도. 다른 유형은 null.'},
+    });
+    assert.deepEqual(docs[1].components.schemas[name],expected,name);
+  }
+  for(const route of statistics){
+    const expected=structuredClone(docs[0].paths['/api/dashboard/'+route]);
+    if(route==='complaint-calls')expected.get.description='판정 완료 통화가 분모입니다. AI 응대 오류 4유형과 ai_service 고객 불만만 품질 비율·5유형 도넛에 포함합니다. 같은 통화·같은 유형은 한 번 집계합니다. 다른 책임의 불만·근거 없는 답변은 통화 목록/상세 참고이며 과거 유형 건수도 운영 참고로 제공합니다. RAG/미답변 사유와 독립적입니다.';
+    assert.deepEqual(docs[1].paths['/api/dashboard/'+route],expected);
+  }
+  for(const name of Object.keys(docs[0].components.schemas).filter(name=>/^(StageDropoff|RegistrationTime|PersonaRegistrationTime|ComplaintCalls|ComplaintType|ResponseWait|ProcessLatency)/.test(name))){
+    const expected=structuredClone(docs[0].components.schemas[name]);
+    if(name==='ComplaintTypeSummaryDto')expected.properties.type.enum=qualityTypes;
+    if(name==='ComplaintCallsDto'){
+      expected.properties.typeTotalCount.description='AI 응대 오류 4유형과 ai_service 고객 불만의 통화 수 합계. 한 통화의 여러 유형은 각각 포함.';
+      expected.properties.legacyTypeCallCount.description='표준 분류 전의 기존 유형이 있는 통화 수. 운영 참고이며 AI 품질 비율에서 제외.';
+    }
+    assert.deepEqual(docs[1].components.schemas[name],expected,name);
+  }
   assert.deepEqual(await requestReferences('faq','http://operations-app:3005/internal/call-read-references/faqs',process.env.CONSULTATION_AUTH_TOKEN,[9307001,9307002]),[]);
   assert.equal((await fetch('http://operations-app:3005/internal/call-read-references/faqs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})})).status,403);
   await Promise.all(Array.from({length:5},()=>Promise.all(['order','customer','persona'].map(read))));

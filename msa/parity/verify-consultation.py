@@ -144,11 +144,13 @@ def main():
                '-e', 'CUSTOMER_URL=http://customer-app:3001', '-e', 'OPERATIONS_URL=http://operations-app:3005',
                '-e', 'ORDER_URL=http://order-app:3002', '-e', 'CONSULTATION_AUTH_TOKEN='+token, '-e', 'CUSTOMER_AUTH_TOKEN='+password,
                network='container:'+RUN+'-consultation-db',
-               command=('node', '--test', 'test/complaint-judge.integration.test.cjs'))
+               command=('node', '--require', './test/analysis-environment-fixture.cjs', '--test', 'test/complaint-judge.integration.test.cjs'))
         run('docker', 'cp', str(ROOT/'backend/test/complaint-judge.integration.test.cjs'),
             name+':/app/service/test/complaint-judge.integration.test.cjs', label='complaint-integration-copy')
         run('docker', 'cp', str(ROOT/'msa/services/consultation/test/helpers/application.cjs'),
             name+':/app/service/test/helpers/application.cjs', label='complaint-fixture-copy')
+        run('docker', 'cp', str(ROOT/'msa/parity/analysis-environment-fixture.cjs'),
+            name+':/app/service/test/analysis-environment-fixture.cjs', label='complaint-rule-fixture-copy')
         complete(name)
         name = RUN+'-differential'
         create(name, images['consultation-checks'], '-e', 'AI_BUSINESS_TOKEN='+password, '-e', 'PGPASSWORD='+password,

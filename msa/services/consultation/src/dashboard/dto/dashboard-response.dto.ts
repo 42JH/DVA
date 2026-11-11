@@ -14,7 +14,6 @@ import {
 export const DASHBOARD_COMPLAINT_TYPES = [
   'INFORMATION_RECOGNITION_ERROR',
   'INTENT_RECOGNITION_ERROR',
-  'UNSUPPORTED_ANSWER',
   'SLOW_RESPONSE',
   'INTERRUPTION',
   'DISSATISFACTION_EXPRESSION',
@@ -131,13 +130,13 @@ export class ComplaintCallsDto extends DashboardCoverageDto {
   @ApiProperty({
     minimum: 0,
     description:
-      '화면 6개 유형별 통화 수 합계. 한 통화의 여러 유형은 각각 포함.',
+      'AI 응대 오류 4유형과 ai_service 고객 불만의 통화 수 합계. 한 통화의 여러 유형은 각각 포함.',
   })
   typeTotalCount!: number;
   @ApiProperty({
     minimum: 0,
     description:
-      '화면 6개 유형 외의 기존 분류가 있는 통화 수. 통화율에는 포함하며 도넛과 별도 표시.',
+      '표준 분류 전의 기존 유형이 있는 통화 수. 운영 참고이며 AI 품질 비율에서 제외.',
   })
   legacyTypeCallCount!: number;
   @ApiProperty({ type: [ComplaintTypeSummaryDto] })

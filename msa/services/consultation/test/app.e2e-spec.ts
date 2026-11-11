@@ -1,3 +1,5 @@
+import { CallComplaintDto } from '../src/call-insights/dto/create-call-analysis.dto';
+import { createValidationPipe } from '../src/common/http/validation.pipe';
 import { ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
@@ -67,6 +69,40 @@ describe('Consultation PBX and active calls (e2e)', () => {
       .expect(/DVA Consultation API/);
   });
   it('publishes only the implemented calls and canonical PBX contract', async () => {
+    const validation = createValidationPipe();
+    const complaint = {
+      type: 'DISSATISFACTION_EXPRESSION',
+      evidenceText: '좀 불편하네요',
+      offsetSeconds: 0,
+      utteranceOrders: [1],
+    };
+    for (const fields of [
+      {},
+      { target: null, level: null },
+      { target: 'ai_service', level: 'mild' },
+      { target: 'price_policy', level: 'explicit' },
+      { target: 'delivery_other', level: 'mild' },
+    ]) {
+      const input = { ...complaint, ...fields };
+      await expect(
+        validation.transform(input, {
+          type: 'body',
+          metatype: CallComplaintDto,
+        }),
+      ).resolves.toMatchObject(input);
+    }
+    for (const fields of [
+      { target: 'external' },
+      { level: 'severe' },
+      { target: 1 },
+      { level: 1 },
+    ])
+      await expect(
+        validation.transform(
+          { ...complaint, ...fields },
+          { type: 'body', metatype: CallComplaintDto },
+        ),
+      ).rejects.toMatchObject({ status: 400 });
     await request(app.getHttpServer())
       .get('/consultation/docs-json')
       .expect(200)
