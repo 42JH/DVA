@@ -6,7 +6,12 @@ import {
   createCompany,
   saveMemberAddresses,
 } from '@/features/company/api/companyApi'
-import { readMembersFile, serverRowErrors, type CsvMember } from '@/features/company/csvMembers'
+import {
+  groupByCompany,
+  readMembersFile,
+  serverRowErrors,
+  type CsvMember,
+} from '@/features/company/csvMembers'
 import { errorText } from '@/features/company/labels'
 
 /** 파일 상태 — 아직 없음 / 읽음(사원 목록) / 틀림(처음 3줄 + 나머지 건수) */
@@ -15,87 +20,90 @@ type Picked =
   | { kind: 'ok'; file: File; members: CsvMember[] }
   | { kind: 'bad'; file: File; errors: string[]; more: number }
 
-/** 08 CSV로 기업 등록 훅 — 기업명 + 파일 → 기업 · 부서 · 사원(담당자 · 부서 포함)을 요청 한 번으로 (11/01 백엔드 확장)
- * 하나의 트랜잭션이라 전부 되거나 전부 안 됨 → 예전의 '기업은 만들었지만…' · 담당자 따로 지정이 없어짐
- * 주소만 아직 등록 API에 칸이 없어 등록 뒤 사원마다 저장(saveMemberAddresses, shortcut) */
+/** 기업 하나 등록 결과 */
+interface Result {
+  name: string
+  ok: boolean
+  message: string | null // 실패 이유 · 주소 저장 실패 안내
+}
+
+/** 08 CSV로 기업 등록 훅 (11/11) — 파일 첫 칸이 기업명, 한 파일에 여러 기업
+ * 기업마다 POST /companies 한 번(기업 · 부서 · 사원이 한 트랜잭션) → 기업 사이는 따로라 일부만 될 수 있음 → 기업별 결과를 보여 줌
+ * 주소는 아직 등록 API에 칸이 없어 등록 뒤 사원마다 저장(saveMemberAddresses, shortcut) */
 export function useCompanyCsv(onDone: () => void) {
   const qc = useQueryClient()
-  const [name, setName] = useState('')
   const [picked, setPicked] = useState<Picked>({ kind: 'none' })
 
   const pick = async (file: File) => {
-    const r = await readMembersFile(file)
+    const r = await readMembersFile(file, 'companies')
     setPicked(r.ok ? { kind: 'ok', file, members: r.members } : { kind: 'bad', file, ...r })
     reg.reset()
   }
 
+  const groups = picked.kind === 'ok' ? groupByCompany(picked.members) : []
+
   const reg = useMutation({
-    mutationFn: async (members: CsvMember[]) => {
-      const departments = [...new Set(members.flatMap((m) => (m.department ? [m.department] : [])))]
-      const id = await createCompany(
-        name.trim(),
-        departments,
-        members.map((m) => ({
-          employeeNo: m.employeeNo,
-          name: m.name,
-          phoneNumber: m.phoneNumber,
-          ...(m.leader ? { role: 'ORG_ADMIN' as const } : {}),
-          ...(m.department ? { departmentName: m.department } : {}),
-        })),
-      )
-      // 주소는 등록이 끝난 뒤 — 못 저장한 사번 수를 돌려줌
-      const failed = await saveMemberAddresses(
-        id,
-        members.map((m) => ({ employeeNo: m.employeeNo, address: m.address })),
-      )
-      return failed.length
+    // 한 기업이 실패해도 다음 기업은 계속 — 같은 파일을 다시 올리면 된 기업이 또 생기므로 결과를 남겨 둠
+    mutationFn: async (): Promise<Result[]> => {
+      const out: Result[] = []
+      for (const g of groups) {
+        try {
+          const departments = [
+            ...new Set(g.members.flatMap((m) => (m.department ? [m.department] : []))),
+          ]
+          const id = await createCompany(
+            g.name,
+            departments,
+            g.members.map((m) => ({
+              employeeNo: m.employeeNo,
+              name: m.name,
+              phoneNumber: m.phoneNumber,
+              ...(m.leader ? { role: 'ORG_ADMIN' as const } : {}),
+              ...(m.department ? { departmentName: m.department } : {}),
+            })),
+          )
+          const failed = await saveMemberAddresses(
+            id,
+            g.members.map((m) => ({ employeeNo: m.employeeNo, address: m.address })),
+          )
+          out.push({
+            name: g.name,
+            ok: true,
+            message: failed.length
+              ? `${failed.length}명의 주소를 저장하지 못했습니다. 기업 상세의 [수정]에서 넣어 주세요.`
+              : null,
+          })
+        } catch (e) {
+          // 서버 오류 경로 members.N → 파일의 행
+          const rows = e instanceof ApiError ? serverRowErrors(e.details, g.members) : []
+          out.push({ name: g.name, ok: false, message: rows[0] ?? errorText(e, '등록') })
+        }
+      }
+      return out
     },
     onSettled: () => qc.invalidateQueries({ queryKey: companyQueries.all() }),
-    onSuccess: (failedAddresses) => {
-      if (failedAddresses === 0) onDone() // 주소 저장 실패만 창에 안내를 남김
+    onSuccess: (results) => {
+      if (results.every((r) => r.ok && !r.message)) onDone() // 하나라도 문제가 있으면 창에 결과를 남김
     },
   })
 
-  const err = reg.error
-  // 서버 오류 경로는 members.N.field (등록 본문의 사원 배열) → 파일의 행으로
-  const rowErrors =
-    err instanceof ApiError && picked.kind === 'ok'
-      ? serverRowErrors(err.details, picked.members)
-      : []
-
   return {
-    name,
-    setName,
     file: picked.kind === 'none' ? null : picked.file,
     fileError:
       picked.kind === 'bad'
         ? [...picked.errors, ...(picked.more ? [`외 ${picked.more}건`] : [])].join('\n')
-        : rowErrors.length
-          ? rowErrors.slice(0, 3).join('\n')
-          : undefined,
-    // 기업마다 담당자 1명 이상 (11/11 사용자) — 파일에 Y가 하나도 없으면 등록을 막음
-    noManager: picked.kind === 'ok' && !picked.members.some((m) => m.leader),
+        : undefined,
+    companies: groups.length, // '기업 2곳'
     count: picked.kind === 'ok' ? picked.members.length : 0, // '사원 24명'
     members: picked.kind === 'ok' ? picked.members : [], // 읽은 사원 — 등록 전에 표로 보여 줌
+    results: reg.data ?? null,
     pick,
     removeFile: () => {
       setPicked({ kind: 'none' })
       reg.reset()
     },
-    errorMessage: err
-      ? rowErrors.length
-        ? null // 줄 오류는 파일 칸 아래에
-        : errorText(err, '등록')
-      : reg.data
-        ? `기업과 사원은 등록했지만 ${reg.data}명의 주소를 저장하지 못했습니다. 기업 상세의 [수정]에서 넣어 주세요.`
-        : null,
-    canSubmit:
-      name.trim() !== '' &&
-      picked.kind === 'ok' &&
-      picked.members.some((m) => m.leader) &&
-      !reg.isPending &&
-      !reg.data,
+    canSubmit: picked.kind === 'ok' && !reg.isPending && !reg.data,
     isSubmitting: reg.isPending,
-    submit: () => picked.kind === 'ok' && reg.mutate(picked.members),
+    submit: () => picked.kind === 'ok' && reg.mutate(),
   }
 }
