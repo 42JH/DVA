@@ -1,12 +1,11 @@
 // 페르소나 코드 → 화면 문구 (컨벤션 6.3: 코드는 api/, 문구는 labels.ts)
 import { ApiError } from '@/shared/api/client'
-import type { TagKind } from '@/shared/ui'
+import type { Tone } from '@/shared/ui'
 import {
   PROMPT_KEYS,
   type PromptFields,
   type PromptKey,
   type Speed,
-  type VersionStatus,
   type WaitTime,
 } from './api/personaApi'
 
@@ -49,15 +48,12 @@ export const WAIT_LABEL: Record<WaitTime, string> = {
   LONG: '기다리기 길게',
 }
 
-// 버전 태그 (와이어프레임 07 버전 히스토리): 저장됨(미적용) = 회색 선, 적용 중 = 파랑, 마지막 적용 = 회색. 지난 버전은 태그 없음
-// '작성 중'은 수정 화면의 저장 전 상태라 여기 없음 (DRAFT_TAG)
-export const VERSION_TAG: Record<VersionStatus, { label: string; kind: TagKind } | null> = {
-  SAVED: { label: '저장됨', kind: 'outline' },
-  PENDING: { label: '적용 대기', kind: 'live' }, // AI가 확인하면 적용 중 (그동안 지금 버전이 계속 쓰임)
-  ACTIVE: { label: '적용 중', kind: 'blue' },
-  APPLIED: { label: '마지막 적용', kind: 'gray' }, // 통화에 안 쓰는 페르소나의 기준 버전 (11/02)
-  PAST: null,
-}
+// 버전 표시 (11/11 — 저장 = 새 버전, [적용] 없음): 확정된 최신 = 현재 버전, 통화에 쓰는 버전 · AI 확인을 기다리는 버전
+export const VERSION_BADGE = {
+  head: { label: '현재 버전', tone: 'idle' },
+  ACTIVE: { label: '통화에 사용 중', tone: 'done' },
+  PENDING: { label: '적용 대기', tone: 'wait' }, // AI가 확인하면 통화에 사용 중 (그동안 이전 버전이 계속 쓰임)
+} satisfies Record<string, { label: string; tone: Tone }>
 
 export const DRAFT_TAG = '작성 중' // 수정 화면에서 저장하기 전 ('v8 · 작성 중')
 
