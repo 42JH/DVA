@@ -17,6 +17,7 @@ import { ParcelDraftWritesRepository } from './parcel-draft-writes.repository';
 import { ParcelDraftWriteScope } from './parcel-draft-write-scope.service';
 import { ParcelDraftWriteWorker } from './parcel-draft-write.worker';
 import { Module } from '@nestjs/common';
+import { BillingModule } from '../billing/billing.module';
 import { HomeOrdersController } from './home-orders.controller';
 import { DatabaseModule } from '../database/database.module';
 import { OrdersService } from './orders.service';
@@ -31,7 +32,7 @@ import { OrderSubmissionService } from './order-submission.service';
 import { OrderSubmissionWorker } from './order-submission.worker';
 
 @Module({
-  imports: [DatabaseModule],
+  imports: [DatabaseModule, BillingModule],
   controllers: [
     HomeOrdersController,
     ParcelDraftWriteController,

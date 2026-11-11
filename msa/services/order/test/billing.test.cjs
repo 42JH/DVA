@@ -52,13 +52,13 @@ test('billing requires matching strict ACKs, preserves domain errors and source 
   for(mode of ['lost','redirect','html','json','utf8','id','status','payload','oversized'])await assert.rejects(requestBilling(url,token,rollover()));
   mode='domain';await assert.rejects(requestBilling(url,token,rollover()),e=>e instanceof BillingError&&e.status===404&&e.error.message==='기업을 찾을 수 없습니다.');
 });
-test('rollover worker isolates tests, coalesces ticks, retries errors and waits for shutdown',async()=>{
+test('rollover shares maintenance ticks, retries errors and waits for shutdown',async()=>{
   let calls=0,finish;
-  const worker=new BillingWorker({rollover:()=>{calls++;return new Promise(resolve=>finish=resolve);}},{get:()=> 'test'});
-  worker.onApplicationBootstrap();assert.equal(calls,0);
+  const worker=new BillingWorker({rollover:()=>{calls++;return new Promise(resolve=>finish=resolve);}});
+  assert.equal(worker.onApplicationBootstrap,undefined);assert.equal(calls,0);
   const first=worker.run();assert.equal(worker.run(),first);assert.equal(calls,1);
   let closed=false;const stop=worker.onModuleDestroy().then(()=>closed=true);await Promise.resolve();assert.equal(closed,false);
   finish();await stop;assert.equal(closed,true);
-  const retry=new BillingWorker({rollover:async()=>{if(calls++===1)throw new Error('test-only');}},{get:()=> 'test'});
+  const retry=new BillingWorker({rollover:async()=>{if(calls++===1)throw new Error('test-only');}});
   await assert.rejects(retry.run());await retry.run();await retry.onModuleDestroy();assert.equal(calls,3);
 });

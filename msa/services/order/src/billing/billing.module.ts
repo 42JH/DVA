@@ -8,6 +8,6 @@ import { BillingWorker } from './billing.worker';
   imports: [DatabaseModule],
   controllers: [BillingController],
   providers: [BillingService, BillingWorker],
-  exports: [BillingService],
+  exports: [BillingService, BillingWorker],
 })
 export class BillingModule {}

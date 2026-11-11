@@ -907,12 +907,13 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
           } else {
             const {OrderDeletionCheckClient}=require(runtime+'/orders/order-deletion-check.client');
             const {OrderSubmissionWorker}=require(runtime+'/orders/order-submission.worker');
-            const makeService=()=>new OrderSubmissionService(database,repository,new AuditService(database,config),
+            const audit=new AuditService(database,config);
+            const makeService=()=>new OrderSubmissionService(database,repository,audit,
               new OrderSubmissionRepository(),dver,new OrderDeletionCheckClient(config),config);
             assert.deepEqual(await makeService().retry(1005,1,submitId),{status:'SUBMITTING'});
             assert.equal((await orderResult(databases.order)).status,'SUBMITTING');
             assert.deepEqual(await shipment(delivery),await shipment(reference),'shipment transaction survived acknowledgement loss');
-            const worker=new OrderSubmissionWorker(makeService(),config);
+            const worker=new OrderSubmissionWorker(makeService(),config,database,repository,audit,{run:async()=>{}});
             await worker.run();
             await worker.run();
             assert.equal((await orderResult(databases.order)).status,'ACCEPTED');
@@ -1399,5 +1400,358 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
     assert.equal((await internal(process.env.CUSTOMER_AUTH_TOKEN,{...event,source:'order'},randomUUID())).status,422);
     t.diagnostic('home HTTP pairs: '+pairs+'; KST boundaries, 11-item previews, three roles, owner immutability and schemas');
   });
+  await t.test(
+    'maintenance expires bounded unpaid batches while preserving held and approving orders',
+    async () => {
+      const now = new Date(),
+        created = new Date(now.getTime() - 7200000),
+        due = new Date(now.getTime() - 1000);
+      const future = new Date(now.getTime() + 60000),
+        approval = new Date(now.getTime() - 300000),
+        past = new Date(now.getTime() - 500);
+      const ids = Array.from({ length: 121 }, (_, i) => ({
+        order_seq: 50000 + i,
+        id: randomUUID(),
+      }));
+      for (const db of [reference, databases.order]) {
+        const client = await db.connect();
+        try {
+          await client.query('BEGIN');
+          // Seed persisted payment states before exercising the normal trigger-protected worker.
+          await client.query("SET LOCAL session_replication_role='replica'");
+          await client.query(
+            'INSERT INTO orders(order_seq,customer_seq,payment_method_type,status,creation_source,total_amount,payment_due_at,created_at,updated_at,deleted_at,paid_at) ' +
+              "OVERRIDING SYSTEM VALUE SELECT 50000+n,1,'billing',CASE WHEN n=120 THEN 'PAID' ELSE 'notPaid' END,'AI',1000," +
+              'CASE WHEN n=118 THEN $3::timestamptz ELSE $2::timestamptz END,$1,$1,CASE WHEN n=119 THEN $4::timestamptz END,' +
+              'CASE WHEN n=120 THEN $4::timestamptz END FROM generate_series(0,120)n',
+            [created, due, future, now],
+          );
+          await client.query(
+            'INSERT INTO order_parcels(order_parcel_seq,order_seq,parcel_position,status,document_count,notified_price) ' +
+              "OVERRIDING SYSTEM VALUE SELECT 60000+n,50000+n,1,'ACTIVE',1,1000 FROM generate_series(0,120)n",
+          );
+          await client.query(
+            'INSERT INTO order_payment_requests(payment_request_id,order_seq,amount,expires_at,created_at,notification_status,' +
+              'approval_started_at,provider_payment_key,invalidated_at,completed_at,provider_reference,provider_approved_at) ' +
+              "SELECT id,order_seq,1000,CASE WHEN order_seq=50118 THEN $4::timestamptz ELSE $3::timestamptz END,$2,'SENT'," +
+              'CASE WHEN order_seq IN(50002,50003,50004,50120) THEN $5::timestamptz END,' +
+              "CASE WHEN order_seq IN(50002,50003,50004,50120) THEN 'fixture-key-'||order_seq::text END," +
+              'CASE WHEN order_seq=50003 THEN $6::timestamptz END,' +
+              'CASE WHEN order_seq IN(50004,50120) THEN $6::timestamptz END,' +
+              "CASE WHEN order_seq IN(50004,50120) THEN 'fixture-completed-'||order_seq::text END," +
+              'CASE WHEN order_seq IN(50004,50120) THEN $6::timestamptz END ' +
+              'FROM jsonb_to_recordset($1::jsonb)r(order_seq int,id uuid) WHERE order_seq<>50005',
+            [JSON.stringify(ids), created, due, future, approval, past],
+          );
+          await client.query('COMMIT');
+        } catch (error) {
+          await client.query('ROLLBACK');
+          throw error;
+        } finally {
+          client.release();
+        }
+      }
+      const clients = [],
+        workers = [];
+      const hold = async (db, sql) => {
+        const client = await db.connect();
+        clients.push(client);
+        await client.query('BEGIN');
+        await client.query(sql);
+        return client;
+      };
+      const release = async (client) => {
+        await client.query('ROLLBACK');
+        client.release();
+        clients.splice(clients.indexOf(client), 1);
+      };
+      const cancelled = async (db) =>
+        Number(
+          (
+            await db.query(
+              "SELECT count(*) FROM orders WHERE order_seq BETWEEN 50000 AND 50120 AND status='CANCELLED'",
+            )
+          ).rows[0].count,
+        );
+      const started = Date.now();
+      try {
+        for (const [owner, runtime] of [
+          ['monolith', './monolith-runtime'],
+          ['order', '../dist'],
+        ]) {
+          const { DatabaseService } = require(
+            runtime + '/database/database.service',
+          );
+          const { AuditService } = require(runtime + '/audit/audit.service');
+          const { OrdersRepository } = require(
+            runtime + '/orders/orders.repository',
+          );
+          const config = {
+            get: (key) =>
+              ({
+                NODE_ENV: 'test',
+                DB_HOST: owner + '-db',
+                DB_PORT: 5432,
+                DB_USER: owner + '_app',
+                DB_PASSWORD: process.env.PGPASSWORD,
+                DB_NAME: process.env.PGDATABASE,
+                OPERATIONS_URL: 'http://operations-app:3005',
+                CUSTOMER_AUTH_TOKEN: process.env.CUSTOMER_AUTH_TOKEN,
+              })[key],
+          };
+          const database = new DatabaseService(config);
+          let audit;
+          if (owner === 'monolith') {
+            const { AuditRepository } = require(
+              runtime + '/audit/audit.repository',
+            );
+            audit = new AuditService(new AuditRepository(database));
+          } else {
+            audit = new AuditService(database, config);
+          }
+          const repository = new OrdersRepository(database);
+          const jobs = [];
+          const transaction = database.transaction.bind(database);
+          database.transaction = (work) => {
+            jobs.push('expiry');
+            return transaction(work);
+          };
+          const recover = {
+            recoverPending: async () => jobs.push('pending'),
+            recoverPaid: async () => jobs.push('paid'),
+            submitPaidOrder: async () => jobs.push('paid'),
+          };
+          let worker;
+          if (owner === 'monolith') {
+            // Intake recovery is injected below; its constructor metadata also imports S3 playback.
+            const intakePath = require.resolve(
+              runtime + '/orders/order-intake.service',
+            );
+            const cachedIntake = require.cache[intakePath];
+            require.cache[intakePath] = {
+              loaded: true,
+              exports: { OrderIntakeService: class {} },
+            };
+            let OrderMaintenanceWorker;
+            try {
+              ({ OrderMaintenanceWorker } = require(
+                runtime + '/orders/order-maintenance.worker',
+              ));
+            } finally {
+              if (cachedIntake) require.cache[intakePath] = cachedIntake;
+              else delete require.cache[intakePath];
+            }
+            const { OrderPaymentsRepository } = require(
+              runtime + '/orders/order-payments.repository',
+            );
+            worker = new OrderMaintenanceWorker(
+              database,
+              audit,
+              { rollover: async () => jobs.push('billing') },
+              recover,
+              repository,
+              new OrderPaymentsRepository(undefined, database),
+              config,
+              { recoverPending: async () => jobs.push('intake') },
+            );
+          } else {
+            const { OrderSubmissionWorker } = require(
+              runtime + '/orders/order-submission.worker',
+            );
+            worker = new OrderSubmissionWorker(
+              recover,
+              config,
+              database,
+              repository,
+              audit,
+              { run: async () => jobs.push('billing') },
+            );
+          }
+          worker.onApplicationBootstrap();
+          assert.deepEqual(jobs, []);
+          workers.push({ owner, database, audit, worker, jobs });
+        }
+        const run = async (expectedBatches) => {
+          for (const item of workers) {
+            item.jobs.length = 0;
+            const first = item.worker.run(now);
+            assert.equal(item.worker.run(now), first);
+            await first;
+            assert.equal(
+              item.jobs.filter((job) => job === 'expiry').length,
+              expectedBatches,
+            );
+            assert.deepEqual(
+              item.jobs.slice(0, item.owner === 'monolith' ? 3 : 2),
+              item.owner === 'monolith'
+                ? ['intake', 'pending', 'billing']
+                : ['pending', 'billing'],
+            );
+            assert.ok(
+              item.jobs.lastIndexOf('paid') > item.jobs.lastIndexOf('billing'),
+            );
+          }
+        };
+        const gates = [];
+        for (const db of [reference, databases.order])
+          gates.push(
+            await hold(db, 'SELECT pg_advisory_xact_lock(20261030,140)'),
+          );
+        await run(1);
+        for (const db of [reference, databases.order])
+          assert.equal(await cancelled(db), 0);
+        for (const gate of gates) await release(gate);
+        const rows = [];
+        for (const db of [reference, databases.order])
+          rows.push(
+            await hold(
+              db,
+              'SELECT 1 FROM orders WHERE order_seq=50000 FOR UPDATE',
+            ),
+          );
+        await run(10);
+        for (const db of [reference, databases.order]) {
+          assert.equal(await cancelled(db), 100);
+          assert.deepEqual(
+            (
+              await db.query(
+                'SELECT order_seq,status FROM orders WHERE order_seq IN(50000,50002) ORDER BY order_seq',
+              )
+            ).rows,
+            [
+              { order_seq: 50000, status: 'notPaid' },
+              { order_seq: 50002, status: 'notPaid' },
+            ],
+          );
+        }
+        for (const row of rows) await release(row);
+        await run(2);
+        for (const db of [reference, databases.order]) {
+          assert.equal(await cancelled(db), 117);
+          await db.query(
+            'UPDATE order_payment_requests SET approval_started_at=NULL,provider_payment_key=NULL WHERE order_seq=50002',
+          );
+        }
+        await run(1);
+        for (const db of [reference, databases.order])
+          assert.equal(await cancelled(db), 118);
+        const normalizeTime = (value) => {
+          if (value === null) return null;
+          assert.ok(
+            value.getTime() >= started - 2000 &&
+              value.getTime() <= Date.now() + 2000,
+          );
+          return '<changed>';
+        };
+        const state = async (db) => {
+          const orders = (
+            await db.query(
+              'SELECT order_seq,status,total_amount,version,created_at,updated_at,closed_at,deleted_at,payment_due_at ' +
+                'FROM orders WHERE order_seq BETWEEN 50000 AND 50120 ORDER BY order_seq',
+            )
+          ).rows.map((row) =>
+            row.status === 'CANCELLED'
+              ? {
+                  ...row,
+                  updated_at: normalizeTime(row.updated_at),
+                  closed_at: normalizeTime(row.closed_at),
+                }
+              : row,
+          );
+          const parcels = (
+            await db.query(
+              'SELECT order_seq,order_parcel_seq,status FROM order_parcels WHERE order_seq BETWEEN 50000 AND 50120 ORDER BY order_seq',
+            )
+          ).rows;
+          const requests = (
+            await db.query(
+              'SELECT payment_request_id,order_seq,amount,expires_at,approval_started_at,provider_payment_key,completed_at,invalidated_at ' +
+                'FROM order_payment_requests WHERE order_seq BETWEEN 50000 AND 50120 ORDER BY order_seq',
+            )
+          ).rows.map((row) =>
+            row.invalidated_at !== null && row.order_seq !== 50003
+              ? { ...row, invalidated_at: normalizeTime(row.invalidated_at) }
+              : row,
+          );
+          return { orders, parcels, requests };
+        };
+        assert.deepEqual(await state(databases.order), await state(reference));
+        const audits = async (db) =>
+          (
+            await db.query(
+              'SELECT actor_type,actor_seq,action,result,target_type,target_seq,metadata FROM audit_logs ' +
+                "WHERE action='ORDER_CANCELLED' AND target_seq BETWEEN 50000 AND 50120 ORDER BY target_seq",
+            )
+          ).rows;
+        const expected = await audits(reference);
+        assert.equal(expected.length, 118);
+        assert.ok(
+          expected.every(
+            (row) =>
+              row.actor_type === 'SYSTEM' &&
+              row.actor_seq === null &&
+              row.metadata.reason === 'PAYMENT_EXPIRED',
+          ),
+        );
+        assert.deepEqual(await audits(databases.operations), expected);
+        await run(1);
+        assert.deepEqual(await audits(databases.operations), expected);
+        const packet = {
+          eventId: randomUUID(),
+          source: 'order',
+          eventType: 'AuditPrepared',
+          payload: {
+            transactionId: randomUUID(),
+            occurredAt: now.toISOString(),
+            result: 'SUCCESS',
+            audit: {
+              actorId: null,
+              actorType: 'SYSTEM',
+              action: 'ORDER_CANCELLED',
+              targetType: 'ORDER',
+              targetId: 50000,
+              requestId: randomUUID(),
+              metadata: {
+                amountBefore: 1000,
+                amountAfter: 0,
+                reason: 'PAYMENT_EXPIRED',
+              },
+            },
+          },
+        };
+        for (const mutate of [
+          (event) => (event.payload.audit.metadata.reason = 'user_request'),
+          (event) => (event.payload.audit.metadata.amountAfter = 1),
+          (event) => (event.payload.audit.actorName = 'forged'),
+        ]) {
+          const event = structuredClone(packet);
+          event.eventId = randomUUID();
+          mutate(event);
+          const response = await fetch(
+            'http://operations-app:3005/internal/events',
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN,
+              },
+              body: JSON.stringify(event),
+            },
+          );
+          assert.equal(response.status, 422);
+        }
+        t.diagnostic(
+          'expiry 118 orders; 100-per-tick limit, advisory/row locks, approval protection, stored cancellation and exact system audits',
+        );
+      } finally {
+        for (const client of [...clients]) await release(client);
+        for (const item of workers) {
+          await item.worker.onModuleDestroy();
+          if (item.audit.onModuleDestroy) await item.audit.onModuleDestroy();
+          await item.database.onModuleDestroy();
+        }
+      }
+    },
+  );
   console.log('Compared HTTP requests: '+compared);
 });

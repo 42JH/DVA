@@ -81,6 +81,11 @@ function auditInput(
     service === 'order' && object(audit) && audit.action === 'BILLING_MONTH_INITIALIZED';
   const paymentCompleted =
     service === 'order' && object(audit) && audit.action === 'ORDER_PAYMENT_COMPLETED';
+  const paymentExpiration =
+    service === 'order' &&
+    object(audit) &&
+    audit.action === 'ORDER_CANCELLED' &&
+    audit.actorType === 'SYSTEM';
   const draftMutation =
     service === 'order' &&
     object(audit) &&
@@ -210,23 +215,37 @@ function auditInput(
             !object(audit.metadata) ||
             Object.keys(audit.metadata).join(',') !== 'amountAfter' ||
             !integer(audit.metadata.amountAfter)
-          : audit.action === 'ORDER_AMOUNT_CHANGED'
+          : paymentExpiration
             ? payload.result !== 'SUCCESS' ||
+              audit.actorName !== undefined ||
               !object(audit.metadata) ||
-              Object.keys(audit.metadata).sort().join(',') !==
-                'amountAfter,amountBefore,orderParcelSeqs' ||
-              ![audit.metadata.amountBefore, audit.metadata.amountAfter].every(
-                (value) =>
-                  value === null ||
-                  (Number.isInteger(value) && Number(value) >= 0 && Number(value) <= 2147483647),
+              Object.keys(audit.metadata).sort().join(',') !== 'amountAfter,amountBefore,reason' ||
+              !(
+                audit.metadata.amountBefore === null ||
+                (Number.isInteger(audit.metadata.amountBefore) &&
+                  Number(audit.metadata.amountBefore) >= 0 &&
+                  Number(audit.metadata.amountBefore) <= 2147483647)
               ) ||
-              !Array.isArray(audit.metadata.orderParcelSeqs) ||
-              audit.metadata.orderParcelSeqs.length < 1 ||
-              !audit.metadata.orderParcelSeqs.every(integer) ||
-              new Set(audit.metadata.orderParcelSeqs).size !== audit.metadata.orderParcelSeqs.length
-            : audit.metadata !== undefined) ||
+              audit.metadata.amountAfter !== 0 ||
+              audit.metadata.reason !== 'PAYMENT_EXPIRED'
+            : audit.action === 'ORDER_AMOUNT_CHANGED'
+              ? payload.result !== 'SUCCESS' ||
+                !object(audit.metadata) ||
+                Object.keys(audit.metadata).sort().join(',') !==
+                  'amountAfter,amountBefore,orderParcelSeqs' ||
+                ![audit.metadata.amountBefore, audit.metadata.amountAfter].every(
+                  (value) =>
+                    value === null ||
+                    (Number.isInteger(value) && Number(value) >= 0 && Number(value) <= 2147483647),
+                ) ||
+                !Array.isArray(audit.metadata.orderParcelSeqs) ||
+                audit.metadata.orderParcelSeqs.length < 1 ||
+                !audit.metadata.orderParcelSeqs.every(integer) ||
+                new Set(audit.metadata.orderParcelSeqs).size !==
+                  audit.metadata.orderParcelSeqs.length
+              : audit.metadata !== undefined) ||
         (payload.result === 'SUCCESS' &&
-          (!(billingInitialization || paymentCompleted
+          (!(billingInitialization || paymentCompleted || paymentExpiration
             ? audit.actorType === 'SYSTEM'
             : submission
               ? audit.actorType === 'SYSTEM' ||
