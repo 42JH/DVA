@@ -141,11 +141,12 @@ function createRelay({ pool, source, destinations, timeoutMs = 5000 }) {
   return () => transaction(pool, async client => {
     const { rows } = await client.query(
       `SELECT pending.* FROM outbox_events pending
-       WHERE delivered_at IS NULL AND next_attempt_at<=clock_timestamp()
+       WHERE destination=ANY($1::text[]) AND delivered_at IS NULL AND next_attempt_at<=clock_timestamp()
          AND NOT EXISTS (SELECT 1 FROM outbox_events earlier
            WHERE earlier.destination=pending.destination AND earlier.aggregate_seq=pending.aggregate_seq
              AND earlier.delivered_at IS NULL AND earlier.outbox_seq<pending.outbox_seq)
        ORDER BY outbox_seq FOR UPDATE OF pending SKIP LOCKED LIMIT 1`,
+      [[...endpoints.keys()]],
     );
     if (!rows.length) return false;
     const event = rows[0], endpoint = endpoints.get(event.destination);

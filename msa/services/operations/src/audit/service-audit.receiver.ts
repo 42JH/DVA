@@ -79,6 +79,15 @@ function auditInput(
   const audit = payload.audit;
   const billingInitialization =
     service === 'order' && object(audit) && audit.action === 'BILLING_MONTH_INITIALIZED';
+  const submission =
+    service === 'order' &&
+    object(audit) &&
+    [
+      'ORDER_SUBMISSION_STARTED',
+      'ORDER_RESUBMISSION_STARTED',
+      'ORDER_SUBMISSION_ACCEPTED',
+      'ORDER_SUBMISSION_FAILED',
+    ].includes(audit.action as string);
   const personaReference =
     service === 'consultation' &&
     object(audit) &&
@@ -116,7 +125,8 @@ function auditInput(
     !(service === 'customer'
       ? actions.has(audit.action as string)
       : service === 'order'
-        ? [
+        ? submission ||
+          [
             'BILLING_MONTH_INITIALIZED',
             'ORDER_DELETED',
             'PARCEL_DRAFT_DELETED',
@@ -199,14 +209,20 @@ function auditInput(
         (payload.result === 'SUCCESS' &&
           (!(billingInitialization
             ? audit.actorType === 'SYSTEM'
-            : [
-                  'ORDER_DELETED',
-                  'PARCEL_DRAFT_DELETED',
-                  'ORDER_PAYMENT_NOTIFICATION_RETRIED',
-                  'ORDER_PAYMENT_COMPLETION_NOTIFICATION_RETRIED',
-                ].includes(audit.action as string)
-              ? audit.actorType === 'ADMIN'
-              : ['ADMIN', 'AI'].includes(audit.actorType as string)) ||
+            : submission
+              ? audit.actorType === 'SYSTEM' ||
+                (audit.actorType === 'ADMIN' &&
+                  ['ORDER_SUBMISSION_STARTED', 'ORDER_RESUBMISSION_STARTED'].includes(
+                    audit.action as string,
+                  ))
+              : [
+                    'ORDER_DELETED',
+                    'PARCEL_DRAFT_DELETED',
+                    'ORDER_PAYMENT_NOTIFICATION_RETRIED',
+                    'ORDER_PAYMENT_COMPLETION_NOTIFICATION_RETRIED',
+                  ].includes(audit.action as string)
+                ? audit.actorType === 'ADMIN'
+                : ['ADMIN', 'AI'].includes(audit.actorType as string)) ||
             audit.targetId === null)))) ||
     typeof payload.occurredAt !== 'string' ||
     !Number.isFinite(Date.parse(payload.occurredAt))

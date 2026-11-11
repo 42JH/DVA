@@ -59,6 +59,7 @@ describe('Order read API (e2e)', () => {
       .expect(({ body }: { body: { paths: Record<string, Record<string, unknown>> } }) => {
         expect(Object.keys(body.paths).sort()).toEqual([
           '/api/admin/orders',
+          '/api/admin/orders/{id}/retry',
           '/api/customers/{id}/addresses',
           '/api/orders',
           '/api/orders/{id}',
@@ -77,6 +78,7 @@ describe('Order read API (e2e)', () => {
           'get',
         ]);
         expect(Object.keys(body.paths['/api/orders/{id}/cancel'])).toEqual(['post']);
+        expect(Object.keys(body.paths['/api/admin/orders/{id}/retry'])).toEqual(['post']);
         expect(Object.keys(body.paths['/api/orders/{id}/parcels/cancel'])).toEqual(['post']);
         for (const path of [
           '/api/admin/orders',

@@ -8,7 +8,15 @@ import type { Environment } from '../config/environment';
 export class OrderDeletionCheckClient {
   constructor(private readonly config: ConfigService<Environment, true>) {}
 
-  async blocked(orderSeq: number): Promise<boolean> {
+  blocked(orderSeq: number): Promise<boolean> {
+    return this.query(orderSeq, 'OrderDeletionCheckRequested');
+  }
+
+  async submissionAllowed(orderSeq: number): Promise<boolean> {
+    return !(await this.query(orderSeq, 'OrderSubmissionCheckRequested'));
+  }
+
+  private async query(orderSeq: number, eventType: string): Promise<boolean> {
     const eventId = randomUUID();
     try {
       const response = await fetch(
@@ -24,7 +32,7 @@ export class OrderDeletionCheckClient {
           body: JSON.stringify({
             eventId,
             source: 'order',
-            eventType: 'OrderDeletionCheckRequested',
+            eventType,
             payload: { orderSeq },
           }),
         },
@@ -34,7 +42,7 @@ export class OrderDeletionCheckClient {
           response.status !== 200 ||
           !/^application\/json(?:\s*;|$)/i.test(response.headers.get('content-type') ?? '')
         )
-          throw new Error('Invalid deletion check response');
+          throw new Error('Invalid order call check response');
         const parts: Uint8Array[] = [];
         let size = 0;
         for await (const part of response.body ?? []) {

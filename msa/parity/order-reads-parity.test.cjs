@@ -795,5 +795,145 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
     assert.equal((await post(path(paid,true),200)).completionNotificationStatus,'PENDING');
     t.diagnostic('notification HTTP pairs: '+requests.length+'; actual worker claims, stale SENDING and exact webhook messages');
   });
+  await t.test('order submission retry preserves the Dver request and recovers an unacknowledged shipment', async () => {
+    const path='/api/admin/orders/{id}/retry', requests=[];
+    const docs=await Promise.all(sides.map(async side=>(await fetch(side.base+'/api/docs-json')).json()));
+    assert.deepEqual(docs[1].paths[path].post,docs[0].paths[path].post);
+    assert.deepEqual(docs[1].components.schemas.SubmittedOrderDto,docs[0].components.schemas.SubmittedOrderDto);
+    async function post(id,expected,extra={}) {
+      const requestId=randomUUID(), results=[];
+      requests.push(requestId);
+      for(const side of sides) {
+        const response=await fetch(side.base+path.replace('{id}',id),{method:'POST',
+          signal:AbortSignal.timeout(15000),
+          headers:{...headers,Origin:'http://localhost:5173','X-Request-Id':requestId,...extra}});
+        const result=await response.json();
+        assert.equal(response.status,expected,side.name+' '+id+' '+JSON.stringify(result));
+        results.push(result);
+      }
+      assert.deepEqual(results[1],results[0]);
+      return results[0].data;
+    }
+    await post(1005,401,{Cookie:''});
+    await post(1005,403,{Origin:'http://wrong.invalid'});
+    await post(0,400);
+    await post(99999,404);
+    await post(1002,409);
+    await post(1007,422);
+    assert.deepEqual(await post(1004,200),{status:'SUBMITTING'});
+    assert.deepEqual(await post(1006,200),{status:'ACCEPTED'});
+    for(const db of [reference,databases.consultation])
+      await db.query('UPDATE call_sessions SET order_seq=1005,order_intake_enabled=true WHERE call_session_seq=1011');
+    await post(1005,409);
+    for(const db of [reference,databases.consultation])
+      await db.query('UPDATE call_sessions SET order_seq=NULL WHERE call_session_seq=1011');
+    for(const db of [reference,databases.order]) {
+      const client=await db.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query("SET LOCAL session_replication_role='replica'");
+        await client.query("UPDATE order_parcels SET item_price=1000 WHERE order_parcel_seq=20051");
+        await client.query("UPDATE order_parcels SET status='CANCELLED' WHERE order_parcel_seq=20052");
+        await client.query('UPDATE orders SET total_amount=3500 WHERE order_seq=1005');
+        await client.query('COMMIT');
+      } catch(error) {await client.query('ROLLBACK');throw error;}
+      finally {client.release();}
+    }
+    await post(1005,503);
+
+    const providerRequests=[], deliveryRequests=[];
+    let dropped=false;
+    const server=require('node:http').createServer(async(req,res)=>{
+      try {
+        const chunks=[];
+        for await(const chunk of req)chunks.push(chunk);
+        const body=Buffer.concat(chunks).toString();
+        if(req.url==='/parcel') {
+          providerRequests.push({key:req.headers['x-api-key'],body:JSON.parse(body)});
+          res.writeHead(200,{'Content-Type':'application/json'});
+          res.end(JSON.stringify({ok:true,parcelNo:'RETRY001',receivedAt:'2030-03-01T00:00:00Z'}));
+          return;
+        }
+        assert.equal(req.url,'/internal/order-accepted');
+        const ack=await fetch('http://delivery-app:3003'+req.url,{method:'POST',
+          headers:{'Content-Type':'application/json',Authorization:req.headers.authorization},body});
+        const result=await ack.json();
+        deliveryRequests.push({event:JSON.parse(body),status:ack.status,result});
+        if(!dropped && ack.ok) {dropped=true;res.destroy();return;}
+        res.writeHead(ack.status,{'Content-Type':'application/json'});
+        res.end(JSON.stringify(result));
+      } catch {res.writeHead(500).end();}
+    });
+    await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+    const delivery=new Pool({host:'delivery-db',user:'delivery_app'});
+    const orderResult=async db=>(await db.query(
+      'SELECT status,parcel_no,dver_received_at,paid_at,pickup_requested_at,total_amount,version FROM orders WHERE order_seq=1005',
+    )).rows[0];
+    const shipment=async db=>(await db.query(
+      "SELECT order_parcel_seq,s.status,h.from_status,h.to_status,h.actor_type,tracking_number LIKE 'DVA-%' AS generated"+
+      ' FROM shipments s JOIN shipment_status_history h USING(shipment_seq) WHERE order_parcel_seq=ANY($1::int[])',
+      [[20051,20052]],
+    )).rows;
+    const submitId=randomUUID();
+    requests.push(submitId);
+    try {
+      for(const [runtime,owner,mono] of [['./monolith-runtime','monolith',true],['../dist','order',false]]) {
+        const local='http://127.0.0.1:'+server.address().port;
+        const config={get(key){return {
+          NODE_ENV:'test',DB_HOST:owner+'-db',DB_PORT:5432,DB_USER:owner+'_app',
+          DB_PASSWORD:process.env.PGPASSWORD,DB_NAME:process.env.PGDATABASE,
+          DVER_API_URL:local+'/parcel',DVER_API_KEY:'parity-dver-key',DELIVERY_URL:local,
+          CUSTOMER_AUTH_TOKEN:process.env.CUSTOMER_AUTH_TOKEN,OPERATIONS_URL:'http://operations-app:3005',
+          CONSULTATION_URL:'http://consultation-app:3004',
+        }[key];}};
+        const {DatabaseService}=require(runtime+'/database/database.service');
+        const {AuditService}=require(runtime+'/audit/audit.service');
+        const {OrdersRepository}=require(runtime+'/orders/orders.repository');
+        const {OrderSubmissionRepository}=require(runtime+'/orders/order-submission.repository');
+        const {OrderSubmissionService}=require(runtime+'/orders/order-submission.service');
+        const {DverClient}=require(runtime+'/orders/dver.client');
+        const database=new DatabaseService(config), repository=new OrdersRepository(), dver=new DverClient(config);
+        try {
+          if(mono) {
+            const {AuditRepository}=require(runtime+'/audit/audit.repository');
+            const {DeliveriesService}=require(runtime+'/deliveries/deliveries.service');
+            const {DeliveriesRepository}=require(runtime+'/deliveries/deliveries.repository');
+            const service=new OrderSubmissionService(database,repository,new AuditService(new AuditRepository(database)),
+              new OrderSubmissionRepository(new DeliveriesService(new DeliveriesRepository())),dver);
+            assert.deepEqual(await service.retry(1005,1,submitId),{status:'ACCEPTED'});
+          } else {
+            const {OrderDeletionCheckClient}=require(runtime+'/orders/order-deletion-check.client');
+            const {OrderSubmissionWorker}=require(runtime+'/orders/order-submission.worker');
+            const makeService=()=>new OrderSubmissionService(database,repository,new AuditService(database,config),
+              new OrderSubmissionRepository(),dver,new OrderDeletionCheckClient(config),config);
+            assert.deepEqual(await makeService().retry(1005,1,submitId),{status:'SUBMITTING'});
+            assert.equal((await orderResult(databases.order)).status,'SUBMITTING');
+            assert.deepEqual(await shipment(delivery),await shipment(reference),'shipment transaction survived acknowledgement loss');
+            const worker=new OrderSubmissionWorker(makeService(),config);
+            await worker.run();
+            await worker.run();
+            assert.equal((await orderResult(databases.order)).status,'ACCEPTED');
+          }
+        } finally {await database.onModuleDestroy();}
+      }
+      assert.equal(providerRequests.length,2);
+      assert.equal(providerRequests[0].body.outboundParcels.length,1);
+      assert.deepEqual(providerRequests[1],providerRequests[0]);
+      assert.deepEqual(await orderResult(databases.order),await orderResult(reference));
+      assert.equal(deliveryRequests.length,2);
+      assert.deepEqual(deliveryRequests.map(x=>[x.status,x.result.status]),[[200,'processed'],[200,'duplicate']]);
+      assert.deepEqual(deliveryRequests[1].event,deliveryRequests[0].event);
+      assert.deepEqual(await shipment(delivery),[{order_parcel_seq:20051,status:'paid',from_status:null,to_status:'paid',actor_type:'SYSTEM',generated:true}]);
+      const {rows}=await databases.order.query('SELECT delivered_at IS NOT NULL AS confirmed FROM outbox_events WHERE event_id=$1',[deliveryRequests[0].event.eventId]);
+      assert.deepEqual(rows,[{confirmed:true}]);
+    } finally {
+      await delivery.end();
+      await new Promise((resolve,reject)=>server.close(error=>error?reject(error):resolve()));
+    }
+    const audit=async db=>(await db.query('SELECT request_id,action,result,target_type,target_seq,actor_type,actor_seq,metadata'+
+      ' FROM audit_logs WHERE request_id=ANY($1::uuid[]) ORDER BY request_id,action',[requests])).rows;
+    assert.deepEqual(await audit(databases.operations),await audit(reference));
+    t.diagnostic('submission HTTP pairs: '+(requests.length-1)+'; Dver request, shipment persistence and duplicate acknowledgement');
+  });
   console.log('Compared HTTP requests: '+compared);
 });

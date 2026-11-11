@@ -19,6 +19,10 @@ import { OrdersController } from './orders.controller';
 import { AdminOrdersController } from './admin-orders.controller';
 import { OrderAddressesController } from './order-addresses.controller';
 import { OrderReadController } from './order-read.controller';
+import { DverClient } from './dver.client';
+import { OrderSubmissionRepository } from './order-submission.repository';
+import { OrderSubmissionService } from './order-submission.service';
+import { OrderSubmissionWorker } from './order-submission.worker';
 
 @Module({
   imports: [DatabaseModule],
@@ -44,6 +48,11 @@ import { OrderReadController } from './order-read.controller';
     OrderDeletionCheckClient,
     OrdersService,
     OrdersRepository,
+    DverClient,
+    OrderSubmissionRepository,
+    OrderSubmissionService,
+    OrderSubmissionWorker,
   ],
+  exports: [OrderSubmissionService],
 })
 export class OrdersModule {}

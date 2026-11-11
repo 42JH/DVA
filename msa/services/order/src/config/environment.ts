@@ -21,6 +21,8 @@ export interface Environment extends PaymentEnvironment {
   CONSULTATION_URL: string;
   CUSTOMER_URL: string;
   DELIVERY_URL: string;
+  DVER_API_URL: string;
+  DVER_API_KEY?: string;
 }
 
 export class EnvironmentValidationError extends Error {
@@ -90,6 +92,33 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
     (typeof businessToken !== 'string' || !/^[\x21-\x7e]{32,256}$/.test(businessToken))
   )
     errors.push('AI_BUSINESS_TOKEN');
+  const dverSetting = raw.DVER_API_URL ?? 'https://public-n8n.dvercorp.co.kr:47514/webhook/parcel';
+  const dverUrl = typeof dverSetting === 'string' ? dverSetting : '';
+  try {
+    const url = new URL(dverUrl);
+    if (
+      (url.protocol !== 'https:' &&
+        !(
+          nodeEnv === 'test' &&
+          url.protocol === 'http:' &&
+          ['127.0.0.1', 'localhost'].includes(url.hostname)
+        )) ||
+      url.username ||
+      url.password ||
+      url.search ||
+      url.hash
+    )
+      errors.push('DVER_API_URL');
+  } catch {
+    errors.push('DVER_API_URL');
+  }
+  const dverKey = raw.DVER_API_KEY;
+  if (
+    dverKey !== undefined &&
+    dverKey !== '' &&
+    (typeof dverKey !== 'string' || !/^[\x21-\x7e]+$/.test(dverKey))
+  )
+    errors.push('DVER_API_KEY');
   const config: Environment = {
     ...paymentEnvironment(raw, errors),
     AUTH_PROXY_HOPS: Number(authProxyHops),
@@ -117,6 +146,8 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
     CONSULTATION_URL: required('CONSULTATION_URL'),
     CUSTOMER_URL: required('CUSTOMER_URL'),
     DELIVERY_URL: required('DELIVERY_URL'),
+    DVER_API_URL: dverUrl,
+    DVER_API_KEY: typeof dverKey === 'string' && dverKey ? dverKey : undefined,
   };
   try {
     const url = new URL(config.OPERATIONS_URL);
