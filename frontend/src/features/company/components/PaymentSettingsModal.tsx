@@ -1,8 +1,8 @@
-// [결제 설정] 창 — 개인 카드(고정) · 월결제 · 그룹 카드(부서별). 누르는 즉시 저장, 확인 창 없음 (11/11)
+// [결제 설정] 창 — 개인 카드(고정) · 월결제 · 그룹 카드(부서 골라서 하나씩). 누르는 즉시 저장, 확인 창 없음 (11/11)
 import type { ReactNode } from 'react'
 import { usePaymentForm } from '@/features/company/hooks/usePaymentForm'
 import { BILLING_LABEL } from '@/features/company/labels'
-import { Badge, Btn } from '@/shared/ui'
+import { Badge, Btn, SelectField } from '@/shared/ui'
 import { Choice, Err } from '@/shared/ui/Field'
 import { Modal } from '@/shared/ui/Modal'
 import { SkeletonRows } from '@/shared/ui/ListFrame'
@@ -72,25 +72,35 @@ export function PaymentSettingsModal({ id, onClose }: { id: number; onClose: () 
             <Err>{vm.deptsError}</Err>
           ) : vm.deptsLoading ? (
             <SkeletonRows rows={3} />
-          ) : vm.rows.length === 0 ? (
+          ) : vm.deptOptions.length === 0 ? (
             <p className="py-4 text-center text-[13px] text-ops-sub">
               부서가 없습니다. CSV로 사원을 등록할 때 부서를 넣으면 부서가 생깁니다.
             </p>
           ) : (
-            vm.rows.map((r) => (
-              <div key={r.id} className="flex flex-col gap-1">
-                <div className="flex items-end gap-2">
-                  <Choice
-                    label={r.name}
-                    value={r.enabled ? 'Y' : 'N'}
-                    options={[...OPTIONS]}
-                    onChange={(v) => vm.setGroup(r.id, v === 'Y')}
-                  />
-                  {r.saving && <Saving />}
+            <>
+              <SelectField
+                compact
+                label="부서"
+                placeholder="부서 선택"
+                value={vm.deptValue}
+                options={vm.deptOptions}
+                onChange={vm.selectDept}
+              />
+              {vm.dept && (
+                <div className="flex flex-col gap-1">
+                  <div className="flex items-end gap-2">
+                    <Choice
+                      label={vm.dept.name}
+                      value={vm.dept.enabled ? 'Y' : 'N'}
+                      options={[...OPTIONS]}
+                      onChange={(v) => vm.setGroup(v === 'Y')}
+                    />
+                    {vm.dept.saving && <Saving />}
+                  </div>
+                  {vm.dept.error && <Err>{vm.dept.error}</Err>}
                 </div>
-                {r.error && <Err>{r.error}</Err>}
-              </div>
-            ))
+              )}
+            </>
           )}
         </Section>
       </fieldset>
