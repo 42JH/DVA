@@ -1,7 +1,7 @@
 // 기업 창 — 사원 추가 · 수정, CSV로 사원 추가, CSV로 기업 등록, 이름 하나 입력(기업명 · 부서명). 규칙 · 요청은 기존 훅 그대로
 // 파일 칸 규칙은 긴 설명 대신 [예시 파일 받기]로 (예시 파일에 칸 이름 · 형식이 다 들어 있음)
 import type { Member } from '@/features/company/api/companyApi'
-import { downloadExample, type CsvMember } from '@/features/company/csvMembers'
+import { downloadExample, type CsvKind, type CsvMember } from '@/features/company/csvMembers'
 import { fmtPhone } from '@/shared/lib/format'
 import { MEMBER_ROLE } from '@/features/company/labels'
 import { useCompanyCsv } from '@/features/company/hooks/useCompanyCsv'
@@ -26,8 +26,8 @@ const FootNote = ({ error, hint }: { error?: string | null; hint?: string | null
     <p className={`${note} text-ops-sub`}>{hint}</p>
   )
 
-const Example = () => (
-  <Btn kind="plain" onClick={downloadExample} className="self-start">
+const Example = ({ kind = 'members' }: { kind?: CsvKind }) => (
+  <Btn kind="plain" onClick={() => downloadExample(kind)} className="self-start">
     <Icon name="download" />
     예시 파일 받기
   </Btn>
@@ -214,6 +214,7 @@ export function MemberCsvModal({
 function CsvTable({ rows }: { rows: (CsvMember & { mark?: string })[] }) {
   if (!rows.length) return null
   const marked = rows.some((r) => r.mark)
+  const withCompany = rows.some((r) => r.company)
   return (
     <section aria-label="읽은 사원" className="flex flex-col gap-1.5">
       <p className="text-[12px] text-ops-sub">읽은 사원 {rows.length}명</p>
@@ -222,6 +223,7 @@ function CsvTable({ rows }: { rows: (CsvMember & { mark?: string })[] }) {
           <thead className="sticky top-0 bg-[#e8eff8] text-[12px] font-semibold">
             <tr className="[&>th]:h-8 [&>th]:px-3 [&>th]:text-left">
               {marked && <th className="w-16">구분</th>}
+              {withCompany && <th className="w-24">기업</th>}
               <th className="w-20">사번</th>
               <th>이름</th>
               <th className="w-32">전화번호</th>
@@ -240,6 +242,7 @@ function CsvTable({ rows }: { rows: (CsvMember & { mark?: string })[] }) {
                     {r.mark}
                   </td>
                 )}
+                {withCompany && <td className="font-semibold">{r.company}</td>}
                 <td>{r.employeeNo}</td>
                 <td>{r.name}</td>
                 <td>{fmtPhone(r.phoneNumber)}</td>
@@ -264,20 +267,24 @@ export function CompanyCsvModal({ onClose }: { onClose: () => void }) {
       footer={
         <>
           <FootNote
-            error={
-              vm.errorMessage ?? (vm.noManager ? '담당자를 1명 이상 Y로 표시해 주세요.' : null)
+            hint={
+              vm.results
+                ? null
+                : vm.count > 0
+                  ? `기업 ${vm.companies}곳, 사원 ${vm.count}명을 등록합니다.`
+                  : null
             }
-            hint={vm.count > 0 ? `사원 ${vm.count}명을 함께 등록합니다.` : null}
           />
-          <Btn onClick={onClose}>취소</Btn>
-          <Btn kind="primary" disabled={!vm.canSubmit} onClick={vm.submit}>
-            {vm.isSubmitting ? '등록 중…' : '등록'}
-          </Btn>
+          <Btn onClick={onClose}>{vm.results ? '닫기' : '취소'}</Btn>
+          {!vm.results && (
+            <Btn kind="primary" disabled={!vm.canSubmit} onClick={vm.submit}>
+              {vm.isSubmitting ? '등록 중…' : '등록'}
+            </Btn>
+          )}
         </>
       }
     >
       <div className="flex flex-col gap-3">
-        <TextInput label="기업명" value={vm.name} onChange={vm.setName} />
         <FileDrop
           file={vm.file}
           accept=".xlsx,.csv"
@@ -285,8 +292,23 @@ export function CompanyCsvModal({ onClose }: { onClose: () => void }) {
           onPick={(f) => void vm.pick(f)}
           onRemove={vm.removeFile}
         />
-        <Example />
-        <CsvTable rows={vm.members} />
+        <Example kind="companies" />
+        {vm.results ? (
+          // 기업마다 따로 등록돼 일부만 될 수 있음 — 된 곳 · 안 된 곳을 기업별로 (11/11)
+          <ul aria-label="등록 결과" className="flex flex-col gap-1.5 text-[13px]">
+            {vm.results.map((r) => (
+              <li key={r.name} className="flex gap-2">
+                <b className="font-semibold">{r.name}</b>
+                <span className={r.ok ? 'text-ops-done' : 'text-ops-stop'}>
+                  {r.ok ? '등록됨' : '등록 못 함'}
+                </span>
+                {r.message && <span className="text-ops-sub">{r.message}</span>}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <CsvTable rows={vm.members} />
+        )}
       </div>
     </Modal>
   )

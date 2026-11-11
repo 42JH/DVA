@@ -4,6 +4,7 @@ import type { Member } from './api/companyApi'
 import {
   decodeCsv,
   exampleCsv,
+  groupByCompany,
   phoneInput,
   previewAgainst,
   readMembersCsv,
@@ -298,6 +299,70 @@ assert.deepEqual(
     ['002', '01000000002', '04524'],
     ['003', '01000000003', '04524'],
   ],
+)
+
+// 기업 CSV (11/11): 첫 칸 기업명 · 한 파일 여러 기업 · 기업마다 담당자 1명 이상 · 사번은 기업 안에서만 겹치면 안 됨
+const coText = exampleCsv('companies')
+assert.ok(coText.startsWith('﻿기업명,사번,'))
+const co = readMembersCsv(coText, 'companies')
+assert.ok(co.ok)
+assert.deepEqual(
+  groupByCompany(co.members).map((g) => [
+    g.name,
+    g.members.length,
+    g.members.filter((m) => m.leader).length,
+  ]),
+  [
+    ['예시상사', 3, 1],
+    ['샘플물류', 2, 1],
+  ],
+)
+assert.equal(co.members[3]!.employeeNo, 'A01') // 사원 칸이 한 칸씩 밀려 읽히지 않음
+assert.equal(co.members[0]!.address.postalCode, '04524')
+const CO_HEAD = '기업명,사번,사원명,전화번호,담당자,부서,도로명 주소,지번 주소,동,우편번호'
+const coRow = (c: string) => `${c},${ADDR}`
+const coErr = (t: string) => {
+  const r = readMembersCsv(t, 'companies')
+  assert.ok(!r.ok)
+  return r.errors
+}
+// 담당자 없는 기업 → 그 기업 이름으로 안내
+assert.match(
+  coErr(`${CO_HEAD}
+${coRow('가사,1,가,01011112222,,')}`)[0]!,
+  /가사: 담당자/,
+)
+// 기업명 빈칸 · 사원 CSV를 기업 화면에 올림
+assert.match(
+  coErr(`${CO_HEAD}
+${coRow(',1,가,01011112222,Y,')}`)[0]!,
+  /기업명이 비어/,
+)
+assert.match(
+  coErr(`${HEAD}
+${row('1,가,01011112222,Y')}`)[0]!,
+  /첫 줄은 '기업명/,
+)
+// 다른 기업의 같은 사번은 됨, 같은 기업이면 막음 · 전화번호는 파일 전체에서 한 번
+assert.ok(
+  readMembersCsv(
+    `${CO_HEAD}
+${coRow('가사,1,가,01011112222,Y,')}
+${coRow('나사,1,나,01011113333,Y,')}`,
+    'companies',
+  ).ok,
+)
+assert.match(
+  coErr(`${CO_HEAD}
+${coRow('가사,1,가,01011112222,Y,')}
+${coRow('가사,1,나,01011113333,,')}`)[0]!,
+  /사번이 2행과 겹칩니다/,
+)
+assert.match(
+  coErr(`${CO_HEAD}
+${coRow('가사,1,가,01011112222,Y,')}
+${coRow('나사,2,나,01011112222,Y,')}`)[0]!,
+  /전화번호가 2행과 겹칩니다/,
 )
 
 console.log('csvMembers OK')
