@@ -4,7 +4,8 @@ code는 사유 표시·관측·테스트용. 문장 지시는 넣지 않는다(d
 from dataclasses import dataclass, field
 from typing import Literal
 
-from app.domain.address_book import origin_confirmation, sender_change_next
+from app.domain.address_book import (missing_sender_address, origin_confirmation, receiver_questions_deferred,
+                                     sender_change_next)
 from app.domain.assess import assess
 from app.domain.state import ConversationState, FieldStatus, Items, Place, Source
 from app.policy.model import Policy
@@ -41,6 +42,7 @@ def state_summary(state: ConversationState, policy: Policy) -> dict:
         fields = {n: f.status.value for n, f in state.current.fields.items() if policy.fields[n].kind != "auto"}
     summary = {"stage": a.stage, "fields": fields, "missing": list(a.missing), "can_proceed": a.readback_ready,
                "parcels": len(state.parcels)}
+    destination = state.candidates if state.candidates and state.candidates.kind == "destination" else None
     if next_sender := sender_change_next(state):
         summary["sender_change_next"] = next_sender
         summary["can_proceed"] = False
@@ -49,8 +51,11 @@ def state_summary(state: ConversationState, policy: Policy) -> dict:
             summary["sender_change_question"] = "발송 주소도 바꾸시겠어요?"
     elif origin := origin_confirmation(state):
         summary.update(origin_confirm=origin, missing=[], can_proceed=False)
-    elif state.intent == "order" and state.candidates and state.candidates.kind == "destination":
-        summary["destination_choices"] = list(state.candidates.labels)
+    elif missing := missing_sender_address(state):
+        if "sender_name" not in a.missing and (destination or state.current.deferred_destination):
+            summary.update(stage="address", missing=list(missing), can_proceed=False)
+    elif state.intent == "order" and destination:
+        summary["destination_choices"] = list(destination.labels)
         summary["can_proceed"] = False
     if summary["missing"][:1] in (["sender_address_detail"], ["receiver_address_detail"]):
         summary["address_detail_question"] = "상세주소를 알려주시겠어요?"
@@ -83,7 +88,7 @@ def order_values(state: ConversationState, policy: Policy) -> dict:
             current[name] = {"value": value} | ({"from": f.source.value} if f.source not in (Source.CUSTOMER, None) else {})
         out["current"] = current
     c = state.candidates
-    if c is not None and c.kind == "destination":
+    if state.intent == "order" and c is not None and c.kind == "destination" and not receiver_questions_deferred(state):
         out["candidates"] = [{"label": label} | {part: getattr(p, part) for part in ("name", "phone", "address", "address_detail")
                                                  if getattr(p, part) and _shown(p.source, part)}
                              for label, p in zip(c.labels, c.items) if isinstance(p, Place)]

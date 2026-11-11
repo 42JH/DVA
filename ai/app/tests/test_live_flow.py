@@ -1338,6 +1338,8 @@ def test_tool_call_on_answer_to_candidates_waits_for_pick():
         await until(lambda: s.phase == Phase.ACTIVE)
         async with s.lock:
             s.state.intent = "order"
+            s.state.record("sender_address", "서울특별시 강남구 테헤란로 211")
+            s.state.record("sender_address_detail", "")
             s.state.record("receiver_name", "현수민")
             pin = Place("현수민", "01055556666", "부산광역시 서구 대신공원로 1", "201호", Geo("x", "y", "00000"), Source.PIN)
             offer(s.state, "destination", (label,), (pin,))

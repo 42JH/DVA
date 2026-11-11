@@ -50,10 +50,8 @@ def sender_change_next(state: ConversationState) -> str | None:
         return None
     if (draft.sender_name_for_parcel or draft.sender_name_scope_pending) and not draft["sender_name"].valid:
         return "sender_name"
-    if draft.sender_address_change:
-        for name in ("sender_address", "sender_address_detail"):
-            if not draft[name].valid:
-                return name
+    if draft.sender_address_change and (missing := missing_sender_address(state)):
+        return missing[0]
     address = draft["sender_address"]
     if (draft.sender_name_for_parcel and state.origin_answer is None
             and (not address.valid or address.source in (Source.PROFILE, Source.HISTORY))):
@@ -73,8 +71,14 @@ def origin_confirmation(state: ConversationState) -> str | None:
     return None
 
 
+def missing_sender_address(state: ConversationState) -> tuple[str, ...]:
+    if state.intent != "order" or state.current is None:
+        return ()
+    return tuple(name for name in ("sender_address", "sender_address_detail") if not state.current[name].valid)
+
+
 def receiver_questions_deferred(state: ConversationState) -> bool:
-    return bool(sender_change_next(state) or origin_confirmation(state))
+    return bool(sender_change_next(state) or origin_confirmation(state) or missing_sender_address(state))
 
 
 def save_offer(state: ConversationState) -> dict:

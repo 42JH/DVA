@@ -65,6 +65,7 @@ async def find_destination(ctx: ToolContext, args: DestinationArgs) -> ToolOutco
         draft.destination_search_id += 1
         search = (draft, draft.destination_search_id)
         places = list(ctx.state.customer.places)
+        started_deferred = receiver_questions_deferred(ctx.state)
     be = [_to_be(p) for p in places]
     # 상호·건물명·도로명 → 실제 주소(주소DB, 없으면 카카오 키워드). 핀 문자열은 상호를 담지 않으므로 주소로 대조한다
     # (통화 67d29423: "다이소 구미 인동점"이 낱말 겹침으로 다른 건물의 핀 3건을 불러왔다)
@@ -92,20 +93,32 @@ async def find_destination(ctx: ToolContext, args: DestinationArgs) -> ToolOutco
         return await _offer(ctx, search, [_from_be(p, Source.COMPANY) for p in page.places], page.places)
     ask = "receiver_place" if name and not place else "receiver_name" if place and not name else None
     return await _destination_problem(ctx, search, ToolOutcome("needs_input", "DEST_NONE", {"found": 0},
-                       [{"field": ask, "reason": "DEST_NONE"}] if ask else []))
+                       [{"field": ask, "reason": "DEST_NONE"}] if ask else []),
+                       name=name, started_deferred=started_deferred)
 
 
 def _current_search(ctx: ToolContext, search: tuple[ParcelDraft, int]) -> bool:
     draft, search_id = search
-    return ctx.state.current is draft and draft.destination_search_id == search_id
+    s = ctx.state
+    return (s.intent == "order" and not s.order_submitted and s.current is draft
+            and draft.destination_search_id == search_id)
 
 
-async def _destination_problem(ctx: ToolContext, search: tuple[ParcelDraft, int], outcome: ToolOutcome) -> ToolOutcome:
+async def _destination_problem(ctx: ToolContext, search: tuple[ParcelDraft, int], outcome: ToolOutcome, *,
+                               name: str | None = None, started_deferred: bool = False) -> ToolOutcome:
     async with ctx.lock:
+        s = ctx.state
         if not _current_search(ctx, search):
-            return ToolOutcome("needs_input", "RESULT_SUPERSEDED", summary=state_summary(ctx.state, ctx.policy))
-        if receiver_questions_deferred(ctx.state):
-            return ToolOutcome("ok", summary=state_summary(ctx.state, ctx.policy))
+            return ToolOutcome("needs_input", "RESULT_SUPERSEDED", summary=state_summary(s, ctx.policy))
+        deferred = receiver_questions_deferred(s)
+        facts = {}
+        if name and (started_deferred or deferred) and s.record("receiver_name", name):
+            facts["recorded"] = ["receiver_name"]
+        if deferred:
+            return ToolOutcome("ok", facts=facts, summary=state_summary(s, ctx.policy))
+        if facts:
+            outcome.facts.update(facts)
+            outcome.summary = state_summary(s, ctx.policy)
         return outcome
 
 
