@@ -202,6 +202,7 @@ class ConversationState:
     callback_requested: bool = False      # 고객이 콜백에 동의(분석 hasCallbackRequest)
     address_offer: dict | None = None     # 저장 대상 {name, sender, receiver, parcel(담은 택배 id)}. 담을 때 묻지 않고 저장
     origin_offered: bool = False          # 출발지 후보에서 보내는지 물음(인사 또는 접수 시작 때)
+    origin_mentioned_in_greeting: bool = False  # 인사에서 발송 주소를 언급함(등록 주소와의 대조 결과와 별개)
     origin_answer: bool | None = None     # 그 출발지에서 보냄 = True, 다른 곳 = False
     origin_applied: bool = False          # 보내는 분 미리 채우기를 마침
     result_accepted: bool = False          # 통화 결과가 ACCEPTED로 확정됨(결과 문구 검사)
