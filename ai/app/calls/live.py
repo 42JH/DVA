@@ -11,11 +11,14 @@ import json
 import logging
 import re
 import time
+from copy import deepcopy
 from dataclasses import dataclass, field, replace
 
 from app.address.matcher import sido_aliases
 from app.address.parse import clean_text, detail_text, parse, split_gil, unlink_gil
+from app.calls.backend_turn import BackendTurn
 from app.calls.session import CallSession, Phase
+from app.calls.turn import SHORT_NO, SHORT_YES, TurnInput, TurnPipeline, TurnResult, TurnState, observe_turn
 from app.domain.rules import KST
 from app.domain.address_book import (begin_sender_name_change, origin_confirmation, prefill_sender,
                                      receiver_questions_deferred, request_sender_address_change, save_offer, sender_change_available,
@@ -46,8 +49,6 @@ TOOL_LATENCY = {"record_fields": "INFORMATION_INPUT", "find_destination": "ADDRE
 GREETING_ORDER = re.compile(
     r"(?:택배)?접수(?:를)?(?:도와드릴까요|도와드려도될까요|해드릴까요|하시겠어요|하실까요|할까요|하시는건가요)$"
 )
-SHORT_YES = re.compile(r"(?:아|어|음)?(?:네|예|응|맞아요|맞습니다|그렇습니다)+")
-SHORT_NO = re.compile(r"(?:아|어|음)?(?:아니|아니요|아뇨|아닙니다)+")
 END_QUESTION = re.compile(r"통화(?:를)?(?:이제)?(?:마칠까요|마무리할까요|종료할까요|끊을까요)$")
 GREETING_OTHER_ORIGIN = re.compile(r"(?:네|예|아니요)?(?:오늘은|이번에는)?다른(?:주소|곳)에서"
                                   r"(?:보낼게요|보내려고요|보냅니다|발송할게요|발송하려고요)")
@@ -81,6 +82,19 @@ class Spoken:
 
 
 @dataclass
+class ShadowSample:
+    utterance_id: int
+    ended_t: float
+    before: TurnState
+    task: asyncio.Task | None = None
+    result: TurnResult | None = None
+    status: str = "superseded"
+    shadow_ms: int | None = None
+    spoken_question: str | None = None
+    spoken_ms: int | None = None
+
+
+@dataclass
 class Runtime:
     """통화별 S5 상태(세션에 붙는다). 업무 값은 state에만 있다."""
     cust: Spoken | None = None
@@ -105,6 +119,7 @@ class Runtime:
     confirm_t: float = 0.0                            # 관제: 확인 "네" 발화 끝(→ 담기)
     # 서버 질문(후보·확인·출발지·박스·콜백)에 답하는 발화의 Decision 반영 대기. 같은 턴의 Backend 도구 호출이 기다린다
     deciding: asyncio.Event | None = None
+    shadow_sample: ShadowSample | None = None
 
     def cancel(self) -> None:
         for h in (self.endpoint, self.ai_end, self.commit):
@@ -118,6 +133,14 @@ class LiveFlow:
         self.svc = service
         self.cfg = service.d.cfg
         self.policy = service.d.policy
+        self.shadow = None
+        self.shadow_tasks: set[asyncio.Task] = set()
+        self.shadow_started = 0
+        if self.cfg.turn_shadow_enabled:
+            deps = service.d
+            backend = BackendTurn(deps.client, deps.backend_model, deps.backend_effort, deps.policy)
+            self.shadow = TurnPipeline(deps.client, backend, deps.policy, self.cfg.decision_budget_sec)
+            service.on_finalize.append(self._finalize_shadow)
         h = service.handlers
         base_in, base_out = h["session.input_transcript.delta"], h["session.output_transcript.delta"]
         h["session.input_transcript.delta"] = lambda s, ev: (base_in(s, ev), self.on_input(s, ev))
@@ -143,6 +166,11 @@ class LiveFlow:
     def on_input(self, s: CallSession, ev: dict) -> None:
         rt, now = self.rt(s), time.time()
         if rt.cust is None:
+            if rt.shadow_sample:
+                try:
+                    self._finish_shadow_sample(s)
+                except Exception as exc:
+                    s.note("Turn shadow", "comparison_error", {"error_type": type(exc).__name__})
             rt.ready_notice = None
             rt.readback_id = None
             rt.seq += 1
@@ -231,6 +259,11 @@ class LiveFlow:
     async def _judge_customer(self, s: CallSession, utt: Spoken, prev: Spoken | None,
                               gate: asyncio.Event | None = None) -> None:
         try:
+            if self.shadow:
+                try:
+                    await self._start_shadow(s, utt, prev)
+                except Exception as exc:
+                    s.note("Turn shadow", "snapshot_error", {"error_type": type(exc).__name__})
             await self._judge_customer_inner(s, utt, prev)
         finally:
             if gate is not None:
@@ -258,6 +291,118 @@ class LiveFlow:
         if not judge_first:
             await self.judge(s, utt, prev)
 
+    async def _start_shadow(self, s: CallSession, utt: Spoken, prev: Spoken | None) -> None:
+        async with s.lock:
+            rt = self.rt(s)
+            if (s.phase != Phase.ACTIVE or s.closed or s.state.order_submitted or
+                    not rt.customer_turns or rt.customer_turns[-1] is not utt):
+                return
+            if (len(self.shadow_tasks) >= self.cfg.turn_shadow_max_concurrent or
+                    self.shadow_started >= self.cfg.turn_shadow_max_turns):
+                s.stats["Turn shadow 제한"] += 1
+                return
+            state = deepcopy(s.state)
+            # 대답을 기다리는 질문은 AI의 짧은 맞장구로 닫히지 않는다.
+            if prev and SHORT_YES.fullmatch(re.sub(r"[\s,.!?…~]+", "", prev.text)):
+                earlier = next((a for a in reversed(rt.ai) if a.t_start < prev.t_start and a.end_ms <= utt.start_ms
+                                and not SHORT_YES.fullmatch(re.sub(r"[\s,.!?…~]+", "", a.text))), None)
+                preceding_customer = rt.customer_turns[-2] if len(rt.customer_turns) > 1 else None
+                if earlier and (preceding_customer is None or earlier.t_start >= preceding_customer.t_last):
+                    prev = earlier
+            heard = bool(prev and utt.start_ms >= prev.end_ms - self.policy.confirm.answer_after_readback_tolerance_ms)
+            greeting = (_greeting_offer(state, prev.text)
+                        if heard and state.intent is None and rt.customer_turns == [utt] else None)
+            spoken_question = _shadow_spoken_question(prev.text) if heard else None
+            origin = bool(heard and (_asked_pending_origin(state, prev.text) or
+                                    spoken_question == "ask_address_change" and
+                                    sender_change_next(state) == "ask_address_change"))
+            if spoken_question == "box":
+                box = state.current.box_proposal if state.current and not state.pending else None
+                if not box or prev.t_start < box.issued_t or BOX_SIZE_NAMES[box.size] not in prev.text:
+                    spoken_question = None
+            candidates = s.state.candidates
+            pick_allowed = bool(heard and candidates and (
+                candidates.kind != "destination" or
+                prev.destination_candidates is candidates and not receiver_questions_deferred(state)))
+            matches = _asked_destinations(candidates, prev.text) if (
+                pick_allowed and candidates.kind == "destination") else []
+            short_yes = SHORT_YES.fullmatch(re.sub(r"[\s,.!?…~]+", "", utt.text))
+            if short_yes and len(matches) > 1:
+                pick_allowed = False
+            draft = state.current
+            expecting_receiver = (state.intent == "order" and draft and draft["sender_name"].valid
+                                  and not draft["receiver_name"].valid and not sender_change_next(state)
+                                  and not origin_confirmation(state))
+            receiver_name_answer = bool(heard and _asked_receiver_name(prev.text, bool(expecting_receiver))
+                                        and not SENDER_NAME_REFERENCE.search(utt.text))
+            turn = TurnInput(state, utt.utterance(), prev.utterance() if heard else None, s.tools.now(),
+                             greeting=greeting, origin_question=origin,
+                             destination=matches[0] if len(matches) == 1 else None, pick_allowed=pick_allowed,
+                             end_question=bool(heard and _asked_end(rt, prev)), spoken_question=spoken_question,
+                             receiver_name_answer=receiver_name_answer)
+            sample = ShadowSample(utt.utterance_id, utt.t_last, observe_turn(state, self.policy))
+            task = s.spawn(self._run_shadow(turn, sample), "turn_shadow")
+            if task is not None:
+                sample.task = task
+                rt.shadow_sample = sample
+                self.shadow_started += 1
+                self.shadow_tasks.add(task)
+                task.add_done_callback(self.shadow_tasks.discard)
+
+    async def _run_shadow(self, turn: TurnInput, sample: ShadowSample) -> None:
+        try:
+            async with asyncio.timeout(self.cfg.turn_shadow_timeout_sec):
+                sample.result = await self.shadow.run(turn)
+                sample.status = sample.result.status
+        except TimeoutError:
+            sample.status = "timeout"
+        except Exception as exc:
+            sample.status = f"error:{type(exc).__name__}"
+        finally:
+            sample.shadow_ms = max(0, round((time.time() - sample.ended_t) * 1000))
+
+    async def _finalize_shadow(self, s: CallSession) -> None:
+        if s.rt and (sample := s.rt.shadow_sample) and sample.status == "superseded":
+            sample.status = "call_ended"
+        self._finish_shadow_sample(s)
+
+    def _finish_shadow_sample(self, s: CallSession) -> None:
+        rt = self.rt(s)
+        sample, rt.shadow_sample = rt.shadow_sample, None
+        if sample is None:
+            return
+        if sample.task and not sample.task.done():
+            sample.task.cancel()
+        if sample.spoken_question is None:
+            for spoken in rt.ai:
+                if spoken.t_start >= sample.ended_t and (question := _shadow_spoken_question(spoken.text)):
+                    sample.spoken_question = question
+                    sample.spoken_ms = round((spoken.t_start - sample.ended_t) * 1000)
+                    break
+        baseline = observe_turn(s.state, self.policy, "end" if s.close_reason == "customer_end" else None)
+        result = sample.result
+        data = {"utterance_id": sample.utterance_id, "status": sample.status,
+                "legacy_state_question": baseline.next_question, "legacy_spoken_question": sample.spoken_question,
+                "legacy_spoken_ms": sample.spoken_ms, "shadow_ready_ms": sample.shadow_ms}
+        if result is not None:
+            before, after = sample.before.fields, result.state.fields
+            differing = sorted(name for name in baseline.fields.keys() | after.keys()
+                               if baseline.fields.get(name) != after.get(name))
+            data.update(
+                route=result.route, shadow_question=result.state.next_question, tool_calls=result.tool_calls,
+                address_unverified=result.address_unverified,
+                differing_fields=differing,
+                legacy_changed_fields=sorted(name for name in baseline.fields.keys() | before.keys()
+                                             if baseline.fields.get(name) != before.get(name)),
+                shadow_changed_fields=sorted(name for name in after.keys() | before.keys()
+                                             if after.get(name) != before.get(name)),
+                parcel_count_matches=baseline.parcels == result.state.parcels,
+            )
+            if sample.before.candidate_kind == "destination":
+                data["destination_matches"] = (baseline.candidate_kind == result.state.candidate_kind and
+                                               not any(name.startswith("receiver_") for name in differing))
+        s.note("Turn shadow", sample.status, data)
+
     def _ai_done(self, s: CallSession) -> None:
         """AI 발화 끝: 결과 문구 검사(LLM 없음, delegation.md §6.2-5)·말한 번호·호수 대조(기록만)."""
         rt = self.rt(s)
@@ -265,6 +410,10 @@ class LiveFlow:
         if not rt.ai:
             return
         spoken = rt.ai[-1]
+        if (sample := rt.shadow_sample) and sample.spoken_question is None and spoken.t_start >= sample.ended_t:
+            if question := _shadow_spoken_question(spoken.text):
+                sample.spoken_question = question
+                sample.spoken_ms = round((spoken.t_start - sample.ended_t) * 1000)
         if rt.readback_id and spoken.readback_id == rt.readback_id and asks_parcel_confirmation(spoken.text):
             rt.readback_id = None
         if wrong := unverified_values(spoken.text, s.state):  # 측정만: 기억으로 답했거나 잘못 읽은 번호·호수
@@ -1363,6 +1512,40 @@ def _answer(a) -> tuple[str, float, dict]:
 
 def _last_question(text: str) -> str:
     return re.split(r"[.!?…]", text.rstrip(" .!?…"))[-1]
+
+
+def _shadow_spoken_question(text: str) -> str | None:
+    """비교용 질문 종류. 판별할 수 없는 발화는 전사 원문 대신 None을 남긴다."""
+    if not asks(text):
+        return None
+    question = _last_question(text).strip()
+    compact = "".join(question.split())
+    if END_QUESTION.search(compact):
+        return "confirm_end"
+    if re.search(r"(?:더|추가로)\s*보낼|더\s*보내실", question):
+        return "more_parcels"
+    if "콜백" in question or ("연락" in question and "담당자" in question):
+        return "callback"
+    if "박스" in question and any(size in question for size in BOX_SIZE_NAMES.values()):
+        return "box"
+    if re.search(r"어떤\s*(?:물품|물건)|무엇을\s*보내", question):
+        return "items"
+    if RECEIVER_NAME_QUESTION.search(question):
+        if re.search(r"성함|이름", question):
+            return "receiver_name"
+        if re.search(r"전화|연락처", question):
+            return "receiver_phone"
+        if "주소" in question:
+            return "receiver_address_detail" if "상세" in question else "receiver_address"
+    if re.search(r"발송|보내는\s*곳", question) and re.search(r"보내실까요|보내시나요|발송하실까요|발송하시나요", question):
+        return "origin"
+    if "발송주소" in compact and re.search(r"바꾸시겠어요|변경하시겠어요", compact):
+        return "ask_address_change"
+    if "접수" in compact and asks_parcel_confirmation(compact):
+        return "readback"
+    if DESTINATION_QUESTION.search(question):
+        return "destination"
+    return None
 
 
 def _asked_end(rt: Runtime, prev: Spoken) -> bool:
