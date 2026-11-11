@@ -167,6 +167,11 @@ export const requestApply = (
         body: { aiPersonaVersionSeq: head.seq, expectedVersion: head.version },
       })
 
+/** 페르소나 삭제 (DELETE /personas, body { aiPersonaSeqs }) — 분류 번호 1~100개를 한꺼번에, 하나라도 실패하면 전부 안 지워짐(204 = 전체 성공)
+ * 소프트 삭제: 소속 버전 · 초안 포함. ACTIVE 버전이 하나라도 있으면 409, 없거나 이미 지운 분류가 끼면 404. 화면은 한 건씩만 보냄 */
+export const deletePersona = (personaSeq: number): Promise<void> =>
+  api.delete('/personas', { body: { aiPersonaSeqs: [personaSeq] } })
+
 /** 페르소나 추가 (POST /personas) — v1 저장(아직 적용 안 함). 코드는 바꿀 수 없고 겹치면 409. 만든 페르소나 번호를 돌려줌 */
 export async function createPersona(input: {
   code: string
