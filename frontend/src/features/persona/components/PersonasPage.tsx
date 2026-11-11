@@ -1,4 +1,4 @@
-// AI 상담가 (11/06) — 가운데 시스템 프롬프트(또는 비교) | 오른쪽 상담가 카드
+// AI 상담가 (11/06) — 가운데 시스템 프롬프트 | 오른쪽 상담가 카드
 // 11/11: 저장 = 새 버전, [적용] 없음. 오른쪽 위 탭([AI 상담가 유형] · [버전 히스토리]) → 버전 히스토리는 고른 상담가의 버전 기록(저장 시각 · 수정한 사람), 고른 버전이 가운데
 // 데이터 · 규칙은 usePersonaPage. 등록 · 수정 · 시험 통화 창은 기존 부품을 그대로 씀
 import { usePersonaPage, type PersonaItem } from '@/features/persona/hooks/usePersonaPage'
@@ -59,8 +59,6 @@ export function PersonasPage() {
               <p className="flex flex-1 items-center justify-center text-[14px] text-ops-sub">
                 불러오는 중…
               </p>
-            ) : vm.compare ? (
-              <Compare vm={vm} />
             ) : (
               <Prompt vm={vm} />
             )}
@@ -221,11 +219,6 @@ function Prompt({ vm }: { vm: Vm }) {
           <Btn kind="plainBadge" onClick={vm.startTestCall}>
             시험 통화
           </Btn>
-          {p.past && (
-            <Btn kind="plainBadge" onClick={vm.startCompare}>
-              현재 버전과 비교
-            </Btn>
-          )}
           {p.reuse && (
             <Btn
               kind="editBadge"
@@ -254,61 +247,31 @@ function Prompt({ vm }: { vm: Vm }) {
             ) : (
               <h3 className="mb-2 text-[18px] font-bold">{s.title}</h3>
             )}
-            <Markdown text={s.text} className="pl-4 text-[14px] leading-6" />
-          </section>
-        ))}
-      </div>
-    </article>
-  )
-}
-
-function Compare({ vm }: { vm: Vm }) {
-  const c = vm.compare!
-  return (
-    <article className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-ops-line bg-white">
-      <header className="flex flex-wrap items-center gap-3 border-b border-ops-line px-5 py-3 text-[13px]">
-        <span className="font-bold">
-          {c.base} ({c.baseTag})에서 {c.target} ({c.targetTag})로
-        </span>
-        <span className="text-ops-stop">빠진 줄 {c.removed}</span>
-        <span className="text-ops-done">더한 줄 {c.added}</span>
-        <Btn kind="plainBadge" className="ml-auto" onClick={vm.closeCompare}>
-          비교 닫기
-        </Btn>
-      </header>
-      <div className="min-h-0 flex-1 [scrollbar-width:thin] overflow-y-auto py-2 text-[14px] leading-6">
-        {c.sections.map((s) => (
-          <section key={s.key} className="mb-4 last:mb-0">
-            {s.group && <h3 className="px-4 pt-2 text-[15px] font-bold">{s.group}</h3>}
-            <h4 className="flex items-baseline gap-2 px-4 py-1.5 font-bold">
-              {s.title}
-              {/* 안 바뀐 칸은 줄을 다 펼치지 않음 — 바뀐 칸만 눈에 띄게 */}
-              {!s.changed && (
-                <span className="text-[12px] font-normal text-ops-faint">변경 없음</span>
-              )}
-            </h4>
-            {s.changed && (
-              <ol>
+            {s.rows ? (
+              // 현재 버전 기준: 빠진 말 = 파란 취소선, 더해진 말 = 파란 강조. 같은 문단에 이어 붙임 (줄 단위라 마크다운은 풀지 않음)
+              <div className="pl-4 text-[14px] leading-6">
                 {s.rows.map((r) => (
-                  <li
-                    key={r.key}
-                    className={`grid grid-cols-[40px_40px_20px_1fr] px-2 ${r.kind === 'del' ? 'bg-ops-stop-soft' : r.kind === 'add' ? 'bg-ops-done-soft' : ''}`}
-                  >
-                    <span className="text-right text-[12px] text-ops-faint tabular-nums">
-                      {r.from ?? ''}
-                    </span>
-                    <span className="text-right text-[12px] text-ops-faint tabular-nums">
-                      {r.to ?? ''}
-                    </span>
-                    <span
-                      className={`text-center ${r.kind === 'del' ? 'text-ops-stop' : 'text-ops-done'}`}
-                    >
-                      {r.kind === 'del' ? '−' : r.kind === 'add' ? '+' : ''}
-                    </span>
-                    <span className="pr-4 whitespace-pre-wrap">{r.text || ' '}</span>
-                  </li>
+                  <p key={r.key} className="whitespace-pre-wrap">
+                    {r.parts.map((x, i) =>
+                      x.kind === 'del' ? (
+                        <del key={i} className="decoration-ops-route">
+                          <span className="sr-only">빠진 말: </span>
+                          {x.text}
+                        </del>
+                      ) : x.kind === 'add' ? (
+                        <ins key={i} className="bg-ops-route-soft text-ops-route no-underline">
+                          <span className="sr-only">더한 말: </span>
+                          {x.text}
+                        </ins>
+                      ) : (
+                        x.text || ' '
+                      ),
+                    )}
+                  </p>
                 ))}
-              </ol>
+              </div>
+            ) : (
+              <Markdown text={s.text} className="pl-4 text-[14px] leading-6" />
             )}
           </section>
         ))}

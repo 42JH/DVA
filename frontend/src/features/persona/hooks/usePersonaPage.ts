@@ -12,7 +12,7 @@ import {
 } from '@/features/persona/labels'
 import type { TestCallTarget } from '@/features/persona/hooks/useTestCall'
 import type { EditTarget } from '@/features/persona/hooks/usePromptEditor'
-import { lineDiff } from '@/features/persona/hooks/lineDiff'
+import { inlineDiff, type Part } from '@/features/persona/hooks/lineDiff'
 import { useVoiceOptions } from '@/features/persona/hooks/useVoiceOptions'
 import {
   ConfirmError,
@@ -54,34 +54,18 @@ interface PromptView {
   time: string
   author: string
   badges: Badge[]
-  sections: { key: PromptKey; group: string | null; sub: boolean; title: string; text: string }[]
-  canEdit: boolean // [프롬프트 수정] — 현재 버전을 볼 때만
-  past: boolean // 기록에서 고른 지난 버전 → [현재 버전과 비교] · [이 버전 다시 쓰기]
-  reuse: { disabled: boolean; hint: string | undefined } | null // [이 버전 다시 쓰기] — 관리자가 지난 버전을 볼 때만
-}
-
-/** 가운데 '현재 버전과 비교' 카드 — 고른 지난 버전 → 현재 버전, 칸별 줄 비교 */
-interface CompareView {
-  base: string // '어제 오후 2:50'
-  baseTag: string // '이 버전'
-  target: string // '오늘 오후 3:07'
-  targetTag: string // '현재 버전'
-  removed: number // '빠진 줄 2' — 여섯 칸 합
-  added: number
   sections: {
     key: PromptKey
     group: string | null
     sub: boolean
     title: string
-    changed: boolean
-    rows: {
-      key: string
-      kind: 'same' | 'del' | 'add'
-      from: number | null
-      to: number | null
-      text: string
-    }[]
+    text: string
+    // 버전 기록에서 볼 때만(가장 오래된 버전 빼고) — 바로 직전 버전 기준 비교. 한 문단 안에 del(이 버전에서 빠진 말) · add(이 버전에서 더해진 말)가 이어 붙음
+    rows: { key: string; parts: Part[] }[] | null
   }[]
+  canEdit: boolean // [프롬프트 수정] — 현재 버전을 볼 때만
+  past: boolean // 기록에서 고른 지난 버전 → 현재 버전 기준 차이 표시 · [이 버전 다시 쓰기]
+  reuse: { disabled: boolean; hint: string | undefined } | null // [이 버전 다시 쓰기] — 관리자가 지난 버전을 볼 때만
 }
 
 /** [통화에 사용하기] · [이 버전 다시 쓰기] 확인 창 */
@@ -100,14 +84,13 @@ const conflictText =
 
 /** 07 AI 상담가 훅 (11/11 — 저장 = 새 버전, [적용] 없음)
  * 가운데 = 고른 상담가의 현재 버전(확정된 최신). 오른쪽 위 탭 [버전 히스토리] → 오른쪽이 고른 상담가의 버전 기록, 고른 버전이 가운데
- * 지난 버전: 보기 · 현재 버전과 비교 · [이 버전 다시 쓰기](그 내용을 새 버전으로 저장)
+ * 지난 버전: 현재 버전 기준 차이 표시 · [이 버전 다시 쓰기](그 내용을 새 버전으로 저장)
  * 통화 상담가 바꾸기 · 새 버전 반영은 [통화에 사용하기]로만. 시험 통화는 따로 (안 해도 사용 가능, 11/11 사용자) */
 export function usePersonaPage() {
   const [personaSeq, setPersonaSeq] = useState<number | null>(null) // null = 통화에 사용 중인 상담가
   const [historyOpen, setHistoryOpen] = useState(false) // 오른쪽 = 버전 기록
   const [version, setVersion] = useState<number | null>(null) // 기록에서 고른 버전 (null = 현재 버전)
   const [editing, setEditing] = useState(false) // 수정 화면
-  const [comparing, setComparing] = useState(false)
   const [testing, setTesting] = useState<number | null>(null) // 시험 통화 중인 버전
   const [confirming, setConfirming] = useState<Confirming>(null)
   const [adding, setAdding] = useState(false)
@@ -188,7 +171,6 @@ export function usePersonaPage() {
       setConfirming(null)
       if (c.kind === 'reuse') {
         setVersion(null) // 새로 생긴 현재 버전을 보여 줌
-        setComparing(false)
       }
     },
     onError: (e) => {
@@ -196,28 +178,19 @@ export function usePersonaPage() {
     },
   })
 
-  const compare = (): CompareView | null => {
-    if (!comparing || !past || !viewing || !head) return null
-    // 칸마다 따로 비교 — 한 칸의 줄이 다른 칸 줄과 짝지어지지 않게 (11/10 칸별 비교)
+  // 칸마다 따로 비교 — 한 칸의 줄이 다른 칸 줄과 짝지어지지 않게. 바로 직전 버전 → 고른 버전 (11/11 문서 비교처럼 한 화면에)
+  // all은 높은 번호가 위 → 처음 만나는 더 낮은 번호가 바로 직전 버전. 남은 초안은 기록이 아님
+  const promptSections = (v: PersonaVersion) => {
+    const before = historyOpen ? all.find((x) => !x.isDraft && x.version < v.version) : undefined
     const sections = PROMPT_SECTIONS.map((s) => {
-      const rows = lineDiff(viewing.prompt[s.key].split('\n'), head.prompt[s.key].split('\n'))
-      return {
-        ...s,
-        changed: rows.some((r) => r.kind !== 'same'),
-        rows: rows.map((r, i) => ({ ...r, key: String(i) })),
+      let rows: { key: string; parts: Part[] }[] | null = null
+      if (before) {
+        const d = inlineDiff(before.prompt[s.key].split('\n'), v.prompt[s.key].split('\n'))
+        rows = d.blocks.map((parts, i) => ({ key: String(i), parts }))
       }
+      return { ...s, text: v.prompt[s.key], rows }
     })
-    const count = (kind: 'del' | 'add') =>
-      sections.reduce((n, s) => n + s.rows.filter((r) => r.kind === kind).length, 0)
-    return {
-      base: fmtVersionTime(viewing.savedAt),
-      baseTag: '이 버전',
-      target: fmtVersionTime(head.savedAt),
-      targetTag: VERSION_BADGE.head.label,
-      removed: count('del'),
-      added: count('add'),
-      sections,
-    }
+    return { sections }
   }
 
   // [수정]은 늘 맨 위에서 시작 — 남은 초안이 있으면 그 내용, 없으면 현재 버전 (11/02 결정)
@@ -233,6 +206,8 @@ export function usePersonaPage() {
           saveTo: persona.head.version + 1,
         }
       : null
+
+  const diff = viewing ? promptSections(viewing) : null
 
   const testingVersion = all.find((v) => v.version === testing) ?? null
   const testCall: TestCallTarget | null =
@@ -276,7 +251,6 @@ export function usePersonaPage() {
   })()
 
   const startEdit = () => {
-    setComparing(false)
     setVersion(null)
     setEditing(true)
   }
@@ -294,7 +268,7 @@ export function usePersonaPage() {
             time: fmtVersionTime(viewing.savedAt),
             author: viewing.author,
             badges: badges(viewing),
-            sections: PROMPT_SECTIONS.map((s) => ({ ...s, text: viewing.prompt[s.key] })),
+            sections: diff!.sections,
             canEdit: canManage && !past,
             past,
             reuse:
@@ -306,9 +280,6 @@ export function usePersonaPage() {
                 : null,
           } satisfies PromptView)
         : null,
-    compare: compare(),
-    startCompare: () => setComparing(true),
-    closeCompare: () => setComparing(false),
 
     // 버전 기록 (오른쪽 위 탭)
     historyOpen,
@@ -325,17 +296,14 @@ export function usePersonaPage() {
       })),
     openHistory: () => {
       setVersion(null)
-      setComparing(false)
       setHistoryOpen(true)
     },
     closeHistory: () => {
       setHistoryOpen(false)
       setVersion(null)
-      setComparing(false)
     },
     selectVersion: (v: number) => {
       setVersion(v)
-      setComparing(false) // 비교는 고른 버전 ↔ 현재 버전뿐
     },
 
     // 확인 창 — [통화에 사용하기] · [이 버전 다시 쓰기]
@@ -411,7 +379,6 @@ export function usePersonaPage() {
     selectPersona: (seq: number) => {
       setPersonaSeq(seq)
       setVersion(null)
-      setComparing(false)
     },
   }
 }
