@@ -18,6 +18,18 @@ spec.loader.exec_module(images)
 
 
 class CiImageTests(unittest.TestCase):
+    def test_order_fault_checks_restore_dependencies_before_later_workers(self):
+        driver = (PATH.parent / 'verify-order.py').read_text()
+        checkpoints = [
+            "label='delivery-outage'", "label='delivery-outage-recovered'",
+            "label='consultation-outage'", "label='consultation-outage-recovered'",
+            "label=side+'-billing-controlled-stop'",
+        ]
+        positions = [driver.index(marker) for marker in checkpoints]
+        self.assertEqual(positions, sorted(positions))
+        self.assertIn("wait_app('delivery', 3003)", driver[positions[1]:positions[2]])
+        self.assertIn("wait_app('consultation', 3004)", driver[positions[3]:positions[4]])
+
     def test_git_fixture_failures_include_the_original_stderr(self):
         with tempfile.TemporaryDirectory() as directory:
             fixture = GitFixture()
