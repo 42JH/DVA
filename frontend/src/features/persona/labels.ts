@@ -1,13 +1,7 @@
 // 페르소나 코드 → 화면 문구 (컨벤션 6.3: 코드는 api/, 문구는 labels.ts)
 import { ApiError } from '@/shared/api/client'
 import type { Tone } from '@/shared/ui'
-import {
-  PROMPT_KEYS,
-  type PromptFields,
-  type PromptKey,
-  type Speed,
-  type WaitTime,
-} from './api/personaApi'
+import { PROMPT_KEYS, type PromptFields, type PromptKey } from './api/personaApi'
 
 // 프롬프트 칸 제목 — 서버가 합친 글(persona-prompt.ts)과 같은 말. 사용자가 못 고치는 글 (11/10)
 export const PROMPT_LABEL: Record<PromptKey, string> = {
@@ -36,18 +30,6 @@ export function emptyPromptNotice(p: PromptFields): string | null {
   return empty.length ? `${empty.join(' · ')} 칸이 비어 있습니다` : null
 }
 
-export const SPEED_LABEL: Record<Speed, string> = {
-  SLOW: '속도 느리게',
-  NORMAL: '속도 보통',
-  FAST: '속도 빠르게',
-}
-
-export const WAIT_LABEL: Record<WaitTime, string> = {
-  SHORT: '기다리기 짧게',
-  NORMAL: '기다리기 보통',
-  LONG: '기다리기 길게',
-}
-
 // 버전 표시 (11/11 — 저장 = 새 버전, [적용] 없음): 확정된 최신 = 현재 버전, 통화에 쓰는 버전 · AI 확인을 기다리는 버전
 export const VERSION_BADGE = {
   head: { label: '현재 버전', tone: 'idle' },
@@ -55,15 +37,7 @@ export const VERSION_BADGE = {
   PENDING: { label: '적용 대기', tone: 'wait' }, // AI가 확인하면 통화에 사용 중 (그동안 이전 버전이 계속 쓰임)
 } satisfies Record<string, { label: string; tone: Tone }>
 
-export const DRAFT_TAG = '작성 중' // 수정 화면에서 저장하기 전 ('v8 · 작성 중')
-
-// 음성 세부 조절 칩 (와이어프레임 07_음성세부조절 순서 그대로)
-export const SPEED_CHOICE: Record<Speed, string> = {
-  SLOW: '느리게',
-  NORMAL: '보통',
-  FAST: '빠르게',
-}
-export const WAIT_CHOICE: Record<WaitTime, string> = { SHORT: '짧게', NORMAL: '보통', LONG: '길게' }
+export const DRAFT_TAG = '작성 중' // 수정 화면에서 저장하기 전
 
 export const DEFAULT_VOICE_LABEL = '기본 음성' // 서버 voiceId null (목소리 '' )
 

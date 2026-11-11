@@ -123,11 +123,7 @@ function PersonaCard({ p, vm }: { p: PersonaItem; vm: Vm }) {
           {p.inUse && <Badge tone="done">통화에 사용 중</Badge>}
           {p.applying && <Badge tone="wait">{p.applying}</Badge>}
         </span>
-        {p.lines.map((l) => (
-          <span key={l} className="mt-1 block text-[13px] text-ops-sub">
-            {l}
-          </span>
-        ))}
+        <span className="mt-1 block text-[13px] text-ops-sub">{p.voice}</span>
         {p.note && <span className="mt-1 block text-[13px] text-ops-wait">{p.note}</span>}
       </button>
       <div className="absolute top-3 right-3">

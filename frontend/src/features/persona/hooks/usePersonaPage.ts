@@ -7,11 +7,8 @@ import type { Tone } from '@/shared/ui'
 import {
   DEFAULT_VOICE_LABEL,
   PROMPT_SECTIONS,
-  SPEED_CHOICE,
-  SPEED_LABEL,
   unsupportedText,
   VERSION_BADGE,
-  WAIT_LABEL,
 } from '@/features/persona/labels'
 import type { TestCallTarget } from '@/features/persona/hooks/useTestCall'
 import type { EditTarget } from '@/features/persona/hooks/usePromptEditor'
@@ -35,7 +32,7 @@ export interface PersonaItem {
   selected: boolean
   inUse: boolean // '통화에 사용 중' 태그
   applying: string | null // '적용 대기' — 통화에 쓰려고 AI 확인을 기다리는 중
-  lines: string[] // 'marin · 속도 보통' · '기다리기 보통'
+  voice: string // 'marin' — 음성 이름만
   note: string | null // '통화엔 이전 버전 사용 중' — 사용 중인 상담가에 더 새 버전이 있을 때
   useLabel: string | null // [통화에 사용하기] · [새 버전 통화에 사용하기] 문구. null = 버튼 없음
 }
@@ -46,7 +43,7 @@ type Badge = { label: string; tone: Tone }
 export interface HistoryRow {
   version: number
   time: string // '오늘 오후 3:07'
-  voice: string // 'marin · 속도 보통 · 기다리기 보통' — 그 버전에 쓰인 음성 (11/11)
+  voice: string // 'marin' — 그 버전에 쓰인 음성 이름 (11/11)
   author: string // 모르면 ''
   badges: Badge[] // 현재 버전 · 통화에 사용 중 · 적용 대기
   selected: boolean
@@ -247,7 +244,6 @@ export function usePersonaPage() {
             persona.name,
             fmtVersionTime(testingVersion.savedAt),
             voiceName(testingVersion.voice.voice),
-            SPEED_CHOICE[testingVersion.voice.speed],
           ].join(' · '),
         }
       : null
@@ -322,11 +318,7 @@ export function usePersonaPage() {
       .map((v): HistoryRow => ({
         version: v.version,
         time: fmtVersionTime(v.savedAt),
-        voice: [
-          voiceName(v.voice.voice),
-          SPEED_LABEL[v.voice.speed],
-          WAIT_LABEL[v.voice.waitTime],
-        ].join(' · '),
+        voice: voiceName(v.voice.voice),
         author: v.author,
         badges: badges(v),
         selected: v === viewing,
@@ -405,10 +397,7 @@ export function usePersonaPage() {
         applying: p.applyingVersion
           ? `${VERSION_BADGE.PENDING.label}${p.applyError ? ' · AI 반영 오류' : ''}`
           : null,
-        lines: [
-          `${voiceName(p.voice.voice)} · ${SPEED_LABEL[p.voice.speed]}`,
-          WAIT_LABEL[p.voice.waitTime],
-        ],
+        voice: voiceName(p.voice.voice),
         note: newer ? '통화엔 이전 버전 사용 중' : null,
         useLabel:
           !canManage || p.applyingVersion
