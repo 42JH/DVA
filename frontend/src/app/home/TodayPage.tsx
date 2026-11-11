@@ -96,8 +96,12 @@ export function TodayPage() {
           <section aria-label="AI 상담 성능">
             <div className="mb-2 flex items-baseline justify-between">
               <h2 className="text-[14px] font-bold">AI 상담 성능</h2>
-              <Link to="/stats" className="text-[13px] font-medium text-ops-route hover:underline">
-                그래프로 보기
+              {/* 다른 카드의 [전체 보기]와 같은 말 · 모양 (11/11 버튼 검수 — 통계 화면으로 가는데 '그래프로 보기'였음) */}
+              <Link
+                to="/stats"
+                className="flex items-center gap-0.5 text-[12px] font-medium text-ops-sub hover:text-ops-ink"
+              >
+                전체 보기
               </Link>
             </div>
             <dl className="grid grid-cols-4 divide-x divide-ops-line rounded-lg border border-ops-line bg-white max-xl:grid-cols-2 max-xl:divide-x-0">
