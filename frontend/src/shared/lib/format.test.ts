@@ -26,6 +26,9 @@ assert.equal(fmtClock(3903), '1:05:03')
 assert.equal(fmtPhone('01066382047'), '010-6638-2047')
 assert.equal(fmtPhone('0312345678'), '031-234-5678') // 10자리
 assert.equal(fmtPhone('1588'), '1588') // 모르는 길이는 그대로
+assert.equal(fmtPhone('021234567'), '02-123-4567') // 서울 9자리
+assert.equal(fmtPhone('0212345678'), '02-1234-5678') // 서울 10자리
+assert.equal(fmtPhone('07012345678'), '070-1234-5678')
 
 // 연도 규칙: 올해면 한 줄, 작년 포함 다른 해면 날짜 · 시각 두 줄
 const now = new Date('2026-10-20T15:00:00+09:00')
