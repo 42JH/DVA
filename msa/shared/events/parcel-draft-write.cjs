@@ -1,4 +1,5 @@
 'use strict';
+const {validateCustomerPreparationOutcome}=require('./order-customer-write.cjs');
 const { validateCompletion,validateFinalization,validatePolicy } = require('./order-intake-write.cjs');
 const { validateEvent } = require('./index.cjs');
 const { privateAddress } = require('./call-event-reference.cjs');
@@ -138,6 +139,10 @@ function validateWriteReference(event) {
   const v = p.input;
   let valid = false;
   switch (p.operation) {
+    case 'CustomerPreparationOutcomeRead':
+      valid=event.source==='customer' && keys(v,'writeEventId');
+      if(valid)validateReadScope(v.writeEventId);
+      break;
     case 'RecipientPinsPrepared':
       valid=event.source==='order'&&keys(v,'customerSeq,id')&&id(v.id)&&id(v.customerSeq);
       break;
@@ -184,6 +189,7 @@ function validateWriteReference(event) {
 
 function validateReferenceResult(value, event) {
   const op = event.payload.operation, input = event.payload.input;
+  if(op==='CustomerPreparationOutcomeRead'){validateCustomerPreparationOutcome(value);if(value.status==='COMMITTED'&&value.customerCreationReceipt.payload.writeEventId!==input.writeEventId)throw new Error('Customer outcome scope mismatch');return;}
   if(op==='RecipientPinsPrepared'){validateRecipientPins(value);return;}
   if(op==='OrderRecipientsRead'){validateRecipientAddresses(value);return;}
   if(op==='RecipientReceiptRead'){validateRecipientReceipt(value);if(value.eventId!==input.eventId)throw new Error('Recipient receipt mismatch');return;}
@@ -269,7 +275,7 @@ function requestDraftWrite(url, token, event) {
 }
 function requestWriteReference(url, token, event, scopeId) {
   validateWriteReference(event);
-  if (!['PendingCallWritesRead','IntakeFinalizationRead','RecipientReceiptRead'].includes(event.payload.operation) && scopeId === undefined)
+  if (!['PendingCallWritesRead','IntakeFinalizationRead','RecipientReceiptRead','CustomerPreparationOutcomeRead'].includes(event.payload.operation) && scopeId === undefined)
     throw new Error('A draft write scope is required');
   return exchange(url,token,event,scopeId,value=>validateReferenceResult(value,event));
 }

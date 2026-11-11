@@ -1,3 +1,8 @@
+import {
+  ORDER_CREATION_LOCK,
+  type CustomerPreparationOutcome,
+  type CustomerCreationReceipt,
+} from '@dva/events/order-customer-write.cjs';
 import { AdminParcelDraftsService } from './admin-parcel-drafts.service';
 import { Headers } from '@nestjs/common';
 import { validateReadScope } from '@dva/events/read-scope.cjs';
@@ -72,7 +77,7 @@ export class ParcelDraftWriteController {
       if (
         !(
           event.source === 'customer'
-            ? ['OrderRecipientsRead', 'RecipientReceiptRead']
+            ? ['OrderRecipientsRead', 'RecipientReceiptRead', 'CustomerPreparationOutcomeRead']
             : event.source === 'consultation'
               ? ['PendingCallWritesRead', 'IntakeFinalizationRead']
               : []
@@ -82,6 +87,12 @@ export class ParcelDraftWriteController {
     } catch {
       throw new HttpException({ error: 'INVALID_DRAFT_REFERENCE' }, 422);
     }
+    if (event.payload.operation === 'CustomerPreparationOutcomeRead')
+      return {
+        eventId: event.eventId,
+        status: 'processed',
+        payload: await this.customerOutcome(String(event.payload.input.writeEventId)),
+      };
     if (event.payload.operation === 'OrderRecipientsRead') {
       try {
         validateReadScope(scopeId);
@@ -119,6 +130,35 @@ export class ParcelDraftWriteController {
     );
     return { eventId: event.eventId, status: 'processed', payload: rows };
   }
+  private customerOutcome(writeEventId: string): Promise<CustomerPreparationOutcome> {
+    return this.database.transaction(async (client) => {
+      const locked = (
+        await client.query<{ locked: boolean }>(
+          'SELECT pg_try_advisory_xact_lock($1,hashtext($2)) AS locked',
+          [ORDER_CREATION_LOCK, writeEventId],
+        )
+      ).rows[0].locked;
+      if (!locked) return { status: 'PENDING' };
+      const row = (
+        await client.query<{
+          result: {
+            customerCreationReceipt?: CustomerCreationReceipt;
+            customerReceipt?: RecipientReceipt | null;
+          };
+        }>(
+          "SELECT payload->'result' AS result FROM inbox_events WHERE event_id=$1 AND source='customer' AND event_type='ParcelDraftWriteRequested'",
+          [writeEventId],
+        )
+      ).rows[0];
+      if (!row?.result?.customerCreationReceipt) return { status: 'ABORTED' };
+      return {
+        status: 'COMMITTED',
+        customerCreationReceipt: row.result.customerCreationReceipt,
+        recipientReceipt: row.result.customerReceipt ?? null,
+      };
+    }, this.database.referencePool);
+  }
+
   private async finalization(id: number): Promise<IntakeFinalization | null> {
     const row = (
       await this.database.pool.query<{ result: IntakeFinalization | null }>(

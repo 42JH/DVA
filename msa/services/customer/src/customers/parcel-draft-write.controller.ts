@@ -1,3 +1,4 @@
+import { OrderCustomerWritesService } from './order-customer-writes.service';
 import { randomUUID } from 'node:crypto';
 import { validateEvent } from '@dva/events';
 import { OrderRecipientPinsService } from './order-recipient-pins.service';
@@ -44,6 +45,7 @@ export class ParcelDraftWriteController {
     private readonly config: ConfigService<Environment, true>,
     private readonly scopes: OrderReferenceScopes,
     private readonly recipientPins: OrderRecipientPinsService,
+    private readonly orderCustomers: OrderCustomerWritesService,
   ) {}
 
   @Post()
@@ -80,6 +82,8 @@ export class ParcelDraftWriteController {
                 },
               },
             );
+            if (payload.customerCreationReceipt)
+              await this.orderCustomers.apply(client, payload.customerCreationReceipt);
             if (payload.customerReceipt)
               await this.recipientPins.apply(client, payload.customerReceipt);
             return { eventId: event.eventId, status: 'processed', payload };
@@ -203,7 +207,17 @@ export class ParcelDraftWriteController {
   async receive(@Body() event: unknown) {
     try {
       validateEvent(event);
-      if (
+      if (event.eventType === 'OrderCustomerCreated') {
+        if (
+          event.source !== 'order' ||
+          Object.keys(event.payload).sort().join(',') !== 'customerSeq,writeEventId' ||
+          !Number.isInteger(event.payload.customerSeq) ||
+          Number(event.payload.customerSeq) < 1 ||
+          Number(event.payload.customerSeq) > 2147483647
+        )
+          throw new Error('Invalid customer creation event');
+        validateReadScope(event.payload.writeEventId);
+      } else if (
         event.source !== 'order' ||
         event.eventType !== 'OrderRecipientPinsWritten' ||
         Object.keys(event.payload).sort().join(',') !== 'orderSeq,writeEventId' ||
@@ -217,6 +231,15 @@ export class ParcelDraftWriteController {
       throw new HttpException({ error: 'INVALID_RECIPIENT_WRITE' }, 422);
     }
     try {
+      if (event.eventType === 'OrderCustomerCreated') {
+        const result = await this.database.transaction((client) =>
+          this.orderCustomers.resolveWrite(client, String(event.payload.writeEventId), {
+            eventId: event.eventId,
+            customerSeq: Number(event.payload.customerSeq),
+          }),
+        );
+        return { eventId: event.eventId, status: result.status };
+      }
       const receipt = await requestWriteReference<RecipientReceipt>(
         this.config.get('ORDER_URL', { infer: true }) + '/internal/parcel-draft-write/reference',
         this.config.get('CUSTOMER_AUTH_TOKEN', { infer: true }),

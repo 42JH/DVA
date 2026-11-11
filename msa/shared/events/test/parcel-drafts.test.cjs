@@ -633,3 +633,118 @@ test('administrator draft submissions bind the draft and separately reserved ord
     global.fetch = saved;
   }
 });
+
+
+test('order customer preparation keeps a stable phone intent and binds the committed owner outcome', async () => {
+  const {
+    customerPreparationId,
+    validateCreatedCustomer,
+    validateCustomerPreparationOutcome,
+  } = require('../order-customer-write.cjs');
+  const { requestWriteReference } = require('../parcel-draft-write.cjs');
+  assert.equal(
+    customerPreparationId('01012345678'),
+    customerPreparationId('01012345678'),
+  );
+  assert.notEqual(
+    customerPreparationId('01012345678'),
+    customerPreparationId('01012345679'),
+  );
+  assert.throws(() => customerPreparationId('010-1234-5678'));
+  const customer = {
+    customerSeq: 3,
+    name: '생성 고객',
+    phoneNumber: '01012345678',
+    status: 'ACTIVE',
+    monthlyBillingEnabled: false,
+    address: null,
+  };
+  validateCreatedCustomer(customer);
+  for (const changed of [
+    { monthlyBillingEnabled: true },
+    { address: {} },
+    { status: 'WITHDRAWN' },
+    { customerSeq: 0 },
+    { phoneNumber: 'invalid' },
+  ])
+    assert.throws(() => validateCreatedCustomer({ ...customer, ...changed }));
+  const writeEventId = randomUUID(),
+    customerCreationReceipt = {
+      eventId: randomUUID(),
+      payload: { writeEventId, customer, adminId: 1, requestId: randomUUID() },
+    };
+  const outcome = {
+    status: 'COMMITTED',
+    customerCreationReceipt,
+    recipientReceipt: null,
+  };
+  validateCustomerPreparationOutcome(outcome);
+  validateCustomerPreparationOutcome({ status: 'PENDING' });
+  validateCustomerPreparationOutcome({ status: 'ABORTED' });
+  assert.throws(() =>
+    validateCustomerPreparationOutcome({
+      status: 'ABORTED',
+      customerCreationReceipt,
+    }),
+  );
+  assert.throws(() =>
+    validateCustomerPreparationOutcome({
+      ...outcome,
+      recipientReceipt: {
+        eventId: randomUUID(),
+        payload: {
+          writeEventId,
+          orderSeq: 5,
+          customerSeq: 4,
+          adminId: 1,
+          requestId: customerCreationReceipt.payload.requestId,
+          pins: [],
+        },
+      },
+    }),
+  );
+  const event = {
+    eventId: randomUUID(),
+    source: 'customer',
+    eventType: 'ParcelDraftWriteReferenceRequested',
+    payload: {
+      operation: 'CustomerPreparationOutcomeRead',
+      input: { writeEventId },
+    },
+  };
+  const saved = global.fetch;
+  let response = outcome;
+  global.fetch = async (_url, options) =>
+    Response.json({
+      eventId: JSON.parse(options.body).eventId,
+      status: 'processed',
+      payload: response,
+    });
+  try {
+    assert.deepEqual(
+      await requestWriteReference('http://order/private', token, event),
+      outcome,
+    );
+    response = {
+      ...outcome,
+      customerCreationReceipt: {
+        ...customerCreationReceipt,
+        payload: {
+          ...customerCreationReceipt.payload,
+          writeEventId: randomUUID(),
+        },
+      },
+    };
+    await assert.rejects(
+      requestWriteReference('http://order/private', token, event),
+    );
+    await assert.rejects(async () =>
+      requestWriteReference('http://order/private', token, {
+        ...event,
+        source: 'order',
+      }),
+    );
+  } finally {
+    global.fetch = saved;
+  }
+});

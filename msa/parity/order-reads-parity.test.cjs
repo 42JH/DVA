@@ -4353,5 +4353,467 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
       );
     },
   );
+
+  await t.test(
+    'order customer preparation preserves identities across owner rollback, pending work and concurrent public writes',
+    async (case48) => {
+      const {
+        DatabaseService: CustomerDatabase,
+      } = require('./customer-runtime/database/database.service');
+      const {
+        AuditService: CustomerAudit,
+      } = require('./customer-runtime/audit/audit.service');
+      const {
+        OrderRecipientPinsService,
+      } = require('./customer-runtime/customers/order-recipient-pins.service');
+      const {
+        OrderCustomerWritesService,
+      } = require('./customer-runtime/customers/order-customer-writes.service');
+      const {
+        CustomersRepository: OriginalCustomers,
+      } = require('./monolith-runtime/customers/customers.repository');
+      const {
+        AuditService: OriginalAudit,
+      } = require('./monolith-runtime/audit/audit.service');
+      const {
+        AuditRepository: OriginalAuditRepository,
+      } = require('./monolith-runtime/audit/audit.repository');
+      const {
+        ORDER_CREATION_LOCK,
+        customerPreparationId,
+      } = require('@dva/events/order-customer-write.cjs');
+      const config = {
+        get: (key) =>
+          ({
+            NODE_ENV: 'test',
+            DB_HOST: 'customer-db',
+            DB_PORT: 5432,
+            DB_USER: 'customer_app',
+            DB_PASSWORD: process.env.PGPASSWORD,
+            DB_NAME: process.env.PGDATABASE,
+            ORDER_URL: 'http://order-app:3002',
+            OPERATIONS_URL: 'http://operations-app:3005',
+            CUSTOMER_AUTH_TOKEN: process.env.CUSTOMER_AUTH_TOKEN,
+          })[key],
+      };
+      const database = new CustomerDatabase(config),
+        audit = new CustomerAudit(database, config),
+        pins = new OrderRecipientPinsService(audit),
+        preparations = new OrderCustomerWritesService(
+          database,
+          config,
+          audit,
+          pins,
+        );
+      const originalRepository = new OriginalCustomers({ pool: reference }),
+        originalAudit = new OriginalAudit(
+          new OriginalAuditRepository({ pool: reference }),
+        );
+      const leases=new Set();
+      async function lease(pool){const client=await pool.connect();leases.add(client);return client;}
+      function release(client){assert.ok(leases.delete(client),'fixture lease must be tracked');client.release();}
+      case48.after(async () => {
+        for(const client of leases){try{await client.query('ROLLBACK');}finally{client.release();}}
+        leases.clear();
+        await preparations.onModuleDestroy();
+        await audit.onModuleDestroy();
+        await database.onModuleDestroy();
+      });
+      for (const db of [reference, databases.customer])
+        await db.query(
+          "SELECT setval(pg_get_serial_sequence('customers','customer_seq'),400000,true)",
+        );
+      const requestIds = [],
+        headers = {
+          'Content-Type': 'application/json',
+          Cookie: 'dva_session=' + tokens[0],
+          Origin: 'http://localhost:5173',
+        };
+      const address = {
+        roadAddress: '고객 도로',
+        jibunAddress: '고객 지번',
+        detailAddress: '101호',
+        dongName: '동',
+        postalCode: '12345',
+      };
+      async function originalInsert(input, requestId, commit = true) {
+        const client = await reference.connect();
+        try {
+          await client.query('BEGIN');
+          const row = await originalRepository.insertForOrder(client, input);
+          assert.ok(row);
+          await originalAudit.recordSuccess(
+            {
+              actorId: 1,
+              actorType: 'ADMIN',
+              action: 'CUSTOMER_CREATED',
+              targetType: 'CUSTOMER',
+              targetId: row.customerSeq,
+              requestId,
+            },
+            client,
+          );
+          await client.query(commit ? 'COMMIT' : 'ROLLBACK');
+          return row;
+        } catch (error) {
+          await client.query('ROLLBACK');
+          throw error;
+        } finally {
+          client.release();
+        }
+      }
+      async function rolledBackPreparation(input, requestId, writeEventId) {
+        let result;
+        const lost = new Error('test-only lost customer owner acknowledgement');
+        await assert.rejects(
+          database.transaction(async (client) => {
+            result = await preparations.prepare(
+              client,
+              { customer: input },
+              1,
+              requestId,
+              writeEventId,
+            );
+            throw lost;
+          }),
+          (error) => error === lost,
+        );
+        assert.ok(result.created);
+        return result.created;
+      }
+      async function ownerStart() {
+        const client = await lease(databases.order),
+          writeEventId = randomUUID();
+        await client.query('BEGIN');
+        await client.query('SELECT pg_advisory_xact_lock($1,hashtext($2))', [
+          ORDER_CREATION_LOCK,
+          writeEventId,
+        ]);
+        return { client, writeEventId };
+      }
+      const receipt = (customer, writeEventId, requestId) => ({
+        eventId: randomUUID(),
+        payload: { writeEventId, customer, adminId: 1, requestId },
+      });
+      async function commitOwner(owner, customerCreationReceipt) {
+        await owner.client.query(
+          "INSERT INTO inbox_events(event_id,source,event_type,payload) VALUES($1,'customer','ParcelDraftWriteRequested',$2)",
+          [
+            owner.writeEventId,
+            { result: { customerCreationReceipt, customerReceipt: null } },
+          ],
+        );
+        await owner.client.query('COMMIT');
+        release(owner.client);
+      }
+      async function duplicate(input, requestId, status) {
+        requestIds.push(requestId);
+        const responses = [];
+        for (const base of [
+          'http://monolith-app:3000',
+          'http://customer-app:3001',
+        ]) {
+          const response = await fetch(base + '/api/customers', {
+              method: 'POST',
+              headers: { ...headers, 'X-Request-Id': requestId },
+              body: JSON.stringify({ ...input, address }),
+            }),
+            body = await response.json();
+          assert.equal(
+            response.status,
+            status,
+            base + ' ' + JSON.stringify(body),
+          );
+          responses.push(
+            require('./final-parity.cjs').envelope(body, requestId),
+          );
+        }
+        assert.deepEqual(responses[1], responses[0]);
+        return responses[0].data;
+      }
+      const first = { name: '확정 준비 고객', phoneNumber: '01090909001' },
+        firstRequest = randomUUID();
+      requestIds.push(firstRequest);
+      const firstSource = await originalInsert(first, firstRequest),
+        firstOwner = await ownerStart(),
+        firstCreated = await rolledBackPreparation(
+          first,
+          firstRequest,
+          firstOwner.writeEventId,
+        );
+      assert.equal(firstCreated.customerSeq, firstSource.customerSeq);
+      assert.equal(
+        (
+          await databases.customer.query(
+            'SELECT 1 FROM customers WHERE customer_seq=$1',
+            [firstCreated.customerSeq],
+          )
+        ).rowCount,
+        0,
+      );
+      const firstReceipt = receipt(
+        firstCreated,
+        firstOwner.writeEventId,
+        firstRequest,
+      );
+      await commitOwner(firstOwner, firstReceipt);
+      const event = {
+        eventId: firstReceipt.eventId,
+        source: 'order',
+        eventType: 'OrderCustomerCreated',
+        payload: {
+          writeEventId: firstOwner.writeEventId,
+          customerSeq: firstCreated.customerSeq,
+        },
+      };
+      const eventUrl =
+        'http://customer-app:3001/internal/call-read-references/parcel-draft-write/events';
+      const forged = await fetch(eventUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN,
+        },
+        body: JSON.stringify({
+          ...event,
+          payload: {
+            ...event.payload,
+            customerSeq: firstCreated.customerSeq + 1,
+          },
+        }),
+      });
+      assert.equal(forged.status, 409);
+      await forged.body.cancel();
+      for (let n = 0; n < 2; n++) {
+        const response = await fetch(eventUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN,
+          },
+          body: JSON.stringify(event),
+        });
+        assert.equal(response.status, 200);
+        assert.ok(
+          ['processed', 'duplicate'].includes((await response.json()).status),
+        );
+      }
+      await duplicate(first, randomUUID(), 409);
+      assert.equal(
+        (
+          await databases.customer.query(
+            "SELECT 1 FROM outbox_events WHERE event_id=$1 AND event_type='OrderCustomerPreparationRequested'",
+            [customerPreparationId(first.phoneNumber)],
+          )
+        ).rowCount,
+        0,
+      );
+      const aborted = { name: '취소 준비 고객', phoneNumber: '01090909002' },
+        abortedRequest = randomUUID();
+      requestIds.push(abortedRequest);
+      const abortedSource = await originalInsert(
+          aborted,
+          abortedRequest,
+          false,
+        ),
+        abortedOwner = await ownerStart(),
+        abortedCreated = await rolledBackPreparation(
+          aborted,
+          abortedRequest,
+          abortedOwner.writeEventId,
+        );
+      assert.equal(abortedCreated.customerSeq, abortedSource.customerSeq);
+      await abortedOwner.client.query('ROLLBACK');
+      release(abortedOwner.client);
+      const running = preparations.run();
+      assert.equal(preparations.run(), running);
+      await running;
+      const replacement = await duplicate(aborted, randomUUID(), 201);
+      assert.ok(replacement.customerSeq > abortedCreated.customerSeq);
+      const pending = { name: '대기 준비 고객', phoneNumber: '01090909003' },
+        pendingRequest = randomUUID();
+      requestIds.push(pendingRequest);
+      const sourceClient = await lease(reference);
+      await sourceClient.query('BEGIN');
+      const sourcePending = await originalRepository.insertForOrder(
+        sourceClient,
+        pending,
+      );
+      await originalAudit.recordSuccess(
+        {
+          actorId: 1,
+          actorType: 'ADMIN',
+          action: 'CUSTOMER_CREATED',
+          targetType: 'CUSTOMER',
+          targetId: sourcePending.customerSeq,
+          requestId: pendingRequest,
+        },
+        sourceClient,
+      );
+      const pendingOwner = await ownerStart(),
+        pendingCreated = await rolledBackPreparation(
+          pending,
+          pendingRequest,
+          pendingOwner.writeEventId,
+        );
+      assert.equal(pendingCreated.customerSeq, sourcePending.customerSeq);
+      const concurrentRequest = randomUUID();
+      requestIds.push(concurrentRequest);
+      const responses = [
+        'http://monolith-app:3000',
+        'http://customer-app:3001',
+      ].map((base) =>
+        fetch(base + '/api/customers', {
+          method: 'POST',
+          headers: { ...headers, 'X-Request-Id': concurrentRequest },
+          body: JSON.stringify({ ...pending, address }),
+        }),
+      );
+      let settled = false;
+      void Promise.all(responses).then(() => {
+        settled = true;
+      });
+      await pause(150);
+      assert.equal(
+        settled,
+        false,
+        'a pending owner must not lose its phone identity',
+      );
+      await sourceClient.query('COMMIT');
+      release(sourceClient);
+      const pendingReceipt = receipt(
+        pendingCreated,
+        pendingOwner.writeEventId,
+        pendingRequest,
+      );
+      await commitOwner(pendingOwner, pendingReceipt);
+      const bodies = [];
+      for (const responsePromise of responses) {
+        const response = await responsePromise;
+        assert.equal(response.status, 409);
+        bodies.push(
+          require('./final-parity.cjs').envelope(
+            await response.json(),
+            concurrentRequest,
+          ),
+        );
+      }
+      assert.deepEqual(bodies[1], bodies[0]);
+      await preparations.run();
+      for (let n = 0; n < 80; n++) {
+        if (
+          (
+            await databases.customer.query(
+              'SELECT 1 FROM customers WHERE customer_seq=$1',
+              [pendingCreated.customerSeq],
+            )
+          ).rowCount
+        )
+          break;
+        await pause(25);
+      }
+      const snapshot = async (db) =>
+        (
+          await db.query(
+            'SELECT to_jsonb(c) data FROM customers c WHERE customer_seq>400000 ORDER BY customer_seq',
+          )
+        ).rows;
+      assert.deepEqual(
+        await snapshot(databases.customer),
+        await snapshot(reference),
+      );
+      assert.equal((await snapshot(reference)).length, 3);
+      const logs = async (db) =>
+        (
+          await db.query(
+            'SELECT request_id,action,result,target_type,target_seq,actor_type,actor_seq,metadata FROM audit_logs WHERE request_id=ANY($1::uuid[]) ORDER BY request_id,audit_log_seq',
+            [requestIds],
+          )
+        ).rows;
+      const sourceLogs = await logs(reference);
+      for (let n = 0; n < 100; n++) {
+        if ((await logs(databases.operations)).length === sourceLogs.length)
+          break;
+        await pause(25);
+      }
+      assert.deepEqual(await logs(databases.operations), sourceLogs);
+      const tableLock = await lease(databases.order),
+        blocked = [];
+      try {
+        await tableLock.query('BEGIN');
+        await tableLock.query(
+          'LOCK TABLE outbox_events IN ACCESS EXCLUSIVE MODE',
+        );
+        for (let n = 0; n < 5; n++)
+          blocked.push(
+            fetch(
+              'http://order-app:3002/internal/parcel-draft-write/reference',
+              {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN,
+                },
+                body: JSON.stringify({
+                  eventId: randomUUID(),
+                  source: 'consultation',
+                  eventType: 'ParcelDraftWriteReferenceRequested',
+                  payload: {
+                    operation: 'PendingCallWritesRead',
+                    input: { id: 2140000000 },
+                  },
+                }),
+              },
+            ),
+          );
+        for (let n = 0; n < 60; n++) {
+          const count = (
+            await databases.order.query(
+              "SELECT count(*)::int n FROM pg_stat_activity WHERE datname=current_database() AND usename='order_app' AND wait_event_type='Lock' AND query LIKE '%outbox_events%' AND query NOT LIKE '%pg_stat_activity%'",
+            )
+          ).rows[0].n;
+          if (count === 5) break;
+          assert.ok(n < 59, 'five main-pool operations must block; observed '+count);
+          await pause(20);
+        }
+        const start = Date.now(),
+          response = await fetch(
+            'http://order-app:3002/internal/parcel-draft-write/reference',
+            {
+              method: 'POST',
+              signal: AbortSignal.timeout(1800),
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN,
+              },
+              body: JSON.stringify({
+                eventId: randomUUID(),
+                source: 'customer',
+                eventType: 'ParcelDraftWriteReferenceRequested',
+                payload: {
+                  operation: 'CustomerPreparationOutcomeRead',
+                  input: { writeEventId: randomUUID() },
+                },
+              }),
+            },
+          );
+        assert.equal(response.status, 200);
+        assert.deepEqual((await response.json()).payload, {
+          status: 'ABORTED',
+        });
+        assert.ok(Date.now() - start < 1800);
+      } finally {
+        await tableLock.query('ROLLBACK');
+        release(tableLock);
+        for (const response of await Promise.all(blocked)) {
+          assert.equal(response.status, 200);
+          await response.body.cancel();
+        }
+      }
+      t.diagnostic(
+        'customer preparation preserves source rows and audits through committed/aborted/pending owner outcomes, duplicate events, competing public creation and five saturated order connections',
+      );
+    },
+  );
   console.log('Compared HTTP requests: '+compared);
 });

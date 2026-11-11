@@ -25,7 +25,7 @@ describe('Customer read API (e2e)', () => {
   beforeAll(async () => {
     const module = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(DatabaseService)
-      .useValue({ pool })
+      .useValue({ pool, referencePool: pool })
       .overrideProvider(AuthService)
       .useValue(auth)
       .overrideProvider(AuditService)

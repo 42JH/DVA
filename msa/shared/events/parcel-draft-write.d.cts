@@ -1,3 +1,4 @@
+import type {CustomerCreationReceipt} from './order-customer-write.cjs';
 import type {RecipientReceipt} from './order-recipient-pins.cjs';
 import type { Event } from './index.cjs';
 
@@ -38,6 +39,7 @@ export interface DraftWriteResult {
   data: Record<string, unknown>;
   receipt: OwnerCallWriteReceipt | null;
   customerReceipt?: RecipientReceipt | null;
+  customerCreationReceipt?:CustomerCreationReceipt|null;
 }
 export interface DraftWriteEvent extends Event {
   source: 'order' | 'consultation' | 'customer';
@@ -55,7 +57,7 @@ export interface WriteReferenceEvent extends Event {
   source: 'order' | 'customer' | 'consultation';
   eventType: 'ParcelDraftWriteReferenceRequested';
   payload: {
-    operation: 'RecipientPinsPrepared' | 'OrderRecipientsRead' | 'RecipientReceiptRead' | 'OrderCustomerRead' | 'CallOrderLinked' | 'IntakeCallRead' | 'IntakeCallSealed' | 'IntakeFinalizationRead' | 'CustomerPaymentPolicyRead' | 'CustomerRead' | 'CustomerPhoneRead' | 'PinChecked' | 'CallRead' |
+    operation: 'CustomerPreparationOutcomeRead' | 'RecipientPinsPrepared' | 'OrderRecipientsRead' | 'RecipientReceiptRead' | 'OrderCustomerRead' | 'CallOrderLinked' | 'IntakeCallRead' | 'IntakeCallSealed' | 'IntakeFinalizationRead' | 'CustomerPaymentPolicyRead' | 'CustomerRead' | 'CustomerPhoneRead' | 'PinChecked' | 'CallRead' |
       'CallBumped' | 'CallCustomerResolved' | 'PendingCallWritesRead';
     input: Record<string, unknown>;
   };

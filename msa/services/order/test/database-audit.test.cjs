@@ -4,7 +4,7 @@ const assert=require('node:assert/strict');
 const {DatabaseService}=require('../dist/database/database.service');
 async function fixture(mode){
   const values={DB_HOST:'unused',DB_PORT:5432,DB_USER:'unused',DB_PASSWORD:'unused',DB_NAME:'unused'};
-  const db=new DatabaseService({get:key=>values[key]});await db.pool.end();
+  const db=new DatabaseService({get:key=>values[key]});assert.equal(db.pool.options.max,5);assert.equal(db.referencePool.options.max,1);await Promise.all([db.pool.end(),db.referencePool.end()]);
   const events=[];let released=false;
   const client={query:async sql=>{events.push(sql);if(mode==='lost-commit'&&sql==='COMMIT')throw Error('connection lost');},release:()=>{released=true;events.push('release');}};
   db.pool={connect:async()=>client};
