@@ -1,3 +1,4 @@
+import { preparedQuery } from '../database/prepared-query';
 import { Injectable } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import { readPage } from '../common/pagination-query';
@@ -79,8 +80,10 @@ export class ParcelDraftsRepository {
   async draft(client: PoolClient, id: number, update = false) {
     const row = (
       await client.query<ParcelDraftRow>(
-        `SELECT ${columns} FROM order_parcel_drafts d WHERE draft_seq=$1 AND ${available}${update ? ' FOR UPDATE OF d' : ''}`,
-        [id],
+        preparedQuery(
+          `SELECT ${columns} FROM order_parcel_drafts d WHERE draft_seq=$1 AND ${available}${update ? ' FOR UPDATE OF d' : ''}`,
+          [id],
+        ),
       )
     ).rows[0];
     if (
@@ -88,8 +91,10 @@ export class ParcelDraftsRepository {
       row &&
       !(
         await client.query(
-          `SELECT 1 FROM order_parcel_drafts d WHERE draft_seq=$1 AND ${available.replaceAll('transaction_timestamp()', 'clock_timestamp()')}`,
-          [id],
+          preparedQuery(
+            `SELECT 1 FROM order_parcel_drafts d WHERE draft_seq=$1 AND ${available.replaceAll('transaction_timestamp()', 'clock_timestamp()')}`,
+            [id],
+          ),
         )
       ).rowCount
     )

@@ -294,3 +294,59 @@ test('retention erases every exact object version and delete marker and propagat
   denied = true;
   await assert.rejects(storage.erase(key), /recording_version_delete_failed/);
 });
+
+test('recording allocation threshold preserves every byte and rejects incomplete or overflowing declarations', async (t) => {
+  const { Readable } = require('node:stream');
+  const { createHash } = require('node:crypto');
+  const audio = Buffer.alloc(8 * 1048576 + 37, Buffer.from([0, 1, 127, 250, 255]));
+  const storage = new RecordingStorage(config());
+  t.after(() => storage.onApplicationShutdown());
+  let active,
+    uploads = 0;
+  t.mock.method(https, 'get', (_url, _options, callback) => {
+    const item = active,
+      request = new EventEmitter();
+    queueMicrotask(() => {
+      const response = Readable.from(item.chunks);
+      response.statusCode = 200;
+      response.headers = { 'content-type': 'audio/wav', 'content-length': String(item.length) };
+      callback(response);
+    });
+    return request;
+  });
+  t.mock.method(storage.s3, 'send', async (command) => {
+    if (command.constructor.name === 'HeadObjectCommand')
+      throw { $metadata: { httpStatusCode: 404 } };
+    uploads++;
+    assert.deepEqual(command.input.Body, active.body);
+    assert.equal(command.input.ContentLength, active.body.length);
+    assert.equal(
+      command.input.ChecksumSHA256,
+      createHash('sha256').update(active.body).digest('base64'),
+    );
+    return {};
+  });
+  for (const length of [8 * 1048576 - 1, 8 * 1048576, audio.length]) {
+    const body = audio.subarray(0, length);
+    active = {
+      length,
+      body,
+      chunks: [
+        body.subarray(0, 1),
+        body.subarray(1, 65536),
+        body.subarray(65536, 65553),
+        body.subarray(65553),
+      ],
+    };
+    await storage.save('threshold-' + length, 1, source);
+  }
+  assert.equal(uploads, 3);
+  for (const item of [
+    { length: audio.length, chunks: [audio.subarray(0, 13)] },
+    { length: 8 * 1048576, chunks: [audio] },
+  ]) {
+    active = item;
+    await assert.rejects(storage.save('invalid-' + item.length, 1, source));
+  }
+  assert.equal(uploads, 3);
+});

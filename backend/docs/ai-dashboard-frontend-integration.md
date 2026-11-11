@@ -185,7 +185,7 @@ async function loadDashboard(customerType, signal) {
 
 한 통화의 같은 유형 근거가 여러 개면 1건이다. 다른 유형 2개면 각 1건이므로 typeTotalCount는 complaintCallCount보다 클 수 있다. 상단은 불편 **통화** 비율, 도넛은 유형별 통화 수 합계 안의 구성비다.
 
-기존 `REPEATED_QUESTION`, `SPEAKING_TOO_FAST`, `RECOGNITION_FAILURE`, `AI_REFUSAL`은 새 여섯 유형으로 변환하지 않는다. 과거 유형도 상단 통화율에 포함하고 `legacyTypeCallCount`를 `기존 분류 N통화` 등 별도 안내로 표시할 수 있다. 화면 유형과 과거 유형을 함께 가진 통화도 있으므로 이 수를 typeTotalCount에 더해 도넛을 재계산하지 않는다.
+기존 `REPEATED_QUESTION`, `SPEAKING_TOO_FAST`, `RECOGNITION_FAILURE`, `AI_REFUSAL`은 새 여섯 유형으로 변환하지 않는다. 과거 유형은 AI 품질 통화율에서 제외하고 `legacyTypeCallCount`를 `기존 분류 N통화` 등 별도 안내로 표시할 수 있다. 화면 유형과 과거 유형을 함께 가진 통화도 있으므로 이 수를 typeTotalCount에 더해 도넛을 재계산하지 않는다.
 
 RAG 응답·미답변 사유 API를 이 카드에 사용하지 않는다. 기존 통화 목록·상세의 `analysis.complaints[].type`도 새 5개 코드가 추가되며 응답 구조는 동일하다. 상세 화면의 라벨/타입 정의에는 [AI 명세의 전체 10개 코드](ai-dashboard-ai-integration.md#불편-표현-유형)를 반영한다.
 
@@ -236,3 +236,9 @@ RAG 응답·미답변 사유 API를 이 카드에 사용하지 않는다. 기존
 새 업무 DELETE API는 추가하지 않는다. 기존 통화 soft delete 즉시 네 조회에서 제외하며, 최초 수신부터 5년 실제 폐기 시 분석과 새 지표를 함께 제거한다. AI가 두 지표를 보내지 않은 과거 통화에 기본 지표를 생성하지 않는다.
 
 배포 순서는 050 적용 → 새 BE 실행 → AI 전송·프론트 호출 연결이다. 현재/직전 활성 버전 관계는 BE가 저장하며 과거 성공 감사로 확인할 수 있는 경우만 보완한다. 확인 불가능한 과거는 previous=null로 시작한다. 프론트 소스·실제 운영 배포와 화면 확인은 이번 백엔드 작업과 별도다.
+
+### 통화 판정 책임과 참고 표시
+
+통화 목록·상세의 analysis.complaints는 target·level·referenceOnly를 제공한다. DISSATISFACTION_EXPRESSION의 target은 ai_service·price_policy·delivery_other, level은 explicit·mild다. 기존 판정의 미상 값과 다른 유형의 target·level은 null이다. UNSUPPORTED_ANSWER는 referenceOnly=true로 근거 검토 목록에 표시한다.
+
+complaint-calls의 complaintCallCount와 complaintRatePercent에는 AI 응대 오류 4유형과 ai_service 대상 불만이 있는 통화만 포함한다. types의 UNSUPPORTED_ANSWER 행은 호환을 위해 유지하며 callCount=0, sharePercent=null, referenceOnly=true다. typeTotalCount는 AI 품질 대상 유형의 통화 수 합계이며 같은 통화의 같은 유형을 한 번 센다. 정책·배송·미상 불만은 통화 상세에서 계속 확인한다.

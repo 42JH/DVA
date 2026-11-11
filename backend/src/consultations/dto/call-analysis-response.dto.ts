@@ -1,6 +1,22 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { CallComplaintDto } from '../../call-insights/dto/create-call-analysis.dto';
 
+export class CallComplaintViewDto extends CallComplaintDto {
+  @ApiProperty({
+    type: String,
+    enum: ['ai_service', 'price_policy', 'delivery_other'],
+    nullable: true,
+    description: '고객 불만의 책임 대상. 기존 판정의 미상 대상은 null.',
+  })
+  target!: string | null;
+
+  @ApiProperty({ type: String, enum: ['explicit', 'mild'], nullable: true })
+  level!: string | null;
+
+  @ApiProperty({ description: '근거 없는 답변은 참고 표시이며 AI 품질 비율에서 제외.' })
+  referenceOnly!: boolean;
+}
+
 export class CallAnalysisDto {
   @ApiProperty({
     type: Number,
@@ -94,11 +110,11 @@ export class CallAnalysisDto {
   hasComplaint!: boolean | null;
 
   @ApiProperty({
-    type: [CallComplaintDto],
+    type: [CallComplaintViewDto],
     maxItems: 20,
     description: '저장된 불만 근거·정수 초 위치·같은 통화의 발화 순번.',
   })
-  complaints!: CallComplaintDto[];
+  complaints!: CallComplaintViewDto[];
 
   @ApiProperty({
     format: 'date-time',
