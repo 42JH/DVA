@@ -20,6 +20,7 @@ export interface Environment {
   CUSTOMER_AUTH_TOKEN: string;
   CONSULTATION_AUTH_TOKEN: string;
   PBX_WEBHOOK_TOKEN?: string;
+  AI_BUSINESS_TOKEN?: string;
   AI_INSIGHTS_TOKEN?: string;
   CALL_ANALYSIS_OPENAI_API_KEY?: string;
   CALL_ANALYSIS_CONCURRENCY: number;
@@ -84,6 +85,14 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
   if (swagger !== 'true' && swagger !== 'false') errors.push('SWAGGER_ENABLED');
   const token = raw.PBX_WEBHOOK_TOKEN;
   const insightsToken = raw.AI_INSIGHTS_TOKEN;
+  const businessToken = raw.AI_BUSINESS_TOKEN;
+  if (
+    businessToken !== undefined &&
+    businessToken !== '' &&
+    (typeof businessToken !== 'string' ||
+      !/^[\x21-\x7e]{32,256}$/.test(businessToken))
+  )
+    errors.push('AI_BUSINESS_TOKEN');
   const analysisKey = raw.CALL_ANALYSIS_OPENAI_API_KEY;
   if (
     analysisKey !== undefined &&
@@ -145,6 +154,10 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
     DB_USER: required('DB_USER'),
     DB_PASSWORD: required('DB_PASSWORD'),
     DB_NAME: required('DB_NAME'),
+    AI_BUSINESS_TOKEN:
+      typeof businessToken === 'string' && businessToken
+        ? businessToken
+        : undefined,
     AI_INSIGHTS_TOKEN:
       typeof insightsToken === 'string' && insightsToken
         ? insightsToken

@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { Pool, PoolClient } from 'pg';
+import type { IntakeOrderResult } from '@dva/events/order-read.cjs';
 import { readPage } from '../common/pagination-query';
 import {
   AdminOrderListItemDto,
@@ -18,6 +19,18 @@ const paymentRequestJson = `(SELECT jsonb_build_object('paymentRequestId',r.paym
 
 @Injectable()
 export class OrdersRepository {
+  async result(client: Pool | PoolClient, id: number, callId: number) {
+    return (
+      await client.query<IntakeOrderResult>(
+        `SELECT order_seq AS "orderSeq",version,status,total_amount AS "totalAmount",parcel_no AS "parcelNo",$2::int AS "callSessionSeq",
+         payment_due_at AS "paymentDueAt",${paymentRequestJson} AS "paymentRequest"
+         FROM orders o WHERE order_seq=$1 AND o.deleted_at IS NULL
+          AND COALESCE(o.closed_at,o.created_at)>statement_timestamp()-interval '5 years'`,
+        [id, callId],
+      )
+    ).rows[0];
+  }
+
   async paymentDeletionBlocked(client: PoolClient, id: number): Promise<boolean> {
     const requests = await client.query<{ blocked: boolean }>(
       `SELECT ((approval_started_at IS NOT NULL AND completed_at IS NULL AND invalidated_at IS NULL)

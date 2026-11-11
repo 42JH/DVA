@@ -30,8 +30,10 @@ function inventory(root = join(__dirname, '../..')) {
       let route = [controller[1], match[2]].filter(Boolean).join('/');
       if (!['health', 'internal/metrics', 'webhooks/pbx/call-ended'].some(p => route === p || (p === 'health' && route === 'health/ready')))
         route = `api/${route}`;
-      return { method: match[1] === 'Sse' ? 'GET' : match[1].toUpperCase(), path: `/${route}`,
-        service, stream: match[1] === 'Sse', file };
+      const method = match[1] === 'Sse' ? 'GET' : match[1].toUpperCase();
+      // The /api/calls ingress and the intake state both belong to consultation.
+      const owner = method === 'GET' && route === 'api/calls/:id/order-intake' ? 'consultation' : service;
+      return { method, path: `/${route}`, service: owner, stream: match[1] === 'Sse', file };
     });
   });
   const migrations = files(join(root, 'backend/migrations')).filter(path => path.endsWith('.sql'))
