@@ -351,6 +351,15 @@ export const companyHandlers = [
     const o = orgOf(params.id)
     return o ? HttpResponse.json({ data: summary(o) }) : notFound()
   }),
+  // 기업명 · 월결제 바꾸기 (API PATCH /companies/:id)
+  http.patch(`${API_BASE_URL}/companies/:id`, async ({ params, request }) => {
+    const o = orgOf(params.id)
+    if (!o) return notFound()
+    const b = (await request.json()) as { name?: string; monthlyBillingEnabled?: boolean }
+    if (b.name !== undefined) o.name = b.name.trim()
+    if (b.monthlyBillingEnabled !== undefined) o.monthlyBillingEnabled = b.monthlyBillingEnabled
+    return HttpResponse.json({ data: summary(o) })
+  }),
   // 여러 곳 한 번에 — 하나라도 없으면 404, 아무것도 안 지움
   http.delete(`${API_BASE_URL}/companies`, async ({ request }) => {
     const { organizationSeqs: ids } = (await request.json()) as { organizationSeqs: number[] }

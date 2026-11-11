@@ -5,7 +5,12 @@ import { pageCount, pageSlice } from '@/shared/api/paging'
 import { fmtDate } from '@/shared/lib/format'
 import { useListParams } from '@/shared/lib/useListParams'
 import { matchKo } from '@/shared/lib/search'
-import { companyQueries, deleteCompanies, deleteCompany } from '@/features/company/api/companyApi'
+import {
+  companyQueries,
+  deleteCompanies,
+  deleteCompany,
+  renameCompany,
+} from '@/features/company/api/companyApi'
 import { BILLING_LABEL, errorText } from '@/features/company/labels'
 
 const PAGE_SIZE = 10 // 디자인: 한 쪽 10곳
@@ -85,9 +90,15 @@ export function useCompanyList(size = PAGE_SIZE) {
     mutationFn: (id: number) => deleteCompany(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: companyQueries.all() }),
   })
+  // 줄의 [수정] — 기업명 (11/11 사용자)
+  const rename = useMutation({
+    mutationFn: ({ id, name }: { id: number; name: string }) => renameCompany(id, name),
+    onSuccess: () => qc.invalidateQueries({ queryKey: companyQueries.all() }),
+  })
 
   return {
     removeOne,
+    rename,
     q: params.q,
     setQ: (v: string) => set({ q: v }), // 쪽은 1로
     rows,

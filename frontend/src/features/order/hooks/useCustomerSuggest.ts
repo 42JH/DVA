@@ -1,5 +1,6 @@
 // 수기 주문 보내는 분 · 받는 분 추천 (11/09 사용자)
-// 보내는 분 = 전체 고객(이름 일부 · 번호 4자리 이상 일부), 받는 분 = 그 고객의 개인 주소록(이름 · 번호 일부, 칸을 누르면 바로)
+// 보내는 분 = 전체 고객(이름 일부 · 번호 4자리 이상 일부), 받는 분 = 그 고객의 개인 주소록(이름 · 번호 일부, 칸을 누르면 바로) + 전체 고객
+// 받는 분은 같은 회사뿐 아니라 다른 기업 사람일 수 있음 (11/11 사용자 — 기업 공유 주소록은 11/01에 없어짐)
 import { useQuery } from '@tanstack/react-query'
 import { customerQueries, type Address } from '@/shared/customer/customerApi'
 import { useDebounced } from '@/shared/lib/useDebounced'
@@ -26,6 +27,8 @@ export function useCustomerSuggest(
 
   const byName = useQuery(customerQueries.search(senderName))
   const byPhone = useQuery(customerQueries.search(senderPhone))
+  const toByName = useQuery(customerQueries.search(receiverName))
+  const toByPhone = useQuery(customerQueries.search(receiverPhone))
 
   // 받는 분 주소록의 주인: 보내는 분 번호와 똑같은 번호의 고객 (부분 검색 결과 중 정확히 일치) → 없으면 수정 창의 주문 고객
   // 추천에서 보내는 분을 고르면 번호가 채워지니 같은 길로 연결됨
@@ -57,8 +60,15 @@ export function useCustomerSuggest(
           address: p.addressData,
         }))
 
+  // 주소록 먼저, 같은 번호의 고객은 한 번만
+  const both = (mine: Suggestion[], all: Suggestion[]) =>
+    mine.concat(all.filter((c) => !mine.some((p) => p.phoneNumber === c.phoneNumber)))
+
   return {
     sender: { byName: customers(byName.data), byPhone: customers(byPhone.data) },
-    receiver: { byName: pins(pinsByName.data), byPhone: pins(pinsByPhone.data) },
+    receiver: {
+      byName: both(pins(pinsByName.data), customers(toByName.data)),
+      byPhone: both(pins(pinsByPhone.data), customers(toByPhone.data)),
+    },
   }
 }

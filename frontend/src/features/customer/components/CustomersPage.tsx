@@ -125,7 +125,7 @@ function CustomerPanel({ seq, onClose }: { seq: number; onClose: () => void }) {
       <div className="flex h-12 shrink-0 items-center gap-2 border-b border-ops-line px-5">
         <span className="text-[12px] font-medium text-ops-sub">고객 #{seq}</span>
         {v.canEdit && !v.editing && (
-          <Btn kind="ghost" className="ml-auto" onClick={v.startEdit}>
+          <Btn kind="warning" className="ml-auto" onClick={v.startEdit}>
             수정
           </Btn>
         )}
@@ -147,7 +147,7 @@ function CustomerPanel({ seq, onClose }: { seq: number; onClose: () => void }) {
           <>
             <p className="text-[20px] font-bold">{v.c.name}</p>
             <p className="text-[14px] whitespace-nowrap text-ops-sub tabular-nums">{v.c.phone}</p>
-            <dl className="mt-4 grid grid-cols-[72px_1fr] gap-y-2 text-[13px]">
+            <dl className="mt-4 grid grid-cols-[max-content_1fr] gap-x-4 gap-y-2 text-[13px]">
               <dt className="text-ops-sub">기본 주소</dt>
               <dd>{v.c.address || <span className="text-ops-faint">없음</span>}</dd>
               <dt className="text-ops-sub">상세주소</dt>
@@ -157,11 +157,28 @@ function CustomerPanel({ seq, onClose }: { seq: number; onClose: () => void }) {
               {v.c.company && (
                 <>
                   <dt className="text-ops-sub">소속</dt>
-                  <dd>{v.c.company}</dd>
+                  <dd>
+                    {v.c.companySeq ? (
+                      <Link
+                        to={`/companies/${v.c.companySeq}`}
+                        className="text-ops-route underline-offset-2 hover:underline"
+                      >
+                        {v.c.company}
+                      </Link>
+                    ) : (
+                      v.c.company
+                    )}
+                  </dd>
                 </>
               )}
               <dt className="text-ops-sub">결제 방법</dt>
               <dd>{v.c.payments?.join(', ')}</dd>
+              {v.monthly && (
+                <>
+                  <dt className="text-ops-sub">이번 달 월정산</dt>
+                  <dd className="tabular-nums">{v.monthly}</dd>
+                </>
+              )}
               <dt className="text-ops-sub">상태</dt>
               <dd>{v.c.withdrawn ? '탈퇴' : '이용 중'}</dd>
             </dl>

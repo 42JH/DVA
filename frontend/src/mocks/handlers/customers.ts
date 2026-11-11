@@ -161,6 +161,17 @@ export const customerHandlers = [
       ? HttpResponse.json({ data: strip(c) })
       : HttpResponse.json({ error: { code: 'NOT_FOUND' } }, { status: 404 })
   }),
+  // 월결제 누적 (백엔드 GET /customers/{id}/billing — month 생략 = 이번 달). 가짜 금액은 고객 번호로 고정
+  http.get(`${API_BASE_URL}/customers/:id/billing`, ({ params, request }) =>
+    HttpResponse.json({
+      data: {
+        customerSeq: Number(params.id),
+        month:
+          new URL(request.url).searchParams.get('month') ?? new Date().toISOString().slice(0, 7),
+        monthlyAmount: (Number(params.id) % 7) * 12500,
+      },
+    }),
+  ),
   // 고객정보 저장(주문 '고객정보에도 저장' · 사원 주소) — 가짜 고객은 주문에서 만들어서 저장은 받기만 함
   http.patch(`${API_BASE_URL}/customers/:id`, () => new HttpResponse(null, { status: 204 })),
   http.get(`${API_BASE_URL}/customers/:id/pins`, ({ params, request }) => {

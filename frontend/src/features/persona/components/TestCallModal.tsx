@@ -5,7 +5,7 @@ import { useTestCall, type TestCallTarget } from '@/features/persona/hooks/useTe
 
 // 07 시험 통화 창 (와이어프레임 07_페르소나관리_시험통화, 10/31)
 // '시험 통화' + 빨간 '통화 중' · 통화 시간 → 설명 줄 → 대화 줄(AI 파랑 / 나 회색 · 말 · 시각) → 🎙 듣는 중 → [통화 끝내기]
-// 11/10 다른 화면과 같은 창(Modal) · 뱃지 · 버튼, [통화 끝내기]는 되돌릴 수 없는 일이라 빨강 채움(dangerFill) 오른쪽
+// 11/10 다른 화면과 같은 창(Modal) · 뱃지 · 버튼, [통화 끝내기]는 되돌릴 수 없는 일이라 빨강(danger) 오른쪽
 // 닫기(✕ · Esc)도 통화를 끝냄 — 몰래 계속되는 통화가 없게
 export function TestCallModal({
   target,
@@ -36,7 +36,7 @@ export function TestCallModal({
       width={640}
       onClose={vm.end}
       footer={
-        <Btn kind="dangerFill" className="ml-auto" onClick={vm.end}>
+        <Btn kind="danger" className="ml-auto" onClick={vm.end}>
           통화 끝내기
         </Btn>
       }
