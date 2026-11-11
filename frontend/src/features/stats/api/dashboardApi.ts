@@ -5,6 +5,8 @@
 // 개발 중엔 MSW 가짜(mocks/handlers/dashboard.ts)가 같은 모양으로 응답
 import { keepPreviousData, queryOptions } from '@tanstack/react-query'
 import { api, type ApiItem } from '@/shared/api/client'
+import { fetchAll } from '@/shared/api/paging'
+import type { CallListItemDto } from '@/shared/call/callDto'
 
 export type CustomerType = 'ALL' | 'NEW' | 'EXISTING'
 export type Stage =
@@ -16,10 +18,10 @@ export type Stage =
   | 'FAQ_ANSWER'
   | 'ORDER_LOOKUP'
   | 'ORDER_CANCEL'
+// 11/11 백엔드 !476: AI 응대 오류 네 유형 + AI 응대 고객 불만 (근거 없는 답변은 빠짐)
 export type ComplaintType =
   | 'INFORMATION_RECOGNITION_ERROR'
   | 'INTENT_RECOGNITION_ERROR'
-  | 'UNSUPPORTED_ANSWER'
   | 'SLOW_RESPONSE'
   | 'INTERRUPTION'
   | 'DISSATISFACTION_EXPRESSION'
@@ -122,5 +124,13 @@ export const dashboardQueries = {
           })
         ).data,
       placeholderData: keepPreviousData, // 탭을 바꾸는 동안 이전 탭 카드가 흐리게 남음 (깜빡임 없게)
+    }),
+  /** 판정에 불만 · 오류가 있는 통화 전부 — 서버 통계는 AI 응대 오류와 AI 응대 불만을 합친 비율 하나라서(11/11),
+   *  고객 불만(대상별) · AI 응대 오류를 따로 세려고 목록을 받아 화면에서 셈. 통계 API처럼 기간 없이 전체
+   *  ponytail: 최대 2,000통화(FETCH_ALL_MAX) — 넘으면 카드에 '최근 2,000통화 기준'. 서버가 두 집계를 주면 이걸 지움 */
+  complainedCalls: () =>
+    queryOptions({
+      queryKey: ['dashboard', 'complained-calls'],
+      queryFn: ({ signal }) => fetchAll<CallListItemDto>('/calls', { hasComplaint: true }, signal),
     }),
 }

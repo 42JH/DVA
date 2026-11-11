@@ -78,16 +78,34 @@ export function Player({
       ) : (
         <div className="ml-2 flex flex-1 items-center gap-3 text-[12px] text-ops-sub tabular-nums">
           <span className="w-10 text-right">{player.now}</span>
-          <input
-            type="range"
-            min={0}
-            max={1000}
-            value={Math.round(player.progress * 1000)}
-            onChange={(e) => player.scrub(Number(e.target.value) / 1000)}
-            disabled={!canPlay}
-            aria-label="재생 위치"
-            className={`flex-1 ${range}`}
-          />
+          <div className="relative flex flex-1 items-center">
+            <input
+              type="range"
+              min={0}
+              max={1000}
+              value={Math.round(player.progress * 1000)}
+              onChange={(e) => player.scrub(Number(e.target.value) / 1000)}
+              disabled={!canPlay}
+              aria-label="재생 위치"
+              className={`flex-1 ${range}`}
+            />
+            {/* 판정 눈금 — 막대 바로 위. 누르는 자리는 눈금보다 넓게 */}
+            {player.marks?.map((m) => (
+              <button
+                key={m.key}
+                type="button"
+                title={m.title}
+                aria-label={m.title}
+                onClick={m.onClick}
+                style={{ left: `${m.at * 100}%` }}
+                className="absolute -top-4 grid h-3.5 w-3 -translate-x-1/2 place-items-center rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ops-route"
+              >
+                <i
+                  className={`block h-2.5 w-[3px] rounded-full ${m.tone === 'stop' ? 'bg-ops-stop' : 'bg-ops-wait'}`}
+                />
+              </button>
+            ))}
+          </div>
           <span className="w-10">{player.length}</span>
         </div>
       )}

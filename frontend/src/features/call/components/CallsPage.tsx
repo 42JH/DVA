@@ -17,7 +17,7 @@ const COLS = [
   { label: '전화번호', className: 'w-[130px]' },
   { label: '접수 주문', className: 'w-[110px]' },
   { label: '고객 용건', className: '', chips: 'kinds' }, // 폭은 useChipColumns가 칩에 맞춰 정함
-  { label: '불만', className: '', chips: 'complaints' }, // 남는 자리 전부
+  { label: '고객 불만', className: '', chips: 'complaints' }, // 남는 자리 전부
   { label: '통화 시간', className: 'w-[90px] max-[1600px]:hidden' },
 ]
 
@@ -207,11 +207,15 @@ function Row({ r, from, onWarm }: { r: CallsRow; from: string; onWarm: () => voi
       )}
       {cell(
         <span data-chips="complaints" className="flex gap-1 whitespace-nowrap">
-          {r.complaints.map((c) => (
-            <span key={c.key} title={c.title}>
-              <Badge tone="stop">{c.label}</Badge>
-            </span>
-          ))}
+          {r.judging ? (
+            <span className="text-[12px] text-ops-faint">판정 전</span>
+          ) : (
+            r.complaints.map((c) => (
+              <span key={c.key} title={c.title}>
+                <Badge tone="stop">{c.label}</Badge>
+              </span>
+            ))
+          )}
         </span>,
         false,
         'left',

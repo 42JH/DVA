@@ -1,12 +1,13 @@
 // 통화 상세 — 대화 · AI 처리 기록 · 녹취는 기존 useCallDetail 그대로, 요약(상태 · 상담 결과 · 불만 · 처리 결과)은 같은 캐시에서 더 꺼냄
 import { useQuery } from '@tanstack/react-query'
-import { fmtDuration, fmtPhone } from '@/shared/lib/format'
+import { fmtClock, fmtDuration, fmtPhone } from '@/shared/lib/format'
+import { LEVEL_TEXT, splitComplaints, targetLabel } from '@/shared/call/complaints'
 import { dateTime } from '@/shared/lib/when'
 import { callKinds } from '@/shared/lib/kinds'
 import { reasonTag } from '@/shared/lib/unansweredReason'
 import { orderNo } from '@/shared/order/labels'
 import { callQueries } from '@/shared/call/callApi'
-import { toCallDetail } from '@/shared/call/callDto'
+import { toCallDetail, type Complaint } from '@/shared/call/callDto'
 import { COMPLAINT_LABEL } from '@/features/call/labels'
 import { useCallDetail } from './useCallDetail'
 import { callState, memberOf } from '../callState'
@@ -32,6 +33,11 @@ export function useCallView(callId: number) {
     ? toCallDetail(d, transcript.data ?? [], results.data ?? [], actions.data ?? [])
     : null
 
+  const split = splitComplaints(call?.complaints ?? [])
+  const at = (c: Complaint) => ({
+    time: c.offsetSeconds === null ? '' : fmtClock(Math.floor(c.offsetSeconds)),
+    go: () => vm.goComplaint(c),
+  })
   const summary = call && {
     state: callState({ ...d!.call, analysis: d!.analysis }),
     member: memberOf(d!.call),
@@ -43,7 +49,19 @@ export function useCallView(callId: number) {
     persona: call.persona ? `${call.persona.name} v${call.persona.version}` : '',
     kinds: callKinds(call.counts),
     analyzed: call.counts !== null,
-    complaints: call.complaints.map((c) => ({ label: COMPLAINT_LABEL[c.type], reason: c.reason })),
+    // 판정: 고객 불만(대상 · 강도 · 고객이 한 말)과 AI 응대 오류로 나눔 (11/11). 시각을 누르면 그 말로
+    judging: call.counts !== null && call.hasComplaint === null, // 분석 뒤 불만 판정이 아직
+    customer: split.customer.map((c) => ({
+      label: targetLabel(c.target),
+      level: c.level ? LEVEL_TEXT[c.level] : null,
+      quote: c.reason,
+      ...at(c),
+    })),
+    errors: split.errors.map((c) => ({
+      label: COMPLAINT_LABEL[c.type],
+      reason: c.reason,
+      ...at(c),
+    })),
     asks: [
       call.callbackAsked && '콜백 요청',
       call.handoffAsked && '상담원 연결 요구',
