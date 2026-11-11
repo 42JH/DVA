@@ -42,7 +42,9 @@ export class OrderDeletionCheckController {
       event.eventType === 'OrderSubmissionCheckRequested'
         ? 'order_intake_enabled AND (ended_at IS NULL OR order_finalized_at IS NULL)'
         : 'deleted_at IS NULL AND ended_at IS NULL';
-    const { rows } = await this.database.pool.query<{ blocked: boolean }>(
+    const { rows } = await this.database.referencePool.query<{
+      blocked: boolean;
+    }>(
       `SELECT EXISTS(SELECT 1 FROM call_sessions
        WHERE order_seq=$1 AND ${predicate}) AS blocked`,
       [event.payload.orderSeq],

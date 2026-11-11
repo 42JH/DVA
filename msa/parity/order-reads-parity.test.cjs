@@ -2595,6 +2595,77 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
     'intake recovery preserves committed order and mapping after a real owner rollback; duplicate receipt has one original-request audit',
   );
 
+  const batchParcel = { ...multi1.parcel, clientComment: '' };
+  for (const side of intakeSides) {
+    await side.calls.query(
+      'INSERT INTO call_sessions(call_session_seq,provider_call_id,caller_phone_number,customer_seq,incoming_at,registered_at,order_intake_enabled,order_intake_version,started_at,ended_at) ' +
+        "OVERRIDING SYSTEM VALUE SELECT 53100+n,'intake-batch-'||n::text,'01000000006',6,$1,$1,true,2,$1,$1 FROM generate_series(0,19)n",
+      [at],
+    );
+    await side.orders.query(
+      'INSERT INTO order_parcel_drafts(draft_seq,reserved_order_seq,call_session_seq,customer_seq,caller_phone_number,client_parcel_id,creation_payload,parcel_data,status) ' +
+        "OVERRIDING SYSTEM VALUE SELECT 57000+n,58000+n,53100+n,6,'01000000006',gen_random_uuid(),'{}'::jsonb,$1::jsonb,'READY' FROM generate_series(0,19)n",
+      [batchParcel],
+    );
+  }
+  const batchRequests = Array.from({ length: 20 }, () => randomUUID());
+  const batchResults = [];
+  for (const side of intakeSides) {
+    const results = await Promise.all(
+      batchRequests.map(async (requestId, n) => {
+        const response = await fetch(
+          side.base + '/api/calls/' + (53100 + n) + '/order-intake/complete',
+          {
+            method: 'POST',
+            signal: AbortSignal.timeout(60000),
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN,
+              'X-Request-Id': requestId,
+            },
+            body: JSON.stringify({
+              expectedIntakeVersion: 2,
+              paymentMethodType: 'credit',
+            }),
+          },
+        );
+        const body = await response.json();
+        return {
+          id: 53100 + n,
+          httpStatus: response.status,
+          status: body.data?.status,
+          orderSeq: body.data?.orderSeq,
+          orderStatus: body.data?.order?.status,
+          error: body.error?.code,
+        };
+      }),
+    );
+    batchResults.push(results);
+  }
+  for (const results of batchResults)
+    assert.deepEqual(
+      results.map(
+        ({ id, httpStatus, status, orderSeq, orderStatus, error }) => ({
+          id,
+          httpStatus,
+          status,
+          orderSeq,
+          orderStatus,
+          error,
+        }),
+      ),
+      Array.from({ length: 20 }, (_, n) => ({
+        id: 53100 + n,
+        httpStatus: 200,
+        status: 'FINALIZED',
+        orderSeq: 58000 + n,
+        orderStatus: 'ACCEPTED',
+        error: undefined,
+      })),
+    );
+  t.diagnostic(
+    'twenty concurrent completions preserve initial FINALIZED/ACCEPTED responses and distinct reserved orders',
+  );
       t.diagnostic(
         'intake completion HTTP pairs: ' +
           pairs +

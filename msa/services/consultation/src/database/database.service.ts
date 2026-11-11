@@ -18,6 +18,7 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
     clear(client: PoolClient): void;
   };
   readonly pool: Pool;
+  readonly referencePool: Pool;
   readonly transactionStatistics = {
     count: 0,
     failures: 0,
@@ -27,7 +28,7 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
   };
 
   constructor(config: ConfigService<Environment, true>) {
-    this.pool = new Pool({
+    const options = {
       host: config.get('DB_HOST', { infer: true }),
       port: config.get('DB_PORT', { infer: true }),
       user: config.get('DB_USER', { infer: true }),
@@ -37,13 +38,17 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
       query_timeout: 5000,
       options: '-c statement_timeout=5000',
       max: 5,
-    });
+    };
+    this.pool = new Pool(options);
+    // Owner callbacks must progress while business transactions await another service.
+    this.referencePool = new Pool({ ...options, max: 1 });
     // An idle connection error must not crash the process or log query parameters.
-    this.pool.on('error', () =>
-      new Logger(DatabaseService.name).error({
-        event: 'database_connection_unavailable',
-      }),
-    );
+    for (const pool of [this.pool, this.referencePool])
+      pool.on('error', () =>
+        new Logger(DatabaseService.name).error({
+          event: 'database_connection_unavailable',
+        }),
+      );
   }
 
   async onModuleInit(): Promise<void> {
@@ -135,6 +140,6 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleDestroy(): Promise<void> {
-    await this.pool.end();
+    await Promise.all([this.pool.end(), this.referencePool.end()]);
   }
 }
