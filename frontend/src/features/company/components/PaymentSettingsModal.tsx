@@ -1,8 +1,8 @@
-// [결제 설정] 창 — 개인 카드(고정) · 월결제 · 그룹 카드(부서 골라서 하나씩). 누르는 즉시 저장, 확인 창 없음 (11/11)
+// [결제 설정] 창 — 월결제 · 그룹 카드(부서 골라서 하나씩). 누르는 즉시 저장, 확인 창 없음 (11/11)
 import type { ReactNode } from 'react'
 import { usePaymentForm } from '@/features/company/hooks/usePaymentForm'
 import { BILLING_LABEL } from '@/features/company/labels'
-import { Badge, Btn, SelectField } from '@/shared/ui'
+import { Btn, SelectField } from '@/shared/ui'
 import { Choice, Err } from '@/shared/ui/Field'
 import { Modal } from '@/shared/ui/Modal'
 import { SkeletonRows } from '@/shared/ui/ListFrame'
@@ -39,16 +39,8 @@ export function PaymentSettingsModal({ id, onClose }: { id: number; onClose: () 
         </Btn>
       }
     >
-      <p className="mb-4 text-[13px] text-ops-sub">누르면 바로 저장됩니다.</p>
       {/* fieldset disabled — 저장 중엔 창 안 모든 버튼을 한 번에 잠금 */}
       <fieldset disabled={vm.locked} className="flex flex-col gap-4">
-        <Section title="개인 카드">
-          <span className="flex items-center gap-2 text-[13px] text-ops-sub">
-            <Badge tone="done">항상 사용</Badge>
-            모든 사원이 쓸 수 있어 끌 수 없습니다.
-          </span>
-        </Section>
-
         <Section title="월결제">
           {vm.monthlyEnabled !== undefined && (
             <div className="flex items-end gap-2">
