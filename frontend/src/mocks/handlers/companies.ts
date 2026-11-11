@@ -538,12 +538,16 @@ export const companyHandlers = [
     return noContent()
   }),
   // 부서 삭제 — 백엔드와 같게 그 부서 사원의 소속도 해제
-  http.delete(`${API_BASE_URL}/departments/:seq`, ({ params }) => {
-    const i = depts.findIndex((x) => x.departmentSeq === Number(params.seq))
-    if (i < 0) return notFound()
-    depts.splice(i, 1)
-    for (let k = members.length - 1; k >= 0; k--)
-      if (members[k].membership.departmentSeq === Number(params.seq)) members.splice(k, 1)
+  // 배열 하나 = 한 트랜잭션: 하나라도 없으면 아무것도 안 지움
+  http.delete(`${API_BASE_URL}/departments`, async ({ request }) => {
+    const ids = ((await request.json()) as { departmentSeqs: number[] }).departmentSeqs
+    if (ids.some((id) => !depts.some((x) => x.departmentSeq === id))) return notFound()
+    for (let k = depts.length - 1; k >= 0; k--)
+      if (ids.includes(depts[k].departmentSeq)) depts.splice(k, 1)
+    for (let k = members.length - 1; k >= 0; k--) {
+      const d = members[k].membership.departmentSeq
+      if (d !== null && ids.includes(d)) members.splice(k, 1)
+    }
     return noContent()
   }),
   http.patch(`${API_BASE_URL}/members/:seq`, async ({ params, request }) => {
@@ -552,10 +556,11 @@ export const companyHandlers = [
     m.membership.role = ((await request.json()) as { role: Member['membership']['role'] }).role
     return noContent()
   }),
-  http.delete(`${API_BASE_URL}/members/:seq`, ({ params }) => {
-    const i = members.findIndex((x) => x.membership.membershipSeq === Number(params.seq))
-    if (i < 0) return notFound()
-    members.splice(i, 1)
+  http.delete(`${API_BASE_URL}/members`, async ({ request }) => {
+    const ids = ((await request.json()) as { membershipSeqs: number[] }).membershipSeqs
+    if (ids.some((id) => !members.some((x) => x.membership.membershipSeq === id))) return notFound()
+    for (let k = members.length - 1; k >= 0; k--)
+      if (ids.includes(members[k].membership.membershipSeq)) members.splice(k, 1)
     return noContent()
   }),
 ]

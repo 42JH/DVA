@@ -4,7 +4,8 @@ import { queryOptions } from '@tanstack/react-query'
 import { ApiError, api, type ApiItem } from '@/shared/api/client'
 import { clearSession } from '@/shared/auth/session'
 
-export type AdminRole = 'OPERATOR' | 'SUPERVISOR' | 'SYSTEM_ADMIN'
+// 11/11 백엔드 권한 이분화: SUPERVISOR 없앰(기존 계정은 OPERATOR로 이관). SYSTEM_ADMIN 전용은 관리자 계정 관리뿐
+export type AdminRole = 'OPERATOR' | 'SYSTEM_ADMIN'
 
 interface AdminMe {
   adminUserSeq: number

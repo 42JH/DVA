@@ -37,7 +37,8 @@ export const draftList = (q: { q?: string; limit: number; offset: number }, sign
     signal,
   })
 
-export const deleteDraft = (draftSeq: number) => api.delete(`/parcel-drafts/${draftSeq}`)
+export const deleteDraft = (draftSeq: number) =>
+  api.delete('/parcel-drafts', { body: { draftSeqs: [draftSeq] } })
 
 const METHOD = { PERSONAL_CARD: 'billing', MONTHLY: 'credit', GROUP_CARD: 'groupBilling' } as const
 

@@ -3,24 +3,24 @@ import { API_BASE_URL } from '@/shared/api/client'
 
 // 가짜 로그인 (가짜 전용) — 연동 상세명세 10/31 API-01~04 모양. 역할 · 승인 상태별로 화면을 확인하려고 넷, 비밀번호는 모두 test1234
 // pending · inactive는 명세대로 로그인이 거절됨(401) — 승인 대기 화면은 가입 직후에만 보임
-// admin = 최고 관리자(SYSTEM_ADMIN) · manager = 일반 관리자(SUPERVISOR) · pending = 승인 대기 · inactive = 비활성화
+// admin = 최고 관리자(SYSTEM_ADMIN) · manager = 일반 관리자(OPERATOR, 11/11 SUPERVISOR 없앰) · pending = 승인 대기 · inactive = 비활성화
 // 가입(AUTH-06)하면 여기에 PENDING으로 붙음(비밀번호 = 가입할 때 넣은 값) — 새로고침하면 사라짐
 const ACCOUNTS: {
   adminUserSeq: number
   loginId: string
   name: string
-  role: 'OPERATOR' | 'SUPERVISOR' | 'SYSTEM_ADMIN'
+  role: 'OPERATOR' | 'SYSTEM_ADMIN'
   status: 'ACTIVE' | 'PENDING' | 'INACTIVE'
 }[] = [
   { adminUserSeq: 1, loginId: 'admin', name: '김관리', role: 'SYSTEM_ADMIN', status: 'ACTIVE' },
-  { adminUserSeq: 2, loginId: 'manager', name: '이매니', role: 'SUPERVISOR', status: 'ACTIVE' },
+  { adminUserSeq: 2, loginId: 'manager', name: '이매니', role: 'OPERATOR', status: 'ACTIVE' },
   { adminUserSeq: 3, loginId: 'pending', name: '박대기', role: 'OPERATOR', status: 'PENDING' },
   { adminUserSeq: 4, loginId: 'inactive', name: '최비활', role: 'OPERATOR', status: 'INACTIVE' },
   // 관리자 화면(10)에 줄이 차도록 더 둠 — 비밀번호는 모두 test1234
   { adminUserSeq: 5, loginId: 'ops01', name: '정운영', role: 'OPERATOR', status: 'ACTIVE' },
   { adminUserSeq: 6, loginId: 'ops02', name: '한상담', role: 'OPERATOR', status: 'ACTIVE' },
   { adminUserSeq: 7, loginId: 'ops03', name: '오지원', role: 'OPERATOR', status: 'ACTIVE' },
-  { adminUserSeq: 8, loginId: 'lead01', name: '강팀장', role: 'SUPERVISOR', status: 'ACTIVE' },
+  { adminUserSeq: 8, loginId: 'lead01', name: '강팀장', role: 'OPERATOR', status: 'ACTIVE' },
   { adminUserSeq: 9, loginId: 'ops04', name: '윤미래', role: 'OPERATOR', status: 'ACTIVE' },
   { adminUserSeq: 10, loginId: 'newbie1', name: '서신입', role: 'OPERATOR', status: 'PENDING' },
   { adminUserSeq: 11, loginId: 'newbie2', name: '임가입', role: 'OPERATOR', status: 'PENDING' },
@@ -100,12 +100,14 @@ export const adminHandlers = [
     a.status = ((await request.json()) as { status: 'ACTIVE' | 'INACTIVE' }).status
     return noContent()
   }),
-  http.delete(`${API_BASE_URL}/admins/:id`, ({ params }) => {
-    const i = ACCOUNTS.findIndex((a) => a.adminUserSeq === Number(params.id))
-    if (i < 0) return fail(404, 'NOT_FOUND', '관리자가 없습니다.')
-    if (ACCOUNTS[i].role === 'SYSTEM_ADMIN')
+  // 배열 하나 = 한 트랜잭션: 전부 검사한 뒤에만 지움 (하나라도 실패하면 아무것도 안 지움)
+  http.delete(`${API_BASE_URL}/admins`, async ({ request }) => {
+    const ids = ((await request.json()) as { adminUserSeqs: number[] }).adminUserSeqs
+    const targets = ids.map((id) => ACCOUNTS.find((a) => a.adminUserSeq === id))
+    if (targets.some((a) => !a)) return fail(404, 'NOT_FOUND', '관리자가 없습니다.')
+    if (targets.some((a) => a?.role === 'SYSTEM_ADMIN'))
       return fail(403, 'FORBIDDEN', '최고 관리자는 지울 수 없습니다.')
-    ACCOUNTS.splice(i, 1)
+    for (const a of targets) ACCOUNTS.splice(ACCOUNTS.indexOf(a!), 1)
     return noContent()
   }),
 ]

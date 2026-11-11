@@ -66,7 +66,7 @@ async function fetchUnanswered(signal?: AbortSignal): Promise<UnansweredQuestion
 
 /** API-28 — FAQ로 풀 필요 없는 질문(조회 · 요청 · 잡음 · 중복) 삭제. 204 (이미 지웠어도 204, FAQ로 바꾼 질문은 409) */
 export const deleteUnanswered = (id: number): Promise<void> =>
-  api.delete(`/unanswered-questions/${id}`)
+  api.delete('/unanswered-questions', { body: { unansweredQuestionSeqs: [id] } })
 
 /** API-27 — [FAQ 추가]: FAQ 만들기 + 처리됨(REGISTERED)을 서버가 한 번에. POST /faqs를 따로 부르지 않음. 204 */
 export const convertToFaq = (id: number, input: FaqInput): Promise<void> =>
