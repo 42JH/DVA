@@ -1,4 +1,6 @@
 export interface PaymentEnvironment {
+  TOSS_BILLING_SECRET_KEY?: string;
+  PAYMENT_CARD_ENCRYPTION_KEY?: string;
   ORDER_PAYMENTS_ENABLED: boolean;
   PAYMENT_PUBLIC_URL: string;
   PAYMENT_TOSS_BASE_URL: string;
@@ -14,6 +16,18 @@ export function paymentEnvironment(
   const flag = raw.ORDER_PAYMENTS_ENABLED ?? 'false';
   if (flag !== 'true' && flag !== 'false') errors.push('ORDER_PAYMENTS_ENABLED');
   const enabled = flag === 'true';
+  const billingSecret = raw.TOSS_BILLING_SECRET_KEY;
+  const cardEncryption = raw.PAYMENT_CARD_ENCRYPTION_KEY;
+  if (
+    billingSecret &&
+    (typeof billingSecret !== 'string' || !/^(?:test|live)_sk_[A-Za-z0-9_-]+$/.test(billingSecret))
+  )
+    errors.push('TOSS_BILLING_SECRET_KEY');
+  if (
+    cardEncryption &&
+    (typeof cardEncryption !== 'string' || !/^[a-fA-F0-9]{64}$/.test(cardEncryption))
+  )
+    errors.push('PAYMENT_CARD_ENCRYPTION_KEY');
   const local = raw.NODE_ENV === 'test';
   const url = (key: string, fallback: string, publicPage = false) => {
     const value = String(raw[key] || fallback);
@@ -65,6 +79,10 @@ export function paymentEnvironment(
     return typeof value === 'string' && value ? value : undefined;
   };
   return {
+    TOSS_BILLING_SECRET_KEY:
+      typeof billingSecret === 'string' && billingSecret ? billingSecret : undefined,
+    PAYMENT_CARD_ENCRYPTION_KEY:
+      typeof cardEncryption === 'string' && cardEncryption ? cardEncryption : undefined,
     ORDER_PAYMENTS_ENABLED: enabled,
     PAYMENT_PUBLIC_URL: url('PAYMENT_PUBLIC_URL', '', true),
     PAYMENT_TOSS_BASE_URL: url('PAYMENT_TOSS_BASE_URL', 'https://api.tosspayments.com'),

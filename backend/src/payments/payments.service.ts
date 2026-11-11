@@ -1,3 +1,4 @@
+import { OrderCardPaymentsService } from '../orders/order-card-payments.service';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Environment } from '../config/environment';
@@ -7,6 +8,7 @@ import { isZonedDate } from '../orders/order-draft';
 import { PaymentsRepository } from './payments.repository';
 import { PaymentClient } from './payment.client';
 import { paymentCompletionMessage, paymentMessage } from './payment-message';
+import { PaymentCardsService } from './payment-cards.service';
 
 @Injectable()
 export class PaymentsService {
@@ -16,6 +18,8 @@ export class PaymentsService {
     private readonly repository: PaymentsRepository,
     private readonly client: PaymentClient,
     private readonly orders: OrderPaymentsService,
+    private readonly cards: PaymentCardsService,
+    private readonly cardPayments: OrderCardPaymentsService,
   ) {}
   ensureEnabled() {
     if (!this.config.get('ORDER_PAYMENTS_ENABLED', { infer: true }))
@@ -45,8 +49,16 @@ export class PaymentsService {
   }
   async reconcile(id: string, requestId: string) {
     const view = await this.read(id);
+    if (view.autoCharge) return this.processCard(id, requestId);
     return this.process(id, view.amount, undefined, requestId);
   }
+
+  async processCard(id: string, requestId: string) {
+    this.ensureEnabled();
+    await this.cardPayments.process(id, requestId);
+    return this.repository.read(id);
+  }
+
   private async process(id: string, amount: number, key: string | undefined, requestId: string) {
     const claim = await this.orders.claimApproval(id, amount, key);
     if (claim.done) return this.repository.read(id);
@@ -108,6 +120,10 @@ export class PaymentsService {
     );
     await this.orders.finishNotification(id, result);
     return true;
+  }
+
+  async revokeDeletedCard(requestId: string) {
+    return this.cards.revokeDeleted(requestId);
   }
   async retryNotification(id: string, adminId: number, requestId: string) {
     this.ensureEnabled();

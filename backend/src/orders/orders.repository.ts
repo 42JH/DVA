@@ -14,7 +14,7 @@ import { ParcelChangeDto, UpdateOrderDto, UpdatedOrderDto } from './dto/update-o
 import { ORDER_ADDRESS_FIELDS, OrderDraft } from './order-draft';
 import { OrderCreationSource, OrderStatus } from './orders.types';
 import { ParcelDraftsRepository } from './parcel-drafts.repository';
-const paymentRequestJson = `(SELECT jsonb_build_object('paymentRequestId',r.payment_request_id,'amount',r.amount,'expiresAt',r.expires_at,'notificationStatus',r.notification_status)
+const paymentRequestJson = `(SELECT jsonb_build_object('paymentRequestId',r.payment_request_id,'amount',r.amount,'expiresAt',r.expires_at,'notificationStatus',r.notification_status,'autoCharge',r.payment_card_seq IS NOT NULL,'cardPaymentFailed',r.card_payment_failed)
  FROM order_payment_requests r WHERE r.order_seq=o.order_seq AND r.invalidated_at IS NULL AND r.completed_at IS NULL AND r.expires_at>clock_timestamp())`;
 import {
   OrderAddressHistoryQueryDto,

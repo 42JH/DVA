@@ -31,7 +31,7 @@ Table organizations {
   organization_seq integer [pk, increment, not null, note: '행의 고유 기본키']
   name text [not null, note: '이름 또는 표시명']
   status text [not null, note: '업무 상태']
-  monthly_billing_enabled boolean [not null, default: false, note: '해당 기업 전체의 월결제 사용 여부']
+  monthly_billing_enabled boolean [not null, default: true, note: '063: 기업 월결제 기본 허용. 기존 비활성 값은 보존']
   created_at timestamptz [default: `CURRENT_TIMESTAMP`, note: '033: 등록 시각. 과거 생성 감사 근거가 없으면 NULL']
   checks {
     `status IN ('ACTIVE','INACTIVE')`
@@ -43,7 +43,7 @@ Table departments {
   department_seq integer [pk, increment, not null]
   organization_seq integer [not null, ref: > organizations.organization_seq]
   name text [not null, note: '앞뒤 공백 없는 1~100자. 같은 기업 안에서 고유']
-  group_billing_enabled boolean [not null, default: false, note: '해당 부서 구성원의 그룹결제 사용 여부']
+  group_billing_enabled boolean [not null, default: false, note: '063: 직원별 설정으로 이관된 이전 정책. 결제 자격에 사용하지 않음']
   created_at timestamptz [default: `CURRENT_TIMESTAMP`, note: '033: 등록 시각. 과거 생성 감사 근거가 없으면 NULL']
   checks {
     `name=btrim(name) AND length(name) BETWEEN 1 AND 100`
@@ -58,6 +58,8 @@ Table departments {
 Ref: memberships.(department_seq,organization_seq) > departments.(department_seq,organization_seq)
 
 Table memberships {
+  monthly_billing_enabled boolean [not null, default: true, note: '063: 직원별 기업 월결제 허용']
+  group_billing_enabled boolean [not null, default: false, note: '063: 직원별 기업 카드 허용. 기업 카드 등록도 필수']
   membership_seq integer [pk, increment, not null, note: '행의 고유 기본키']
   customer_seq integer [not null, unique, note: '연결 대상 ID']
   organization_seq integer [not null, note: '연결 대상 ID']
@@ -161,8 +163,33 @@ Table order_billing_charges {
   Note: 'order / 기업 월·그룹결제 청구 원장. 결제 완료 트랜잭션에서 주문당 1회 기록. 재접수는 원장을 추가하지 않는다. SQL 인덱스: billing_charge_month_idx(organization_seq,billing_month).'
 }
 
+// Module payment: 개인·기업 등록 카드와 주문 결제 요청 (064)
+Table payment_cards {
+  payment_card_seq integer [pk, increment, not null]
+  customer_seq integer [ref: > customers.customer_seq]
+  organization_seq integer [ref: > organizations.organization_seq]
+  registration_key uuid [unique, not null]
+  request_hash text [not null, note: '멱등 검증용 HMAC. 카드 원문은 저장하지 않음']
+  provider_customer_key uuid [not null]
+  provider_environment text [not null, note: 'test/live']
+  encrypted_billing_key text [note: 'AES-256-GCM 암호화 PG 결제키. 해제 후 PG 폐기 완료 시 제거']
+  issuer_code text
+  masked_number text
+  expiration_year integer [not null]
+  expiration_month integer [not null]
+  status text [not null, default: 'REGISTERING', note: 'REGISTERING/ACTIVE/FAILED']
+  claimed_until timestamptz
+  created_at timestamptz [not null, default: `clock_timestamp()`]
+  updated_at timestamptz [not null, default: `clock_timestamp()`]
+  deleted_at timestamptz
+  Note: '개인 또는 기업 소유 중 하나만 지정. 소유자당 활성 카드 1개 부분 UNIQUE. soft delete 후 5년 폐기. 승인 확인 중인 거래가 끝난 후 PG 키 폐기.'
+}
+
 Table order_payment_requests {
   payment_request_id uuid [pk, not null, default: `gen_random_uuid()`]
+  payment_card_seq integer [ref: > payment_cards.payment_card_seq, note: '064: NULL이면 기존 링크 결제. FK ON DELETE SET NULL']
+  card_payment_order_id uuid [not null, default: `gen_random_uuid()`, note: '064: 카드 승인 멱등키와 결과 복구용 PG 주문 ID']
+  card_payment_failed boolean [not null, default: false, note: '064: 명시적 승인 거절. 불명확한 응답은 실패로 확정하지 않음']
   order_seq integer [not null, ref: > orders.order_seq]
   amount integer [not null, note: '이 요청의 확정 결제 금액(양의 정수 원)']
   expires_at timestamptz [not null]

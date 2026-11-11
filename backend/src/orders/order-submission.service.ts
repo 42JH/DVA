@@ -130,9 +130,13 @@ export class OrderSubmissionService {
     requestId: string,
   ) {
     const snapshot = (await this.repository.detail(client, id, null))!;
+    const policy = await this.payments.eligibility(client, customerId);
+    if (snapshot.paymentMethodType === null && policy.organizationSeq !== null && policy.monthly) {
+      await this.payments.defaultMonthly(client, id);
+      snapshot.paymentMethodType = 'credit';
+    }
     assertOrderSubmissionReady(snapshot, Date.now(), false);
     assertOrderAmount(snapshot);
-    const policy = await this.payments.eligibility(client, customerId);
     if (
       (snapshot.paymentMethodType === 'credit' && !policy.monthly) ||
       (snapshot.paymentMethodType === 'groupBilling' && !policy.group)
@@ -169,7 +173,14 @@ export class OrderSubmissionService {
           },
           client,
         );
-    if (snapshot.paymentMethodType === 'billing') {
+    if (snapshot.paymentMethodType === 'billing' || snapshot.paymentMethodType === 'groupBilling') {
+      if (snapshot.paymentMethodType === 'groupBilling')
+        await this.payments.prepareCompanyCard(
+          client,
+          id,
+          policy.organizationSeq!,
+          policy.departmentSeq,
+        );
       await this.payments.waitForPayment(client, id);
       await this.audit.recordSuccess(
         {

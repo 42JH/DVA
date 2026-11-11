@@ -1,3 +1,4 @@
+const { configureTestCardPayments } = require('./helpers/payment-cards.cjs');
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID, randomBytes } = require('node:crypto');
@@ -13,6 +14,12 @@ const { AuditService } = require('../dist/audit/audit.service');
 process.env.PBX_WEBHOOK_TOKEN = randomBytes(32).toString('hex');
 process.env.S3_RECORDINGS_BUCKET = '';
 const f = applicationFixture('통화 주문 확정');
+const startApp = f.start;
+f.start = async () => {
+  const app = await startApp();
+  configureTestCardPayments(app);
+  return app;
+};
 before(async () => {
   // The real worker scans all orders; earlier suites must not supply its pending workload.
   await f.pool.query('TRUNCATE TABLE orders CASCADE');

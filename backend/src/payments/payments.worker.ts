@@ -38,6 +38,20 @@ export class PaymentsWorker implements OnApplicationBootstrap, OnModuleDestroy {
   }
   private async work() {
     if (!this.config.get('ORDER_PAYMENTS_ENABLED', { infer: true })) return;
+    await Promise.all(
+      (await this.repository.pendingCardApprovals()).map(async ({ id }) => {
+        try {
+          await this.payments.processCard(id, randomUUID());
+        } catch {
+          this.logger.warn({ event: 'card_payment_deferred' });
+        }
+      }),
+    );
+    try {
+      await this.payments.revokeDeletedCard(randomUUID());
+    } catch {
+      this.logger.warn({ event: 'card_revocation_deferred' });
+    }
     for (let i = 0; i < 10; i++) if (!(await this.payments.notifyCompletionOne())) break;
     for (let i = 0; i < 10; i++) if (!(await this.payments.notifyOne())) break;
     for (const { id } of await this.repository.pendingApprovals()) {

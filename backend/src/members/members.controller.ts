@@ -32,6 +32,7 @@ import {
   ListMembersQueryDto,
   MemberIdParamsDto,
   UpdateMemberDto,
+  UpdateMemberPaymentsDto,
 } from './dto/member-request.dto';
 import { MembersEnvelopeDto } from './dto/member-response.dto';
 
@@ -117,6 +118,27 @@ export class MembersController {
     @Req() request: AuthRequest,
   ) {
     return this.members.update(params.id, input, request.admin.adminUserSeq, request.requestId);
+  }
+
+  @Patch('companies/:id/members')
+  @HttpCode(204)
+  @AuditOperation({ action: 'MEMBERSHIP_UPDATED', targetType: 'MEMBERSHIP', target: 'none' })
+  @ApiOperation({
+    summary: '직원 단건·복수 결제 권한 변경',
+    description: '같은 기업의 membershipSeqs 1~100개를 함께 저장하거나 롤백합니다.',
+  })
+  @ApiNoContentResponse()
+  updatePayments(
+    @Param() params: MemberIdParamsDto,
+    @Body() input: UpdateMemberPaymentsDto,
+    @Req() request: AuthRequest,
+  ) {
+    return this.members.updatePayments(
+      params.id,
+      input,
+      request.admin.adminUserSeq,
+      request.requestId,
+    );
   }
 
   @Delete('members/:id')

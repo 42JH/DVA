@@ -1,4 +1,5 @@
 // Explicit test data: production migrations never invent a default department.
+const { seedTestCard } = require('./payment-cards.cjs');
 async function testMembership(
   pool,
   {
@@ -17,9 +18,10 @@ async function testMembership(
       [organizationSeq, groupBillingEnabled],
     )
   ).rows[0].department_seq;
+  if (groupBillingEnabled) await seedTestCard(pool, 'ORGANIZATION', organizationSeq);
   return pool.query(
-    `INSERT INTO memberships(customer_seq,organization_seq,employee_no,role,status,department_seq) VALUES($1,$2,$3,$4,$5,$6) RETURNING membership_seq`,
-    [customerSeq, organizationSeq, employeeNo, role, status, department],
+    `INSERT INTO memberships(customer_seq,organization_seq,employee_no,role,status,department_seq,group_billing_enabled) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING membership_seq`,
+    [customerSeq, organizationSeq, employeeNo, role, status, department, groupBillingEnabled],
   );
 }
 module.exports = { testMembership };

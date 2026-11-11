@@ -1,3 +1,4 @@
+import { PaymentCardsService } from '../payments/payment-cards.service';
 import { Injectable } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import { AuditService } from '../audit/audit.service';
@@ -22,6 +23,7 @@ export class CustomersService {
     private readonly database: DatabaseService,
     private readonly audit: AuditService,
     private readonly calls: ConsultationsService,
+    private readonly cards: PaymentCardsService,
   ) {}
 
   async billingMonth(id: number, month?: string) {
@@ -41,6 +43,7 @@ export class CustomersService {
             'NOT_FOUND',
             '삭제할 고객 중 찾을 수 없거나 이미 삭제된 고객이 있습니다.',
           );
+        await this.cards.softDelete(client, 'CUSTOMER', sorted, actorId, requestId);
         await this.repository.removeMany(client, sorted);
         for (const id of sorted)
           await this.audit.recordSuccess(

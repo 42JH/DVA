@@ -1,5 +1,6 @@
 import { AdminOrderListQueryDto } from './dto/admin-order-list.dto';
 import { Injectable } from '@nestjs/common';
+import { OrderCardPaymentsService } from './order-card-payments.service';
 import { OrderSubmissionService } from './order-submission.service';
 import { writeOrder } from './order-write';
 import { PoolClient } from 'pg';
@@ -38,6 +39,7 @@ export class OrdersService {
     private readonly deliveries: DeliveriesService,
     private readonly submission: OrderSubmissionService,
     private readonly drafts: ParcelDraftsRepository,
+    private readonly cardPayments: OrderCardPaymentsService,
   ) {}
 
   async delete(id: number, adminId: number, requestId: string): Promise<void> {
@@ -379,13 +381,19 @@ export class OrdersService {
           : undefined;
       return { result: await this.repository.result(client, result.orderSeq, callId), payload };
     });
-    if (!prepared.payload || prepared.result.orderSeq === null) return prepared.result;
-    await this.submission.submitPaidOrder(prepared.result.orderSeq, requestId);
+    if (
+      prepared.result.orderSeq === null ||
+      (!prepared.payload && (prepared.result as OrderResultDto).status !== 'notPaid')
+    )
+      return prepared.result;
+    if (prepared.payload)
+      await this.submission.submitPaidOrder(prepared.result.orderSeq, requestId);
+    else await this.cardPayments.forOrder(prepared.result.orderSeq, requestId);
     try {
       return await this.database.transaction((client) =>
         this.repository.result(
           client,
-          prepared.result.orderSeq,
+          prepared.result.orderSeq!,
           (prepared.result as OrderResultDto).callSessionSeq,
         ),
       );
@@ -778,6 +786,8 @@ export class OrdersService {
       if (call && call.orderSeq === null) await this.calls.attachOrder(client, callId!, id);
       return { status: payload ? ('PAID' as const) : ('notPaid' as const) };
     });
+    if (prepared.status === 'notPaid')
+      return (await this.cardPayments.forOrder(id, requestId)) ?? prepared;
     return prepared.status === 'PAID' ? this.submission.submitPaidOrder(id, requestId) : prepared;
   }
 }

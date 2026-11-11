@@ -1,3 +1,4 @@
+const { configureTestCardPayments } = require('./helpers/payment-cards.cjs');
 const { legacyOrderIntake } = require('./helpers/legacy-order-intake.cjs');
 require('reflect-metadata');
 const { before, after, test } = require('node:test');
@@ -148,6 +149,7 @@ before(async () => {
     )
   ).rows[0].customer_seq;
   app = legacyOrderIntake(await startTestApp(apps));
+  configureTestCardPayments(app);
   origin = await app.getUrl();
   base = origin + '/api';
   app.get(ConfigService).set('PAYMENT_PUBLIC_URL', base + '/payments');
@@ -548,6 +550,7 @@ test('timeout after Toss success recovers after application restart using GET on
   await app.close();
   apps.splice(apps.indexOf(app), 1);
   app = await startTestApp(apps);
+  configureTestCardPayments(app);
   origin = await app.getUrl();
   base = origin + '/api';
   app.get(ConfigService).set('PAYMENT_PUBLIC_URL', base + '/payments');
@@ -647,7 +650,7 @@ test('public page/status expose no provider key or secrets and cannot accept sel
   assert.equal((await request(`/payments/requests/${id}/reconcile`, { paid: true })).status, 400);
 });
 
-test('monthly and group billing bypass Toss and notifications and preserve a future requested pickup', async () => {
+test('monthly bypasses card approval while group uses a registered card and sends a completion notice', async () => {
   await worker.run();
   const count = messages.length,
     postCount = calls.filter((c) => c.method === 'POST').length;
@@ -685,7 +688,8 @@ test('monthly and group billing bypass Toss and notifications and preserve a fut
     assert.equal(o.pickup_requested_at.toISOString(), requested);
   }
   await worker.run();
-  assert.equal(messages.length, count);
+  assert.equal(messages.length, count + 1);
+  assert.match(messages.at(-1), /결제 완료/);
   assert.equal(calls.filter((c) => c.method === 'POST').length, postCount);
 });
 test('only an authenticated administrator can explicitly retry a notification; retries are audited', async () => {
