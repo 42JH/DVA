@@ -7,7 +7,7 @@ import { PromptEditor } from './PromptEditor'
 import { TestCallModal } from './TestCallModal'
 import { VoiceEditor } from './VoiceEditor'
 import { PageHead } from '@/shared/ui'
-import { Badge, Btn, Icon } from '@/shared/ui'
+import { Badge, Btn, Icon, KebabMenu } from '@/shared/ui'
 import { Confirm } from '@/shared/ui/Modal'
 import { Markdown } from '@/shared/ui/Markdown'
 
@@ -109,7 +109,7 @@ function Personas({ vm }: { vm: Vm }) {
   )
 }
 
-// 이름 · 태그 → 음성 → (사용 중인데 새 버전이 있으면) 안내 → [통화에 사용하기]. 오른쪽 위 ⋮ = 버전 기록 (11/11)
+// 이름 · 태그 → 음성 → (사용 중인데 새 버전이 있으면) 안내 → [통화에 사용하기]. 오른쪽 위 ⋮ = 메뉴 → 버전 기록 (11/11)
 function PersonaCard({ p, vm }: { p: PersonaItem; vm: Vm }) {
   return (
     <div
@@ -134,15 +134,12 @@ function PersonaCard({ p, vm }: { p: PersonaItem; vm: Vm }) {
         ))}
         {p.note && <span className="mt-1 block text-[13px] text-ops-wait">{p.note}</span>}
       </button>
-      <button
-        type="button"
-        aria-label={`${p.name} 버전 기록`}
-        title="버전 기록"
-        onClick={() => vm.openHistory(p.personaSeq)}
-        className="absolute top-3 right-3 grid size-8 place-items-center rounded-md text-ops-sub hover:bg-ops-line/60 hover:text-ops-ink"
-      >
-        <Icon name="kebab" className="size-5" />
-      </button>
+      <div className="absolute top-3 right-3">
+        <KebabMenu
+          label={`${p.name} 메뉴`}
+          items={[{ label: '버전 기록', onSelect: () => vm.openHistory(p.personaSeq) }]}
+        />
+      </div>
       {p.useLabel && (
         <Btn kind="lineBadge" className="mt-3" onClick={() => vm.askUse(p.personaSeq)}>
           {p.useLabel}
