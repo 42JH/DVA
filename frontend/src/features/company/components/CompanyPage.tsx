@@ -520,6 +520,7 @@ function Modals({ vm, id }: { vm: VM; id: number }) {
           member={m.kind === 'edit' ? m.member : null}
           onClose={vm.close}
           onCsv={() => vm.open({ kind: 'csv' })}
+          initialDept={/^\d+$/.test(vm.dept) ? Number(vm.dept) : null}
         />
       )
     case 'csv':

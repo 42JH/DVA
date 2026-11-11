@@ -20,7 +20,12 @@ type Role = Member['membership']['role']
 /** 08 사원 추가 · 수정 창 훅 — 사번 · 사원명 · 전화번호 · 역할 · 주소(검색) · 상세주소 (주소는 11/01 추가)
  * 추가 = 등록(+담당자면 PATCH) · 수정 = 같은 사번으로 재등록(이름 · 전화 갱신) + 역할이 바뀌면 PATCH. 사번은 수정 불가
  * 주소는 고객 정보라 사원 저장 뒤 따로 PATCH /customers/{customerSeq} → 주소만 실패하면 주소만 다시 보냄 */
-export function useMemberForm(companyId: number, target: Member | null, onDone: () => void) {
+export function useMemberForm(
+  companyId: number,
+  target: Member | null,
+  onDone: () => void,
+  initialDept: number | null = null, // 추가 창: 부서 목록에서 고른 부서를 미리 골라 둠
+) {
   const qc = useQueryClient()
   const editing = target !== null
   const before = target?.customer.address ?? null // 지금 고객 주소 (없으면 null)
@@ -29,6 +34,7 @@ export function useMemberForm(companyId: number, target: Member | null, onDone: 
     name: target?.customer.name ?? '',
     phone: phoneInput(target?.customer.phoneNumber ?? ''), // 전화번호 형식 010-1234-5678 (CSV와 같은 모양, 11/06)
     role: target?.membership.role ?? ('MEMBER' as Role),
+    dept: String((target ? target.membership.departmentSeq : initialDept) ?? ''), // '' = 부서 없음
     detail: before?.detailAddress ?? '',
   })
   const [picked, setPicked] = useState<SearchedAddress | null>(null) // 주소를 새로 고르면
@@ -41,6 +47,9 @@ export function useMemberForm(companyId: number, target: Member | null, onDone: 
   } | null>(null)
   // 같은 사번 · 전화 검사용 — 상세 화면이 이미 받아 둔 전체 사원(캐시)
   const all = useQuery(companyQueries.allMembers(companyId)).data ?? []
+  const depts = useQuery(companyQueries.departments(companyId)).data ?? []
+  const deptSeq = form.dept === '' ? null : Number(form.dept)
+  const deptChanged = editing && deptSeq !== target.membership.departmentSeq
 
   const no = form.employeeNo.trim()
   const digits = phoneDigits(form.phone)
@@ -76,11 +85,14 @@ export function useMemberForm(companyId: number, target: Member | null, onDone: 
         employeeNo: no,
         name: form.name.trim(),
         phoneNumber: digits,
-        // 수정은 다시 등록하는 방식 — 부서를 안 보내면 서버가 '부서 없음'으로 바꿈 → 지금 부서 그대로 (11/09 검수)
-        ...(editing ? { departmentSeq: target.membership.departmentSeq } : {}),
+        // 부서는 창에서 고른 값 (수정은 다시 등록하는 방식이라 늘 보냄 — 안 보내면 서버가 '부서 없음'으로 바꿈)
+        departmentSeq: deptSeq,
       }
       const infoChanged =
-        !editing || item.name !== target.customer.name || digits !== target.customer.phoneNumber
+        !editing ||
+        item.name !== target.customer.name ||
+        digits !== target.customer.phoneNumber ||
+        deptChanged
       if (infoChanged) await addMembers(companyId, [item])
       if (editing) {
         if (form.role !== target.membership.role)
@@ -129,6 +141,7 @@ export function useMemberForm(companyId: number, target: Member | null, onDone: 
     form.name.trim() !== target.customer.name ||
     digits !== target.customer.phoneNumber ||
     form.role !== target.membership.role ||
+    deptChanged ||
     address !== null // 주소 · 상세주소만 바꿔도 저장
   return {
     editing,
@@ -137,6 +150,11 @@ export function useMemberForm(companyId: number, target: Member | null, onDone: 
     setName: set('name'),
     setPhone: (v: string) => set('phone')(phoneInput(v)), // 치는 대로 하이픈
     setRole: (r: Role) => set('role')(r),
+    setDept: set('dept'),
+    deptOptions: [
+      { value: '', label: '부서 없음' },
+      ...depts.map((d) => ({ value: String(d.departmentSeq), label: d.name })),
+    ],
     setDetail: set('detail'),
 
     road,
