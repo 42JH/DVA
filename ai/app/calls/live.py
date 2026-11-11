@@ -14,7 +14,7 @@ import time
 from dataclasses import dataclass, field, replace
 
 from app.address.matcher import sido_aliases
-from app.address.parse import clean_text, parse, split_gil, unlink_gil
+from app.address.parse import clean_text, detail_text, parse, split_gil, unlink_gil
 from app.calls.session import CallSession, Phase
 from app.domain.rules import KST
 from app.domain.address_book import (begin_sender_name_change, origin_confirmation, prefill_sender,
@@ -26,7 +26,7 @@ from app.domain.claims import truth, unverified_claims, unverified_values
 from app.domain.confirm import (ConfirmAnswer, Utterance, asks, asks_parcel_confirmation, check_gate, commit_parcel,
                                 explicitly_requests_parcel, issue_cancel_confirmation, issue_parcel_confirmation,
                                 release, take_cancel)
-from app.domain.state import BOX_SIZE_NAMES, BoxProposal, ConversationState
+from app.domain.state import BOX_SIZE_NAMES, BoxProposal, CandidateSet, ConversationState
 from app.domain.store import hold_unclassified_items, item_issues_pending
 from app.observability.trace import span
 from app.policy.render import decision_questions
@@ -54,6 +54,10 @@ GREETING_OTHER_ORIGIN = re.compile(r"(?:네|예|아니요)?(?:오늘은|이번�
 REGISTERED_ORIGIN_QUESTION = re.compile(
     r"(?:등록된|기존|저장된)발송주소(?:로|에서)(?:그대로)?(?:보내실까요|보내시나요|발송하실까요|발송하시나요)$"
 )
+DESTINATION_QUESTION = re.compile(
+    r"(?P<target>.+?)(?:으?로\s*보내(?:실까요|시나요|시는\s*(?:게|것이)\s*맞(?:으실까요|으신가요|나요))"
+    r"|(?:\s*받는\s*곳)?(?:이|가)\s*맞(?:으실까요|으신가요|나요))$"
+)
 RECEIVER_NAME_QUESTION = re.compile(r"(?:받는|받으시는|받으실)\s*(?:분|사람)|수취인|수령인")
 SENDER_NAME_REFERENCE = re.compile(r"(?:보내는|보내시는|보내실)\s*(?:분|사람|성함|이름)|발송인|송하인|발신자")
 
@@ -70,6 +74,7 @@ class Spoken:
     readback_id: str | None = None
     sender_name_scope: str | None = None
     scope_decided: asyncio.Event | None = None
+    destination_candidates: CandidateSet | None = None
 
     def utterance(self) -> Utterance:
         return Utterance(self.utterance_id, self.start_ms or 0, self.end_ms or 0, self.t_start, self.text, self.readback_id)
@@ -167,8 +172,10 @@ class LiveFlow:
             last.end_ms, last.t_last = ev.get("end_ms") or last.end_ms, now
         else:
             rt.seq += 1
+            candidates = s.state.candidates
             rt.ai.append(Spoken(rt.seq, ev.get("delta", ""), ev.get("start_ms") or 0, ev.get("end_ms") or 0,
-                                now, now, ready_parcel_id=rt.ready_notice, readback_id=readback_id))
+                                now, now, ready_parcel_id=rt.ready_notice, readback_id=readback_id,
+                                destination_candidates=candidates if candidates and candidates.kind == "destination" else None))
             rt.ready_notice = None
             del rt.ai[:-20]
             if rt.cust_end_t:  # 새 AI 발화 시작 = 고객 말 끝 뒤 첫 반응
@@ -288,6 +295,9 @@ class LiveFlow:
             candidates = s.state.candidates
             pick = candidates.labels if candidates and not (
                 candidates.kind == "destination" and receiver_questions_deferred(s.state)) else ()
+            destination_question = bool(heard_question and pick and candidates.kind == "destination"
+                                        and prev.destination_candidates is candidates
+                                        and s.state.intent == "order" and not pending)
             pending_id = pending.id if pending else None
             callback = s.state.callback_offered and not s.state.callback_requested
             current = s.state.current
@@ -299,7 +309,7 @@ class LiveFlow:
                                                                            "item", "readback"))
             box = current.box_proposal if current and s.state.intent == "order" and not pending else None
             cancel_current = s.tools.draft_intake and current is not None and not current.empty()
-        reply = re.sub(r"[\s,.!?…~]+", "", utt.text) if greeting or origin_question or end_question else ""
+        reply = re.sub(r"[\s,.!?…~]+", "", utt.text)
         if end_question and (SHORT_YES.fullmatch(reply) or SHORT_NO.fullmatch(reply)):
             await self.apply(s, utt, prev, {"switch": ("end" if SHORT_YES.fullmatch(reply) else "none", 1.0)}, pending_id)
             return
@@ -317,6 +327,18 @@ class LiveFlow:
             s.note("Decision", "발송 주소 확인 동의")
             await self.apply(s, utt, prev, {"origin": ("yes", 1.0)}, pending_id)
             return
+        if destination_question and SHORT_YES.fullmatch(reply):
+            matching_labels = _asked_destinations(candidates, prev.text)
+            if len(matching_labels) == 1:
+                s.note("Decision", "받는 곳 후보 확인 동의")
+                await self.apply(s, utt, prev, {"pick": (matching_labels[0], 1.0)}, pending_id,
+                                 expected_candidates=candidates, direct_pick=True)
+                return
+            if len(matching_labels) > 1:
+                pick = ()  # 같은 기본주소의 여러 후보 중에는 짧은 동의로 고를 수 없다.
+        if pick and prev and prev.destination_candidates is not None and prev.destination_candidates is not candidates \
+                and SHORT_YES.fullmatch(reply):
+            pick = ()  # 이미 바뀐 받는 곳 후보에는 예전 질문의 짧은 답을 적용할 수 없다.
         # readback 단계는 확인 대기가 풀려 있어도 confirm을 듣는다(Live가 스스로 확인 질문을 하면 '네'가 갈 곳이 없음, 운영 통화 56c133c8)
         questions = decision_questions(self.policy, stage, pending=pending is not None or stage == "readback",
                                        pick_labels=pick, callback=callback, origin=origin,
@@ -355,13 +377,16 @@ class LiveFlow:
         s.decision_ms.append(ms)
         s.timing("Decision", ms)
         answers = {a.name: _answer(a) for a in d.answers if a.type == "choice"}
+        if not pick:
+            answers.pop("pick", None)
         if greeting in ("order", "origin_mentioned") and answers.get("origin", (None,))[0] == "yes":
             answers.pop("origin")  # 인사에서 등록 주소를 대조하지 못했으면 사용 여부는 별도로 묻는다.
         s.note("Decision", ", ".join(f"{k}={v[0]}({v[1]:.2f})" for k, v in answers.items()) + f" {ms}ms",
                {"stage": stage, "pending": pending_id, "input": text, "ms": ms,
                 "answers": {k: {"choice": v[0], "confidence": round(v[1], 3), "probabilities": v[2]}
                             for k, v in answers.items()}})
-        await self.apply(s, utt, prev, answers, pending_id, box=box, greeting=bool(greeting))
+        await self.apply(s, utt, prev, answers, pending_id, box=box, greeting=bool(greeting),
+                         expected_candidates=candidates if pick else None)
 
     async def _clarify_greeting(self, s: CallSession, utt: Spoken) -> None:
         async with s.lock:
@@ -370,7 +395,8 @@ class LiveFlow:
         s.spawn(self.notify(s, "N2", {"greeting_confirmation": "ask_intent"}), "clarify_greeting")
 
     async def apply(self, s: CallSession, utt: Spoken, prev: Spoken | None, answers: dict, pending_id: str | None,
-                    *, box: BoxProposal | None = None, greeting: bool = False):
+                    *, box: BoxProposal | None = None, greeting: bool = False,
+                    expected_candidates: CandidateSet | None = None, direct_pick: bool = False):
         rt, st, th = self.rt(s), s.state, self.cfg.decision_min_confidence
         followups = []
         async with s.lock:
@@ -378,6 +404,9 @@ class LiveFlow:
                 s.note("Decision", "DECISION_STALE")
                 return
             if greeting and (rt.customer_turns != [utt] or st.intent is not None):
+                return
+            if direct_pick and (st.intent != "order" or st.pending
+                                or rt.customer_turns and rt.customer_turns[-1] != utt):
                 return
             rt.latest_applied = utt.utterance_id
             switch = answers.get("switch")
@@ -508,6 +537,7 @@ class LiveFlow:
                 st.awaiting_fix = True  # 고친 값이 올 때까지 되읽기를 다시 열지 않는다
             picked_lookup = False
             if ((p := answers.get("pick")) and p[1] >= th
+                    and (expected_candidates is None or st.candidates is expected_candidates)
                     and not (st.candidates and st.candidates.kind == "destination" and receiver_questions_deferred(st))):
                 kind = st.candidates.kind if st.candidates else None
                 if p[0] == "none":
@@ -1344,9 +1374,28 @@ def _asked_pending_origin(state: ConversationState, text: str) -> bool:
     origin = origin_confirmation(state)
     if not origin or not asks(text):
         return False
-    if origin == "registered" and REGISTERED_ORIGIN_QUESTION.search("".join(_last_question(text).split())):
+    if REGISTERED_ORIGIN_QUESTION.search("".join(_last_question(text).split())):
         return True
     return _greeting_offer(state, text) == "registered_origin"
+
+
+def _asked_destinations(candidates: CandidateSet, text: str) -> list[str]:
+    """들은 질문이 가리킬 수 있는 현재 후보의 이름표."""
+    if not asks(text) or not (question := DESTINATION_QUESTION.search(_last_question(text).strip())):
+        return []
+    target = re.sub(r"\s*받는\s*곳$", "", question["target"]).strip()
+    label = "".join(detail_text(target).split())
+    # 번호를 읽는 전사에서 '구 길'처럼 쪼개지는 길 번호를 기존 주소 파서에 맞춘다.
+    address = clean_text(re.sub(r"(?<=[가-힣])\s+(?=길\b)", "", target))
+    heard = [part for form in (address, split_gil(address), unlink_gil(address)) if form for part in parse(form)]
+    matches = []
+    for name, place in zip(candidates.labels, candidates.items):
+        if label == "".join(detail_text(name).split()) or any(
+                number and number == spoken_number and branch == spoken_branch and head[-len(spoken):] == spoken
+                for head, branch, number in parse(clean_text(place.address))
+                for spoken, spoken_branch, spoken_number in heard if spoken):
+            matches.append(name)
+    return matches
 
 
 def _asked_receiver_name(text: str, expecting_name: bool) -> bool:
