@@ -14,7 +14,7 @@ export type { OrderDetail, Party, PaymentMethod } from '@/shared/order/orderApi'
 import type { OrderStatusDto } from '@/shared/order/orderDto'
 export type OrderStatus = OrderStatusDto
 
-/** '주문 상태' 고르기 = 서버 statusGroup (11/01): 결제 완료 = PAID · SUBMITTING · ACCEPTED, 접수 실패 = SUBMITTING_FAILED · SUBMISSION_FAILED */
+/** '주문 상태' 고르기 = 서버 statusGroup (11/11): 결제 완료 = PAID · SUBMITTING · SUBMITTING_FAILED(재시도 중), 접수 완료 = ACCEPTED, 접수 실패 = SUBMISSION_FAILED */
 export type StatusGroup = 'ALL' | OrderGroup
 
 /** 품목 4종 (와이어프레임 03 · 디버 FAQ '박스 크기') — 주문 상세의 items 키와 같은 순서. 그 밖은 '기타 품목' 글로 */
