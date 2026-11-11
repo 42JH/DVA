@@ -6,6 +6,7 @@ import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import { configureApplication } from '../src/configure-application';
 import { DatabaseService } from '../src/database/database.service';
+import { AiPersonaClient } from '../src/ai-settings/ai-persona.client';
 
 describe('Operations infrastructure (e2e)', () => {
   let app: INestApplication<App>;
@@ -72,6 +73,21 @@ describe('Operations infrastructure (e2e)', () => {
             .expect({ status: 'ok', service: 'backend' });
         }
       }
+      pool.query.mockResolvedValue({ rows: [], rowCount: 0 });
+      fetchHealth.mockImplementation(() => Promise.resolve(new Response('', { status: 200 })));
+      const previousQueries = pool.query.mock.calls.length;
+      await Promise.all(
+        Array.from({ length: 20 }, () =>
+          request(app.getHttpServer())
+            .get('/health/ready')
+            .expect(200)
+            .expect({
+              status: 'ok',
+              dependencies: { database: 'up', aiAgent: 'up' },
+            }),
+        ),
+      );
+      expect(pool.query.mock.calls.length - previousQueries).toBe(20);
       pool.query.mockResolvedValue({ rows: [], rowCount: 0 });
       fetchHealth.mockRejectedValue(new Error('AI unreachable'));
       await request(app.getHttpServer())
@@ -160,7 +176,28 @@ describe('Operations infrastructure (e2e)', () => {
     await request(app.getHttpServer()).get('/api/ai/options').expect(401);
     const token = 'persona-test-token-'.padEnd(40, 'p');
     app.get(ConfigService).set('AI_PERSONA_TOKEN', token);
+    const previousAiUrl = app.get(ConfigService).get<string>('AI_AGENT_URL');
+    app.get(ConfigService).set('AI_AGENT_URL', 'http://persona-fixture');
+    const capabilities = {
+      voices: [{ id: 'fixture', label: 'Fixture voice' }],
+      speakingRate: { min: null, max: null },
+      turnWaitLevels: ['NORMAL'],
+    };
+    const fetchOptions = jest.spyOn(globalThis, 'fetch');
     try {
+      fetchOptions.mockImplementation(() =>
+        Promise.resolve(new Response(JSON.stringify(capabilities))),
+      );
+      const client = app.get(AiPersonaClient);
+      const [first, second] = await Promise.all([client.options(), client.options()]);
+      first.voices[0].label = 'Caller changed';
+      expect(second).toEqual(capabilities);
+      fetchOptions.mockImplementation(() => Promise.resolve(new Response('', { status: 503 })));
+      await expect(client.options()).rejects.toMatchObject({ status: 503 });
+      fetchOptions.mockImplementation(() =>
+        Promise.resolve(new Response(JSON.stringify(capabilities))),
+      );
+      await expect(client.options()).resolves.toEqual(capabilities);
       await request(app.getHttpServer())
         .get('/api/ai/config')
         .set('Authorization', 'Bearer wrong')
@@ -171,6 +208,8 @@ describe('Operations infrastructure (e2e)', () => {
         .set('Cookie', 'dva_session=invalid')
         .expect(401);
     } finally {
+      fetchOptions.mockRestore();
+      app.get(ConfigService).set('AI_AGENT_URL', previousAiUrl);
       app.get(ConfigService).set('AI_PERSONA_TOKEN', undefined);
     }
   });

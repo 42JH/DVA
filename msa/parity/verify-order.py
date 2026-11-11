@@ -166,12 +166,16 @@ def main():
                command=('node', '--test', 'test/order-cancellation-outage.test.cjs'))
         run('docker', 'cp', str(ROOT/'msa/parity/order-cancellation-outage.test.cjs'), name+':/app/service/test/order-cancellation-outage.test.cjs', label='delivery-outage-copy')
         complete(name)
+        run('docker', 'start', RUN+'-delivery-app', label='delivery-outage-recovered')
+        wait_app('delivery', 3003)
         run('docker', 'stop', '--time=5', RUN+'-consultation-app', label='consultation-outage')
         name = RUN+'-outage'
         create(name, images['order-checks'], '-e', 'PGPASSWORD='+password, '-e', 'PGDATABASE=dva_webhook_test',
                command=('node', '--test', 'test/order-read-outage.test.cjs'))
         run('docker', 'cp', str(ROOT/'msa/parity/order-read-outage.test.cjs'), name+':/app/service/test/order-read-outage.test.cjs', label='outage-copy')
         complete(name)
+        run('docker', 'start', RUN+'-consultation-app', label='consultation-outage-recovered')
+        wait_app('consultation', 3004)
         # Isolate deterministic rollover instants from the real 10-second production timers.
         for side in ('monolith', 'order'):
             run('docker', 'stop', '--time=5', RUN+'-'+side+'-app', label=side+'-billing-controlled-stop')

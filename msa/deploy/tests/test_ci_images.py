@@ -1,11 +1,15 @@
 """CI image deduplication must preserve every runner's checks and image identity."""
 import importlib.util
+import ast
 import json
 import os
+import re
+import subprocess
 from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
+from git_fixture import GitFixture
 
 PATH = Path(__file__).resolve().parents[2] / 'parity/ci_images.py'
 spec = importlib.util.spec_from_file_location('ci_images', PATH)
@@ -14,6 +18,53 @@ spec.loader.exec_module(images)
 
 
 class CiImageTests(unittest.TestCase):
+    def test_order_fault_checks_restore_dependencies_before_later_workers(self):
+        driver = (PATH.parent / 'verify-order.py').read_text()
+        checkpoints = [
+            "label='delivery-outage'", "label='delivery-outage-recovered'",
+            "label='consultation-outage'", "label='consultation-outage-recovered'",
+            "label=side+'-billing-controlled-stop'",
+        ]
+        positions = [driver.index(marker) for marker in checkpoints]
+        self.assertEqual(positions, sorted(positions))
+        self.assertIn("wait_app('delivery', 3003)", driver[positions[1]:positions[2]])
+        self.assertIn("wait_app('consultation', 3004)", driver[positions[3]:positions[4]])
+
+    def test_git_fixture_failures_include_the_original_stderr(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = GitFixture()
+            fixture.root = Path(directory)
+            with self.assertRaises(subprocess.CalledProcessError) as failure:
+                fixture.git('--invalid-fixture-command')
+            self.assertIn('invalid-fixture-command', failure.exception.stderr)
+            self.assertIn('Git fixture stderr\n' + failure.exception.stderr, failure.exception.__notes__)
+
+    def test_operations_keeps_all_contract_tests_and_excludes_only_source_performance_tests(self):
+        root = PATH.parents[2]
+        tree = ast.parse((root / 'msa/parity/verify-operations.py').read_text())
+        commands = []
+        for call in ast.walk(tree):
+            if not isinstance(call, ast.Call):
+                continue
+            for keyword in call.keywords:
+                if keyword.arg != 'command' or not isinstance(keyword.value, ast.Tuple):
+                    continue
+                if any(isinstance(item, ast.Constant) and item.value == 'test/ai-settings.integration.test.cjs'
+                       for item in keyword.value.elts):
+                    commands.append(ast.literal_eval(keyword.value))
+        self.assertEqual(len(commands), 1)
+        command = commands[0]
+        self.assertEqual(command[:3], ('node', '--test', '--test-concurrency=1'))
+        self.assertEqual(command[4:], ('test/ai-settings.test.cjs', 'test/ai-settings.integration.test.cjs'))
+        self.assertTrue(command[3].startswith('--test-skip-pattern='))
+        pattern = command[3].split('=', 1)[1]
+        source = (root / 'backend/test/ai-settings.test.cjs').read_text()
+        names = re.findall(r"^test\('([^']+)'", source, re.M)
+        self.assertEqual([name for name in names if re.search(pattern, name)], [
+            'shared option reads isolate callers, expire on settlement and separate rotated credentials',
+            'health shares only the upstream probe and checks each caller database independently',
+        ])
+
     def test_all_suites_share_eleven_images(self):
         wanted = images.required(list(images.SUITES), list(images.SERVICES), True)
         self.assertEqual(len(wanted), 11)

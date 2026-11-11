@@ -16,8 +16,12 @@ test('order DELETE preserves source HTTP, business rows, audit and owner boundar
   t.after(async()=>{for(const lock of retained){await lock.query('ROLLBACK');lock.release();}await Promise.all(Object.values(pools).map(p=>p.end()));});
   const sides=[{name:'monolith',url:'http://monolith-app:3000',db:pools.monolith,audit:pools.monolith,calls:pools.monolith},
     {name:'msa',url:'http://order-app:3002',db:pools.order,audit:pools.operations,calls:pools.consultation}];
-  // The preceding read-only differential finishes with a deliberately MSA-only concurrency edit.
+  // The preceding differential includes a deliberately MSA-only concurrency edit.
   // Start this independent suite from equal stored rows, rather than filtering that difference away.
+  // Creation fixtures also leave active companies that the production billing worker can initialize.
+  for (const pool of [pools.monolith, pools.customer]) {
+    await truncateFixture(pool, 'TRUNCATE memberships,departments,organizations RESTART IDENTITY CASCADE');
+  }
   for(const side of sides) {
     await truncateFixture(side.calls, 'TRUNCATE call_sessions RESTART IDENTITY CASCADE');
     await truncateFixture(side.db, 'TRUNCATE '+tables.join(',')+(side.name==='monolith'?',shipments':'')+' RESTART IDENTITY CASCADE');
