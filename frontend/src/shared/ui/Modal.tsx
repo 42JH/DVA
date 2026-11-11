@@ -3,6 +3,12 @@
 import { useEffect, useRef, type ReactNode } from 'react'
 import { Btn, Icon } from './controls'
 
+// Enter: 폼 안 입력칸 = 브라우저 제출 · 그 밖 = 아래 줄의 확정 버튼(색 채움). 글 칸 줄바꿈 · 한글 조합 · 꾹 누름은 제외
+const FIELD =
+  'input:not([disabled]):not([type=hidden]):not([type=file]),select:not([disabled]),textarea:not([disabled])'
+const OK =
+  '[data-foot] button[data-kind=primary]:not(:disabled),[data-foot] button[data-kind=dangerSolid]:not(:disabled)'
+
 export function Modal({
   title,
   extra,
@@ -23,13 +29,33 @@ export function Modal({
   const ref = useRef<HTMLDialogElement>(null)
   const downOutside = useRef(false) // 누르기 시작한 곳이 바깥이었나
   useEffect(() => {
-    ref.current?.showModal()
+    const d = ref.current
+    if (!d) return
+    d.showModal()
+    // 처음 초점: 확정 버튼(data-autofocus) → 첫 입력칸 → 창 자체. 브라우저 기본(첫 버튼 = ✕)이면 Enter가 '닫기'가 됨
+    const to =
+      d.querySelector<HTMLElement>('[data-autofocus]') ?? d.querySelector<HTMLElement>(FIELD)
+    ;(to ?? d).focus()
   }, [])
   return (
     <dialog
       ref={ref}
       role="dialog" // useEscape가 창이 열린 걸 알아보는 표시
       aria-label={title}
+      tabIndex={-1}
+      onKeyDown={(e) => {
+        if (e.key !== 'Enter') return
+        // 꾹 누른 Enter의 반복 — 창을 연 Enter가 이어져 바로 확정되지 않게 (삭제 버튼 → 삭제 확인)
+        if (e.repeat) return e.preventDefault()
+        if (e.nativeEvent.isComposing || e.defaultPrevented) return // 한글 조합 확정 · 추천 고르기 · 안쪽 창이 이미 처리
+        const t = e.target as HTMLElement
+        // 글 칸은 줄바꿈, 버튼 · 링크 · 고르기는 제 할 일, 폼 안 입력칸은 브라우저가 제출(제출 버튼이 꺼져 있으면 안 함)
+        if (t.closest('textarea, button, a, select, [contenteditable="true"]')) return
+        if ((t as HTMLInputElement).form) return
+        e.preventDefault()
+        // 확정 버튼이 없는 창(시험 통화의 '통화 끝내기' 등 테두리 빨강)은 아무 일 없음
+        ref.current?.querySelector<HTMLButtonElement>(OK)?.click()
+      }}
       onCancel={(e) => {
         e.preventDefault() // 닫는 건 부모 상태로 (dialog가 혼자 닫히지 않게)
         onClose()
@@ -40,7 +66,7 @@ export function Modal({
         if (downOutside.current && e.target === e.currentTarget) onClose()
       }}
       style={{ width }}
-      className="m-auto hidden max-h-[calc(100dvh-48px)] max-w-[calc(100vw-32px)] flex-col rounded-lg bg-white p-0 text-ops-ink shadow-lg backdrop:bg-ops-ink/40 open:flex motion-safe:animate-pop-in"
+      className="m-auto hidden max-h-[calc(100dvh-48px)] max-w-[calc(100vw-32px)] flex-col rounded-lg bg-white p-0 text-ops-ink shadow-lg outline-none backdrop:bg-ops-ink/40 open:flex motion-safe:animate-pop-in"
     >
       <div className="flex h-14 shrink-0 items-center gap-2 border-b border-ops-line px-6">
         <h2 className="text-[16px] font-bold">{title}</h2>
@@ -59,7 +85,10 @@ export function Modal({
         {children}
       </div>
       {footer && (
-        <div className="flex shrink-0 items-center gap-2 border-t border-ops-line px-6 py-3">
+        <div
+          data-foot
+          className="flex shrink-0 items-center gap-2 border-t border-ops-line px-6 py-3"
+        >
           {footer}
         </div>
       )}
@@ -109,7 +138,7 @@ export function Confirm({
             kind={ok === '삭제' || danger ? 'dangerSolid' : 'primary'}
             disabled={busy}
             onClick={onOk}
-            autoFocus
+            data-autofocus // 열면 확정 버튼에 초점 — Enter = 확인 (OS 확인 창과 같게)
           >
             {busy ? `${ok} 중…` : ok}
           </Btn>

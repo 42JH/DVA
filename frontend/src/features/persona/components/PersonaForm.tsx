@@ -37,7 +37,14 @@ export function PersonaForm({
   voiceFields: ReactNode // 이름 아래 음성 드롭다운 (VoiceFields)
 }) {
   return (
-    <article className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-ops-line bg-white">
+    // 폼: 이름 칸에서 Enter = 저장 (글 칸은 줄바꿈). 저장이 꺼져 있으면 브라우저가 제출 안 함
+    <form
+      onSubmit={(e) => {
+        e.preventDefault()
+        if (vm.canSave) vm.save()
+      }}
+      className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-ops-line bg-white"
+    >
       <header className="flex flex-wrap items-center gap-3 border-b border-ops-line px-5 py-3">
         <span className="text-[15px] font-bold">{vm.tag}</span>
         <span className="text-[13px] text-ops-sub">{vm.subtitle}</span>
@@ -75,7 +82,7 @@ export function PersonaForm({
         <Btn className="ml-auto" onClick={vm.cancel}>
           취소
         </Btn>
-        <Btn kind="primary" disabled={!vm.canSave} onClick={vm.save}>
+        <Btn kind="primary" type="submit" disabled={!vm.canSave}>
           {vm.saveLabel}
         </Btn>
       </footer>
@@ -90,6 +97,6 @@ export function PersonaForm({
           고친 내용이 사라집니다.
         </Confirm>
       )}
-    </article>
+    </form>
   )
 }
