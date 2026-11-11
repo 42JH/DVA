@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { BillingService } from '../billing/billing.service';
 import { ConfigService } from '@nestjs/config';
 import { Environment } from '../config/environment';
 import { ApiException } from '../common/errors/api.exception';
@@ -23,6 +24,7 @@ export class PaymentsService {
     private readonly client: PaymentClient,
     private readonly ordersRepository: OrdersRepository,
     private readonly submissions: OrderSubmissionService,
+    private readonly billing: BillingService,
   ) {}
   ensureEnabled() {
     if (!this.config.get('ORDER_PAYMENTS_ENABLED', { infer: true }))
@@ -172,6 +174,7 @@ export class PaymentsService {
         throw new ApiException(409, 'INVALID_STATE', '결제 승인 대상이 변경되었습니다.');
       await this.repository.complete(client, id, providerReference);
       await this.repository.markPaid(client, request.orderSeq, approvedAt);
+      await this.billing.recordPersonalCharge(client, request.orderSeq);
       await this.audit.recordSuccess(
         {
           actorId: null,

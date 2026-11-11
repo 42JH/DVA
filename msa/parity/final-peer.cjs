@@ -34,7 +34,7 @@ createServer(async (request, response) => {
         return json(response,{code:'REJECT_CARD_PAYMENT'});
       }
       const payment={orderId,totalAmount:amount,paymentKey,currency:'KRW',status:'DONE',
-        approvedAt:'2030-03-01T09:01:00Z'};
+        approvedAt:paymentKey==='approve-legacy-credit'?'2030-02-28T15:00:00Z':'2030-03-01T09:01:00Z'};
       payments.set(paymentKey,payment);
       if(paymentKey==='approve-unknown') {
         response.statusCode=502;

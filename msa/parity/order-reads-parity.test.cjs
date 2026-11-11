@@ -955,6 +955,7 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
         await client.query("UPDATE order_parcels SET origin_name=COALESCE(origin_name,'발송인'),item_price=1000,notified_price=3500 WHERE order_seq=1002");
         await client.query('INSERT INTO orders(order_seq,customer_seq,payment_method_type,status,version,created_at,updated_at,creation_source,total_amount,payment_due_at,pickup_requested_at) '+
           'OVERRIDING SYSTEM VALUE SELECT 1051,customer_seq,payment_method_type,status,version,created_at,updated_at,creation_source,total_amount,payment_due_at,pickup_requested_at FROM orders WHERE order_seq=1002');
+        await client.query("UPDATE orders SET payment_method_type='credit',billing_organization_seq=6001,billing_organization_name='이전 기업' WHERE order_seq=1051");
         await client.query('INSERT INTO order_parcels(order_parcel_seq,order_seq,parcel_position,origin_name,origin_phone_number,'+
           'origin_road_address,origin_jibun_address,origin_dong_name,origin_postal_code,destination_name,destination_phone_number,'+
           'destination_road_address,destination_jibun_address,destination_dong_name,destination_postal_code,document_count,item_price,notified_price) '+
@@ -1004,16 +1005,43 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
       assert.deepEqual(await repo.pendingApprovals(),[]);
     }
     const recovered=await post(pending,'reconcile',{},200);
-    const approved=await post(second,'confirm',input(second,'approve-normal'),200);
+    try {
+      for(const db of [reference,databases.order])await db.query(
+        "CREATE FUNCTION parity_charge_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'charge storage unavailable'; END; $$; "+
+        "CREATE TRIGGER parity_charge_failure BEFORE INSERT ON order_billing_charges FOR EACH ROW WHEN(NEW.order_seq=1051) EXECUTE FUNCTION parity_charge_failure()");
+      await post(second,'confirm',input(second,'approve-legacy-credit'),500);
+      for(const db of [reference,databases.order]){
+        const row=(await db.query("SELECT o.status,o.paid_at,r.completed_at,o.billing_organization_seq,"+
+          "(SELECT count(*)::int FROM order_billing_charges b WHERE b.order_seq=o.order_seq) AS charges "+
+          "FROM orders o JOIN order_payment_requests r USING(order_seq) WHERE o.order_seq=1051")).rows[0];
+        assert.deepEqual(row,{status:'notPaid',paid_at:null,completed_at:null,billing_organization_seq:6001,charges:0});
+      }
+    } finally {
+      for(const db of [reference,databases.order])await db.query(
+        'DROP TRIGGER IF EXISTS parity_charge_failure ON order_billing_charges; DROP FUNCTION IF EXISTS parity_charge_failure()');
+    }
+    const approved=await post(second,'reconcile',{},200);
     for(const view of [recovered,approved]) {
       assert.equal(view.status,'PAID');
       assert.equal(view.orderStatus,'ACCEPTED');
-      assert.equal(view.approvedAt,'2030-03-01T09:01:00.000Z');
-      assert.equal(view.pickupRequestedAt,'2030-03-02T00:00:00.000Z');
       assert.equal(view.completionNotificationStatus,'PENDING');
     }
+    assert.equal(recovered.approvedAt,'2030-03-01T09:01:00.000Z');
+    assert.equal(recovered.pickupRequestedAt,'2030-03-02T00:00:00.000Z');
+    assert.equal(approved.approvedAt,'2030-02-28T15:00:00.000Z');
+    assert.equal(approved.pickupRequestedAt,'2030-03-01T00:00:00.000Z');
     assert.deepEqual(await post(pending,'reconcile',{},200),recovered);
-    assert.deepEqual(await post(second,'confirm',input(second,'approve-normal'),200),approved);
+    assert.deepEqual(await post(second,'confirm',input(second,'approve-legacy-credit'),200),approved);
+    const charges=async db=>(await db.query(
+      'SELECT order_seq,organization_seq,customer_seq,billing_month::text,payment_method_type,amount::float8,occurred_at '+
+      'FROM order_billing_charges WHERE order_seq IN (1002,1051) ORDER BY order_seq',
+    )).rows;
+    const personal=await charges(reference);
+    assert.deepEqual(await charges(databases.order),personal);
+    assert.equal(personal.length,1);assert.equal(personal[0].order_seq,1051);
+    assert.equal(personal[0].organization_seq,null);assert.equal(personal[0].billing_month,'2030-03-01');
+    assert.equal(personal[0].payment_method_type,'credit');assert.equal(personal[0].amount,7000);
+    assert.equal(personal[0].occurred_at.toISOString(),approved.approvedAt);
     const calls=await Promise.all(['monolith','order'].map(async owner=>{
       const response=await fetch('http://'+owner+'-app:8000/__requests',{headers:{Authorization:'Bearer '+process.env.CUSTOMER_AUTH_TOKEN}});
       assert.equal(response.status,200);
@@ -1022,7 +1050,7 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
     assert.deepEqual(calls[1],calls[0]);
     assert.deepEqual(calls[0].map(call=>[call.method,call.path]),[
       ['POST','/v1/payments/confirm'],['POST','/v1/payments/confirm'],['GET','/v1/payments/approve-unknown'],
-      ['POST','/parcel'],['POST','/v1/payments/confirm'],['POST','/parcel'],
+      ['POST','/parcel'],['POST','/v1/payments/confirm'],['GET','/v1/payments/approve-legacy-credit'],['POST','/parcel'],
     ]);
     const stored=async db=>(await db.query(
       'SELECT r.payment_request_id,r.provider_reference,r.provider_payment_key,r.provider_approved_at,'+
@@ -1037,6 +1065,7 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
     const expected=await audit(reference);
     assert.deepEqual(await audit(databases.operations),expected);
     assert.equal(expected.filter(row=>row.action==='ORDER_PAYMENT_COMPLETED').length,2);
+    assert.equal(expected.filter(row=>row.action.startsWith('BILLING_')).length,0);
     const delivery=new Pool({host:'delivery-db',user:'delivery_app'});
     try {
       const shipments=async db=>(await db.query(

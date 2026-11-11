@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
+import type { PoolClient } from 'pg';
 import {
   requestBilling,
   type BillingMonth,
@@ -20,6 +21,18 @@ export class BillingService {
     private readonly audit: AuditService,
     private readonly config: ConfigService<Environment, true>,
   ) {}
+
+  async recordPersonalCharge(client: PoolClient, orderId: number): Promise<void> {
+    await client.query(
+      `INSERT INTO order_billing_charges(order_seq,organization_seq,customer_seq,billing_month,payment_method_type,amount,occurred_at)
+       SELECT order_seq,NULL,customer_seq,date_trunc('month',paid_at AT TIME ZONE 'Asia/Seoul')::date,
+        payment_method_type,total_amount,paid_at FROM orders
+       WHERE order_seq=$1 AND paid_at IS NOT NULL AND payment_method_type='credit'
+        AND billing_organization_seq IS NULL AND customer_seq IS NOT NULL
+       ON CONFLICT(order_seq) DO NOTHING`,
+      [orderId],
+    );
+  }
 
   async readCustomer(id: number, month: string | null): Promise<CustomerBillingView> {
     return (
