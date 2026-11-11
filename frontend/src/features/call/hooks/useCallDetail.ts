@@ -12,7 +12,7 @@ import {
 } from '@/shared/call/callApi'
 import { utteranceAt, utteranceForAction, type CallActionKind } from '@/shared/call/callDto'
 import { faqResultText, groupActions } from '@/shared/call/actionText'
-import { splitComplaints, targetLabel } from '@/shared/call/complaints'
+import { isCustomerComplaint, splitComplaints, TARGET_LABEL } from '@/shared/call/complaints'
 import { useRecordingPlayer } from './useRecordingPlayer'
 
 /** 스크립트 한 줄 (말만 — AI 동작은 오른쪽 처리 내용으로, 10/30). onClick = 이 말부터 듣기 (11/01, 시각을 모르면 없음) */
@@ -69,7 +69,7 @@ function toSegments(utterances: Timed[], all: Complaint[]): ScriptSegment[] {
       time: u.labelSec === null ? '' : fmtClock(u.labelSec),
       who: u.speaker === 'AI' ? 'AI' : '고객',
       text: u.text,
-      ...(said ? { complaint: `고객 불만: ${targetLabel(said.target)}` } : {}),
+      ...(said ? { complaint: `고객 불만: ${TARGET_LABEL[said.target]}` } : {}),
     }
     const last = segments[segments.length - 1]
     const sameGroup =
@@ -246,13 +246,13 @@ export function useCallDetail(callId: number, fromFaq?: number) {
             const sec =
               c.offsetSeconds ?? says.find((u) => c.utteranceOrders.includes(u.order))?.labelSec
             if (sec == null) return []
-            const cust = customer.includes(c)
+            const cust = isCustomerComplaint(c)
             return [
               {
                 key: i,
                 at: Math.min(1, sec / lengthSec),
                 tone: cust ? ('stop' as const) : ('wait' as const),
-                title: `${cust ? `고객 불만: ${targetLabel(c.target)}` : COMPLAINT_LABEL[c.type]} ${fmtClock(Math.floor(sec))}`,
+                title: `${cust ? `고객 불만: ${TARGET_LABEL[c.target]}` : COMPLAINT_LABEL[c.type]} ${fmtClock(Math.floor(sec))}`,
                 onClick: () => goComplaint(c),
               },
             ]

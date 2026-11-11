@@ -100,7 +100,7 @@ export function useToday() {
       live: !!c.startedAt && !c.endedAt,
       // 고객 불만이 있을 때만 (AI 응대 오류 · 근거 없는 답변은 빼고, 11/11 Jira 148)
       complaint: (c.analysis?.complaints ?? []).some(
-        (x) => x.type === 'DISSATISFACTION_EXPRESSION',
+        (x) => x.type === 'DISSATISFACTION_EXPRESSION' && !!x.target, // 최신 판정본만
       ),
     })),
     perf: [

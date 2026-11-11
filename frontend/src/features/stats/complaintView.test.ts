@@ -21,7 +21,7 @@ const call = (complaints: { type: string; target?: string | null }[]) =>
     },
   }) as unknown as CallListItemDto
 
-test('AI 응대 오류 · 고객 불만을 통화 수로 따로 셈 (근거 없는 답변 · 옛 유형은 빠짐)', () => {
+test('AI 응대 오류 · 고객 불만을 통화 수로 따로 셈 (최신 판정본만: 근거 없는 답변 · 옛 유형 · 대상 없는 불만은 빠짐)', () => {
   const v = complaintView({ assessedCallCount: 10 } as ComplaintCalls, [
     call([{ type: 'INFORMATION_RECOGNITION_ERROR' }, { type: 'INTERRUPTION' }]),
     call([
@@ -46,14 +46,13 @@ test('AI 응대 오류 · 고객 불만을 통화 수로 따로 셈 (근거 없�
       ['INTERRUPTION', 1],
     ],
   )
-  assert.equal(customer.value, '30.0') // 3 / 10
+  assert.equal(customer.value, '20.0') // 2 / 10 — 대상 없는 옛 판정은 안 셈
   assert.deepEqual(
     customer.slices.map((s) => [s.key, s.value]),
     [
       ['ai_service', 1],
       ['price_policy', 1],
       ['delivery_other', 0],
-      ['none', 1],
     ],
   )
 })

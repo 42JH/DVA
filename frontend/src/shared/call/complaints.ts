@@ -1,4 +1,5 @@
-// 통화 판정 결과 나누기 (Jira 148, 11/11 백엔드 !476): 고객 불만 · AI 응대 오류 · 화면에 안 보이는 것
+// 통화 판정 결과 나누기 (Jira 148, 11/11 백엔드 !476): 고객 불만 · AI 응대 오류만 보임
+// 최신 판정본 기준만 (11/11 사용자: 과거 판정은 무시) — 대상(target) 없는 고객 불만 · 옛 유형(되묻기 반복 등) · 근거 없는 답변은 화면에서 뺌(서버 저장은 그대로)
 // 통화 목록 · 상세, 통계, 홈이 같은 기준으로 씀
 import type { ComplaintLevel, ComplaintTarget, ComplaintType } from './callDto'
 
@@ -17,30 +18,26 @@ export const TARGET_LABEL: Record<ComplaintTarget, string> = {
   price_policy: '요금 정책',
   delivery_other: '배송',
 }
-/** 대상이 없는 불만 = !476 전 판정이라 새 기준으로 다시 분석하기 전 → '분석 전' (목록 칩 · 상세 · 통계 같은 말, 11/11 사용자) */
-export const targetLabel = (t: ComplaintTarget | null) => (t ? TARGET_LABEL[t] : '분석 전')
 export const LEVEL_TEXT: Record<ComplaintLevel, string> = {
   explicit: '강하게 항의함',
   mild: '가볍게 불편을 말함',
 }
 
 type Judged = { type: ComplaintType; target: ComplaintTarget | null }
-export const isCustomerComplaint = (c: Judged) => c.type === 'DISSATISFACTION_EXPRESSION'
+/** 최신 판정본의 고객 불만 = 대상이 있는 것 */
+export const isCustomerComplaint = <T extends Judged>(c: T): c is T & { target: ComplaintTarget } =>
+  c.type === 'DISSATISFACTION_EXPRESSION' && c.target !== null
+const isAiError = (c: Judged) => (AI_ERROR_TYPES as readonly ComplaintType[]).includes(c.type)
 
-/** 고객 불만 · AI 응대 오류(새 네 유형 + 옛 유형)로 나눔. 근거 없는 답변은 정확도 확인 전이라 화면에서 뺌 (11/11 사용자 — 서버 저장은 그대로) */
+/** 고객 불만(대상 있는 것) · AI 응대 오류(새 네 유형)로 나눔 — 나머지는 버림 */
 export function splitComplaints<T extends Judged>(list: T[]) {
-  const shown = list.filter((c) => c.type !== 'UNSUPPORTED_ANSWER')
-  return {
-    customer: shown.filter(isCustomerComplaint),
-    errors: shown.filter((c) => !isCustomerComplaint(c)),
-  }
+  return { customer: list.filter(isCustomerComplaint), errors: list.filter(isAiError) }
 }
 
-/** 고객 불만을 대상마다 하나로 (TARGETS 순서, 대상 없는 건 맨 뒤) — 목록 칩 · 통계 */
-export function byTarget<T extends Judged>(list: T[]): T[] {
-  const rank = (c: T) => (c.target ? TARGETS.indexOf(c.target) : TARGETS.length)
+/** 고객 불만을 대상마다 하나로 (TARGETS 순서) — 목록 칩 · 통계 */
+export function byTarget<T extends Judged>(list: T[]) {
   return list
     .filter(isCustomerComplaint)
     .filter((c, i, all) => all.findIndex((x) => x.target === c.target) === i)
-    .sort((a, b) => rank(a) - rank(b))
+    .sort((a, b) => TARGETS.indexOf(a.target) - TARGETS.indexOf(b.target))
 }
