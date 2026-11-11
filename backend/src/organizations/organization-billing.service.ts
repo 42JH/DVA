@@ -45,7 +45,7 @@ export class OrganizationBillingService {
   }
   async recordCharge(client: PoolClient, orderId: number, requestId: string) {
     const charge = await this.repository.insertCharge(client, orderId);
-    if (!charge) return;
+    if (!charge || charge.organizationSeq === null) return;
     await this.ensureMonth(client, charge.organizationSeq, charge.billingMonth, requestId);
     const change = await this.repository.increment(
       client,

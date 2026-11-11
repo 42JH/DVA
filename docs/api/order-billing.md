@@ -72,6 +72,19 @@ POST /api/admin/orders/{id}/retry는 접수 실패한 동일 주문의 미취소
 
 GET /api/companies/{id}/billing?month=YYYY-MM으로 monthlyAmount·groupBillingAmount를 조회한다. 월 생략 시 현재 KST 월이며, 집계 행이 아직 없으면 두 금액을 0으로 반환한다. 조회는 원장을 변경하지 않는다. 금액은 JavaScript 안전 정수 범위의 원 단위 숫자다.
 
+`GET /api/customers/{id}/billing?month=YYYY-MM`은 ACTIVE 관리자 세션으로 조회한다. 응답의
+`data`는 `{ customerSeq, month, monthlyAmount }`이며 공통 `meta`를 포함한다. 월 생략 시 KST 이번 달이고,
+잘못된 월은 400, 없거나 삭제된 고객은 404, 해당 월 사용액이 없으면 0원이다.
+
+개인 `credit`은 결제 확정 트랜잭션에서 주문당 원장 한 건을 기록한다. 결제 확정 시점의 고객과 금액을 보존하며
+기업 소속 변경이나 주문 금액 보정 이후에도 원래 개인 청구를 조회한다. 집계 월은 `paid_at`의 KST 월이다.
+결제 전 취소는 청구가 없고, 결제 이후 디버 접수 실패는 사용액에 포함된다.
+기업 월결제·그룹결제는 기업 API에서 조회한다.
+
+062 migration 적용이 필요하다. 2026-11-11 운영 DB 읽기 전용 확인 당시 결제 확정된 개인 월결제 주문은 0건이었다.
+최초 금액은 보존 중인 `ORDER_PAYMENT_COMPLETED` 감사 기록에서 확인할 수 있으며 감사 보존 기간은 7일이다.
+이번 migration은 기존 주문의 현재 총액을 청구 원금으로 이관하지 않는다.
+
 새 월은 별도의 0원 행으로 시작한다. 이전 월을 덮어쓰지 않고, 재시작 시 누락된 월도 순서대로 생성한다. BILLING_MONTH_INITIALIZED는 각 결제 방식의 이전 월 금액→0원, BILLING_AMOUNT_INCREASED는 증가 전후 금액을 SYSTEM으로 기록한다. 원장·사용액·감사는 함께 커밋하거나 롤백한다.
 
 관리자 통화 조회에는 orderStatus와 orderTotalAmount를 반환한다. GET /api/calls의 orderStatus 필터로 상담에 연결된 결제 대기·접수·취소 주문을 검색할 수 있으며 통화 종료 사유는 그대로 보존한다.
