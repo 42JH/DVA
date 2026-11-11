@@ -66,7 +66,7 @@ def test_persona_first_then_fixed_business_rules_and_fallback_on_blank():
 def test_server_results_are_rendered_from_workflow_policy():
     text = render_live(None, POLICY)
     for key in ("call_started", "closing", "agent", "phones_to_read", "missing", "origin_confirm", "pickup",
-                "confirm_route", "readback", "sender_change_question", "address_detail_question"):
+                "confirm_route", "readback", "sender_change_question", "address_detail_question", "destination_choices"):
         assert text.count(f"\n- {key}: {POLICY.results[key]}") == 1
     assert "이대로 접수할까요?" in POLICY.results["readback"]  # 간소화한 되읽기도 질문으로 끝나야 G3을 통과한다
     assert "접수 정보를 수집할 때만" in text
@@ -87,6 +87,7 @@ def test_address_directions_and_short_detail_questions_are_rendered():
     live, backend = render_live(None, POLICY), render_backend(POLICY)
     for text in (live, backend):
         assert "“○○에서 보낼게요”는 발송 주소, “○○로 보낼게요”는 받는 곳 주소" in text
+        assert "발송 기본주소와 상세주소가 기록된 뒤" in text and "destination_choices" in text
     assert POLICY.fields["sender_address_detail"].label == "발송지 상세주소"
     assert POLICY.fields["receiver_address_detail"].label == "받는 곳 상세주소"
     assert "고객이 뜻을 되묻거나 무엇을 말해야 할지 몰라 할 때만" in live

@@ -252,14 +252,16 @@ async def record_fields(ctx: ToolContext, args: RecordArgs, *, expected_box: Box
         address_completed = (sender_address_pending and s.current is draft and
                              all(draft[name].valid for name in ("sender_address", "sender_address_detail")))
         receiver_keys = {"receiver_name", "receiver_address"}
-        if s.current and receiver_keys.intersection(facts["changed"]):
+        if s.current and receiver_keys.intersection(facts["recorded"]):
             s.current.deferred_destination = None
             s.current.destination_search_id += 1
+            if s.candidates and s.candidates.kind == "destination":
+                s.candidates = None
         if not needs and (resumed := resume_destination(s)):
             resumed.facts |= {k: v for k, v in facts.items() if v}
             resumed.summary = state_summary(s, policy)
             return resumed
-        # 받는 분 성함·주소는 자동으로 주소록과 대조한다. 발송 주소 변경 중 들은 값은 변경을 마친 뒤 대조한다.
+        # 받는 분 성함·주소는 자동으로 주소록과 대조한다. 발송 주소가 덜 채워졌으면 후보는 보류한다.
         # 핀에서 고른 받는 곳이면 다시 찾지 않는다.
         if (not needs and not s.pending and s.customer.places
                 and (receiver_keys.intersection(facts["recorded"])

@@ -35,6 +35,11 @@ def ctx(backend=None, address=None, **kw) -> ToolContext:
                        BackendGateway(backend or MockBackend()), address, now=lambda: NOW, clock=lambda: 100.0, **kw)
 
 
+def complete_sender_address(c: ToolContext) -> None:
+    c.state.record("sender_address", "서울특별시 강남구 테헤란로 211")
+    c.state.record("sender_address_detail", "")
+
+
 def call(c, name, args, call_id=None, **kw):
     return run(run_tool(c, name, json.dumps(args, ensure_ascii=False), call_id or f"c{len(c.outputs)}", **kw))
 
@@ -371,6 +376,65 @@ def test_explicit_destination_waits_for_sender_and_is_not_carried_to_another_dra
     assert call(c, "get_state", {})["destination_choices"] == list(st.candidates.labels)
 
 
+@pytest.mark.parametrize(("tool", "name_field"), [("record_fields", "receiver_name"), ("find_destination", "name")])
+def test_ordinary_order_offers_destination_only_after_sender_address(address, tool, name_field):
+    c = ctx(address=address)
+    c.state.customer.places = (Place("이영희", CALLER, "서울특별시 강남구 테헤란로 212", "5층", source=Source.PIN),)
+
+    out = call(c, tool, {name_field: "이영희"})
+    assert out["status"] == "ok" and out["missing"][0] == "sender_address"
+    assert "destination_choices" not in out and "labels" not in out.get("facts", {})
+    assert c.state.candidates is None and c.state.current.deferred_destination
+
+    out = call(c, "record_fields", {"sender_address": "서울 강남구 테헤란로 211"})
+    assert out["missing"] == ["sender_address_detail"]
+    assert out["address_detail_question"] == "상세주소를 알려주시겠어요?"
+    assert "candidates" not in call(c, "get_state", {"include_values": True}).get("facts", {})
+
+    out = call(c, "record_fields", {"sender_address_detail": ""})
+    assert out["status"] == "needs_choice" and out["destination_choices"] == out["facts"]["labels"]
+    assert apply_pick(c.state, out["destination_choices"][0])
+    assert c.state.current["receiver_address_detail"].value == "5층"
+
+
+def test_no_destination_match_keeps_early_receiver_name(address):
+    c = ctx(address=address)
+    call(c, "record_fields", {"receiver_phone": CALLER, "sender_address": "서울 강남구 테헤란로 211"})
+
+    out = call(c, "find_destination", {"name": "이영희"})
+    assert out["status"] == "ok" and out["missing"][0] == "sender_address_detail"
+    assert out["facts"]["recorded"] == ["receiver_name"] and c.state.current["receiver_name"].value == "이영희"
+
+    out = call(c, "record_fields", {"sender_address_detail": ""})
+    assert out["missing"][0] == "receiver_address" and "receiver_name" not in out["missing"]
+
+
+@pytest.mark.parametrize("receiver_corrected", [False, True])
+def test_delayed_no_match_keeps_name_only_for_current_receiver(receiver_corrected):
+    async def scenario():
+        started, release = asyncio.Event(), asyncio.Event()
+
+        class SlowCompanySearch(MockBackend):
+            async def search_company_places(self, *args, **kwargs):
+                started.set()
+                await release.wait()
+                return await super().search_company_places(*args, **kwargs)
+
+        c = ctx(SlowCompanySearch())
+        old = asyncio.create_task(run_tool(c, "find_destination", json.dumps({"name": "이영희"}), "old"))
+        await started.wait()
+        async with c.lock:
+            complete_sender_address(c)
+        if receiver_corrected:
+            await run_tool(c, "record_fields", json.dumps({"receiver_name": "박민수"}), "new")
+        release.set()
+        out = await old
+        assert out["code"] == ("RESULT_SUPERSEDED" if receiver_corrected else "DEST_NONE")
+        assert c.state.current["receiver_name"].value == ("박민수" if receiver_corrected else "이영희")
+
+    run(scenario())
+
+
 @pytest.mark.parametrize(("detail", "expected"), [(None, None), ("", ""), ("삼층", "3층")])
 def test_find_destination_preserves_new_receiver_detail_state(address, detail, expected):
     c = ctx(address=address)
@@ -383,8 +447,8 @@ def test_find_destination_preserves_new_receiver_detail_state(address, detail, e
     assert ("receiver_address_detail" in out["missing"]) is (detail is None)
 
 
-@pytest.mark.parametrize("new_draft", [False, True])
-def test_stale_destination_search_cannot_replace_newer_choices(address, new_draft):
+@pytest.mark.parametrize("change", ["new_search", "new_draft", "lookup"])
+def test_stale_destination_search_cannot_replace_newer_choices(address, change):
     from app.domain.state import copy_draft
 
     async def scenario():
@@ -397,18 +461,26 @@ def test_stale_destination_search_cannot_replace_newer_choices(address, new_draf
                 return await address.resolve(heard)
 
         c = ctx(address=SlowAddress())
+        complete_sender_address(c)
         c.state.customer.places = (Place("이영희", CALLER, "서울특별시 강남구 테헤란로 212", "5층", source=Source.PIN),)
         old = asyncio.create_task(run_tool(c, "find_destination",
                                            json.dumps({"place": "서울 강남구 테헤란로 211"}), "old"))
         await started.wait()
-        if new_draft:
-            async with c.lock:
+        async with c.lock:
+            if change == "new_draft":
                 c.state.current = copy_draft(c.state.current)
-        newer = await run_tool(c, "find_destination", json.dumps({"name": "이영희"}), "new")
-        assert newer["status"] == "needs_choice"
+            elif change == "lookup":
+                c.state.intent = "lookup"
+                offer(c.state, "order", ("최근 택배",), ({"id": 1},))
+        if change != "lookup":
+            newer = await run_tool(c, "find_destination", json.dumps({"name": "이영희"}), "new")
+            assert newer["status"] == "needs_choice"
         release.set()
         assert (await old)["code"] == "RESULT_SUPERSEDED"
-        assert c.state.candidates.items[0].name == "이영희"
+        if change == "lookup":
+            assert c.state.candidates.kind == "order" and c.state.candidates.labels == ("최근 택배",)
+        else:
+            assert c.state.candidates.items[0].name == "이영희"
 
     run(scenario())
 
@@ -521,6 +593,7 @@ def place(name, address_, source=Source.PIN, detail="101호"):
 def test_personal_place_found_first_and_pick_applies():
     c = ctx(customer=Customer(caller_phone=CALLER, places=(place("이영희", "부산 해운대구 센텀로 10"),
                                                            place("김엄마", "대구 수성구 달구벌대로 2450"))))
+    complete_sender_address(c)
     out = call(c, "find_destination", {"name": "김엄마"})
     assert out["status"] == "needs_choice" and len(out["facts"]["labels"]) == 1
     assert "맞나요" in out["facts"]["guidance"]  # 후보 1건은 질문으로 확인하게 한다
@@ -536,6 +609,7 @@ def test_narrowing_offered_candidates_to_one_applies_the_pick():
     pins = (place("박지호", "경상북도 구미시 인의로 1"), place("박지호", "서울특별시 양천구 신정로 2", detail="403호"),
             place("박지호", "경상북도 구미시 인의로 3"))
     c = ctx(customer=Customer(caller_phone=CALLER, places=pins))
+    complete_sender_address(c)
     assert call(c, "record_fields", {"receiver_name": "박지호"})["code"] == "DEST_MANY"
     out = call(c, "find_destination", {"name": "박지호", "place": "양천구"})
     s = c.state
@@ -552,6 +626,7 @@ def test_place_resolves_to_address_then_book_confirms_or_new_receiver(corrector,
     c = ctx(address=AddressService(corrector),
             customer=Customer(caller_phone=CALLER, places=(place("김철수", same), place("이영희", same, detail="501호"),
                                                            place("박지점", "경상북도 구미시 인동9길 7-3"))))
+    complete_sender_address(c)
     assert call(c, "find_destination", {"place": "송파구 올림픽로 삼백"})["code"] == "DEST_MANY"  # 같은 주소의 두 분
     out = call(c, "find_destination", {"name": "박민수", "place": "송파구 올림픽로 삼백"})
     s = c.state
@@ -582,9 +657,10 @@ def test_pin_labels_name_and_region_then_detail():
 
 
 def test_record_receiver_checks_address_book_without_request(corrector, fake_kakao):
-    """받는 분 성함이나 주소를 들으면 바로 주소록 핀을 확인한다. 고르면 핀 값으로, 아니면 들은 대로."""
+    """발송 주소를 받은 상태에서는 받는 분 성함이나 주소로 바로 주소록 핀을 확인한다."""
     pins = (place("김엄마", "대구광역시 수성구 달구벌대로 2450"), place("김철수", "서울특별시 송파구 올림픽로 300"))
     c = ctx(address=AddressService(corrector), customer=Customer(customer_seq=12, caller_phone=CALLER, places=pins))
+    complete_sender_address(c)
     out = call(c, "record_fields", {"receiver_name": "김엄마"})
     assert out["status"] == "needs_choice" and out["facts"]["labels"] == ["김엄마 수성구 y"]
     assert c.state.field_of("receiver_name").value == "김엄마" and "receiver_name" in out["facts"]["recorded"]
@@ -597,6 +673,7 @@ def test_record_receiver_checks_address_book_without_request(corrector, fake_kak
     assert call(c, "record_fields", {"receiver_address": "송파구 올림픽로 삼백"})["status"] == "ok"
     # 성함 전에 주소를 들으면 실제 주소로 대조: 같은 건물이면 확인, 다른 건물번호면 그대로
     c = ctx(address=AddressService(corrector), customer=Customer(customer_seq=12, caller_phone=CALLER, places=pins))
+    complete_sender_address(c)
     out = call(c, "record_fields", {"receiver_address": "송파구 올림픽로 삼백"})
     assert out["status"] == "needs_choice" and out["facts"]["labels"] == ["김철수 송파구 y"]
     c.state.candidates = None
@@ -612,6 +689,7 @@ def test_company_search_many_more_none_and_failure():
     db = MockBackend()
     db.company_places = [company(), company("주소둘", seq=27), company("다른사람", "다른기업", seq=28)]
     c = ctx(db)
+    complete_sender_address(c)
     out = call(c, "find_destination", {"organization": "주소기업"})
     assert out["code"] == "DEST_MANY" and len(out["facts"]["labels"]) == 2
     assert c.state.candidates.items[0].source == Source.COMPANY
@@ -761,6 +839,7 @@ def test_get_state_values_on_request():
     """고객이 물으면 고르기 전 후보·고른 뒤 기록 값을 서버 상태로 준다. 발신번호·기업 사원 연락처·상세주소는 주지 않는다."""
     pins = (place("박지호", "경상북도 구미시 인의로 1"), place("박지호", "서울특별시 양천구 신정로 2", detail="403호"))
     c = ctx(customer=Customer(caller_phone=CALLER, places=pins))
+    complete_sender_address(c)
     labels = call(c, "find_destination", {"name": "박지호"})["facts"]["labels"]
     v = c.state.state_version
     before = call(c, "get_state", {"include_values": True})["facts"]
@@ -772,6 +851,7 @@ def test_get_state_values_on_request():
     assert cur["receiver_phone"] == {"value": "01098765432", "from": "pin"}
     assert "sender_phone" not in cur and c.state.field_of("sender_phone").valid  # 발신번호는 읽지 않는다
     company = ctx()
+    complete_sender_address(company)
     offer(company.state, "destination", ("세종대로 김부장",),
           (Place("김부장", "01011112222", "서울 중구 세종대로 110", "5층", None, Source.COMPANY),))
     cand = call(company, "get_state", {"include_values": True})["facts"]["candidates"][0]

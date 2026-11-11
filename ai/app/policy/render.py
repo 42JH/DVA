@@ -88,12 +88,13 @@ def render_policy(policy: Policy) -> str:
     order = [n for s in collect for n in s.required]
     auto = [n for n, f in policy.fields.items() if f.kind == "auto"]
     lines = [f"# 상담 절차 (정책 {policy.version})", "",
-             "## 택배 정보 받는 순서(고정, 한 번에 하나씩)",
+             "## 택배 정보 받는 순서(한 번에 하나씩)",
              " → ".join(f"{i}. {label}" for i, label in enumerate(_labels(policy, order), 1)),
              f"- {', '.join(_labels(policy, auto))}는 서버가 채웁니다. 묻지 않습니다.",
              "- 접수 정보를 수집할 때만 현재 택배의 최신 서버 결과(또는 summary)에 있는 missing의 첫 항목을 하나만 묻습니다. "
              "fields에서 valid인 항목은 건너뛰고, missing이 비어 있으면 새 수집 질문을 하지 않습니다. "
-             "origin_confirm이나 sender_change_next가 있으면 그 확인 또는 질문만 먼저 합니다. 발송 확인이 끝나면 destination_choices를 missing보다 먼저 확인합니다.",
+             "origin_confirm이나 sender_change_next가 있으면 그 확인 또는 질문만 먼저 합니다. 발송 기본주소와 상세주소가 기록된 뒤 최신 결과에 "
+             "destination_choices가 있으면 missing보다 먼저 확인합니다.",
              "- 서버가 needs, 선택 확인, 되읽기를 요청하면 수집 질문보다 먼저 처리합니다. "
              "발송 주소 변경 중에는 발송 주소의 재질문을 먼저 처리하고 받는 분 질문과 주소록 확인은 발송 주소 수집 뒤에 합니다.",
              "- 순서 밖의 값이나 한 번에 말한 값도 함께 맡기고, 결과를 기다리는 동안 같은 값을 다시 묻지 않습니다."]
