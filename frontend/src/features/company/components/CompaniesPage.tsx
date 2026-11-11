@@ -39,7 +39,7 @@ export function CompaniesPage() {
           placeholder="기업명으로 검색"
           label="기업 검색"
         />
-        <Btn kind="line" className="ml-auto" onClick={vm.openCsv}>
+        <Btn kind="primary" className="ml-auto" onClick={vm.openCsv}>
           <Icon name="sheet" />
           CSV로 기업 등록
         </Btn>
