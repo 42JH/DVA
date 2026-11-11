@@ -8,7 +8,7 @@ import { useDebounced } from '@/shared/lib/useDebounced'
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toCallRow, type CallListItemDto } from '@/shared/call/callDto'
 import { callQueries } from '@/shared/call/callApi'
-import { byTarget, targetLabel } from '@/shared/call/complaints'
+import { byTarget, TARGET_LABEL } from '@/shared/call/complaints'
 import { useSnapshotList } from '@/shared/lib/useSnapshotList'
 import { rangeFrom, type Range } from '@/shared/lib/range'
 import { dateTime } from '@/shared/lib/when'
@@ -86,10 +86,9 @@ export function useCalls() {
       analyzed: row.counts !== null,
       // 고객 불만 칩 — 대상마다 하나, 전부 보임 (11/11 사용자: AI 응대 오류는 목록에서 빼고 상세 · 통계로, +N 없이). 근거는 그 대상의 첫 말
       complaints: byTarget(row.complaints).map((c) => ({
-        key: c.target ?? 'none',
-        label: targetLabel(c.target),
+        key: c.target,
+        label: TARGET_LABEL[c.target],
         title: c.reason,
-        tone: c.target ? ('stop' as const) : ('idle' as const), // 대상 없는 옛 판정('분석 전')은 회색
       })),
       judging: row.counts !== null && row.hasComplaint === null, // 분석은 끝났고 불만 판정은 아직
       duration: row.durationSec === null ? '' : fmtDuration(row.durationSec),

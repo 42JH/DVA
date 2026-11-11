@@ -1,7 +1,7 @@
 // 통화 상세 — 대화 · AI 처리 기록 · 녹취는 기존 useCallDetail 그대로, 요약(상태 · 상담 결과 · 불만 · 처리 결과)은 같은 캐시에서 더 꺼냄
 import { useQuery } from '@tanstack/react-query'
 import { fmtClock, fmtDuration, fmtPhone } from '@/shared/lib/format'
-import { LEVEL_TEXT, splitComplaints, targetLabel } from '@/shared/call/complaints'
+import { LEVEL_TEXT, splitComplaints, TARGET_LABEL } from '@/shared/call/complaints'
 import { dateTime } from '@/shared/lib/when'
 import { callKinds } from '@/shared/lib/kinds'
 import { reasonTag } from '@/shared/lib/unansweredReason'
@@ -52,7 +52,7 @@ export function useCallView(callId: number) {
     // 판정: 고객 불만(대상 · 강도 · 고객이 한 말)과 AI 응대 오류로 나눔 (11/11). 시각을 누르면 그 말로
     judging: call.counts !== null && call.hasComplaint === null, // 분석 뒤 불만 판정이 아직
     customer: split.customer.map((c) => ({
-      label: targetLabel(c.target),
+      label: TARGET_LABEL[c.target],
       level: c.level ? LEVEL_TEXT[c.level] : null,
       quote: c.reason,
       ...at(c),

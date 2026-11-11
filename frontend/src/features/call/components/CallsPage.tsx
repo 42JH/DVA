@@ -213,12 +213,12 @@ function Row({ r, from, onWarm }: { r: CallsRow; from: string; onWarm: () => voi
       {cell(
         <span data-chips="complaints" className="flex gap-1 whitespace-nowrap">
           {r.judging ? (
-            // 판정 전 · 대상 없는 옛 판정 모두 같은 회색 '분석 전' 칩 (11/11 사용자: 두 말이 섞여 불편)
+            // 불만 판정 전은 회색 '분석 전' 칩. 옛 판정 결과는 무시(빈칸) — 최신 판정본만 (11/11 사용자)
             <Badge tone="idle">분석 전</Badge>
           ) : (
             r.complaints.map((c) => (
               <span key={c.key} title={c.title}>
-                <Badge tone={c.tone}>{c.label}</Badge>
+                <Badge tone="stop">{c.label}</Badge>
               </span>
             ))
           )}

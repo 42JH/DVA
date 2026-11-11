@@ -32,13 +32,12 @@ export function complaintView(d: ComplaintCalls, calls: CallListItemDto[]) {
       })),
     }
   }
-  const targets = [...TARGETS, 'none' as const]
   return {
     tabs: [
       tab(
         'ai',
         'AI 응대 오류',
-        count((j) => j.errors.some((e) => isAiError(e.type))),
+        count((j) => j.errors.length > 0),
         AI_ERROR_TYPES.map((t) => ({
           key: t,
           ...AI_ERROR[t],
@@ -49,15 +48,12 @@ export function complaintView(d: ComplaintCalls, calls: CallListItemDto[]) {
         'customer',
         '고객 불만',
         count((j) => j.customer.length > 0),
-        targets
-          .map((k) => ({
-            key: k,
-            ...COMPLAINT_TARGET[k],
-            value: count((j) => j.customer.some((c) => (c.target ?? 'none') === k)),
-          }))
-          .filter((p) => p.key !== 'none' || p.value > 0), // 대상 없는 옛 판정은 있을 때만
+        TARGETS.map((k) => ({
+          key: k,
+          ...COMPLAINT_TARGET[k],
+          value: count((j) => j.customer.some((c) => c.target === k)),
+        })),
       ),
     ],
   }
 }
-const isAiError = (t: string) => (AI_ERROR_TYPES as readonly string[]).includes(t)
