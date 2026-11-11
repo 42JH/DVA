@@ -2673,5 +2673,711 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
       );
     },
   );
+  await t.test(
+    'order updates preserve legacy caller bounds, all administrator states, pins, totals and payment requests',
+    async () => {
+      const original = sides[0].base,
+        candidate = sides[1].base,
+        started = Date.now(),
+        at = new Date().toISOString(),
+        due = new Date(Date.now() + 3600000).toISOString();
+      const owners = [
+        {
+          ...sides[0],
+          calls: reference,
+          orders: reference,
+          customers: reference,
+          audit: reference,
+        },
+        {
+          ...sides[1],
+          calls: databases.consultation,
+          orders: databases.order,
+          customers: databases.customer,
+          audit: databases.operations,
+        },
+      ];
+      const address = (name) => ({
+        name,
+        phoneNumber: '01070707070',
+        roadAddress: '수정 도로',
+        jibunAddress: '수정 지번',
+        detailAddress: '101호',
+        dongName: '동',
+        postalCode: '12345',
+      });
+      const origin = address('발송인'),
+        destination = address('수령인');
+      const methods = [
+        'COLLECTING',
+        'notPaid',
+        'PAID',
+        'SUBMITTING',
+        'SUBMITTING_FAILED',
+        'ACCEPTED',
+        'SUBMISSION_FAILED',
+        'CANCELLED',
+      ];
+      const keys = [randomUUID(), randomUUID()];
+      for (const side of owners) {
+        for (const [id, status, deleted] of [
+          [97001, 'ACTIVE', null],
+          [97002, 'ACTIVE', null],
+          [97003, 'WITHDRAWN', null],
+          [97004, 'ACTIVE', at],
+        ])
+          await side.customers.query(
+            'INSERT INTO customers(customer_seq,name,phone_number,status,deleted_at) OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,$4,$5)',
+            [
+              id,
+              '수정 고객 ' + id,
+              '0107070707' + (id - 97001),
+              status,
+              deleted,
+            ],
+          );
+        for (const [id, customer] of [
+          [97001, 97001],
+          [97002, 97002],
+        ])
+          await side.customers.query(
+            'INSERT INTO personal_pins(personal_pin_seq,customer_seq,address_data) OVERRIDING SYSTEM VALUE VALUES($1,$2,$3)',
+            [id, customer, origin],
+          );
+        for (let n = 1; n <= 11; n++)
+          await side.calls.query(
+            'INSERT INTO call_sessions(call_session_seq,provider_call_id,caller_phone_number,customer_seq,order_seq,incoming_at,registered_at,order_intake_enabled,deleted_at,started_at,ended_at) ' +
+              "OVERRIDING SYSTEM VALUE VALUES($1,'update-call-'||$1::int::text,$2,$3,$4,$5,$5,$6,$7,$8,$8)",
+            [
+              97000 + n,
+              n === 8 ? null : n === 7 ? '01070707071' : '01070707070',
+              n === 1 ? null : 97001,
+              null,
+              [1, 10].includes(n)
+                ? null
+                : [5, 9].includes(n)
+                  ? '2000-01-01T00:00:00Z'
+                  : at,
+              n === 5,
+              [5, 6].includes(n) ? at : null,
+              [3, 4].includes(n) ? at : null,
+            ],
+          );
+        const held = await side.calls.connect();
+        await held.query('BEGIN');
+        await held.query(
+          'SELECT 1 FROM call_sessions WHERE call_session_seq IN(97005,97006,97009) FOR KEY SHARE',
+        );
+        retention.push(held);
+        const client = await side.orders.connect();
+        try {
+          await client.query('BEGIN');
+          await client.query("SET LOCAL session_replication_role='replica'");
+          for (let n = 0; n < 16; n++) {
+            const status =
+              n < 8 ? methods[n] : n === 12 ? 'notPaid' : 'COLLECTING';
+            await client.query(
+              'INSERT INTO orders(order_seq,customer_seq,payment_method_type,status,total_amount,creation_source,version,created_at,updated_at,payment_due_at,paid_at,pickup_requested_at,parcel_no,dver_received_at,closed_at,deleted_at) ' +
+                "OVERRIDING SYSTEM VALUE VALUES($1,$2,'billing',$3,$4,'ADMIN',1,$5,$5,$6,$7,'2030-02-01T00:00:00Z',$8,$9,$10,$11)",
+              [
+                61000 + n,
+                n === 8 ? 97003 : n === 9 ? null : n === 15 ? 97004 : 97001,
+                status,
+                n === 7 ? 0 : 5000,
+                at,
+                [1, 12].includes(n) ? due : null,
+                [
+                  'PAID',
+                  'SUBMITTING',
+                  'SUBMITTING_FAILED',
+                  'ACCEPTED',
+                  'SUBMISSION_FAILED',
+                ].includes(status)
+                  ? at
+                  : null,
+                n === 5 ? 'EDIT0052' : null,
+                n === 5 ? at : null,
+                [5, 7].includes(n) ? at : null,
+                n === 11 ? at : null,
+              ],
+            );
+            const columns = Object.fromEntries(
+              ['origin', 'destination'].flatMap((side) =>
+                Object.entries(side === 'origin' ? origin : destination).map(
+                  ([name, value]) => [
+                    side +
+                      '_' +
+                      name.replace(
+                        /[A-Z]/g,
+                        (letter) => '_' + letter.toLowerCase(),
+                      ),
+                    value,
+                  ],
+                ),
+              ),
+            );
+            const parcel = {
+              ...columns,
+              order_parcel_seq: 72000 + n,
+              order_seq: 61000 + n,
+              parcel_position: 1,
+              status: n === 7 ? 'CANCELLED' : 'ACTIVE',
+              document_count: 1,
+              small_box_count: 0,
+              medium_box_count: 0,
+              big_box_count: 0,
+              other_item_description: '',
+              client_comment: '기존 메모',
+              item_price: 1000,
+              notified_price: 5000,
+              origin_pin_scope: n === 13 ? 'COMPANY' : null,
+              origin_pin_seq: n === 13 ? 99913 : null,
+              created_at: at,
+              updated_at: at,
+            };
+            await client.query(
+              'INSERT INTO order_parcels OVERRIDING SYSTEM VALUE SELECT * FROM jsonb_populate_record(NULL::order_parcels,$1::jsonb)',
+              [parcel],
+            );
+          }
+          await client.query(
+            'INSERT INTO order_parcels OVERRIDING SYSTEM VALUE SELECT (jsonb_populate_record(NULL::order_parcels,to_jsonb(p)||$1::jsonb)).* FROM order_parcels p WHERE order_parcel_seq=72000',
+            [
+              {
+                order_parcel_seq: 72016,
+                parcel_position: 2,
+                status: 'CANCELLED',
+              },
+            ],
+          );
+          for (const [n, index] of [
+            [1, 0],
+            [12, 1],
+          ])
+            await client.query(
+              'INSERT INTO order_payment_requests(payment_request_id,order_seq,amount,expires_at,created_at,approval_started_at,provider_payment_key) VALUES($1,$2,5000,$3,$4,$5,$6)',
+              [
+                keys[index],
+                61000 + n,
+                due,
+                at,
+                n === 12 ? at : null,
+                n === 12 ? 'update-approval-key' : null,
+              ],
+            );
+          await client.query('COMMIT');
+        } catch (error) {
+          await client.query('ROLLBACK');
+          throw error;
+        } finally {
+          client.release();
+        }
+        await side.calls.query(
+          'UPDATE call_sessions SET order_seq=CASE WHEN call_session_seq IN(97002,97011) THEN 61001 ELSE 61000 END WHERE call_session_seq IN(97002,97003,97011)',
+        );
+        await side.orders.query(
+          "SELECT setval('order_parcels_order_parcel_seq_seq',73000,false)",
+        );
+        await side.orders.query(
+          'INSERT INTO order_parcel_drafts(draft_seq,reserved_order_seq,customer_seq,client_parcel_id,creation_payload,parcel_data,status,legacy_order_seq,legacy_order_parcel_seq) ' +
+            "OVERRIDING SYSTEM VALUE VALUES(58000,99000,97001,$1,'{}',$2,'INCOMPLETE',61010,72010)",
+          [
+            randomUUID(),
+            {
+              ...origin,
+              origin,
+              destination,
+              originPin: null,
+              documentCount: 1,
+            },
+          ],
+        );
+      }
+      const sourceSpec = await (
+          await fetch(original + '/api/docs-json')
+        ).json(),
+        targetSpec = await (await fetch(candidate + '/order/docs-json')).json();
+      const {
+        schema,
+        envelope,
+        generatedTimes,
+      } = require('./final-parity.cjs');
+      assert.deepEqual(
+        schema(targetSpec.paths['/api/orders/{id}'].patch, targetSpec),
+        schema(sourceSpec.paths['/api/orders/{id}'].patch, sourceSpec),
+      );
+      let pairs = 0;
+      const requestIds = [];
+      const version = async (id) =>
+        (
+          await reference.query(
+            'SELECT version FROM orders WHERE order_seq=$1',
+            [id],
+          )
+        ).rows[0].version;
+      async function pair(id, input, status = 200, options = {}) {
+        const requestId = randomUUID(),
+          bodies = [];
+        requestIds.push(requestId);
+        const authorization = options.ai
+          ? {
+              Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN,
+              call_session_seq: String(options.call ?? 97001),
+            }
+          : {
+              Cookie: 'dva_session=' + tokens[(options.admin ?? 1) - 1],
+              Origin: 'http://localhost:5173',
+            };
+        for (const side of owners) {
+          const response = await fetch(side.base + '/api/orders/' + id, {
+            method: 'PATCH',
+            signal: AbortSignal.timeout(30000),
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Request-Id': requestId,
+              ...authorization,
+              ...options.headers,
+            },
+            body: JSON.stringify(input),
+          });
+          const body = await response.json();
+          assert.equal(
+            response.status,
+            status,
+            side.name + ' PATCH ' + id + ' ' + JSON.stringify(body),
+          );
+          assert.equal(response.headers.get('cache-control'), 'no-store');
+          bodies.push(envelope(body, requestId));
+          if (status === 200)
+            assert.equal(
+              body.data.version,
+              (
+                await side.orders.query(
+                  'SELECT version FROM orders WHERE order_seq=$1',
+                  [id],
+                )
+              ).rows[0].version,
+            );
+        }
+        assert.deepEqual(bodies[1], bodies[0], 'PATCH ' + id);
+        pairs++;
+        return bodies[0].data;
+      }
+      await pair(61000, { expectedVersion: 1, pickupRequestedAt: null }, 401, {
+        ai: true,
+        headers: { Authorization: '' },
+      });
+      for (const input of [
+        {},
+        { expectedVersion: 1 },
+        { expectedVersion: '1', totalAmount: 5 },
+        { expectedVersion: 1, customerSeq: 97001 },
+        { expectedVersion: 1, pickupRequestedAt: '2026-02-30T00:00:00Z' },
+        { expectedVersion: 1, parcels: [{ orderParcelSeq: 72000 }] },
+        {
+          expectedVersion: 1,
+          parcels: [
+            { orderParcelSeq: 72000, clientComment: 'a' },
+            { orderParcelSeq: 72000, clientComment: 'b' },
+          ],
+        },
+        {
+          expectedVersion: 1,
+          removeParcelSeqs: [72000],
+          parcels: [{ orderParcelSeq: 72000, clientComment: 'a' }],
+        },
+      ])
+        await pair(61000, input, 400);
+      await pair(
+        61000,
+        { expectedVersion: 1, removeParcelSeqs: [72000] },
+        403,
+        { ai: true, headers: { call_session_seq: 'invalid' } },
+      );
+      await pair(61000, { expectedVersion: 1, pickupRequestedAt: null }, 400, {
+        ai: true,
+        headers: { call_session_seq: 'invalid' },
+      });
+      for (const [call, status] of [
+        [97002, 409],
+        [97004, 409],
+        [97005, 409],
+        [97006, 404],
+        [97007, 403],
+        [97008, 403],
+        [97009, 404],
+        [999999, 404],
+      ])
+        await pair(
+          61000,
+          { expectedVersion: 1, pickupRequestedAt: null },
+          status,
+          { ai: true, call },
+        );
+      await pair(61008, { expectedVersion: 1, pickupRequestedAt: null }, 403);
+      await pair(61009, { expectedVersion: 1, pickupRequestedAt: null }, 403);
+      await pair(61010, { expectedVersion: 1, pickupRequestedAt: null }, 409);
+      await pair(61011, { expectedVersion: 1, pickupRequestedAt: null }, 404);
+      await pair(61015, { expectedVersion: 1, pickupRequestedAt: null }, 404);
+      await pair(999999, { expectedVersion: 1, pickupRequestedAt: null }, 404);
+      await pair(61000, { expectedVersion: 2, pickupRequestedAt: null }, 409);
+      await pair(
+        61000,
+        {
+          expectedVersion: 1,
+          parcels: [{ orderParcelSeq: 72016, destination: { name: '금지' } }],
+        },
+        409,
+        { ai: true },
+      );
+      await pair(
+        61000,
+        {
+          expectedVersion: 1,
+          parcels: [
+            {
+              orderParcelSeq: 72000,
+              originPin: { scope: 'PERSONAL', pinSeq: 97002 },
+            },
+          ],
+        },
+        403,
+        { ai: true },
+      );
+      await pair(
+        61000,
+        {
+          expectedVersion: 1,
+          parcels: [
+            {
+              orderParcelSeq: 72000,
+              originPin: { scope: 'PERSONAL', pinSeq: 97001 },
+              destination: { detailAddress: null },
+              clientComment: 'AI 수정',
+            },
+          ],
+          pickupRequestedAt: null,
+        },
+        200,
+        { ai: true },
+      );
+      await pair(61000, { expectedVersion: 1, pickupRequestedAt: null }, 409, {
+        ai: true,
+      });
+      await pair(61001, { expectedVersion: 1, pickupRequestedAt: null }, 409, {
+        ai: true,
+        call: 97011,
+      });
+      await pair(
+        61000,
+        { expectedVersion: await version(61000), removeParcelSeqs: [72001] },
+        404,
+      );
+      await pair(
+        61000,
+        {
+          expectedVersion: await version(61000),
+          parcels: [
+            {
+              originPin: { scope: 'COMPANY', pinSeq: 99913 },
+              documentCount: 1,
+            },
+          ],
+        },
+        400,
+      );
+      await pair(
+        61013,
+        {
+          expectedVersion: 1,
+          parcels: [
+            { orderParcelSeq: 72013, origin: { detailAddress: '금지 변경' } },
+          ],
+        },
+        400,
+      );
+      await pair(61013, {
+        expectedVersion: 1,
+        parcels: [
+          { orderParcelSeq: 72013, destination: { name: '기업 기록 유지' } },
+        ],
+      });
+      await pair(61013, {
+        expectedVersion: await version(61013),
+        parcels: [{ orderParcelSeq: 72013, originPin: null }],
+      });
+      for (const [header, status] of [
+        ['ignored', 400],
+        ['97002', 409],
+        ['97005', 404],
+        ['97007', 403],
+      ])
+        await pair(
+          61000,
+          { expectedVersion: await version(61000), pickupRequestedAt: null },
+          status,
+          {
+            headers: { call_session_seq: header },
+          },
+        );
+      await pair(
+        61000,
+        { expectedVersion: await version(61000), pickupRequestedAt: null },
+        200,
+        {
+          headers: { call_session_seq: '97003' },
+        },
+      );
+      for (let n = 0; n < 8; n++)
+        await pair(
+          61000 + n,
+          {
+            expectedVersion: await version(61000 + n),
+            parcels: [
+              {
+                orderParcelSeq: 72000 + n,
+                destination: { detailAddress: '관리자 ' + n },
+              },
+            ],
+          },
+          200,
+          { admin: (n % 3) + 1 },
+        );
+      await pair(
+        61002,
+        { expectedVersion: await version(61002), paymentMethodType: 'credit' },
+        409,
+      );
+      await pair(
+        61012,
+        {
+          expectedVersion: 1,
+          parcels: [{ orderParcelSeq: 72012, clientComment: '진행 중' }],
+        },
+        409,
+      );
+      await pair(61001, {
+        expectedVersion: await version(61001),
+        parcels: [{ orderParcelSeq: 72001, notifiedPrice: 6000 }],
+      });
+      await pair(
+        61001,
+        { expectedVersion: await version(61001), totalAmount: 6001 },
+        422,
+      );
+      await pair(61000, {
+        expectedVersion: await version(61000),
+        parcels: [{ documentCount: 2, notifiedPrice: 7000, itemPrice: 1000 }],
+        paymentMethodType: 'credit',
+      });
+      await pair(61000, {
+        expectedVersion: await version(61000),
+        removeParcelSeqs: [72000],
+      });
+      const uuidMaps = [new Map(), new Map()];
+      const normalize = (value, index, key = '') => {
+        if (value === null) return null;
+        if (value instanceof Date) value = value.toISOString();
+        if (key === 'payment_request_id') {
+          assert.match(value, /^[0-9a-f-]{36}$/i);
+          const map = uuidMaps[index];
+          if (!map.has(value)) map.set(value, 'payment-' + map.size);
+          return map.get(value);
+        }
+        if (key === 'invalidated_at') {
+          assert.ok(
+            Date.parse(value) >= started - 1000 &&
+              Date.parse(value) <= Date.now() + 1000,
+          );
+          return '<new invalidation>';
+        }
+        if (Array.isArray(value))
+          return value.map((item) => normalize(item, index));
+        if (typeof value === 'object')
+          return Object.fromEntries(
+            Object.entries(value).map(([key, item]) => [
+              key,
+              normalize(item, index, key),
+            ]),
+          );
+        return value;
+      };
+      const stored = async (side) => ({
+        orders: (
+          await side.orders.query(
+            'SELECT to_jsonb(o) AS data FROM orders o WHERE order_seq BETWEEN 61000 AND 61015 ORDER BY order_seq',
+          )
+        ).rows,
+        parcels: (
+          await side.orders.query(
+            'SELECT to_jsonb(p) AS data FROM order_parcels p WHERE order_seq BETWEEN 61000 AND 61015 ORDER BY order_seq,parcel_position',
+          )
+        ).rows,
+        calls: (
+          await side.calls.query(
+            'SELECT call_session_seq,order_seq,customer_seq,order_intake_version FROM call_sessions WHERE call_session_seq BETWEEN 97001 AND 97011 ORDER BY call_session_seq',
+          )
+        ).rows,
+        payments: (
+          await side.orders.query(
+            'SELECT to_jsonb(p) AS data FROM order_payment_requests p WHERE order_seq BETWEEN 61000 AND 61015 ORDER BY order_seq,created_at,payment_request_id',
+          )
+        ).rows,
+        charges: (
+          await side.orders.query(
+            'SELECT * FROM order_billing_charges WHERE order_seq BETWEEN 61000 AND 61015',
+          )
+        ).rows,
+      });
+      const before = await stored(owners[0]),
+        after = await stored(owners[1]);
+      assert.deepEqual(
+        normalize(generatedTimes(after, started - 1000, Date.now() + 1000), 1),
+        normalize(generatedTimes(before, started - 1000, Date.now() + 1000), 0),
+      );
+      assert.equal(after.charges.length, 0);
+      const paymentRows = after.payments
+        .map((row) => row.data)
+        .filter((row) => row.order_seq === 61001);
+      assert.equal(paymentRows.length, 2);
+      assert.equal(
+        paymentRows.filter((row) => row.invalidated_at === null)[0].amount,
+        6000,
+      );
+      assert.ok(paymentRows.some((row) => row.invalidated_at !== null));
+      assert.equal(after.calls[0].order_seq, 61000);
+      assert.equal(after.calls[0].customer_seq, 97001);
+      assert.equal(after.calls[0].order_intake_version, 1);
+      const logs = async (db) =>
+        (
+          await db.query(
+            'SELECT request_id,action,result,target_type,target_seq,actor_type,actor_seq,metadata FROM audit_logs WHERE request_id=ANY($1::uuid[]) ORDER BY audit_log_seq',
+            [requestIds],
+          )
+        ).rows;
+      const audits = await logs(reference);
+      for (let n = 0; n < 100; n++) {
+        if ((await logs(databases.operations)).length === audits.length) break;
+        await pause(25);
+      }
+      assert.deepEqual(await logs(databases.operations), audits);
+      const aiHeaders = {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN,
+        call_session_seq: '97010',
+      };
+      const faultInput = {
+        expectedVersion: 1,
+        parcels: [{ orderParcelSeq: 72014, clientComment: '커밋된 수정' }],
+      };
+      await databases.consultation.query(
+        "CREATE FUNCTION order_link_fixture_failure() RETURNS trigger LANGUAGE plpgsql AS $fixture$ BEGIN IF NEW.event_type='OrderCallLinked' AND (NEW.payload->>'callSessionSeq')::int=97010 THEN RAISE EXCEPTION 'test-only call link acknowledgement failure'; END IF; RETURN NEW; END $fixture$",
+      );
+      await databases.consultation.query(
+        'CREATE TRIGGER order_link_fixture_failure BEFORE INSERT ON inbox_events FOR EACH ROW EXECUTE FUNCTION order_link_fixture_failure()',
+      );
+      let receipt, committedVersion;
+      try {
+        const response = await fetch(candidate + '/api/orders/61014', {
+          method: 'PATCH',
+          headers: aiHeaders,
+          body: JSON.stringify(faultInput),
+        });
+        assert.equal(response.status, 500);
+        await response.body.cancel();
+        committedVersion = (
+          await databases.order.query(
+            'SELECT version FROM orders WHERE order_seq=61014',
+          )
+        ).rows[0].version;
+        assert.ok(committedVersion > 1);
+        assert.equal(
+          (
+            await databases.order.query(
+              'SELECT client_comment FROM order_parcels WHERE order_parcel_seq=72014',
+            )
+          ).rows[0].client_comment,
+          '커밋된 수정',
+        );
+        assert.equal(
+          (
+            await databases.consultation.query(
+              'SELECT order_seq FROM call_sessions WHERE call_session_seq=97010',
+            )
+          ).rows[0].order_seq,
+          null,
+        );
+        receipt = (
+          await databases.order.query(
+            "SELECT event_id,payload FROM outbox_events WHERE destination='consultation' AND event_type='OrderCallLinked' AND aggregate_seq=97010 ORDER BY outbox_seq",
+          )
+        ).rows[0];
+        assert.equal(receipt.payload.orderSeq, 61014);
+      } finally {
+        await databases.consultation.query(
+          'DROP TRIGGER order_link_fixture_failure ON inbox_events',
+        );
+        await databases.consultation.query(
+          'DROP FUNCTION order_link_fixture_failure()',
+        );
+      }
+      const event = {
+        eventId: receipt.event_id,
+        source: 'order',
+        eventType: 'OrderCallLinked',
+        payload: receipt.payload,
+      };
+      for (let n = 0; n < 2; n++) {
+        const response = await fetch(
+          'http://consultation-app:3004/internal/parcel-draft-write/events',
+          { method: 'POST', headers: aiHeaders, body: JSON.stringify(event) },
+        );
+        assert.equal(response.status, 200);
+        assert.ok(
+          ['processed', 'duplicate'].includes((await response.json()).status),
+        );
+      }
+      assert.deepEqual(
+        (
+          await databases.consultation.query(
+            'SELECT order_seq,customer_seq,order_intake_version FROM call_sessions WHERE call_session_seq=97010',
+          )
+        ).rows,
+        [{ order_seq: 61014, customer_seq: 97001, order_intake_version: 1 }],
+      );
+      const retry = await fetch(candidate + '/api/orders/61014', {
+        method: 'PATCH',
+        headers: aiHeaders,
+        body: JSON.stringify(faultInput),
+      });
+      assert.equal(retry.status, 409);
+      assert.equal((await retry.json()).error.code, 'VERSION_CONFLICT');
+      assert.equal(
+        (
+          await databases.order.query(
+            'SELECT version FROM orders WHERE order_seq=61014',
+          )
+        ).rows[0].version,
+        committedVersion,
+      );
+      assert.equal(
+        (
+          await databases.consultation.query(
+            'SELECT count(*)::int AS n FROM inbox_events WHERE event_id=$1',
+            [receipt.event_id],
+          )
+        ).rows[0].n,
+        1,
+      );
+      t.diagnostic(
+        'committed order edit restores its legacy call after a real owner acknowledgement rollback and duplicate event replay',
+      );
+      t.diagnostic(
+        'order update HTTP pairs: ' +
+          pairs +
+          '; legacy/new calls, all administrator states, personal/company pins, retained cancellation, totals and payment replacement',
+      );
+    },
+  );
   console.log('Compared HTTP requests: '+compared);
 });

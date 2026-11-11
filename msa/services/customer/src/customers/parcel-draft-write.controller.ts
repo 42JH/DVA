@@ -88,9 +88,13 @@ export class ParcelDraftWriteController {
       validateReadScope(scopeId);
       if (
         event.source !== 'order' ||
-        !['CustomerRead', 'CustomerPhoneRead', 'PinChecked', 'CustomerPaymentPolicyRead'].includes(
-          event.payload.operation,
-        )
+        ![
+          'CustomerRead',
+          'CustomerPhoneRead',
+          'PinChecked',
+          'CustomerPaymentPolicyRead',
+          'OrderCustomerRead',
+        ].includes(event.payload.operation)
       )
         throw new Error('Invalid customer write reference');
     } catch {
@@ -107,6 +111,16 @@ export class ParcelDraftWriteController {
         const input = event.payload.input;
         if (event.payload.operation === 'CustomerPaymentPolicyRead')
           return this.paymentPolicy(client, Number(input.id));
+        if (event.payload.operation === 'OrderCustomerRead')
+          return (
+            (
+              await client.query<CustomerReference>(
+                `SELECT customer_seq AS "customerSeq",phone_number AS phone,status='ACTIVE' AS active
+          FROM customers WHERE customer_seq=$1 AND deleted_at IS NULL FOR SHARE`,
+                [input.id],
+              )
+            ).rows[0] ?? null
+          );
         if (event.payload.operation === 'PinChecked')
           return (
             (

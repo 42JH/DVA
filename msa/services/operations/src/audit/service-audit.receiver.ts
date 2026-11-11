@@ -155,6 +155,7 @@ function auditInput(
           [
             'BILLING_MONTH_INITIALIZED',
             'ORDER_CREATED',
+            'ORDER_UPDATED',
             'ORDER_DELETED',
             'PARCEL_DRAFT_DELETED',
             'ORDER_CANCELLED',
@@ -249,18 +250,21 @@ function auditInput(
             : audit.action === 'ORDER_AMOUNT_CHANGED'
               ? payload.result !== 'SUCCESS' ||
                 !object(audit.metadata) ||
-                Object.keys(audit.metadata).sort().join(',') !==
-                  'amountAfter,amountBefore,orderParcelSeqs' ||
                 ![audit.metadata.amountBefore, audit.metadata.amountAfter].every(
                   (value) =>
                     value === null ||
                     (Number.isInteger(value) && Number(value) >= 0 && Number(value) <= 2147483647),
                 ) ||
-                !Array.isArray(audit.metadata.orderParcelSeqs) ||
-                audit.metadata.orderParcelSeqs.length < 1 ||
-                !audit.metadata.orderParcelSeqs.every(integer) ||
-                new Set(audit.metadata.orderParcelSeqs).size !==
-                  audit.metadata.orderParcelSeqs.length
+                !(Object.hasOwn(audit.metadata, 'orderParcelSeqs')
+                  ? Object.keys(audit.metadata).sort().join(',') ===
+                      'amountAfter,amountBefore,orderParcelSeqs' &&
+                    Array.isArray(audit.metadata.orderParcelSeqs) &&
+                    audit.metadata.orderParcelSeqs.length > 0 &&
+                    audit.metadata.orderParcelSeqs.every(integer) &&
+                    new Set(audit.metadata.orderParcelSeqs).size ===
+                      audit.metadata.orderParcelSeqs.length
+                  : Object.keys(audit.metadata).sort().join(',') === 'amountAfter,amountBefore' &&
+                    audit.actorType === 'ADMIN')
               : audit.metadata !== undefined) ||
         (payload.result === 'SUCCESS' &&
           (!(billingInitialization || billingIncrease || paymentCompleted || paymentExpiration

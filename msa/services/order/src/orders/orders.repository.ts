@@ -1,3 +1,4 @@
+import type { UpdateOrderDto, UpdatedOrderDto, ParcelChangeDto } from './dto/update-order.dto';
 import { ORDER_ADDRESS_FIELDS, type OrderDraft } from './order-draft';
 import type { OrderAddressPatchDto } from './dto/create-order.dto';
 import type { OriginPinDto } from './dto/origin-pin.dto';
@@ -453,5 +454,68 @@ export class OrdersRepository {
         [JSON.stringify(rows)],
       );
     }
+  }
+  async updateHeader(client: PoolClient, id: number, input: UpdateOrderDto) {
+    // 같은 값을 저장해도 버전을 소비해 이전 expectedVersion의 재전송을 막는다.
+    await client.query(
+      `UPDATE orders SET version=version+1,
+         payment_method_type=COALESCE($2,payment_method_type),
+         pickup_requested_at=CASE WHEN $3 THEN $4::timestamptz ELSE pickup_requested_at END,
+         total_amount=CASE WHEN $5 THEN $6::int ELSE total_amount END
+       WHERE order_seq=$1`,
+      [
+        id,
+        input.paymentMethodType ?? null,
+        input.pickupRequestedAt !== undefined,
+        input.pickupRequestedAt ?? null,
+        input.totalAmount !== undefined,
+        input.totalAmount ?? null,
+      ],
+    );
+  }
+
+  async updateParcel(client: PoolClient, orderId: number, parcel: ParcelChangeDto) {
+    const values: unknown[] = [orderId, parcel.orderParcelSeq];
+    const changes: string[] = [];
+    const set = (column: string, value: unknown) => {
+      if (value !== undefined) {
+        values.push(value);
+        changes.push(`${column}=$${values.length}`);
+      }
+    };
+    for (const side of ['origin', 'destination'] as const)
+      for (const field of ORDER_ADDRESS_FIELDS)
+        set(
+          `${side}_${field.replace(/[A-Z]/g, (letter) => '_' + letter.toLowerCase())}`,
+          parcel[side]?.[field],
+        );
+    for (const field of [
+      'documentCount',
+      'smallBoxCount',
+      'mediumBoxCount',
+      'bigBoxCount',
+      'otherItemDescription',
+      'clientComment',
+      'itemPrice',
+      'notifiedPrice',
+    ] as const)
+      set(
+        field.replace(/[A-Z]/g, (letter) => '_' + letter.toLowerCase()),
+        parcel[field],
+      );
+    if (parcel.originPin !== undefined) {
+      set('origin_pin_scope', parcel.originPin?.scope ?? null);
+      set('origin_pin_seq', parcel.originPin?.pinSeq ?? null);
+    }
+    await client.query(
+      `UPDATE order_parcels SET ${changes.join(',')} WHERE order_seq=$1 AND order_parcel_seq=$2`,
+      values,
+    );
+  }
+
+  async currentVersion(client: PoolClient, id: number): Promise<UpdatedOrderDto> {
+    return (
+      await client.query<UpdatedOrderDto>('SELECT version FROM orders WHERE order_seq=$1', [id])
+    ).rows[0];
   }
 }

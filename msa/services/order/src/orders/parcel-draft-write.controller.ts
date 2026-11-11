@@ -1,3 +1,4 @@
+import { OrdersService } from './orders.service';
 import { validateEvent } from '@dva/events';
 import { ApiException } from '../common/errors/api.exception';
 import { finalizationId, type IntakeFinalization } from '@dva/events/order-intake-write.cjs';
@@ -15,7 +16,7 @@ import { ApiExcludeController } from '@nestjs/swagger';
 import {
   validateDraftWrite,
   validateWriteReference,
-  type CallWriteReceipt,
+  type OwnerCallWriteReceipt,
 } from '@dva/events/parcel-draft-write.cjs';
 import { DatabaseService } from '../database/database.service';
 import { ParcelDraftWritesService } from './parcel-draft-writes.service';
@@ -25,6 +26,7 @@ import { ParcelDraftWritesService } from './parcel-draft-writes.service';
 @Controller('internal/parcel-draft-write')
 export class ParcelDraftWriteController {
   constructor(
+    private readonly orders: OrdersService,
     private readonly intake: OrderIntakeWritesService,
     private readonly database: DatabaseService,
     private readonly drafts: ParcelDraftWritesService,
@@ -42,9 +44,11 @@ export class ParcelDraftWriteController {
     return {
       eventId: event.eventId,
       status: 'processed',
-      payload: await (event.payload.command.operation.startsWith('OrderIntake')
-        ? this.intake.execute(event)
-        : this.drafts.execute(event)),
+      payload: await (event.payload.command.operation === 'OrderUpdated'
+        ? this.orders.executeUpdate(event)
+        : event.payload.command.operation.startsWith('OrderIntake')
+          ? this.intake.execute(event)
+          : this.drafts.execute(event)),
     };
   }
 
@@ -69,9 +73,9 @@ export class ParcelDraftWriteController {
         payload: await this.finalization(Number(event.payload.input.id)),
       };
     }
-    const { rows } = await this.database.pool.query<CallWriteReceipt>(
+    const { rows } = await this.database.pool.query<OwnerCallWriteReceipt>(
       `SELECT event_id AS "eventId",payload FROM outbox_events WHERE destination='consultation'
-       AND event_type='ParcelDraftCallWritten' AND aggregate_seq=$1 AND delivered_at IS NULL ORDER BY outbox_seq`,
+       AND event_type IN ('ParcelDraftCallWritten','OrderCallLinked') AND aggregate_seq=$1 AND delivered_at IS NULL ORDER BY outbox_seq`,
       [event.payload.input.id],
     );
     return { eventId: event.eventId, status: 'processed', payload: rows };

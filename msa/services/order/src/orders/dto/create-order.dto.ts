@@ -1,5 +1,7 @@
 import { Type } from 'class-transformer';
 import {
+  IsIn,
+  IsISO8601,
   IsInt,
   IsObject,
   IsOptional,
@@ -179,4 +181,40 @@ export class ParcelInputDto {
   @Min(MIN_ORDER_ITEM_PRICE)
   @Max(MAX_ORDER_ITEM_PRICE)
   itemPrice?: number | null;
+}
+
+export class CreateOrderDto {
+  @ApiPropertyOptional({
+    description: '취소되지 않은 상세 배송비 합계(원). 최종 확정 시 필수.',
+    minimum: 1,
+    maximum: 2147483647,
+    nullable: true,
+  })
+  @ValidateIf((_object, value) => value !== undefined && value !== null)
+  @IsInt()
+  @Min(1)
+  @Max(2147483647)
+  totalAmount?: number | null;
+
+  @ApiPropertyOptional({
+    enum: ['billing', 'credit', 'groupBilling'],
+    description:
+      'billing: 개인·기업 개인 카드, credit: 월결제, groupBilling: 소속 부서 그룹결제. 생략하면 미정(null)으로 저장하며 최종 접수 전에 선택해야 합니다. 확정 시 자격을 검증합니다.',
+  })
+  @ValidateIf(present)
+  @IsIn(['billing', 'credit', 'groupBilling'])
+  paymentMethodType?: 'billing' | 'credit' | 'groupBilling';
+
+  @ApiPropertyOptional({
+    description:
+      '요청 수거 시각. 결제가 이 시각 이전 또는 같으면 유지합니다. 이후 결제 또는 생략 시 결제 완료 + 1시간을 한국시간 09:00~17:00에 맞추며, 17시 초과는 다음날 09시입니다. 전달 시각에는 별도 영업시간·일수 제한을 두지 않습니다.',
+    example: '2026-10-28T10:00:00+09:00',
+    type: String,
+    format: 'date-time',
+    nullable: true,
+  })
+  @IsOptional()
+  @IsISO8601({ strict: true, strictSeparator: true })
+  @Matches(/T.*(?:Z|[+-]\d{2}:\d{2})$/)
+  pickupRequestedAt?: string | null;
 }

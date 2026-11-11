@@ -5,7 +5,7 @@ import {
   requestDraftWrite,
   requestWriteReference,
   validateDraftWrite,
-  type CallWriteReceipt,
+  type OwnerCallWriteReceipt,
   type DraftWriteCall,
 } from '@dva/events/parcel-draft-write.cjs';
 import type { IntakeFinalization } from '@dva/events/order-intake-write.cjs';
@@ -25,7 +25,7 @@ type DraftCallSnapshot = Pick<
 export class ParcelDraftWriteService {
   readonly activeCalls = new Map<
     string,
-    { id: number | null; requestId: string }
+    { id: number | null; requestId: string; operation: string }
   >();
   constructor(
     private readonly database: DatabaseService,
@@ -44,6 +44,24 @@ export class ParcelDraftWriteService {
       return await this.database.transaction(async (client) => {
         await client.query("SET LOCAL lock_timeout='2s'");
         const id = event.payload.command.callSessionSeq;
+        const updatingOrder =
+          event.payload.command.operation === 'OrderUpdated';
+        if (
+          updatingOrder &&
+          event.payload.command.adminId === null &&
+          id !== null &&
+          (
+            await client.query(
+              'SELECT 1 FROM call_sessions WHERE call_session_seq=$1 AND order_intake_enabled',
+              [id],
+            )
+          ).rowCount
+        )
+          throw new ApiException(
+            409,
+            'INVALID_STATE',
+            '신규 통화의 수정·취소는 배송 초안 API를 사용해 주세요.',
+          );
         let call: DraftCallSnapshot | null = null;
         if (id !== null) {
           call =
@@ -51,7 +69,7 @@ export class ParcelDraftWriteService {
               await client.query<DraftCallSnapshot>(
                 `SELECT call_session_seq AS "callSessionSeq",customer_seq AS "customerSeq",order_intake_version AS "intakeVersion"
                FROM call_sessions WHERE call_session_seq=$1 AND deleted_at IS NULL
-               AND incoming_at>statement_timestamp()-interval '5 years' FOR UPDATE`,
+               AND ${updatingOrder ? "(incoming_at IS NULL OR incoming_at>clock_timestamp()-interval '5 years')" : "incoming_at>statement_timestamp()-interval '5 years'"} FOR UPDATE`,
                 [id],
               )
             ).rows[0] ?? null;
@@ -75,7 +93,7 @@ export class ParcelDraftWriteService {
             );
           if (finalized)
             await applyIntakeFinalization(client, finalized, this.audit);
-          const pending = await requestWriteReference<CallWriteReceipt[]>(
+          const pending = await requestWriteReference<OwnerCallWriteReceipt[]>(
             this.config.get('ORDER_URL', { infer: true }) +
               '/internal/parcel-draft-write/reference',
             this.config.get('CUSTOMER_AUTH_TOKEN', { infer: true }),
@@ -88,7 +106,8 @@ export class ParcelDraftWriteService {
           );
           for (const receipt of pending) {
             if ((await applyDraftCallWrite(client, receipt)) === 'processed') {
-              call.intakeVersion = receipt.payload.afterVersion;
+              if ('afterVersion' in receipt.payload)
+                call.intakeVersion = receipt.payload.afterVersion;
               call.customerSeq =
                 receipt.payload.customerSeq ?? call.customerSeq;
             }
@@ -98,6 +117,7 @@ export class ParcelDraftWriteService {
           this.activeCalls.set(event.eventId, {
             id,
             requestId: event.payload.command.requestId,
+            operation: event.payload.command.operation,
           });
           try {
             const payload = await requestDraftWrite(

@@ -22,7 +22,8 @@ import {
   requestWriteReference,
   validateWriteReference,
   validateCallMutation,
-  type CallWriteReceipt,
+  type OwnerCallWriteReceipt,
+  validateOrderCallLink,
   type DraftWriteCall,
 } from '@dva/events/parcel-draft-write.cjs';
 import { OrderReadError } from '@dva/events/order-read.cjs';
@@ -69,6 +70,7 @@ export class ParcelDraftWriteController {
           'CallRead',
           'CallBumped',
           'CallCustomerResolved',
+          'CallOrderLinked',
           'IntakeCallRead',
           'IntakeCallSealed',
         ].includes(event.payload.operation)
@@ -116,12 +118,23 @@ export class ParcelDraftWriteController {
               [id],
             )
           ).rows[0].version;
+        if (event.payload.operation === 'CallOrderLinked')
+          await client.query(
+            'UPDATE call_sessions SET order_seq=$2,customer_seq=COALESCE(customer_seq,$3) WHERE call_session_seq=$1',
+            [id, event.payload.input.orderSeq, event.payload.input.customerSeq],
+          );
         if (event.payload.operation === 'CallCustomerResolved')
           await client.query(
             'UPDATE call_sessions SET customer_seq=$2 WHERE call_session_seq=$1 AND customer_seq IS NULL',
             [id, event.payload.input.customerSeq],
           );
-        return this.call(client, id, event.payload.operation === 'CallRead');
+        return this.call(
+          client,
+          id,
+          event.payload.operation === 'CallRead',
+          false,
+          this.executor.activeCalls.get(scopeId)?.operation === 'OrderUpdated',
+        );
       });
       return { eventId: event.eventId, status: 'processed', payload };
     } catch (error) {
@@ -134,6 +147,7 @@ export class ParcelDraftWriteController {
     id: unknown,
     active: boolean,
     intake = false,
+    legacy = false,
   ): Promise<DraftWriteCall | null> {
     return (
       (
@@ -143,7 +157,9 @@ export class ParcelDraftWriteController {
          order_intake_enabled AS enabled,order_intake_version AS "intakeVersion",
          to_jsonb(order_completion_received_at)#>>'{}' AS "completionReceivedAt"${intake ? `,order_completion_payload AS "completionPayload",to_jsonb(order_finalized_at)#>>'{}' AS "finalizedAt"` : ''} FROM call_sessions WHERE call_session_seq=$1` +
             (active
-              ? " AND deleted_at IS NULL AND incoming_at>statement_timestamp()-interval '5 years'"
+              ? legacy
+                ? " AND deleted_at IS NULL AND (incoming_at IS NULL OR incoming_at>clock_timestamp()-interval '5 years')"
+                : " AND deleted_at IS NULL AND incoming_at>statement_timestamp()-interval '5 years'"
               : ''),
           [id],
         )
@@ -215,14 +231,16 @@ export class ParcelDraftWriteController {
       validateEvent(event);
       if (
         event.source !== 'order' ||
-        event.eventType !== 'ParcelDraftCallWritten'
+        !['ParcelDraftCallWritten', 'OrderCallLinked'].includes(event.eventType)
       )
         throw new Error('Invalid draft call write');
-      validateCallMutation(event.payload);
+      if (event.eventType === 'OrderCallLinked')
+        validateOrderCallLink(event.payload);
+      else validateCallMutation(event.payload);
     } catch {
       throw new HttpException({ error: 'INVALID_DRAFT_CALL_WRITE' }, 422);
     }
-    const receipt: CallWriteReceipt = {
+    const receipt: OwnerCallWriteReceipt = {
       eventId: event.eventId,
       payload: event.payload,
     };

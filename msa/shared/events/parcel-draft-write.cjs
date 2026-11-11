@@ -31,9 +31,9 @@ function validateDraftWrite(event, source) {
   if (!['order','consultation','customer'].includes(source) || event.source !== source ||
       event.eventType !== 'ParcelDraftWriteRequested' || !keys(p, fields) ||
       !keys(c,'adminId,callSessionSeq,id,input,operation,requestId') ||
-      !['ParcelDraftCreated','ParcelDraftUpdated','OrderIntakeSealed','OrderIntakeFinalized'].includes(c.operation) ||
+      !['ParcelDraftCreated','ParcelDraftUpdated','OrderIntakeSealed','OrderIntakeFinalized','OrderUpdated'].includes(c.operation) ||
       !(c.operation === 'ParcelDraftCreated' ? c.id === null : id(c.id)) ||
-      !nullableId(c.adminId) || !(c.adminId === null ? id(c.callSessionSeq) : c.callSessionSeq === null) ||
+      !nullableId(c.adminId) || !(c.adminId === null ? id(c.callSessionSeq) : c.operation === 'OrderUpdated' ? nullableId(c.callSessionSeq) : c.callSessionSeq === null) ||
       !object(c.input) || typeof c.requestId !== 'string' || c.requestId.length < 1 || c.requestId.length > 128 ||
       !address(p.orderAddress) || source !== 'order' && !address(p.consultationAddress) ||
       source === 'customer' && !address(p.customerAddress))
@@ -59,10 +59,17 @@ function validateCallMutation(value) {
       !nullableId(value.customerSeq)) throw new Error('Invalid draft call mutation');
 }
 
+function validateOrderCallLink(value) {
+  if(!keys(value,'beforeCustomerSeq,beforeOrderSeq,callSessionSeq,customerSeq,orderSeq') ||
+    !id(value.callSessionSeq)||value.beforeOrderSeq!==null||!nullableId(value.beforeCustomerSeq)||!id(value.orderSeq)||!id(value.customerSeq)||value.beforeCustomerSeq!==null&&value.beforeCustomerSeq!==value.customerSeq)
+    throw new Error('Invalid order call link');
+}
+
 function validateReceipt(value) {
   if (!keys(value,'eventId,payload')) throw new Error('Invalid draft call receipt');
   validateReadScope(value.eventId);
-  validateCallMutation(value.payload);
+  if(object(value.payload)&&Object.hasOwn(value.payload,'beforeOrderSeq')) validateOrderCallLink(value.payload);
+  else validateCallMutation(value.payload);
 }
 
 function validateWriteResult(value, command) {
@@ -80,6 +87,14 @@ function validateWriteResult(value, command) {
     }
     return;
   }
+  if(command.operation==='OrderUpdated') {
+    if(!keys(value.data,'version')||!id(value.data.version))throw new Error('Invalid order update result');
+    if(value.receipt!==null) {
+      validateReceipt(value.receipt);validateOrderCallLink(value.receipt.payload);
+      if(value.receipt.payload.callSessionSeq!==command.callSessionSeq)throw new Error('Order call scope mismatch');
+    }
+    return;
+  }
   validateDraftReadResult(value.data, { operation: 'ParcelDraftDetailRead', id: value.data?.draftSeq, query: {} });
   if (value.data.callSessionSeq !== command.callSessionSeq ||
       (command.callSessionSeq === null ? value.data.intakeVersion !== null : !id(value.data.intakeVersion)))
@@ -88,6 +103,7 @@ function validateWriteResult(value, command) {
     throw new Error('Draft write result mismatch');
   if (value.receipt !== null) {
     validateReceipt(value.receipt);
+    validateCallMutation(value.receipt.payload);
     if (value.receipt.payload.callSessionSeq !== command.callSessionSeq ||
         value.receipt.payload.afterVersion !== value.data.intakeVersion)
       throw new Error('Draft receipt mismatch');
@@ -103,6 +119,7 @@ function validateWriteReference(event) {
   let valid = false;
   switch (p.operation) {
     case 'CustomerPaymentPolicyRead':
+    case 'OrderCustomerRead':
     case 'CustomerRead':
       valid = event.source === 'order' && keys(v,'id') && id(v.id);
       break;
@@ -116,6 +133,9 @@ function validateWriteReference(event) {
     case 'CallRead':
     case 'CallBumped':
       valid = event.source === 'order' && keys(v,'id') && id(v.id);
+      break;
+    case 'CallOrderLinked':
+      valid=event.source==='order'&&keys(v,'customerSeq,id,orderSeq')&&id(v.id)&&id(v.orderSeq)&&id(v.customerSeq);
       break;
     case 'CallCustomerResolved':
       valid = event.source === 'order' && keys(v,'customerSeq,id') && id(v.id) && id(v.customerSeq);
@@ -148,9 +168,10 @@ function validateReferenceResult(value, event) {
     if(call.callSessionSeq!==input.id) throw new Error('Intake call mismatch');
     return;
   }
-  if (op === 'CallRead' || op === 'CallCustomerResolved') {
+  if (op === 'CallRead' || op === 'CallCustomerResolved' || op==='CallOrderLinked') {
     validateWriteCall(value);
     if (value !== null && value.callSessionSeq !== input.id) throw new Error('Draft call reference mismatch');
+    if(op==='CallOrderLinked' && value!==null && value.orderSeq!==input.orderSeq) throw new Error('Order call link mismatch');
     if (op === 'CallCustomerResolved' && value !== null && value.customerSeq !== input.customerSeq)
       throw new Error('Draft call customer mismatch');
     return;
@@ -166,7 +187,7 @@ function validateReferenceResult(value, event) {
   if (op === 'CallBumped' ? !id(value) : op === 'PinChecked' ? typeof value !== 'boolean' :
       value !== null && (!keys(value,'active,customerSeq,phone') || !id(value.customerSeq) ||
         typeof value.active !== 'boolean' || typeof value.phone !== 'string' ||
-        op === 'CustomerRead' && value.customerSeq !== input.id ||
+        ['CustomerRead','OrderCustomerRead'].includes(op) && value.customerSeq !== input.id ||
         op === 'CustomerPhoneRead' && (value.phone !== input.phone || !value.active)))
     throw new Error('Invalid draft reference result');
 }
@@ -220,4 +241,4 @@ function requestWriteReference(url, token, event, scopeId) {
   return exchange(url,token,event,scopeId,value=>validateReferenceResult(value,event));
 }
 module.exports = { validateDraftWrite, requestDraftWrite, validateWriteReference, requestWriteReference,
-  validateCallMutation, validateReceipt, validateWriteCall };
+  validateCallMutation, validateOrderCallLink, validateReceipt, validateWriteCall };

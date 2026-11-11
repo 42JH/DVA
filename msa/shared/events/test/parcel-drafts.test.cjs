@@ -328,3 +328,29 @@ test('write hops await source transactions while individual reference requests k
     assert.ok(signals[1] instanceof AbortSignal);
   } finally {global.fetch=saved;}
 });
+
+test('order updates bind durable call links and preserve the original customer association',async()=>{
+  const {validateDraftWrite,validateReceipt,validateOrderCallLink,requestDraftWrite,requestWriteReference}=require('../parcel-draft-write.cjs');
+  const mutation={callSessionSeq:1,beforeOrderSeq:null,beforeCustomerSeq:null,orderSeq:42,customerSeq:3};
+  const receipt={eventId:randomUUID(),payload:mutation};validateReceipt(receipt);
+  for(const changed of [{...mutation,beforeOrderSeq:2},{...mutation,beforeCustomerSeq:2},{...mutation,orderSeq:0},{...mutation,afterVersion:1}])assert.throws(()=>validateOrderCallLink(changed));
+  validateOrderCallLink({...mutation,beforeCustomerSeq:3});
+  const input={eventId:randomUUID(),source:'order',eventType:'ParcelDraftWriteRequested',payload:{orderAddress:null,
+    command:{operation:'OrderUpdated',id:42,adminId:null,callSessionSeq:1,input:{expectedVersion:1,pickupRequestedAt:null},requestId:randomUUID()}}};
+  validateDraftWrite(input,'order');
+  const adminCommand={...input,payload:{...input.payload,command:{...input.payload.command,adminId:1}}};
+  validateDraftWrite(adminCommand,'order');
+  validateDraftWrite({...adminCommand,payload:{...adminCommand.payload,command:{...adminCommand.payload.command,callSessionSeq:null}}},'order');
+  assert.throws(()=>validateDraftWrite({...adminCommand,payload:{...adminCommand.payload,command:{...adminCommand.payload.command,operation:'ParcelDraftUpdated'}}},'order'));
+  const saved=global.fetch;let mode='update';
+  global.fetch=async(url,options)=>{const event=JSON.parse(options.body);return Response.json({eventId:event.eventId,status:'processed',
+    payload:mode==='update'?{data:{version:4},receipt}:mode==='customer'?{customerSeq:3,phone:'01011112222',active:false}:
+    {callSessionSeq:1,customerSeq:3,orderSeq:mode==='wrong-order'?43:42,callerPhoneNumber:'01011112222',enabled:false,endedAt:null,intakeVersion:1,completionReceivedAt:null}});};
+  try {
+    assert.deepEqual(await requestDraftWrite('http://consultation/private',token,input),{data:{version:4},receipt});
+    const reference={eventId:randomUUID(),source:'order',eventType:'ParcelDraftWriteReferenceRequested',payload:{operation:'CallOrderLinked',input:{id:1,orderSeq:42,customerSeq:3}}};
+    mode='call';assert.equal((await requestWriteReference('http://consultation/private',token,reference,randomUUID())).orderSeq,42);
+    mode='wrong-order';await assert.rejects(requestWriteReference('http://consultation/private',token,reference,randomUUID()));
+    mode='customer';assert.equal((await requestWriteReference('http://customer/private',token,{...reference,payload:{operation:'OrderCustomerRead',input:{id:3}}},randomUUID())).active,false);
+  } finally {global.fetch=saved;}
+});

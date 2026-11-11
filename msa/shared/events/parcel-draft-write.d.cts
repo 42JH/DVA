@@ -1,7 +1,7 @@
 import type { Event } from './index.cjs';
 
 export interface DraftWriteCommand {
-  operation: 'ParcelDraftCreated' | 'ParcelDraftUpdated' | 'OrderIntakeSealed' | 'OrderIntakeFinalized';
+  operation: 'ParcelDraftCreated' | 'ParcelDraftUpdated' | 'OrderIntakeSealed' | 'OrderIntakeFinalized' | 'OrderUpdated';
   id: number | null;
   adminId: number | null;
   callSessionSeq: number | null;
@@ -24,10 +24,18 @@ export interface CallMutation {
   afterVersion: number;
   customerSeq: number | null;
 }
+export interface CallOrderLink {
+  callSessionSeq:number;
+  beforeOrderSeq:null;
+  beforeCustomerSeq:number|null;
+  orderSeq:number;
+  customerSeq:number;
+}
+export interface OwnerCallWriteReceipt {eventId:string;payload:CallMutation|CallOrderLink}
 export interface CallWriteReceipt { eventId: string; payload: CallMutation }
 export interface DraftWriteResult {
   data: Record<string, unknown>;
-  receipt: CallWriteReceipt | null;
+  receipt: OwnerCallWriteReceipt | null;
 }
 export interface DraftWriteEvent extends Event {
   source: 'order' | 'consultation' | 'customer';
@@ -45,7 +53,7 @@ export interface WriteReferenceEvent extends Event {
   source: 'order' | 'customer' | 'consultation';
   eventType: 'ParcelDraftWriteReferenceRequested';
   payload: {
-    operation: 'IntakeCallRead' | 'IntakeCallSealed' | 'IntakeFinalizationRead' | 'CustomerPaymentPolicyRead' | 'CustomerRead' | 'CustomerPhoneRead' | 'PinChecked' | 'CallRead' |
+    operation: 'OrderCustomerRead' | 'CallOrderLinked' | 'IntakeCallRead' | 'IntakeCallSealed' | 'IntakeFinalizationRead' | 'CustomerPaymentPolicyRead' | 'CustomerRead' | 'CustomerPhoneRead' | 'PinChecked' | 'CallRead' |
       'CallBumped' | 'CallCustomerResolved' | 'PendingCallWritesRead';
     input: Record<string, unknown>;
   };
@@ -56,4 +64,6 @@ export function validateWriteReference(event: unknown): asserts event is WriteRe
 export function requestWriteReference<T>(url: string, token: string, event: WriteReferenceEvent, scopeId?: string): Promise<T>;
 export function validateWriteCall(value: unknown): asserts value is DraftWriteCall | null;
 export function validateCallMutation(value: unknown): asserts value is CallMutation;
-export function validateReceipt(value: unknown): asserts value is CallWriteReceipt;
+export function validateReceipt(value: unknown): asserts value is OwnerCallWriteReceipt;
+
+export function validateOrderCallLink(value:unknown):asserts value is CallOrderLink;

@@ -11,7 +11,8 @@ import { requestDraftCallReferences } from '@dva/events/parcel-drafts.cjs';
 import {
   requestDraftWrite,
   requestWriteReference,
-  type CallWriteReceipt,
+  type OwnerCallWriteReceipt,
+  type CallOrderLink,
   type CustomerReference,
   type DraftWriteCall,
   type DraftWriteCommand,
@@ -34,7 +35,8 @@ type ActiveWrite = {
   event: DraftWriteEvent;
   before: Pick<DraftWriteCall, 'callSessionSeq' | 'customerSeq' | 'intakeVersion'> | null;
   call: DraftWriteCall | null;
-  receipt: CallWriteReceipt | null;
+  receipt: OwnerCallWriteReceipt | null;
+  link: CallOrderLink | null;
 };
 
 @Injectable()
@@ -73,7 +75,13 @@ export class ParcelDraftWriteScope {
     work: () => Promise<Record<string, unknown>>,
   ): Promise<DraftWriteResult> {
     const call = event.payload.call ?? null;
-    const state: ActiveWrite = { event, before: call && { ...call }, call: null, receipt: null };
+    const state: ActiveWrite = {
+      event,
+      before: call && { ...call },
+      call: null,
+      receipt: null,
+      link: null,
+    };
     return this.local.run(state, async () => ({ data: await work(), receipt: state.receipt }));
   }
 
@@ -128,7 +136,15 @@ export class ParcelDraftWriteScope {
         await client.query('DELETE FROM inbox_events WHERE event_id=$1', [event.eventId]);
         return data;
       }
-      if (
+      if (state.link) {
+        const eventId = await enqueue(client, {
+          destination: 'consultation',
+          eventType: 'OrderCallLinked',
+          aggregateSeq: state.link.callSessionSeq,
+          payload: { ...state.link },
+        });
+        state.receipt = { eventId, payload: state.link };
+      } else if (
         state.before &&
         state.call &&
         (state.before.customerSeq !== state.call.customerSeq ||
@@ -207,6 +223,29 @@ export class ParcelDraftWriteScope {
   }
   sealIntake(id: number, payload: IntakeCompletion) {
     return this.reference<IntakeCall | null>('consultation', 'IntakeCallSealed', { id, payload });
+  }
+  orderCustomer(id: number) {
+    return this.reference<CustomerReference | null>('customer', 'OrderCustomerRead', { id });
+  }
+  async linkOrder(id: number, orderSeq: number, customerSeq: number) {
+    const before = this.active.call;
+    if (!before || before.callSessionSeq !== id || before.orderSeq !== null)
+      throw new Error('Order call is not held');
+    const linked = await this.reference<DraftWriteCall | null>('consultation', 'CallOrderLinked', {
+      id,
+      orderSeq,
+      customerSeq,
+    });
+    if (!linked || linked.orderSeq !== orderSeq || linked.customerSeq === null)
+      throw new Error('Order call link was not applied');
+    this.active.link = {
+      callSessionSeq: id,
+      beforeOrderSeq: null,
+      beforeCustomerSeq: before.customerSeq,
+      orderSeq,
+      customerSeq: linked.customerSeq,
+    };
+    this.active.call = linked;
   }
   async call(id: number) {
     const call = await this.reference<DraftWriteCall | null>('consultation', 'CallRead', { id });
