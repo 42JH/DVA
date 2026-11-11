@@ -113,7 +113,7 @@ export function useOrderForm(
   // 칸 값은 한국 시간 (수거 규칙이 한국 시간 09 ~ 17시라 브라우저 시간대와 상관없이)
   const initialPickup = order?.pickupRequestedAt ? kstLocal(new Date(order.pickupRequestedAt)) : ''
   const [pickupAt, setPickupAt] = useState(initialPickup) // datetime-local 값
-  // 새 주문만 월정산 기본(와이어프레임). 수정은 서버 값 그대로 — 미정(null)을 월정산으로 채우면 안 바꿔도 credit이 나감
+  // 새 주문만 월결제 기본(와이어프레임). 수정은 서버 값 그대로 — 미정(null)을 월결제으로 채우면 안 바꿔도 credit이 나감
   const [payment, setPayment] = useState<PaymentMethod | null>(
     order ? order.paymentMethod : 'MONTHLY',
   )
@@ -166,7 +166,7 @@ export function useOrderForm(
   const showFee = order === undefined || collecting
 
   // 결제 자격 (11/10) — 보내는 분 = 주문 고객. 번호를 다 넣기 전 · 불러오는 중엔 모두 켬 (접수 때 서버가 다시 확인)
-  // 기업 소속: 월정산 · 그룹카드는 기업 · 부서 설정이라 꺼져 있으면 못 고름. 개인: 그룹카드 불가, 월정산은 물어보고 추가
+  // 기업 소속: 월결제 · 그룹카드는 기업 · 부서 설정이라 꺼져 있으면 못 고름. 개인: 그룹카드 불가, 월결제은 물어보고 추가
   const senderPhone = parties.sender.phone
   const payCtx = useQuery({
     ...orderQueries.payContext(senderPhone),
@@ -174,7 +174,7 @@ export function useOrderForm(
   }).data
   const isCompany = !!payCtx && payCtx.company !== null
   const canAddMonthly = !!payCtx && !isCompany && !payCtx.available.includes('MONTHLY')
-  const [monthlyFor, setMonthlyFor] = useState<string | null>(null) // 월정산 추가에 동의한 번호 — 번호가 바뀌면 다시 물음
+  const [monthlyFor, setMonthlyFor] = useState<string | null>(null) // 월결제 추가에 동의한 번호 — 번호가 바뀌면 다시 물음
   const [askingMonthly, setAskingMonthly] = useState<{
     revertTo: PaymentMethod | null // [취소]면 돌아갈 결제 방식
     thenSubmit: boolean // [접수]를 눌러 물었으면 [추가] 뒤 이어서 접수
@@ -253,7 +253,7 @@ export function useOrderForm(
   const suggest = useCustomerSuggest(parties.sender, parties.receiver, order?.customerSeq ?? null)
   const mutation = useMutation({
     // alsoCustomer = '고객정보에도 저장'을 골랐는지 (주문 저장이 성공한 뒤에만 고객 PATCH — 별도 트랜잭션)
-    // monthly = 보내기 전에 보내는 분에게 월정산을 켤지 — 상태가 아니라 인자로 ([추가] 직후 이어서 접수하면 상태가 아직 옛 값)
+    // monthly = 보내기 전에 보내는 분에게 월결제을 켤지 — 상태가 아니라 인자로 ([추가] 직후 이어서 접수하면 상태가 아직 옛 값)
     mutationFn: async ({
       alsoCustomer,
       monthly,
@@ -262,7 +262,7 @@ export function useOrderForm(
       monthly: boolean
     }): Promise<'ok' | 'customerFailed'> => {
       const body = input()
-      // 월정산 먼저 — 서버가 접수 순간 자격을 확인. 주소를 다시 안 골랐으면(수정 · 초안) 원래 주소의 나머지 칸으로 (새 고객 생성에 필요)
+      // 월결제 먼저 — 서버가 접수 순간 자격을 확인. 주소를 다시 안 골랐으면(수정 · 초안) 원래 주소의 나머지 칸으로 (새 고객 생성에 필요)
       const was = order?.sender
       const newCustomer = monthly
         ? await addMonthly(order?.customerSeq ?? payCtx?.customerSeq ?? null, {
@@ -438,7 +438,7 @@ export function useOrderForm(
       isCompany && paymentOptions.some((o) => o.disabledHint)
         ? `${payCtx.company || '소속 기업'}에서 꺼진 결제 수단은 기업 관리에서 켤 수 있어요.`
         : undefined,
-    // 개인 고객이 등록 안 된 월정산을 고름 → '홍길동님에게 월정산을 추가할까요?'
+    // 개인 고객이 등록 안 된 월결제을 고름 → '홍길동님에게 월결제을 추가할까요?'
     askingMonthly: askingMonthly !== null,
     monthlyName: parties.sender.name.trim() || '이 고객',
     agreeMonthly: () => {
@@ -501,7 +501,7 @@ export function useOrderForm(
     // 수정에서 보내는 분 이름 · 주소가 바뀌었으면 먼저 묻고, 아니면 바로 저장
     submit: () => {
       if (!pickupStillOk()) return
-      // 월정산이 기본으로 골라져 있어 아직 안 물었으면(새 주문) 여기서 물음
+      // 월결제이 기본으로 골라져 있어 아직 안 물었으면(새 주문) 여기서 물음
       if (payment === 'MONTHLY' && canAddMonthly && !monthlyAgreed)
         return setAskingMonthly({ revertTo: null, thenSubmit: true })
       submitNow(addingMonthly)

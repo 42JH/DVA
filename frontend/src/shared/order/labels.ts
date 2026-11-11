@@ -8,7 +8,7 @@ export const orderNo = (orderSeq: number) => `DV-${String(orderSeq).padStart(5, 
 export type OrderGroup = 'COLLECTING' | 'notPaid' | 'PAID' | 'ACCEPTED' | 'SUBMISSION_FAILED' | 'CANCELLED'
 
 export const PAYMENT_METHOD_LABEL: Record<PaymentMethod, string> = {
-  MONTHLY: '월정산',
+  MONTHLY: '월결제',
   GROUP_CARD: '그룹카드',
   PERSONAL_CARD: '개인카드',
   BRANCH_VISIT: '지점 방문',

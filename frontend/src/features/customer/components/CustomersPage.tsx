@@ -175,7 +175,7 @@ function CustomerPanel({ seq, onClose }: { seq: number; onClose: () => void }) {
               <dd>{v.c.payments?.join(', ')}</dd>
               {v.monthly && (
                 <>
-                  <dt className="self-center text-ops-sub">이번 달 월정산</dt>
+                  <dt className="self-center text-ops-sub">이번 달 월결제</dt>
                   <dd className="text-[16px] font-bold tabular-nums">{v.monthly}</dd>
                 </>
               )}

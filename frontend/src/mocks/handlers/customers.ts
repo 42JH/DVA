@@ -101,7 +101,7 @@ function paymentsOf(c: ReturnType<typeof customers>[number]) {
 
 export const customerHandlers = [
   // 고객 확인 (백엔드 POST /customers/context — AI · 관리자 공용). 쓸 수 있는 결제 계산은 백엔드 SQL과 같음:
-  // billing(개인카드) 항상 · credit(월정산) 일반 고객은 고객 허용, 기업 고객은 기업 허용 · groupBilling(그룹카드) 소속 부서가 허용
+  // billing(개인카드) 항상 · credit(월결제) 일반 고객은 고객 허용, 기업 고객은 기업 허용 · groupBilling(그룹카드) 소속 부서가 허용
   http.post(`${API_BASE_URL}/customers/context`, async ({ request }) => {
     const { phoneNumber } = (await request.json()) as { phoneNumber: string }
     const c = customers().find((x) => x.phoneNumber === phoneNumber)

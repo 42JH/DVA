@@ -253,7 +253,7 @@ assert.deepEqual(
   [],
 )
 
-// 결제 방식 미정(서버 null): 안 고르면 안 보냄(전엔 월정산으로 채워져 credit이 나감) · 고르면 보냄 · 접수는 막힘
+// 결제 방식 미정(서버 null): 안 고르면 안 보냄(전엔 월결제으로 채워져 credit이 나감) · 고르면 보냄 · 접수는 막힘
 const undecided: OrderDetail = { ...order, paymentMethod: null }
 assert.equal(buildOrderPatch(undecided, 101, { ...same, paymentMethod: null }).patch, null)
 assert.equal(
