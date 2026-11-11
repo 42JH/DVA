@@ -4742,34 +4742,19 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
       try {
         await tableLock.query('BEGIN');
         await tableLock.query(
-          'LOCK TABLE outbox_events IN ACCESS EXCLUSIVE MODE',
+          'LOCK TABLE orders IN ACCESS EXCLUSIVE MODE',
         );
         for (let n = 0; n < 5; n++)
           blocked.push(
             fetch(
-              'http://order-app:3002/internal/parcel-draft-write/reference',
-              {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN,
-                },
-                body: JSON.stringify({
-                  eventId: randomUUID(),
-                  source: 'consultation',
-                  eventType: 'ParcelDraftWriteReferenceRequested',
-                  payload: {
-                    operation: 'PendingCallWritesRead',
-                    input: { id: 2140000000 },
-                  },
-                }),
-              },
+              'http://order-app:3002/api/orders/2140000000',
+              { headers },
             ),
           );
         for (let n = 0; n < 60; n++) {
           const count = (
             await databases.order.query(
-              "SELECT count(*)::int n FROM pg_stat_activity WHERE datname=current_database() AND usename='order_app' AND wait_event_type='Lock' AND query LIKE '%outbox_events%' AND query NOT LIKE '%pg_stat_activity%'",
+              "SELECT count(*)::int n FROM pg_stat_activity a WHERE datname=current_database() AND usename='order_app' AND wait_event_type='Lock' AND EXISTS(SELECT 1 FROM pg_locks l WHERE l.pid=a.pid AND l.relation='orders'::regclass AND l.mode='AccessShareLock' AND NOT l.granted)",
             )
           ).rows[0].n;
           if (count === 5) break;
@@ -4802,11 +4787,37 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
           status: 'ABORTED',
         });
         assert.ok(Date.now() - start < 1800);
+        for (const [source, operation, input, status, expected] of [
+          ['consultation', 'PendingCallWritesRead', { id: 2140000000 }, 200, []],
+          ['consultation', 'IntakeFinalizationRead', { id: 2140000000 }, 200, null],
+          ['customer', 'RecipientReceiptRead', { eventId: randomUUID() }, 404, undefined],
+        ]) {
+          const response = await fetch(
+            'http://order-app:3002/internal/parcel-draft-write/reference',
+            {
+              method: 'POST',
+              signal: AbortSignal.timeout(1800),
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN,
+              },
+              body: JSON.stringify({
+                eventId: randomUUID(), source,
+                eventType: 'ParcelDraftWriteReferenceRequested',
+                payload: { operation, input },
+              }),
+            },
+          );
+          assert.equal(response.status, status, operation);
+          const body = await response.json();
+          if (status === 200) assert.deepEqual(body.payload, expected);
+          else assert.equal(body.error.code, 'NOT_FOUND');
+        }
       } finally {
         await tableLock.query('ROLLBACK');
         release(tableLock);
         for (const response of await Promise.all(blocked)) {
-          assert.equal(response.status, 200);
+          assert.equal(response.status, 404);
           await response.body.cancel();
         }
       }
