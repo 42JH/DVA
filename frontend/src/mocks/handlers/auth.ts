@@ -100,12 +100,14 @@ export const adminHandlers = [
     a.status = ((await request.json()) as { status: 'ACTIVE' | 'INACTIVE' }).status
     return noContent()
   }),
-  http.delete(`${API_BASE_URL}/admins/:id`, ({ params }) => {
-    const i = ACCOUNTS.findIndex((a) => a.adminUserSeq === Number(params.id))
-    if (i < 0) return fail(404, 'NOT_FOUND', '관리자가 없습니다.')
-    if (ACCOUNTS[i].role === 'SYSTEM_ADMIN')
+  // 배열 하나 = 한 트랜잭션: 전부 검사한 뒤에만 지움 (하나라도 실패하면 아무것도 안 지움)
+  http.delete(`${API_BASE_URL}/admins`, async ({ request }) => {
+    const ids = ((await request.json()) as { adminUserSeqs: number[] }).adminUserSeqs
+    const targets = ids.map((id) => ACCOUNTS.find((a) => a.adminUserSeq === id))
+    if (targets.some((a) => !a)) return fail(404, 'NOT_FOUND', '관리자가 없습니다.')
+    if (targets.some((a) => a?.role === 'SYSTEM_ADMIN'))
       return fail(403, 'FORBIDDEN', '최고 관리자는 지울 수 없습니다.')
-    ACCOUNTS.splice(i, 1)
+    for (const a of targets) ACCOUNTS.splice(ACCOUNTS.indexOf(a!), 1)
     return noContent()
   }),
 ]

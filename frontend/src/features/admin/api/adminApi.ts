@@ -50,4 +50,5 @@ export const setAdminStatus = (id: number, status: 'ACTIVE' | 'INACTIVE'): Promi
 export const resetAdminPassword = (id: number): Promise<void> => api.patch(`/admins/${id}/password`)
 
 /** 계정 삭제 · 가입 거절 — 같은 API. 실제 삭제라 확인 창 뒤에만. SYSTEM_ADMIN 계정은 서버가 거절 */
-export const deleteAdmin = (id: number): Promise<void> => api.delete(`/admins/${id}`)
+export const deleteAdmin = (id: number): Promise<void> =>
+  api.delete('/admins', { body: { adminUserSeqs: [id] } })

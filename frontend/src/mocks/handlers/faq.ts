@@ -427,13 +427,16 @@ export const faqHandlers = [
     return new HttpResponse(null, { status: 204 })
   }),
   // API-28 — OPEN만 삭제, 이미 지웠으면 204, FAQ로 바꾼 질문은 409
-  http.delete(`${API_BASE_URL}/unanswered-questions/:id`, ({ params }) => {
-    const u = unanswered.find((x) => x.unansweredQuestionSeq === Number(params.id))
-    if (!u) return error(404, 'NOT_FOUND', '미답변 질문이 없습니다.')
-    if (deleted.has(u.unansweredQuestionSeq)) return new HttpResponse(null, { status: 204 })
-    if (u.status === 'REGISTERED')
+  // 배열 하나 = 한 트랜잭션: 하나라도 없거나 REGISTERED면 아무것도 안 지움
+  http.delete(`${API_BASE_URL}/unanswered-questions`, async ({ request }) => {
+    const ids = ((await request.json()) as { unansweredQuestionSeqs: number[] })
+      .unansweredQuestionSeqs
+    const targets = ids.map((id) => unanswered.find((x) => x.unansweredQuestionSeq === id))
+    if (targets.some((u) => !u)) return error(404, 'NOT_FOUND', '미답변 질문이 없습니다.')
+    // 이미 지운 질문은 REGISTERED 검사 없이 통과(204) — 백엔드 규칙
+    if (targets.some((u) => u!.status === 'REGISTERED' && !deleted.has(u!.unansweredQuestionSeq)))
       return error(409, 'INVALID_STATE', 'FAQ로 바꾼 질문은 삭제할 수 없습니다.')
-    deleted.add(u.unansweredQuestionSeq)
+    for (const u of targets) deleted.add(u!.unansweredQuestionSeq)
     return new HttpResponse(null, { status: 204 })
   }),
 ]
