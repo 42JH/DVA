@@ -5,7 +5,7 @@ import { fakeTestCallScript } from '@/features/persona/api/personaApi'
 export interface TestCallTarget {
   personaSeq: number
   version: number
-  subtitle: string // '빠른 접수형 v7 (저장됨) · marin · 빠르게'
+  subtitle: string // '빠른 접수형 · 오늘 오후 3:07 · marin'
 }
 
 /** 07 시험 통화 훅 (와이어프레임 07_페르소나관리_시험통화, 10/31) — 열리면 바로 통화 시작, 1초마다 시간 · 그때까지 나온 말

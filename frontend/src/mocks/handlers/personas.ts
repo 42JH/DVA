@@ -17,7 +17,7 @@ const ver = (
   version,
   name: '빠른 접수형',
   promptText: '빠르고 정확하게 택배 접수를 돕는 상담원입니다.',
-  // 프롬프트 6칸 (백엔드 persona-response.dto — 늘 글자). 없으면 수정 · 음성 세부 조절 화면이 깨졌음 (11/11 QA)
+  // 프롬프트 6칸 (백엔드 persona-response.dto — 늘 글자). 없으면 수정 화면이 깨졌음 (11/11 QA)
   role: '택배 접수를 돕는 AI 상담원',
   personality: '친절하고 차분함',
   tone: '존댓말, 짧고 분명하게',

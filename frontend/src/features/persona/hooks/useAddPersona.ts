@@ -28,7 +28,7 @@ const newCode = () => `persona-${crypto.randomUUID()}`
 
 /** 07 상담가 등록 훅 — 이름 · 프롬프트 → v1 저장(아직 적용 안 함, Swagger POST /api/personas)
  * 수정 화면과 같은 넓은 화면(PersonaForm)이라 반환 모양도 usePromptEditor와 같게 (11/11)
- * 음성은 기본값에서 시작, 수정 화면처럼 [음성 세부 조절] 창에서 고름 (11/11 사용자)
+ * 음성은 기본값에서 시작, 수정 화면처럼 이름 아래 드롭다운에서 고름 (11/11 사용자)
  * 만든 뒤엔 그 페르소나를 골라 보여 줌. 통화에 쓰려면 시험 통화 → [적용] 또는 [사용하기] */
 export function useAddPersona(onDone: (personaSeq: number) => void, onClose: () => void) {
   const qc = useQueryClient()
@@ -67,7 +67,7 @@ export function useAddPersona(onDone: (personaSeq: number) => void, onClose: () 
   const guard = useLeaveGuard(dirty, mutation.isPending || mutation.isSuccess, onClose)
 
   return {
-    tag: `v1 · ${DRAFT_TAG}`,
+    tag: DRAFT_TAG,
     subtitle: '새 상담가 · 통화에 쓰려면 등록 뒤 시험 통화를 하고 적용하세요',
     name,
     setName,
@@ -79,9 +79,8 @@ export function useAddPersona(onDone: (personaSeq: number) => void, onClose: () 
     setField: (key: PromptKey, value: string) => setPrompt((p) => ({ ...p, [key]: value })),
     emptyNotice: triedSubmit ? emptyNotice : null, // 처음부터 띄우면 여섯 칸 다 비어 있어 시끄러움
 
-    // 음성 세부 조절 창
+    // 음성 드롭다운
     ...voiceDraft,
-    voiceTitle: `v1 ${DRAFT_TAG}`,
 
     saveLabel: mutation.isPending ? '등록 중…' : '등록',
     canSave: name.trim() !== '' && !voiceDraft.optionsPending && !mutation.isPending, // 빈칸은 막지 않고 누르면 안내
