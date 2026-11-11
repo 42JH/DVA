@@ -26,7 +26,17 @@ export function CompanyPage() {
   return (
     <>
       <PageHead title={vm.name || '기업'} back={{ to: '/companies', label: '기업 목록으로' }}>
-        <span className="flex items-center gap-4 pl-2">
+        {/* 이름 수정은 이름 바로 옆 연필 (11/11: 위 줄 색 버튼을 줄임) */}
+        <button
+          type="button"
+          aria-label="기업 이름 수정"
+          title="기업 이름 수정"
+          onClick={() => vm.open({ kind: 'rename' })}
+          className="-ml-2 grid size-8 place-items-center rounded-md text-ops-faint hover:bg-ops-paper hover:text-ops-ink"
+        >
+          <Icon name="pen" />
+        </button>
+        <span className="flex items-center gap-4 pl-1">
           {vm.facts.map(([k, v]) => (
             <span key={k} className="flex gap-1.5 text-[13px]">
               <span className="text-ops-faint">{k}</span>
@@ -34,14 +44,9 @@ export function CompanyPage() {
             </span>
           ))}
         </span>
-        <span className="ml-auto flex gap-2">
-          <Btn kind="edit" onClick={() => vm.open({ kind: 'rename' })}>
-            이름 수정
-          </Btn>
-          <Btn kind="danger" onClick={() => vm.open({ kind: 'deleteCompany' })}>
-            기업 삭제
-          </Btn>
-        </span>
+        <Btn kind="danger" className="ml-auto" onClick={() => vm.open({ kind: 'deleteCompany' })}>
+          기업 삭제
+        </Btn>
       </PageHead>
       {vm.notFound || vm.loadError ? (
         <p className="flex flex-1 items-center justify-center py-16 text-center text-[14px] text-ops-sub">
@@ -128,25 +133,22 @@ function DeptPanel({ vm }: { vm: VM }) {
           type="button"
           aria-pressed={on}
           onClick={() => vm.pickDept(key)}
-          className="flex w-full items-center gap-1.5 px-4 pt-2.5 pb-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ops-route focus-visible:ring-inset"
+          className="flex w-full items-center gap-1.5 px-4 py-2.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ops-route focus-visible:ring-inset"
         >
           <span className={`truncate text-[14px] font-semibold ${on ? 'text-ops-route' : ''}`}>
             {name}
           </span>
           <span className="text-[12px] text-ops-sub tabular-nums">{count}명</span>
         </button>
-        <div className="flex gap-1.5 px-4 pb-2.5">{actions}</div>
+        {/* 이름 변경 · 삭제는 고른 부서에만 (부서마다 버튼이 붙어 시끄러웠음, 11/11) */}
+        {on && actions && <div className="-mt-1 flex gap-1.5 px-4 pb-2.5">{actions}</div>}
       </li>
     )
   }
   return (
     <section aria-label="부서" className={`${card} flex w-[220px] shrink-0 flex-col xl:w-[280px]`}>
-      <div className="flex h-12 items-center border-b border-ops-line pr-3 pl-4">
+      <div className="flex h-12 items-center border-b border-ops-line px-4">
         <h2 className="text-[14px] font-bold">부서</h2>
-        <Btn kind="primary" className="ml-auto" onClick={() => vm.open({ kind: 'addDept' })}>
-          <Icon name="plus" />
-          부서 추가
-        </Btn>
       </div>
       <ul className="min-h-0 flex-1 [scrollbar-width:thin] overflow-y-auto">
         {item('', '전체 사원', vm.allCount)}
@@ -166,6 +168,16 @@ function DeptPanel({ vm }: { vm: VM }) {
           ),
         )}
         {vm.noDeptCount > 0 && item('none', '부서 없음', vm.noDeptCount)}
+        <li>
+          <button
+            type="button"
+            onClick={() => vm.open({ kind: 'addDept' })}
+            className="flex w-full items-center gap-1.5 px-4 py-3 text-[13px] font-semibold text-ops-route outline-none hover:bg-ops-route-soft focus-visible:ring-2 focus-visible:ring-ops-route focus-visible:ring-inset"
+          >
+            <Icon name="plus" />
+            부서 추가
+          </button>
+        </li>
       </ul>
     </section>
   )
@@ -220,13 +232,7 @@ function TabHead({ vm }: { vm: VM }) {
               label="사원 검색"
             />
           </span>
-          <Btn kind="primary" onClick={() => vm.open({ kind: 'csv' })}>
-            <Icon name="sheet" />
-            <span>
-              CSV<span className="max-xl:hidden">로 사원</span> 등록
-            </span>
-          </Btn>
-          <Btn kind="primary" onClick={() => vm.open({ kind: 'add' })}>
+          <Btn kind="line" onClick={() => vm.open({ kind: 'add' })}>
             <Icon name="plus" />
             사원 등록
           </Btn>
@@ -513,6 +519,7 @@ function Modals({ vm, id }: { vm: VM; id: number }) {
           companyName={vm.name}
           member={m.kind === 'edit' ? m.member : null}
           onClose={vm.close}
+          onCsv={() => vm.open({ kind: 'csv' })}
         />
       )
     case 'csv':

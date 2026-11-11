@@ -1,7 +1,7 @@
 // 버튼 모양 (11/11 사용자: 상태 칩과 버튼이 같은 모양이라 헷갈림 — Figma '버튼 · 칩 모양 정리')
-//   연한 채움 = 상태(Badge, 못 누름). 버튼은 자리로 나눔 (11/11 사용자 재정리):
-//   표 줄 안(…Badge) = 흰 바탕 + 색 테두리(FAQ 등록 · 수정 · 삭제 모두) · 줄 밖(화면 위 · 패널 · 창) = 색으로 꽉 채움(주문 추가처럼)
-//   회색(닫기 · 취소 · 이동)은 행동이 아니라 자리 상관없이 테두리
+//   연한 채움 = 상태(Badge, 못 누름). 버튼은 기본이 흰 바탕 + 색 테두리 (11/11 사용자 재정리):
+//   꽉 채움은 화면 맨 위 줄의 만들기(주문 추가 · CSV로 기업 등록)와 창의 최종 버튼(저장 · 등록 · 삭제 확정)뿐
+//   표 줄 안 · 카드 · 패널 안(FAQ 등록 · 사원 등록 · 수정 · 삭제 · 기업 삭제)은 모두 테두리
 //   색 = 뜻: 파랑 만들기 · 저장 · 승인, 노랑 수정 · 설정, 빨강 삭제 · 되돌릴 수 없음, 회색 닫기 · 취소 · 보기 · 이동
 // 테두리는 안쪽 ring — 테두리 있는 버튼과 없는 버튼의 폭 · 글자 자리가 같게
 export const ACTION_BADGE_SIZE =
@@ -10,7 +10,6 @@ export const ACTION_BADGE_SIZE =
 export const BUTTON_LOOK = {
   solid: 'bg-ops-route text-white hover:bg-[#1a5fcc]',
   solidDanger: 'bg-ops-stop text-white hover:bg-[#c22f2f]',
-  solidEdit: 'bg-ops-wait text-white hover:bg-[#9e5f00]',
   line: 'bg-white text-ops-route ring-1 ring-[#8fb6f5] ring-inset hover:bg-ops-route-soft',
   edit: 'bg-white text-ops-wait ring-1 ring-[#e3b56b] ring-inset hover:bg-ops-wait-soft',
   danger: 'bg-white text-ops-stop ring-1 ring-[#ec9c9c] ring-inset hover:bg-ops-stop-soft',
