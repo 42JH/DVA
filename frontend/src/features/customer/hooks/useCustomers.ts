@@ -20,7 +20,7 @@ import { customerSearch } from '@/shared/customer/customerSearch'
 // billing 개인카드(항상) · credit 월정산(일반 고객은 고객 허용, 기업 고객은 기업 허용) · groupBilling 그룹카드(소속 부서 허용)
 // 전화번호만 보내면 통화 · 감사 기록을 남기지 않음 (백엔드 설명)
 interface CallerContext {
-  organization: { name: string } | null
+  organization: { organizationSeq: number; name: string } | null
   department: { name: string } | null
   availablePaymentMethods: PayMethod[]
 }
@@ -43,6 +43,8 @@ const contextOpts = (phone: string) =>
         company: data.organization
           ? [data.organization.name, data.department?.name].filter(Boolean).join(' ')
           : null,
+        companySeq: data.organization?.organizationSeq ?? null, // 소속 → 기업 상세 바로 가기
+        credit: data.availablePaymentMethods.includes('credit'),
         payments: data.availablePaymentMethods.map((m) => PAY_LABEL[m]),
       }
     },
@@ -133,6 +135,17 @@ export function useCustomer(seq: number) {
   const c = useQuery(customerOpts(seq))
   const pins = useQuery(pinsOpts(seq))
   const ctx = useQuery({ ...contextOpts(c.data?.phoneNumber ?? ''), enabled: !!c.data })
+  // 이번 달 월결제 누적 — 일반 고객만. 기업 고객의 월결제는 기업 월결제라 기업 상세에서 봄
+  // month 생략 = 서버가 한국 시각 이번 달 (기업 /companies/{id}/billing과 같은 규칙)
+  const personalCredit = !!ctx.data?.credit && !ctx.data.companySeq
+  const billing = useQuery({
+    queryKey: ['screen', 'customer', seq, 'billing'],
+    queryFn: ({ signal }) =>
+      api
+        .get<ApiItem<{ monthlyAmount: number }>>(`/customers/${seq}/billing`, { signal })
+        .then((r) => r.data.monthlyAmount),
+    enabled: personalCredit,
+  })
   const [editing, setEditing] = useState(false) // 패널이 고객마다 key로 새로 그려져 고객을 바꾸면 풀림
   return {
     dto: c.data, // 수정 폼의 원래 값
@@ -149,9 +162,18 @@ export function useCustomer(seq: number) {
       detail: c.data.address?.detailAddress ?? '',
       postal: c.data.address?.postalCode ?? '',
       company: ctx.data?.company ?? null, // '디버물류 영업팀'
+      companySeq: ctx.data?.companySeq ?? null,
       payments: ctx.data?.payments ?? null,
       withdrawn: c.data.status === 'WITHDRAWN',
     },
+    // null = 월결제 안 씀(또는 기업 고객) → 줄을 안 보임
+    monthly: !personalCredit
+      ? null
+      : billing.error
+        ? '불러오지 못했습니다'
+        : billing.data === undefined
+          ? '불러오는 중…'
+          : `${billing.data.toLocaleString('ko-KR')}원`,
     error: c.error ? '고객 정보를 불러오지 못했습니다.' : null,
     pins: (pins.data?.data ?? []).map((p) => ({
       key: p.personalPinSeq,
