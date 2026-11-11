@@ -197,8 +197,9 @@ const draftHandlers = [
           { status: 404 },
         )
   }),
-  http.delete(`${API_BASE_URL}/parcel-drafts/:id`, ({ params }) => {
-    draftGone.add(Number(params.id))
+  http.delete(`${API_BASE_URL}/parcel-drafts`, async ({ request }) => {
+    const ids = ((await request.json()) as { draftSeqs: number[] }).draftSeqs
+    for (const id of ids) draftGone.add(id)
     return new HttpResponse(null, { status: 204 })
   }),
   // 원본으로 새 READY 초안 — 같은 clientParcelId면 같은 초안 (응답 유실 재전송)

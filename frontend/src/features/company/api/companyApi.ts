@@ -219,7 +219,7 @@ export const renameDepartment = (departmentSeq: number, name: string): Promise<v
 
 /** 부서 삭제 — 204. 그 부서 사원의 기업 소속도 해제됨(고객 · 주문 기록은 남음, company-deletion.md) */
 export const deleteDepartment = (departmentSeq: number): Promise<void> =>
-  api.delete(`/departments/${departmentSeq}`)
+  api.delete('/departments', { body: { departmentSeqs: [departmentSeq] } })
 
 /** 담당자 표시 바꾸기 */
 export const setMemberRole = (
@@ -229,7 +229,7 @@ export const setMemberRole = (
 
 /** 기업 소속 해제 — 고객 · 개인 PIN · 과거 주문은 남음 */
 export const removeMember = (membershipSeq: number): Promise<void> =>
-  api.delete(`/members/${membershipSeq}`)
+  api.delete('/members', { body: { membershipSeqs: [membershipSeq] } })
 
 /** 사번들을 담당자로 지정 — 등록 응답에 번호가 없어 전체를 다시 받아 사번으로 찾음 (backend-todo 10: role을 등록에 실어 주면 없어짐)
  * 이미 담당자면 건너뜀. 못 찾았거나 실패한 수를 돌려줌 (CSV 기업 등록 · CSV 사원 추가 · 사원 추가 창 공용) */
