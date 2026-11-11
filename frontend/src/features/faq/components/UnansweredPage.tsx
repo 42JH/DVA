@@ -1,8 +1,7 @@
 // 미답변 문의 (11/06) — AI가 답하지 못한 질문 처리 대기열. 오래된 것부터(먼저 쌓인 것부터 처리)
 // 줄: 질문 | 사유 | 고객 · 전화 | 통화 시각 | [FAQ로 만들기] [삭제]. 질문을 누르면 그 통화 상세
-// 데이터 · 검색 · 삭제는 기존 useUnansweredList 그대로. [FAQ로 만들기] = FAQ의 추가 칸에 고객 말을 채워 감 (저장하면 처리됨)
+// 데이터 · 검색 · 삭제는 기존 useUnansweredList 그대로. [FAQ 등록] = 이 화면의 창에서 고객 말을 채워 등록 (저장하면 처리됨)
 import { useRef, useState } from 'react'
-import { useLocation, useNavigate } from 'react-router'
 import { reasonTag } from '@/shared/lib/unansweredReason'
 import { useUnansweredList, type UnansweredRow } from '@/features/faq/hooks/useUnansweredList'
 import { PageHead } from '@/shared/ui'
@@ -12,6 +11,7 @@ import { useScrollable } from '@/shared/lib/useScrollable'
 import { useKeepScroll } from '@/shared/lib/keepScroll'
 import { Confirm } from '@/shared/ui/Modal'
 import { UnansweredCall } from './UnansweredCall'
+import { FaqAddModal } from './FaqsPage'
 import { dateTime } from '@/shared/lib/when'
 import { useListParams } from '@/shared/lib/useListParams'
 import { usePageSize } from '@/shared/lib/paging'
@@ -22,8 +22,6 @@ const PARAMS = { d: 'asc' }
 
 export function UnansweredPage() {
   const vm = useUnansweredList()
-  const navigate = useNavigate()
-  const { pathname, search } = useLocation()
   // 목록은 한 번에 받아 두고 화면에서 쪽을 나눔 (검색을 바꾸면 기존 훅이 쪽을 1로)
   const { params, page: rawPage, set } = useListParams(PARAMS)
   const asc = params.d !== 'desc'
@@ -36,8 +34,6 @@ export function UnansweredPage() {
   const scrollable = useScrollable(box, [rows])
   useKeepScroll(box, 'list')
   const [open, setOpen] = useState<(UnansweredRow & { day: string }) | null>(null)
-  const toFaq = (r: UnansweredRow) =>
-    navigate('/faqs', { state: { from: r, back: pathname + search } })
 
   return (
     <>
@@ -105,7 +101,7 @@ export function UnansweredPage() {
                   key={r.unansweredQuestionSeq}
                   r={r}
                   vm={vm}
-                  onFaq={() => toFaq(r)}
+                  onFaq={() => vm.openAdd(r)}
                   onOpen={() => setOpen(r)}
                 />
               ))}
@@ -138,6 +134,7 @@ export function UnansweredPage() {
           onClose={() => setOpen(null)}
         />
       )}
+      {vm.modal?.kind === 'faq' && <FaqAddModal from={vm.modal.item} onClose={vm.closeModal} />}
       {vm.modal?.kind === 'delete' && (
         <Confirm
           title="질문을 삭제할까요?"
