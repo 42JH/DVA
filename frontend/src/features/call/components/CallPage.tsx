@@ -315,7 +315,7 @@ function Contents({ vm }: { vm: CallView }) {
                 </ul>
               )}
             </Section>
-            {/* 판정 (11/11): 고객 불만 = 대상 · 강도 · 고객이 한 말, AI 응대 오류 = 유형 · 근거. 판정 전 · 없음 · 분석 전을 문구로 나눔 */}
+            {/* 판정 (11/11): 고객 불만 = 대상 · 강도 · 고객이 한 말, AI 응대 오류 = 유형 · 근거. 판정 전('아직 분석 전') · 없음 · 통화 분석 전을 문구로 나눔 */}
             <Section
               id="customer-complaints"
               title={s.customer.length ? `고객 불만 ${s.customer.length}` : '고객 불만'}
@@ -325,7 +325,7 @@ function Contents({ vm }: { vm: CallView }) {
                   {!s.analyzed
                     ? waitText
                     : s.judging
-                      ? '불만 판정 중입니다.'
+                      ? '아직 분석 전입니다.'
                       : '고객 불만이 없습니다.'}
                 </Muted>
               ) : (
@@ -348,7 +348,7 @@ function Contents({ vm }: { vm: CallView }) {
                   {!s.analyzed
                     ? waitText
                     : s.judging
-                      ? '판정 중입니다.'
+                      ? '아직 분석 전입니다.'
                       : 'AI 응대 오류가 없습니다.'}
                 </Muted>
               ) : (

@@ -17,8 +17,8 @@ export const TARGET_LABEL: Record<ComplaintTarget, string> = {
   price_policy: '요금 정책',
   delivery_other: '배송',
 }
-/** 대상이 없는 불만(!476 전 판정)은 '불만' */
-export const targetLabel = (t: ComplaintTarget | null) => (t ? TARGET_LABEL[t] : '불만')
+/** 대상이 없는 불만 = !476 전 판정이라 새 기준으로 다시 분석하기 전 → '분석 전' (목록 칩 · 상세 · 통계 같은 말, 11/11 사용자) */
+export const targetLabel = (t: ComplaintTarget | null) => (t ? TARGET_LABEL[t] : '분석 전')
 export const LEVEL_TEXT: Record<ComplaintLevel, string> = {
   explicit: '강하게 항의함',
   mild: '가볍게 불편을 말함',

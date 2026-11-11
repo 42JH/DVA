@@ -102,8 +102,8 @@ export function CallsPage() {
 const KINDS_BASE = 310
 const COMPLAINTS_BASE = 172
 
-/** 고객 불만 칸은 칩 셋 폭으로 고정(더 긴 줄이 있을 때만 늘림), 고객 용건 칸이 남는 자리 전부(table-layout fixed) — 용건이 더 넓음.
- *  용건 칩이 남는 자리(바닥 KINDS_BASE)에 안 들어가면 표 최소 너비를 늘려 가로 스크롤 */
+/** 두 칩 칸이 남는 자리를 칩이 다 생겼을 때 폭의 비율(용건 310 : 불만 172)로 나눔 — 넓은 화면에서 한쪽만 커지지 않게 (11/11 사용자: 균형)
+ *  고객 불만 칸 폭을 정하고 고객 용건 칸이 나머지(table-layout fixed). 바닥보다 좁아지면 표 최소 너비를 늘려 가로 스크롤 */
 function useChipColumns(ref: RefObject<HTMLTableElement | null>, rows: unknown) {
   const [minWidth, setMinWidth] = useState(1120)
   const [complaintsWidth, setComplaintsWidth] = useState(COMPLAINTS_BASE)
@@ -121,7 +121,9 @@ function useChipColumns(ref: RefObject<HTMLTableElement | null>, rows: unknown) 
       const fixed = [...t.querySelectorAll<HTMLElement>('thead th')]
         .filter((th) => !th.dataset.chipsCol && th.offsetWidth > 0) // 숨긴 칸(1600 아래 구분 · 통화 시간)은 0
         .reduce((sum, th) => sum + th.offsetWidth, 0)
-      const complaints = Math.max(COMPLAINTS_BASE, widest('complaints'))
+      const rest = (t.parentElement?.clientWidth ?? 0) - fixed // 두 칩 칸에 남는 자리
+      const share = Math.round((rest * COMPLAINTS_BASE) / (KINDS_BASE + COMPLAINTS_BASE))
+      const complaints = Math.max(COMPLAINTS_BASE, widest('complaints'), share)
       setComplaintsWidth(complaints)
       setMinWidth(Math.max(1120, fixed + Math.max(KINDS_BASE, widest('kinds')) + complaints))
     }
@@ -211,11 +213,12 @@ function Row({ r, from, onWarm }: { r: CallsRow; from: string; onWarm: () => voi
       {cell(
         <span data-chips="complaints" className="flex gap-1 whitespace-nowrap">
           {r.judging ? (
-            <span className="text-[12px] text-ops-faint">판정 전</span>
+            // 판정 전 · 대상 없는 옛 판정 모두 같은 회색 '분석 전' 칩 (11/11 사용자: 두 말이 섞여 불편)
+            <Badge tone="idle">분석 전</Badge>
           ) : (
             r.complaints.map((c) => (
               <span key={c.key} title={c.title}>
-                <Badge tone="stop">{c.label}</Badge>
+                <Badge tone={c.tone}>{c.label}</Badge>
               </span>
             ))
           )}
