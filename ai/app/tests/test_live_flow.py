@@ -224,7 +224,7 @@ def test_yes_before_readback_does_not_commit():
     assert s.state.parcels == [] and all("confirm" not in n for _, n in client.decisions.calls)
 
 
-def test_tool_failure_still_returns_output_and_unverified_claim_gets_n3():
+def test_tool_failure_still_returns_output_and_ai_claim_is_not_corrected():
     svc, client = flow()
 
     async def scenario():
@@ -239,8 +239,8 @@ def test_tool_failure_still_returns_output_and_unverified_claim_gets_n3():
             "type": "response.output_item.done", "item": {"type": "function_call", "call_id": "c1",
                                                          "name": "cancel_order", "arguments": "{}"}}})
         await until(lambda: "response.item.create" in sent_types(conn))
-        await ai(conn, "네, 접수 완료되었습니다.", 2000)              # 서버 결과 없이 접수 완료 → N3(사실 첨부)
-        await until(lambda: "session.instructions.append" in sent_types(conn))
+        await ai(conn, "네, 접수 완료되었습니다.", 2000)  # 발화 감시·정정(N3)은 없다: 접수 사이 발화는 지시문과 결과 보류로 막는다
+        await asyncio.sleep(0.3)
         conn.push({"type": "session.closed", "reason": "remote_hangup"})
         await task
         return conn
@@ -248,8 +248,7 @@ def test_tool_failure_still_returns_output_and_unverified_claim_gets_n3():
     conn = run(scenario())
     out = json.loads(next(e for e in conn.sent if e["type"] == "response.item.create")["item"]["output"])
     assert out["code"] == "TOOL_NOT_ALLOWED"  # 서버 전용 취소는 모델이 부를 수 없다 — 그래도 결과는 돌려준다
-    n3 = next(e for e in conn.sent if e["type"] == "session.instructions.append")
-    assert "접수되었" in n3["content"] and n3["delegation_id"] is None and "order_submitted" in n3["content"]
+    assert "session.instructions.append" not in sent_types(conn)
 
 
 

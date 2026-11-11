@@ -110,7 +110,7 @@
 | `response.event` | `delegation.md` §4 함수 라우터 |
 | `session.updated` | 기록만(트리거를 쓰지 않으므로 질문 세트 교체 없음) |
 | `session.input_transcript.delta` | 고객 발화 누적, **발화 끝 타이머(`utterance_gap_ms`) 재시작** → 만료 시 Decision 호출(`delegation.md` §3), 확정 지연 중이면 **확정 취소**, 무발화 타이머 리셋 |
-| `session.output_transcript.delta` | AI 발화 누적(직전 AI 발화 = Decision 입력·G3 기준), 발화 끝에 결과 문구 검사(§6.2-5), 첫 응답 시간 측정, CLOSING quiet window |
+| `session.output_transcript.delta` | AI 발화 누적(직전 AI 발화 = Decision 입력·G3 기준), 발화 끝에 번호·호수 값 대조(기록만, 결과 문구 검사는 2026-11-12 제거), 첫 응답 시간 측정, CLOSING quiet window |
 | `session.usage.updated` | `context_window.usage_ratio` 지표(0.9 근접 경고) |
 | `error` | `client_event_id`로 원인 송신 찾기, 치명 여부 분류 |
 | `session.closed` | 사유·usage 기록 → CLOSED |

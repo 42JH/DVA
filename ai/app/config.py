@@ -123,7 +123,7 @@ class CallConfig(_Strict):
     agent_days: tuple[int, ...] = (0, 1, 2, 3, 4)    # 월=0 … 일=6
     commit_delay_ms: int = Field(700, ge=0)          # 확인 "예" 뒤 확정 지연(새 입력이 오면 취소)
     notify_quiet_ms: int = Field(600, gt=0)          # N2는 AI 발화가 이만큼 멈춘 뒤 보낸다
-    n3_max: int = Field(3, ge=0)                     # P4: 정정 3회
+    draft_receipt_wait_sec: float = Field(5.0, gt=0)  # 접수 확정 뒤 BE 저장 결과를 기다리는 상한(넘으면 실패로 안내)
     response_fallback_sec: float = Field(3.0, gt=0)  # response.completed가 안 와도 결과 뒤 response.create
 
 

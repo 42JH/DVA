@@ -15,7 +15,6 @@ from app.config import ROOT
 DecisionSet = Literal["intent", "collect", "confirm", "pick", "more", "off"]
 # pick은 후보 이름표가 통화마다 달라 정책에 질문을 두지 않고 서버가 만든다(delegation.md §3.2)
 STATIC_DECISION_SETS = ("intent", "collect", "confirm", "more", "callback", "origin", "sender_change", "sender_name_scope", "box")
-CLAIM_CONDITIONS = ("result_accepted", "cancel_done", "never")
 
 
 class _Strict(BaseModel):
@@ -61,16 +60,8 @@ class DecisionSpec(_Strict):
     questions: tuple[Question, ...] = Field(min_length=1)
 
 
-class Claim(_Strict):
-    phrases: tuple[str, ...] = Field(min_length=1)
-    unless: Literal["result_accepted", "cancel_done", "no_pending", "never"]
-    use_skip: bool = True   # false면 claim_skip(부정·미래 표지)을 보지 않는다
-
-
 class Forbid(_Strict):
     items: tuple[str, ...] = Field(min_length=1)
-    claims: tuple[Claim, ...] = ()
-    claim_skip: tuple[str, ...] = ()   # 이 말이 있는 문장은 단정이 아니다(부정·미래·물음)
 
 
 class Pickup(_Strict):

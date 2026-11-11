@@ -222,8 +222,8 @@ class ConversationState:
     origin_mentioned_in_greeting: bool = False  # 인사에서 발송 주소를 언급함(등록 주소와의 대조 결과와 별개)
     origin_answer: bool | None = None     # 그 출발지에서 보냄 = True, 다른 곳 = False
     origin_applied: bool = False          # 보내는 분 미리 채우기를 마침
-    result_accepted: bool = False          # 통화 결과가 ACCEPTED로 확정됨(결과 문구 검사)
-    cancel_done: bool = False              # 이번 통화에서 택배 취소가 완료됨(결과 문구 검사)
+    result_accepted: bool = False          # 통화 결과가 ACCEPTED로 확정됨
+    cancel_done: bool = False              # 이번 통화에서 택배 취소가 완료됨
     _next_parcel: int = 1
 
     # --- 변경(잠금 안에서만) ---

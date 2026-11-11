@@ -1,4 +1,4 @@
-"""S5: 통화 중 흐름 — 함수 호출 라우터 · 발화 끝 Decision · 확인 관문 · 서버 결과 전달(N1'/N2/N3) · 결과 문구 검사.
+"""S5: 통화 중 흐름 — 함수 호출 라우터 · 발화 끝 Decision · 확인 관문 · 서버 결과 전달(N1'/N2).
 
 CallService.handlers에 붙는 동기 핸들러(상태 갱신 + 작업 생성만)와, 잠금 밖에서 I/O 하는 작업으로 나뉜다(concurrency.md §3).
 설계: delegation.md v3.1 §3(발화 끝 Decision)·§4(경로·복합 발화 R1~R6)·§6(전달 등급), conversation-state.md §5(관문).
@@ -23,7 +23,7 @@ from app.domain.address_book import (begin_sender_name_change, origin_confirmati
 from app.domain.assess import assess, readback_facts
 from app.domain.candidates import (DESTINATION_CHANGE_FIELDS, DESTINATION_CLARIFICATIONS, apply_destination_change, apply_pick,
                                    destination_changes, offer, reject_candidates)
-from app.domain.claims import truth, unverified_claims, unverified_values
+from app.domain.claims import unverified_values
 from app.domain.confirm import (ConfirmAnswer, Utterance, asks, asks_parcel_confirmation, check_gate, commit_parcel,
                                 explicitly_requests_parcel, issue_cancel_confirmation, issue_parcel_confirmation,
                                 release, take_cancel)
@@ -74,7 +74,6 @@ class Spoken:
     end_ms: int
     t_start: float
     t_last: float
-    ready_parcel_id: str | None = None
     readback_id: str | None = None
     sender_name_scope: str | None = None
     scope_decided: asyncio.Event | None = None
@@ -97,9 +96,7 @@ class Runtime:
     delegations: dict[str, dict] = field(default_factory=dict)  # delegation_id → {offset_ms, inflight, outputs, completed}
     commit: asyncio.TimerHandle | None = None
     commit_pid: str | None = None
-    ready_notice: str | None = None                    # 다음 AI 발화에 한해 접수를 안내할 수 있는 택배 ID
     readback_id: str | None = None                     # 현재 말할 서버 확인 내용의 pending ID
-    n3: int = 0
     sent_hashes: set[str] = field(default_factory=set)
     intent_started: bool = False
     unanswered: int = 0                               # 매뉴얼 검색이 연속으로 답을 못 한 횟수(3회 → 상담원 권유, 답하면 0)
@@ -146,7 +143,6 @@ class LiveFlow:
     def on_input(self, s: CallSession, ev: dict) -> None:
         rt, now = self.rt(s), time.time()
         if rt.cust is None:
-            rt.ready_notice = None
             rt.readback_id = None
             rt.seq += 1
             rt.cust = Spoken(rt.seq, "", ev.get("start_ms") or 0, ev.get("end_ms") or 0, now, now)
@@ -176,8 +172,7 @@ class LiveFlow:
         else:
             rt.seq += 1
             rt.ai.append(Spoken(rt.seq, ev.get("delta", ""), ev.get("start_ms") or 0, ev.get("end_ms") or 0,
-                                now, now, ready_parcel_id=rt.ready_notice, readback_id=readback_id))
-            rt.ready_notice = None
+                                now, now, readback_id=readback_id))
             del rt.ai[:-20]
             if rt.cust_end_t:  # 새 AI 발화 시작 = 고객 말 끝 뒤 첫 반응
                 s.timing("고객 말 끝→AI 말 시작", (now - rt.cust_end_t) * 1000)
@@ -264,7 +259,7 @@ class LiveFlow:
             await self.judge(s, utt, prev)
 
     def _ai_done(self, s: CallSession) -> None:
-        """AI 발화 끝: 결과 문구 검사(LLM 없음, delegation.md §6.2-5)·말한 번호·호수 대조(기록만)."""
+        """AI 발화 끝: 확인 질문 끝 표시·말한 번호·호수 대조(기록만)."""
         rt = self.rt(s)
         rt.ai_end = None
         if not rt.ai:
@@ -275,14 +270,6 @@ class LiveFlow:
         if wrong := unverified_values(spoken.text, s.state):  # 측정만: 기억으로 답했거나 잘못 읽은 번호·호수
             s.note("값 대조", "서버 값에 없는 번호·호수", wrong)
             log.warning("값 대조 불일치 %s %s", s.call_id, wrong)
-        pid = spoken.ready_parcel_id
-        ready_receipt = pid is not None and self.svc.intake.confirmed_status(s, pid) == "ready"
-        if claims := unverified_claims(spoken.text, s.state, self.policy, ready_receipt=ready_receipt):
-            s.note("결과 문구", ",".join(claims))
-            facts = truth(s.state)
-            if s.tools.draft_intake:
-                facts.pop("submit_when", None)
-            s.spawn(self.notify(s, "N3", {"unverified": claims, "truth": facts}), "n3")
 
     # ------------------------------------------------------------------ 발화 끝 Decision
     async def judge(self, s: CallSession, utt: Spoken, prev: Spoken | None) -> None:
@@ -648,10 +635,16 @@ class LiveFlow:
         if kind == "parcel":
             self._maybe_save_addresses(s)
             if facts:
+                # 접수 결과가 나오기 전에는 알리지 않는다: 요청과 완료 사이에 '확인 중' 같은 말이 끼지 않게(사용자 결정 2026-11-12)
                 if draft_save is not None:
-                    await asyncio.wait({draft_save}, timeout=1.5)
+                    await asyncio.wait({draft_save}, timeout=self.cfg.draft_receipt_wait_sec)
                 if s.tools.draft_intake:
-                    facts["draft_intake"] = self.svc.intake.confirmed_status(s, facts["parcel_added"])
+                    status = self.svc.intake.confirmed_status(s, facts["parcel_added"])
+                    if status == "pending":  # 저장 실패이거나 상한 안에 끝나지 않음 → 실패 안내 + 상담원 연결 제안
+                        facts |= {"draft_intake": "failed", "agent": "suggest"}
+                        s.note("접수 저장", "실패 또는 시간 초과")
+                    else:
+                        facts["draft_intake"] = status
                 s.note("담기", facts["parcel_added"])
                 await self.notify(s, "N2", facts | {"summary": state_summary(s.state, self.policy)})
             return
@@ -1212,10 +1205,10 @@ class LiveFlow:
                     if not task.done():
                         task.cancel()
 
-    # ------------------------------------------------------------------ 전달(N1'/N2/N3)
+    # ------------------------------------------------------------------ 전달(N1'/N2)
     async def notify(self, s: CallSession, level: str, facts: dict, again: bool = False,
                      *, unless_tool_turn: Spoken | None = None) -> None:
-        """N1' thinking(무음) · N2 commentary(말할 것, AI 발화가 멈춘 뒤·진행 위임 뒤) · N3 instructions(정정, 상한).
+        """N1' thinking(무음) · N2 commentary(말할 것, AI 발화가 멈춘 뒤·진행 위임 뒤).
         again: 같은 내용이라도 다시 보낸다(마무리 인사 재요청)."""
         rt = self.rt(s)
         readback_id = facts.get("readback_id")
@@ -1227,12 +1220,6 @@ class LiveFlow:
         if h in rt.sent_hashes and not again:
             return  # 같은 내용 중복 송신 안 함(§6.3)
         rt.sent_hashes.add(h)
-        if level == "N3":
-            if rt.n3 >= self.cfg.n3_max:
-                content = json.dumps({"agent_offer": True, "reason": "corrections_exceeded"}, ensure_ascii=False)
-                level = "N2"  # P4: 3회 이후는 정정 대신 이관 제안 사실
-            else:
-                rt.n3 += 1
         if level == "N2":
             receipt_pid = facts.get("parcel_added") if facts.get("draft_intake") == "ready" else None
             t0 = time.monotonic()
@@ -1263,10 +1250,7 @@ class LiveFlow:
                 status = self.svc.intake.confirmed_status(s, receipt_pid)
                 if status != "ready":
                     content = json.dumps(facts | {"draft_intake": status}, ensure_ascii=False, sort_keys=True)
-                    receipt_pid = None
-            rt.ready_notice = receipt_pid
-        etype = {"N1'": "session.thinking.append", "N2": "session.commentary.append",
-                 "N3": "session.instructions.append"}[level]
+        etype = {"N1'": "session.thinking.append", "N2": "session.commentary.append"}[level]
         s.stats[f"전달 {level}"] += 1
         s.note(f"전달 {level}", content[:200], {"content": json.loads(content)})
         if level == "N2" and facts.get("closing"):
