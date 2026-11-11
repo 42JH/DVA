@@ -1,136 +1,231 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router'
 import { fmtDate, fmtPhone } from '@/shared/lib/format'
-import { pageCount } from '@/shared/api/paging'
+import { pageCount, pageSlice } from '@/shared/api/paging'
+import { addMonths, todayYmd } from '@/shared/lib/dateRange'
 import { useDebounced } from '@/shared/lib/useDebounced'
 import { useListParams } from '@/shared/lib/useListParams'
+import { phoneDigits } from '@/shared/lib/search'
 import { ApiError } from '@/shared/api/client'
-import { companyQueries, removeMember, type Member } from '@/features/company/api/companyApi'
+import {
+  companyQueries,
+  createDepartment,
+  deleteCompany,
+  deleteDepartment,
+  removeMember,
+  renameCompany,
+  renameDepartment,
+  type Department,
+  type Member,
+} from '@/features/company/api/companyApi'
 import { errorText } from '@/features/company/labels'
 
-const PAGE_SIZE = 10 // 디자인: 한 쪽 10명
-const DEFAULTS = { q: '' }
+const PAGE_SIZE = 10
+// t 탭(사원 · 청구) · q 사원 검색 · d 부서('' 전체 · 'none' 부서 없음 · 번호) · r 구분('' 전체 · 'manager')
+// m 달('' 이번 달) · cq 청구 검색 · o 고른 청구 건(주문 번호)
+const DEFAULTS = { t: '', q: '', d: '', r: '', m: '', cq: '', o: '' }
+const MONTH = /^[1-9]\d{3}-(0[1-9]|1[0-2])$/ // 서버 BillingMonthQueryDto와 같은 형식
 
-interface MemberRow {
-  id: number // membershipSeq
-  employeeNo: string
-  name: string
-  leader: boolean // '대표자' 태그 (여러 명 가능)
-  inactive: boolean // '비활성' 태그 (11/01 디자인 추가 d)
-  phone: string // '010-2481-3375'
-  address: string // 도로명 — 없으면 '없음' (보기만, 11/01 결정 A)
-  detail: string // 상세주소 — 없으면 '없음'
-  member: Member // 수정 창에 그대로 넘김
-}
-
-/** 창 — 한 번에 하나 (구분 유니온) */
-type MemberModal =
+type Modal =
   | { kind: 'add' }
   | { kind: 'edit'; member: Member }
-  | { kind: 'delete'; member: Member }
+  | { kind: 'deleteMember'; member: Member; last: boolean } // last = 마지막 담당자 → 지우지 못함
   | { kind: 'csv' }
-  | { kind: 'payment' } // 결제 설정 (11/11)
+  | { kind: 'rename' }
+  | { kind: 'deleteCompany' }
+  | { kind: 'addDept' }
+  | { kind: 'renameDept'; dept: Department }
+  | { kind: 'deleteDept'; dept: Department }
   | null
 
-/** 08 기업 상세 훅 — 기업 · 제목 줄(사원 수 · 대표자) · 사원 표(쪽은 URL) · 창 상태 · 사원 삭제 */
+const isManager = (m: Member) => m.membership.role === 'ORG_ADMIN'
+
+/** 08 기업 상세 훅 (11/11 재설계) — 청구액(달) · 부서 · 사원 탭 · 청구 내역 탭 · 창 */
 export function useCompanyDetail(id: number, size = PAGE_SIZE) {
   const { params, page, set } = useListParams(DEFAULTS)
   const qc = useQueryClient()
-  const [modal, setModal] = useState<MemberModal>(null)
+  const navigate = useNavigate()
+  const [modal, setModal] = useState<Modal>(null)
+  const tab: 'members' | 'charges' = params.t === 'charges' ? 'charges' : 'members'
 
   const company = useQuery(companyQueries.detail(id))
-  // 사원 검색은 서버에서 (11/08 — 이름 · 사번 · 전화번호 부분 검색, 전체에서 찾은 뒤 쪽을 자름). 칠 때마다 묻지 않게 잠깐 기다림
-  const q = useDebounced(params.q.trim().normalize('NFC').slice(0, 100))
-  const members = useQuery({
-    ...companyQueries.members(id, { limit: size, offset: (page - 1) * size, q: q || undefined }),
+  const all = useQuery(companyQueries.allMembers(id))
+  const depts = useQuery(companyQueries.departments(id))
+  const everyone = all.data ?? []
+  const managers = everyone.filter(isManager)
+
+  // ── 달 · 청구액 (기업은 월결제 고정. 그룹결제가 서버에서 없어지기 전까지 두 금액을 더함)
+  const thisMonth = todayYmd().slice(0, 7)
+  const month = MONTH.test(params.m) && params.m <= thisMonth ? params.m : thisMonth
+  const goMonth = (m: string) => set({ m: m === thisMonth ? '' : m, o: '', page })
+  const billing = useQuery(companyQueries.billing(id, month))
+  const prev = useQuery(companyQueries.billing(id, addMonths(month, -1)))
+  const sum = (b?: { monthlyAmount: number; groupBillingAmount: number }) =>
+    b ? b.monthlyAmount + b.groupBillingAmount : null
+
+  // ── 사원 탭: 전체를 받아 부서 · 구분 · 검색으로 거름 (서버 사원 목록엔 부서 조건이 없음)
+  const q = useDebounced(params.q.trim().normalize('NFC').toLowerCase())
+  const digits = /^[0-9-]+$/.test(q) ? phoneDigits(q) : ''
+  const inDept = (m: Member) =>
+    params.d === ''
+      ? true
+      : params.d === 'none'
+        ? m.membership.departmentSeq === null
+        : m.membership.departmentSeq === Number(params.d)
+  const byDept = everyone.filter(inDept)
+  const filtered = byDept.filter(
+    (m) =>
+      (params.r !== 'manager' || isManager(m)) &&
+      (!q ||
+        m.customer.name.toLowerCase().includes(q) ||
+        m.membership.employeeNo.toLowerCase().includes(q) ||
+        (!!digits && m.customer.phoneNumber.includes(digits))),
+  )
+
+  // ── 청구 내역 탭
+  const charges = useQuery({
+    ...companyQueries.charges(id, {
+      month,
+      q: params.cq.trim() || undefined,
+      limit: size,
+      offset: (page - 1) * size,
+    }),
     placeholderData: keepPreviousData,
   })
-  // 대표자는 쪽과 상관없이 전체에서 — 제목 줄 '대표자 이서미 외 1명' (11/01 디자인 추가 c)
-  const all = useQuery(companyQueries.allMembers(id))
-  const leaderMembers = (all.data ?? []).filter(
-    (m) => m.membership.role === 'ORG_ADMIN' && m.membership.status === 'ACTIVE',
-  )
-  const leaders = leaderMembers.map((m) => m.customer.name)
+  // 탭 이름 · 위 카드의 건수는 검색과 상관없이 그 달 전체
+  const chargeCount = useQuery(companyQueries.charges(id, { month, limit: 1, offset: 0 }))
 
-  const shown = members.data?.data ?? []
-
-  const total = members.data?.total_count ?? 0
+  const total = tab === 'members' ? filtered.length : (charges.data?.total_count ?? 0)
   const pages = pageCount(total, size)
+  const loaded = tab === 'members' ? !!all.data : !!charges.data
   useEffect(() => {
-    if (members.data && page > pages) set({ page: pages }) // 마지막 쪽의 마지막 사원을 지우면 앞쪽으로
-  }, [members.data, page, pages, set])
+    if (loaded && page > pages) set({ page: pages })
+  }, [loaded, page, pages, set])
 
-  const remove = useMutation({
-    mutationFn: (m: Member) => removeMember(m.membership.membershipSeq),
-    onSuccess: async () => {
-      // 이 기업(상세 · 사원 · 사원 수 · 전체) + 목록 화면의 사원 수까지 한 번에
-      await qc.invalidateQueries({ queryKey: companyQueries.all() })
-      setModal(null)
-    },
-  })
-
-  const rows: MemberRow[] = shown.map((m) => ({
+  const deptName = new Map((depts.data ?? []).map((d) => [d.departmentSeq, d.name]))
+  const rows = pageSlice(filtered, page, size).rows.map((m) => ({
     id: m.membership.membershipSeq,
     employeeNo: m.membership.employeeNo,
     name: m.customer.name,
-    leader: m.membership.role === 'ORG_ADMIN',
-    inactive: m.membership.status === 'INACTIVE',
+    manager: isManager(m),
+    dept:
+      m.membership.departmentSeq === null ? null : (deptName.get(m.membership.departmentSeq) ?? ''),
     phone: fmtPhone(m.customer.phoneNumber),
-    address: m.customer.address?.roadAddress ?? '없음',
-    detail: m.customer.address?.detailAddress || '없음', // 빈 문자열도 '없음'
+    address: m.customer.address
+      ? `${m.customer.address.roadAddress} ${m.customer.address.detailAddress ?? ''}`.trim()
+      : null,
     member: m,
   }))
+  const picked = charges.data?.data.find((c) => String(c.orderSeq) === params.o) ?? null
 
-  // 부서 번호 → 이름 (사원 응답엔 번호만 있음)
-  const depts = useQuery(companyQueries.departments(id))
-  const deptName = new Map((depts.data ?? []).map((d) => [d.departmentSeq, d.name]))
+  // ── 저장
+  const done = async () => {
+    await qc.invalidateQueries({ queryKey: companyQueries.all() })
+    setModal(null)
+  }
+  const act = useMutation({
+    mutationFn: async (run: () => Promise<unknown>) => run(),
+    onSuccess: done,
+  })
+  const run = (fn: () => Promise<unknown>) => act.mutate(fn)
+
+  const noDept =
+    (company.data?.memberCount ?? everyone.length) -
+    (depts.data ?? []).reduce((n, d) => n + d.memberCount, 0)
 
   return {
-    deptName,
     notFound: company.error instanceof ApiError && company.error.status === 404,
-    loadError:
-      (company.error ?? members.error)
-        ? '기업 정보를 불러오지 못했습니다. 새로고침해 주세요.'
-        : null,
+    loadError: company.error ? '기업 정보를 불러오지 못했습니다. 새로고침해 주세요.' : null,
     name: company.data?.name ?? '',
-    // 검색 창 '최근 조회' 줄 — 기업명 뒤 대표자 이름 · 전화번호 (11/05 시안). 대표자가 없으면 기업명만
-    leader: leaderMembers[0]
-      ? [leaderMembers[0].customer.name, fmtPhone(leaderMembers[0].customer.phoneNumber)]
-      : undefined,
-    inactive: company.data?.status === 'INACTIVE',
-    // 제목 줄 '사원 12명 · 등록 05.22 · 대표자 이서미 외 1명' (디자인 + 대표자, 11/01)
-    summary: [
-      company.data ? `사원 ${company.data.memberCount}명` : null,
-      company.data?.createdAt ? `등록 ${fmtDate(company.data.createdAt)}` : null,
-      leaders.length === 0
-        ? null
-        : `대표자 ${leaders[0]}${leaders.length > 1 ? ` 외 ${leaders.length - 1}명` : ''}`,
-    ]
-      .filter(Boolean)
-      .join(' · '),
-    total,
+    facts: company.data
+      ? [
+          ...(company.data.createdAt ? [['등록', fmtDate(company.data.createdAt)]] : []),
+          ['담당자', all.data ? `${managers.length}명` : ''],
+          ['사원', `${company.data.memberCount}명`],
+        ]
+      : [],
 
-    q: params.q,
-    setQ: (v: string) => set({ q: v }), // 쪽은 1로
-    rows,
-    isLoading: members.isPending,
+    // 청구액 카드
+    monthLabel: `${month.slice(0, 4)}년 ${Number(month.slice(5))}월`,
+    monthNum: Number(month.slice(5)),
+    prevMonth: () => goMonth(addMonths(month, -1)),
+    nextMonth: month < thisMonth ? () => goMonth(addMonths(month, 1)) : undefined,
+    amount: sum(billing.data),
+    prevAmount: sum(prev.data),
+    chargeTotal: chargeCount.data?.total_count ?? null,
+
+    // 부서
+    depts: depts.data ?? [],
+    dept: params.d,
+    allCount: company.data?.memberCount ?? everyone.length,
+    noDeptCount: Math.max(0, noDept),
+    pickDept: (d: string) => set({ d }),
+
+    // 탭
+    tab,
+    setTab: (t: 'members' | 'charges') => set({ t: t === 'members' ? '' : t, o: '' }),
     page: Math.min(page, pages),
-    pages,
+    total,
     setPage: (p: number) => set({ page: p }),
 
-    modal,
-    openAdd: () => setModal({ kind: 'add' }),
-    openEdit: (m: Member) => setModal({ kind: 'edit', member: m }),
-    askDelete: (m: Member) => {
-      remove.reset() // 지난 실패 문구가 다른 사원 창에 남지 않게
-      setModal({ kind: 'delete', member: m })
-    },
-    openCsv: () => setModal({ kind: 'csv' }),
-    openPayment: () => setModal({ kind: 'payment' }),
-    close: () => setModal(null),
+    // 사원 탭
+    q: params.q,
+    setQ: (v: string) => set({ q: v }),
+    role: (params.r === 'manager' ? 'manager' : 'all') as 'all' | 'manager',
+    setRole: (r: 'all' | 'manager') => set({ r: r === 'all' ? '' : r }),
+    byDeptCount: byDept.length,
+    byDeptManagers: byDept.filter(isManager).length,
+    rows,
+    membersLoading: all.isPending,
+    showCharges: (name: string) => set({ t: 'charges', cq: name, o: '' }),
 
-    confirmDelete: () => modal?.kind === 'delete' && remove.mutate(modal.member),
-    deleting: remove.isPending,
-    deleteError: remove.error ? errorText(remove.error, '삭제') : null,
+    // 청구 내역 탭
+    cq: params.cq,
+    setCq: (v: string) => set({ cq: v, o: '' }),
+    charges: charges.data?.data ?? [],
+    chargesSum: charges.data?.total_amount ?? null,
+    chargesLoading: charges.isPending,
+    chargesError: charges.error ? '청구 내역을 불러오지 못했습니다. 새로고침해 주세요.' : null,
+    picked,
+    pick: (orderSeq: number) =>
+      set({ o: params.o === String(orderSeq) ? '' : String(orderSeq), page }),
+    unpick: () => set({ o: '', page }),
+
+    // 창
+    modal,
+    open: (m: Exclude<Modal, null>) => {
+      act.reset()
+      setModal(m)
+    },
+    askDeleteMember: (m: Member) => {
+      act.reset()
+      setModal({ kind: 'deleteMember', member: m, last: isManager(m) && managers.length <= 1 })
+    },
+    close: () => setModal(null),
+    busy: act.isPending,
+    error: act.error
+      ? errorText(act.error, modal?.kind?.startsWith('delete') ? '삭제' : '저장')
+      : null,
+
+    renameCompany: (name: string) => run(() => renameCompany(id, name)),
+    deleteCompany: () =>
+      act.mutate(() => deleteCompany(id), {
+        onSuccess: () => navigate('/companies', { replace: true }),
+      }),
+    deleteMember: (m: Member) => run(() => removeMember(m.membership.membershipSeq)),
+    addDept: (name: string) => run(() => createDepartment(id, name)),
+    renameDept: (d: Department, name: string) => run(() => renameDepartment(d.departmentSeq, name)),
+    deleteDept: (d: Department) =>
+      act.mutate(() => deleteDepartment(d.departmentSeq), {
+        onSuccess: () => {
+          if (params.d === String(d.departmentSeq)) set({ d: '' })
+        },
+      }),
+
+    // 검색 창 '최근 조회' 줄에 쓰던 값 — 첫 담당자 이름 · 전화번호
+    leader: managers[0]
+      ? [managers[0].customer.name, fmtPhone(managers[0].customer.phoneNumber)]
+      : undefined,
   }
 }

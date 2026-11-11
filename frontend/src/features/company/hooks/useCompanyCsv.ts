@@ -15,8 +15,8 @@ type Picked =
   | { kind: 'ok'; file: File; members: CsvMember[] }
   | { kind: 'bad'; file: File; errors: string[]; more: number }
 
-/** 08 CSV로 기업 등록 훅 — 기업명 + 파일 → 기업 · 부서 · 사원(대표자 · 부서 포함)을 요청 한 번으로 (11/01 백엔드 확장)
- * 하나의 트랜잭션이라 전부 되거나 전부 안 됨 → 예전의 '기업은 만들었지만…' · 대표자 따로 지정이 없어짐
+/** 08 CSV로 기업 등록 훅 — 기업명 + 파일 → 기업 · 부서 · 사원(담당자 · 부서 포함)을 요청 한 번으로 (11/01 백엔드 확장)
+ * 하나의 트랜잭션이라 전부 되거나 전부 안 됨 → 예전의 '기업은 만들었지만…' · 담당자 따로 지정이 없어짐
  * 주소만 아직 등록 API에 칸이 없어 등록 뒤 사원마다 저장(saveMemberAddresses, shortcut) */
 export function useCompanyCsv(onDone: () => void) {
   const qc = useQueryClient()
@@ -73,6 +73,8 @@ export function useCompanyCsv(onDone: () => void) {
         : rowErrors.length
           ? rowErrors.slice(0, 3).join('\n')
           : undefined,
+    // 기업마다 담당자 1명 이상 (11/11 사용자) — 파일에 Y가 하나도 없으면 등록을 막음
+    noManager: picked.kind === 'ok' && !picked.members.some((m) => m.leader),
     count: picked.kind === 'ok' ? picked.members.length : 0, // '사원 24명'
     members: picked.kind === 'ok' ? picked.members : [], // 읽은 사원 — 등록 전에 표로 보여 줌
     pick,
@@ -87,7 +89,12 @@ export function useCompanyCsv(onDone: () => void) {
       : reg.data
         ? `기업과 사원은 등록했지만 ${reg.data}명의 주소를 저장하지 못했습니다. 기업 상세의 [수정]에서 넣어 주세요.`
         : null,
-    canSubmit: name.trim() !== '' && picked.kind === 'ok' && !reg.isPending && !reg.data,
+    canSubmit:
+      name.trim() !== '' &&
+      picked.kind === 'ok' &&
+      picked.members.some((m) => m.leader) &&
+      !reg.isPending &&
+      !reg.data,
     isSubmitting: reg.isPending,
     submit: () => picked.kind === 'ok' && reg.mutate(picked.members),
   }

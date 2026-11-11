@@ -193,7 +193,71 @@ const orgOf = (id: unknown) => orgs.find((o) => o.organizationSeq === Number(id)
 const memberCount = (id: number) =>
   members.filter((m) => m.membership.organizationSeq === id && m.membership.status === 'ACTIVE')
     .length
-const summary = (o: Org) => ({ ...o, memberCount: memberCount(o.organizationSeq) })
+const active = (id: number) =>
+  members.filter((m) => m.membership.organizationSeq === id && m.membership.status === 'ACTIVE')
+const deptMembers = (seq: number) =>
+  members.filter((m) => m.membership.departmentSeq === seq && m.membership.status === 'ACTIVE')
+    .length
+const addr = (a: Address | null) => (a ? `${a.roadAddress} ${a.detailAddress ?? ''}`.trim() : '')
+
+// 청구 내역 (백엔드에 요청한 GET /companies/{id}/billing/charges 계약) — 사원이 다른 기업 사원에게 보낸 월결제 건
+// 번호 · 달로 정해져 새로고침해도 같음. 이번 달은 오늘까지만
+const PRICES = [4950, 6000, 8000, 10000, 12000]
+const BOXES = ['서류 1건', '소박스 1개', '중박스 1개', '대박스 1개']
+function chargesOf(id: number, month: string) {
+  const mine = active(id)
+  const others = members.filter(
+    (m) => m.membership.organizationSeq !== id && m.membership.status === 'ACTIVE',
+  )
+  if (!mine.length || !others.length) return []
+  const [y, mo] = month.split('-').map(Number)
+  const now = new Date()
+  const lastDay =
+    y === now.getFullYear() && mo === now.getMonth() + 1
+      ? now.getDate()
+      : new Date(y, mo, 0).getDate()
+  const n = (id * 5 + mo) % 9
+  return Array.from({ length: n }, (_, i) => {
+    const s = mine[(i * 3 + id) % mine.length]
+    const r = others[(i * 7 + id * 11 + mo) % others.length]
+    const ro = orgs.find((o) => o.organizationSeq === r.membership.organizationSeq)!
+    const amount = PRICES[(i + id + mo) % PRICES.length]
+    const day = Math.max(1, lastDay - Math.floor((i * lastDay) / Math.max(n, 1)))
+    return {
+      orderSeq: 200 + id * 37 + mo * 11 + i,
+      paidAt: new Date(y, mo - 1, day, 9 + ((i * 5) % 9), (i * 17) % 60).toISOString(),
+      amount,
+      sender: {
+        name: s.customer.name,
+        phoneNumber: s.customer.phoneNumber,
+        departmentName:
+          depts.find((d) => d.departmentSeq === s.membership.departmentSeq)?.name ?? null,
+        address: addr(s.customer.address),
+      },
+      recipient: {
+        organizationName: ro.name,
+        name: r.customer.name,
+        phoneNumber: r.customer.phoneNumber,
+        address: addr(r.customer.address),
+      },
+      items: [{ label: BOXES[(i + id) % BOXES.length], amount }],
+    }
+  })
+}
+const thisMonth = () => {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+const summary = (o: Org) => ({
+  ...o,
+  memberCount: memberCount(o.organizationSeq),
+  // 목록용으로 백엔드에 요청한 칸 (11/11)
+  departmentCount: depts.filter((d) => d.organizationSeq === o.organizationSeq).length,
+  managerNames: active(o.organizationSeq)
+    .filter((m) => m.membership.role === 'ORG_ADMIN')
+    .map((m) => m.customer.name),
+  monthlyAmount: chargesOf(o.organizationSeq, thisMonth()).reduce((n, c) => n + c.amount, 0),
+})
 const page = <T>(rows: T[], url: URL) => {
   const limit = Math.min(100, Math.max(1, Number(url.searchParams.get('limit') ?? 20)))
   const offset = Math.max(0, Number(url.searchParams.get('offset') ?? 0))
@@ -353,15 +417,32 @@ export const companyHandlers = [
     const o = orgOf(params.id)
     if (!o) return notFound()
     const id = Number(params.id)
+    const month = new URL(request.url).searchParams.get('month') ?? thisMonth()
     return HttpResponse.json({
       data: {
         organizationSeq: id,
         organizationName: o.name,
-        month:
-          new URL(request.url).searchParams.get('month') ?? new Date().toISOString().slice(0, 7),
-        monthlyAmount: (id % 5) * 184000,
-        groupBillingAmount: (id % 3) * 56000,
+        month,
+        monthlyAmount: chargesOf(id, month).reduce((n, c) => n + c.amount, 0),
+        groupBillingAmount: 0,
       },
+    })
+  }),
+  http.get(`${API_BASE_URL}/companies/:id/billing/charges`, ({ params, request }) => {
+    if (!orgOf(params.id)) return notFound()
+    const url = new URL(request.url)
+    const q = (url.searchParams.get('q') ?? '').trim()
+    const rows = chargesOf(Number(params.id), url.searchParams.get('month') ?? thisMonth()).filter(
+      (c) =>
+        !q ||
+        c.sender.name.includes(q) ||
+        c.recipient.organizationName.includes(q) ||
+        c.recipient.name.includes(q) ||
+        String(c.orderSeq).includes(q.replace(/^DV-0*/i, '')),
+    )
+    return HttpResponse.json({
+      ...page(rows, url),
+      total_amount: rows.reduce((n, c) => n + c.amount, 0),
     })
   }),
   http.get(`${API_BASE_URL}/companies/:id`, ({ params }) => {
@@ -424,7 +505,11 @@ export const companyHandlers = [
     if (!orgOf(params.id)) return notFound()
     const rows = depts
       .filter((d) => d.organizationSeq === Number(params.id))
-      .map(({ departmentSeq, name }) => ({ departmentSeq, name }))
+      .map(({ departmentSeq, name }) => ({
+        departmentSeq,
+        name,
+        memberCount: deptMembers(departmentSeq),
+      }))
     return HttpResponse.json(page(rows, new URL(request.url)))
   }),
   http.post(`${API_BASE_URL}/companies/:id/departments`, async ({ params, request }) => {
@@ -444,6 +529,22 @@ export const companyHandlers = [
       )
     depts.push({ departmentSeq: nextDept, organizationSeq: org, name, groupBillingEnabled: false })
     return created({ departmentSeq: nextDept++ })
+  }),
+  http.patch(`${API_BASE_URL}/departments/:seq`, async ({ params, request }) => {
+    const d = depts.find((x) => x.departmentSeq === Number(params.seq))
+    if (!d) return notFound()
+    const b = (await request.json()) as { name?: string }
+    if (b.name !== undefined) d.name = b.name.trim()
+    return noContent()
+  }),
+  // 부서 삭제 — 백엔드와 같게 그 부서 사원의 소속도 해제
+  http.delete(`${API_BASE_URL}/departments/:seq`, ({ params }) => {
+    const i = depts.findIndex((x) => x.departmentSeq === Number(params.seq))
+    if (i < 0) return notFound()
+    depts.splice(i, 1)
+    for (let k = members.length - 1; k >= 0; k--)
+      if (members[k].membership.departmentSeq === Number(params.seq)) members.splice(k, 1)
+    return noContent()
   }),
   http.patch(`${API_BASE_URL}/members/:seq`, async ({ params, request }) => {
     const m = members.find((x) => x.membership.membershipSeq === Number(params.seq))

@@ -1,10 +1,9 @@
-// 기업 목록 (11/06) — 검색 · 체크 · 줄마다 [삭제] · CSV로 기업 등록. 이름을 누르면 기업 상세(사원)
-// 삭제: 줄의 [삭제] → 확인 창. 체크한 줄의 [삭제]를 누르면 체크한 곳 모두 (체크해야만 나타나는 버튼은 두지 않음)
-// 목록 · 여러 곳 삭제 · CSV는 기존 useCompanyList · CSV 창(CompanyModals)
-import { useRef, useState } from 'react'
+// 기업 목록 (11/11 재설계) — 통화 목록과 같은 표 · 줄을 누르면 기업 상세. 칸: 기업 · 담당자 · 사원 · 부서 · 이번 달 청구액 · 등록
+// 삭제 · 이름 수정은 상세 화면에서 (줄마다 버튼 · 체크 없음). 정렬은 등록 최신순 고정(서버 기본)
+import { useRef } from 'react'
 import { Link, useNavigate } from 'react-router'
-import { errorText } from '@/features/company/labels'
 import { useCompanyList } from '@/features/company/hooks/useCompanyList'
+import { useFitNames } from '@/features/company/fitNames'
 import { PageHead } from '@/shared/ui'
 import { Btn, Icon } from '@/shared/ui'
 import { SearchBox, SkeletonRows } from '@/shared/ui/ListFrame'
@@ -12,24 +11,17 @@ import { useScrollable } from '@/shared/lib/useScrollable'
 import { CompanyCsvModal } from './CompanyModals'
 import { Pagination } from '@/shared/ui/Pagination'
 import { usePageSize } from '@/shared/lib/paging'
-import { Confirm, Modal } from '@/shared/ui/Modal'
-import { TextInput } from '@/shared/ui/Field'
+import { todayYmd } from '@/shared/lib/dateRange'
+
+const won = (n: number) => `${n.toLocaleString('ko-KR')}원`
 
 export function CompaniesPage() {
   const navigate = useNavigate()
   const [size, setSize] = usePageSize()
   const vm = useCompanyList(size)
-  const all = vm.rows.length > 0 && vm.selected.size === vm.rows.length
   const box = useRef<HTMLDivElement>(null)
   const scrollable = useScrollable(box, [vm.rows])
-  const [asking, setAsking] = useState<{ id: number; name: string } | null>(null) // 한 곳 삭제 확인
-  const removeOne = vm.removeOne
-  const [editing, setEditing] = useState<{ id: number; name: string } | null>(null) // 기업명 수정 창
-  const askRow = (id: number, name: string) => {
-    if (vm.selected.has(id) && vm.selected.size > 1)
-      vm.askDelete() // 체크한 곳 모두
-    else setAsking({ id, name })
-  }
+  const month = Number(todayYmd().slice(5, 7))
   return (
     <>
       <PageHead title="기업">
@@ -45,87 +37,64 @@ export function CompaniesPage() {
         </Btn>
       </PageHead>
       <section aria-label="기업 목록" className="flex min-h-0 flex-1 flex-col gap-3 px-6 pt-4 pb-4">
-        <p className="flex h-8 items-center gap-2 text-[13px] text-ops-sub">
-          {vm.selected.size
-            ? `${vm.selected.size}곳 선택`
-            : `기업 ${vm.total.toLocaleString('ko-KR')}곳`}
-          {vm.deleteError && <span className="text-ops-stop">{vm.deleteError}</span>}
-        </p>
         <div
           ref={box}
           data-scrollable={scrollable || undefined}
           className="flex min-h-0 flex-1 [scrollbar-width:thin] flex-col overflow-auto rounded-lg border border-ops-line bg-white"
         >
-          <table className="ops-table min-w-[760px]">
+          <table className="ops-table min-w-[900px]">
             <thead>
               <tr>
-                <th scope="col" className="w-[52px]">
-                  <input
-                    type="checkbox"
-                    aria-label="이 쪽 전체 선택"
-                    checked={all}
-                    onChange={vm.toggleAll}
-                    className="mx-auto block size-4 accent-ops-route"
-                  />
-                </th>
                 <th scope="col">기업</th>
-                <th scope="col" className="w-[110px] text-right">
+                <th scope="col" className="w-[32%]">
+                  담당자
+                </th>
+                <th scope="col" className="w-[90px]">
                   사원
                 </th>
+                <th scope="col" className="w-[80px]">
+                  부서
+                </th>
+                <th scope="col" className="w-[130px]">
+                  {month}월 청구액
+                </th>
                 <th scope="col" className="w-[120px]">
-                  결제
-                </th>
-                <th scope="col" className="w-[140px]">
                   등록
-                </th>
-                <th scope="col" className="w-[100px] text-right">
-                  관리
                 </th>
               </tr>
             </thead>
             <tbody>
               {vm.rows.map((r) => (
-                // 줄 어디를 눌러도 기업 상세로 (11/09 사용자: 이름 글자를 정확히 눌러야 들어가져 불편). 체크 · [삭제]는 따로
+                // 줄 어디를 눌러도 기업 상세로 (11/09 사용자). 이름 칸은 링크라 키보드 · 새 탭도 됨
                 <tr
                   key={r.id}
-                  aria-selected={vm.selected.has(r.id)}
                   onClick={() => navigate(`/companies/${r.id}`)}
                   className="h-11 cursor-pointer"
                 >
-                  <td onClick={(e) => e.stopPropagation()}>
-                    <input
-                      type="checkbox"
-                      aria-label={`${r.name} 선택`}
-                      checked={vm.selected.has(r.id)}
-                      onChange={() => vm.toggle(r.id)}
-                      className="mx-auto block size-4 accent-ops-route"
-                    />
-                  </td>
-                  {/* 이름 칸은 칸 전체가 링크 (키보드 · 새 탭 열기용) */}
                   <td className="p-0! text-left">
                     <Link
                       to={`/companies/${r.id}`}
                       onClick={(e) => e.stopPropagation()}
-                      className="flex h-11 w-full min-w-0 items-center px-[15px] font-medium outline-none hover:text-ops-route focus-visible:ring-2 focus-visible:ring-ops-route focus-visible:ring-inset"
+                      className="flex h-11 w-full min-w-0 items-center px-[15px] font-semibold outline-none hover:text-ops-route focus-visible:ring-2 focus-visible:ring-ops-route focus-visible:ring-inset"
                     >
                       <span className="truncate">{r.name}</span>
                     </Link>
                   </td>
-                  <td className="tabular-nums">{r.members.toLocaleString('ko-KR')}명</td>
-                  <td className="text-[13px]">{r.billing}</td>
-                  <td className="text-[13px] whitespace-nowrap text-ops-sub tabular-nums">
-                    {r.date}
+                  <td className="text-left">
+                    <Managers names={r.managers} />
                   </td>
-                  <td onClick={(e) => e.stopPropagation()}>
-                    <span className="flex justify-center gap-1.5">
-                      <Btn kind="editBadge" onClick={() => setEditing({ id: r.id, name: r.name })}>
-                        수정
-                      </Btn>
-                      <Btn kind="dangerBadge" onClick={() => askRow(r.id, r.name)}>
-                        삭제
-                      </Btn>
-                    </span>
+                  <td className="text-center tabular-nums">
+                    {r.members.toLocaleString('ko-KR')}명
                   </td>
+                  <td className="text-center tabular-nums">
+                    {r.departments === null ? '' : `${r.departments}곳`}
+                  </td>
+                  <td
+                    className={`text-center tabular-nums ${r.amount ? 'font-semibold text-ops-ink' : 'text-ops-faint'}`}
+                  >
+                    {r.amount === null ? '' : won(r.amount)}
+                  </td>
+                  <td className="text-center text-ops-sub tabular-nums">{r.date}</td>
                 </tr>
               ))}
             </tbody>
@@ -150,97 +119,16 @@ export function CompaniesPage() {
         />
       </section>
       {vm.csvOpen && <CompanyCsvModal onClose={vm.closeCsv} />}
-      {editing && (
-        <RenameModal
-          name={editing.name}
-          busy={vm.rename.isPending}
-          error={vm.rename.error ? errorText(vm.rename.error, '저장') : null}
-          onSave={(name) =>
-            vm.rename.mutate({ id: editing.id, name }, { onSuccess: () => setEditing(null) })
-          }
-          onClose={() => {
-            setEditing(null)
-            vm.rename.reset()
-          }}
-        />
-      )}
-      {(vm.confirming || asking) && (
-        <Confirm
-          title="기업을 삭제할까요?"
-          ok="삭제"
-          danger
-          busy={vm.deleting || removeOne.isPending}
-          error={removeOne.error ? errorText(removeOne.error, '삭제') : null}
-          onOk={() =>
-            vm.confirming
-              ? void vm.removeSelected()
-              : asking && removeOne.mutate(asking.id, { onSuccess: () => setAsking(null) })
-          }
-          onClose={() => {
-            vm.cancelDelete()
-            setAsking(null)
-            removeOne.reset()
-          }}
-        >
-          <b className="font-semibold">
-            {vm.confirming
-              ? `${vm.selectedNames.slice(0, 3).join(', ')}${vm.selectedNames.length > 3 ? ` 외 ${vm.selectedNames.length - 3}곳` : ''}`
-              : asking?.name}
-          </b>
-          을(를) 삭제합니다. 사원 소속도 함께 지워지고 되돌릴 수 없습니다.
-        </Confirm>
-      )}
     </>
   )
 }
 
-/** 기업명 수정 창 — 바뀐 게 없거나 비었으면 저장 꺼짐 */
-function RenameModal({
-  name,
-  busy,
-  error,
-  onSave,
-  onClose,
-}: {
-  name: string
-  busy: boolean
-  error: string | null
-  onSave: (name: string) => void
-  onClose: () => void
-}) {
-  const [value, setValue] = useState(name)
-  const next = value.trim()
-  const canSave = !busy && next !== '' && next !== name
+/** 담당자 칸 — 들어가는 만큼 이름 + '외 n명' */
+function Managers({ names }: { names: string[] }) {
+  const [ref, text] = useFitNames(names)
   return (
-    <Modal
-      title="기업 수정"
-      width={440}
-      onClose={onClose}
-      footer={
-        <>
-          {error && (
-            <p role="alert" className="min-w-0 flex-1 text-[12px] text-ops-stop">
-              {error}
-            </p>
-          )}
-          <Btn className="ml-auto" onClick={onClose}>
-            취소
-          </Btn>
-          <Btn kind="primary" type="submit" form="company-rename" disabled={!canSave}>
-            {busy ? '저장 중…' : '저장'}
-          </Btn>
-        </>
-      }
-    >
-      <form
-        id="company-rename"
-        onSubmit={(e) => {
-          e.preventDefault()
-          if (canSave) onSave(next)
-        }}
-      >
-        <TextInput label="기업명" value={value} onChange={setValue} />
-      </form>
-    </Modal>
+    <span ref={ref} className="block overflow-hidden whitespace-nowrap">
+      {text}
+    </span>
   )
 }
