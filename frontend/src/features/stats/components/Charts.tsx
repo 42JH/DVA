@@ -160,7 +160,7 @@ const SW = 34 // 고리 두께
 const C = 2 * Math.PI * R
 const GAP = 1.2 // 조각 사이 흰 틈
 
-/** 불편 유형 도넛 (Figma 166 · 12시부터 시계 방향) — 가운데 '유형별 집계 n 건 · 중복 포함'. 합이 0이면 회색 고리만 */
+/** 판정 도넛 (Figma 166 · 12시부터 시계 방향) — 가운데 'n 건'(한 통화의 여러 유형은 각각, 11/11 설명 줄임). 합이 0이면 회색 고리만 */
 export function Donut({
   slices,
   total,
@@ -202,9 +202,8 @@ export function Donut({
       </svg>
       {/* 도넛이 작아지면(낮은 화면) 작은 글자는 고리에 걸려서 숫자만 */}
       <div className="absolute inset-0 flex flex-col items-center justify-center text-[12px] text-ops-faint">
-        <span className="@max-[120px]:hidden">유형별 집계</span>
         <b className="text-[25px] leading-[33px] tracking-[-0.7px] text-ops-ink">{total}</b>
-        <span className="@max-[120px]:hidden">건 · 중복 포함</span>
+        <span>건</span>
       </div>
     </div>
   )

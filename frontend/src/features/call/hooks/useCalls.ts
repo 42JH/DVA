@@ -8,7 +8,7 @@ import { useDebounced } from '@/shared/lib/useDebounced'
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toCallRow, type CallListItemDto } from '@/shared/call/callDto'
 import { callQueries } from '@/shared/call/callApi'
-import { COMPLAINT_LABEL } from '@/features/call/labels'
+import { byTarget, targetLabel } from '@/shared/call/complaints'
 import { useSnapshotList } from '@/shared/lib/useSnapshotList'
 import { rangeFrom, type Range } from '@/shared/lib/range'
 import { dateTime } from '@/shared/lib/when'
@@ -84,15 +84,14 @@ export function useCalls() {
       phone: row.callerNumber ? fmtPhone(row.callerNumber) : '',
       kinds: callKinds(row.counts),
       analyzed: row.counts !== null,
-      // 불만 칩 — 유형마다 하나만 (11/09 사용자: 같은 유형이 여러 번이어도 목록에선 한 번). 근거는 첫 번째 것
-      complaints: row.complaints
-        .filter((c, i, all) => all.findIndex((x) => x.type === c.type) === i)
-        .map((c) => ({
-          key: c.type,
-          label: COMPLAINT_LABEL[c.type],
-          title: c.reason,
-          tone: 'stop' as const,
-        })),
+      // 고객 불만 칩 — 대상마다 하나, 전부 보임 (11/11 사용자: AI 응대 오류는 목록에서 빼고 상세 · 통계로, +N 없이). 근거는 그 대상의 첫 말
+      complaints: byTarget(row.complaints).map((c) => ({
+        key: c.target ?? 'none',
+        label: targetLabel(c.target),
+        title: c.reason,
+      })),
+      judging: row.counts !== null && row.hasComplaint === null, // 분석은 끝났고 불만 판정은 아직
+
       duration: row.durationSec === null ? '' : fmtDuration(row.durationSec),
       // 이 통화로 접수된 주문 — 번호만 (주문 상태는 주문 화면에서, 11/07 사용자)
       order: d.orderSeq ? { seq: d.orderSeq, no: orderNo(d.orderSeq) } : null,

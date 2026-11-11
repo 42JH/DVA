@@ -23,4 +23,6 @@ export interface PlayerView {
   src?: string
   handlers: AudioHTMLAttributes<HTMLAudioElement>
   text: string | null // 녹취 사정 한 줄 (없으면 null)
+  // 진행 막대 위 판정 눈금 (at 0 ~ 1, 빨강 = 고객 불만 · 주황 = AI 응대 오류). 누르면 그 말로
+  marks?: { key: number; at: number; tone: 'stop' | 'wait'; title: string; onClick: () => void }[]
 }

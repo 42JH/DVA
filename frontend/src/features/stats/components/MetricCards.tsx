@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
+import { Segments } from '@/shared/ui'
 import { Link } from 'react-router'
 import type {
   CardState,
@@ -21,15 +22,15 @@ function Card<V>({
   c,
   children,
 }: {
-  title: string
+  title: ReactNode // 글이면 제목, 아니면 그대로(탭)
   aside: ReactNode // 오른쪽 위 — 회색 칩 또는 '그래프 보기'
   c: CardState<V>
   children: (v: V) => ReactNode
 }) {
   return (
     <section className="flex min-h-0 min-w-0 flex-col gap-v8 rounded-lg border border-ops-line bg-white px-5 py-v16">
-      <header className="flex h-7 shrink-0 items-center gap-2">
-        <h2 className="text-[14px] font-bold">{title}</h2>
+      <header className="flex min-h-7 shrink-0 items-center gap-2">
+        {typeof title === 'string' ? <h2 className="text-[14px] font-bold">{title}</h2> : title}
         {aside}
       </header>
       {c.view ? (
@@ -220,47 +221,57 @@ const LEGEND =
   'grid grid-cols-[minmax(0,1fr)_65px] xl:grid-cols-[minmax(0,1fr)_58px_65px] items-center gap-2 px-[9px]'
 const COUNT = 'hidden text-right xl:block'
 
-/** §4 고객 불편 표현 통화율 — 메인은 늘 전체 고객 */
+/** §4 [AI 응대 오류 | 고객 불만] 탭 (11/11) — 두 탭 값을 한 번에 받아 그려서 탭을 넘겨도 기다림 없음. 메인은 늘 전체 고객 */
 export function ComplaintCard({ c }: { c: CardState<ComplaintView> }) {
+  const [tab, setTab] = useState('ai')
   return (
-    <Card title="고객 불편 표현 통화율" aside={<Chip>전체 고객</Chip>} c={c}>
-      {(v) => (
-        <>
-          <Headline value={v.value} unit="%" blue>
-            <p className="font-medium text-ops-ink">{v.ratio}</p>
-            <p>{v.excluded}</p>
-          </Headline>
-          <div className="grid min-h-0 flex-1 grid-cols-[clamp(140px,36%,244px)_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] gap-4 pt-1">
-            <div className="grid min-h-0 place-items-center">
-              <Donut slices={v.slices} total={v.total} />
-            </div>
-            <div className="flex min-h-0 [scrollbar-width:thin] flex-col justify-center overflow-y-auto">
-              <div className={`${LEGEND} shrink-0 pb-1.5 text-[12px] text-ops-sub`}>
-                <span>불편 유형</span>
-                <span className={COUNT}>통화 수</span>
-                <span className="text-right">구성비</span>
+    <Card
+      title={
+        <Segments
+          label="AI 응대 품질"
+          value={tab}
+          onPick={setTab}
+          items={[
+            { value: 'ai', label: 'AI 응대 오류' },
+            { value: 'customer', label: '고객 불만' },
+          ]}
+        />
+      }
+      aside={<Chip>전체 고객</Chip>}
+      c={c}
+    >
+      {(all) => {
+        const v = all.tabs.find((t) => t.key === tab) ?? all.tabs[0]
+        return (
+          <>
+            <Headline value={v.value} unit="%" blue>
+              <p className="font-medium text-ops-ink">{v.ratio}</p>
+              {all.capped && <p>최근 2,000통화 기준</p>}
+            </Headline>
+            <div className="grid min-h-0 flex-1 grid-cols-[clamp(140px,36%,244px)_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] gap-4 pt-1">
+              <div className="grid min-h-0 place-items-center">
+                <Donut slices={v.slices} total={v.total} />
               </div>
-              {v.slices.map((s) => (
-                <div
-                  key={s.key}
-                  className={`${LEGEND} max-h-[28px] min-h-5 flex-[1_1_0px] rounded-md text-[13px] tabular-nums ${s.hot ? 'bg-ops-route-soft' : ''}`}
-                >
-                  <span className="flex min-w-0 items-center gap-2">
-                    <i className={`size-2 shrink-0 rounded-[3px] ${s.bg}`} />
-                    <span className="truncate">{s.label}</span>
-                  </span>
-                  <span className={COUNT}>{s.count}</span>
-                  <span className="text-right text-ops-sub">{s.share}</span>
-                </div>
-              ))}
+              {/* 범례 머리 줄 · 아래 설명은 뺌 (11/11 사용자: 설명이 너무 많음) */}
+              <div className="flex min-h-0 [scrollbar-width:thin] flex-col justify-center overflow-y-auto">
+                {v.slices.map((s) => (
+                  <div
+                    key={s.key}
+                    className={`${LEGEND} max-h-[28px] min-h-5 flex-[1_1_0px] rounded-md text-[13px] tabular-nums ${s.hot ? 'bg-ops-route-soft' : ''}`}
+                  >
+                    <span className="flex min-w-0 items-center gap-2">
+                      <i className={`size-2 shrink-0 rounded-[3px] ${s.bg}`} />
+                      <span className="truncate">{s.label}</span>
+                    </span>
+                    <span className={COUNT}>{s.count}</span>
+                    <span className="text-right text-ops-sub">{s.share}</span>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
-          <div className="shrink-0 border-t border-ops-line pt-2 text-[12px]">
-            <p className="font-medium text-ops-sub">{v.foot[0]}</p>
-            <p className="text-ops-faint">{v.foot[1]}</p>
-          </div>
-        </>
-      )}
+          </>
+        )
+      }}
     </Card>
   )
 }

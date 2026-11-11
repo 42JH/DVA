@@ -2,14 +2,16 @@ import { useQuery, type UseQueryResult } from '@tanstack/react-query'
 import { fmtDuration } from '@/shared/lib/format'
 import {
   dashboardQueries,
-  type ComplaintCalls,
   type RegistrationTime,
   type ResponseWait,
   type StageDropoffs,
   type VersionTime,
 } from '@/features/stats/api/dashboardApi'
 import { hoursMinutes, maxIndex, num, one, pctText, two, versionGap } from '@/features/stats/format'
-import { COMPLAINT, PROCESS_LABEL, STAGE_LABEL } from '@/features/stats/labels'
+import { PROCESS_LABEL, STAGE_LABEL } from '@/features/stats/labels'
+import { FETCH_ALL_MAX } from '@/shared/api/paging'
+import type { CallListItemDto } from '@/shared/call/callDto'
+import { complaintView } from '@/features/stats/complaintView'
 
 const sec = (s: number | null) => (s === null ? '—' : `${one(s)}초`)
 const sec2 = (s: number | null) => (s === null ? '—' : `${two(s)}초`) // 응답 대기 카드 표의 평균 대기만 두 자리 (0.02초처럼 작은 값)
@@ -23,8 +25,33 @@ export function useDashboard() {
       useQuery(dashboardQueries.card('registration-time', 'ALL')),
       registrationView,
     ),
-    complaint: card(useQuery(dashboardQueries.card('complaint-calls', 'ALL')), complaintView),
+    // 판정 수(서버 통계)와 불만 있는 통화 목록이 둘 다 와야 그림 — 탭을 넘길 때 따로 기다리지 않게 (11/11 사용자)
+    complaint: both(
+      useQuery(dashboardQueries.card('complaint-calls', 'ALL')),
+      useQuery(dashboardQueries.complainedCalls()),
+      (d, calls: CallListItemDto[]) => ({
+        ...complaintView(d, calls),
+        capped: calls.length >= FETCH_ALL_MAX, // 받은 통화가 상한 — 그 안에서 센 값
+      }),
+    ),
     wait: card(useQuery(dashboardQueries.card('response-wait', 'ALL')), waitView),
+  }
+}
+
+/** 두 요청을 합친 카드 하나 — 둘 다 와야 값, 하나라도 실패면 다시 시도 */
+function both<A, B, V>(
+  a: UseQueryResult<A>,
+  b: UseQueryResult<B>,
+  view: (a: A, b: B) => V,
+): CardState<V> {
+  return {
+    view: a.data && b.data ? view(a.data, b.data) : null,
+    stale: a.isPlaceholderData || b.isPlaceholderData,
+    failed: (a.isError && !a.data) || (b.isError && !b.data),
+    retry: () => {
+      void a.refetch()
+      void b.refetch()
+    },
   }
 }
 
@@ -88,32 +115,6 @@ function registrationView(d: RegistrationTime) {
   }
 }
 
-/** §4 — 상단 = 불편 통화 비율(과거 유형 포함), 도넛 = 여섯 유형 통화 수 합 안의 구성비. 범례 색칠 = 가장 많은 유형 */
-function complaintView(d: ComplaintCalls) {
-  const hot = maxIndex(d.types.map((t) => t.callCount))
-  return {
-    value: one(d.complaintRatePercent),
-    ratio: `불편 ${num(d.complaintCallCount)} / 판정 완료 ${num(d.assessedCallCount)}통화`,
-    excluded: `미판정 ${num(d.unassessedCallCount)}통화 제외`,
-    total: num(d.typeTotalCount),
-    slices: d.types.map((t, i) => ({
-      key: t.type,
-      ...COMPLAINT[t.type],
-      value: t.callCount,
-      count: num(t.callCount),
-      share: pctText(t.sharePercent),
-      hot: i === hot,
-    })),
-    foot: [
-      `원형 비율은 유형별 집계 ${num(d.typeTotalCount)}건 대비 · 한 통화에 여러 유형을 포함합니다.`,
-      `통화율 ${pctText(d.complaintRatePercent)} = 불편 ${num(d.complaintCallCount)} / 판정 완료 ${num(d.assessedCallCount)}` +
-        (d.legacyTypeCallCount
-          ? ` · 기존 분류 ${num(d.legacyTypeCallCount)}통화 포함(원형 제외)`
-          : ''),
-    ],
-  }
-}
-
 /** §5 — P95 없이 평균 대기만. 줄 색칠 = 평균 대기가 가장 긴 처리 */
 function waitView(d: ResponseWait) {
   const hot = maxIndex(d.processes.map((p) => p.averageLatencyMs ?? 0))
@@ -138,5 +139,5 @@ function waitView(d: ResponseWait) {
 
 export type DropOffView = ReturnType<typeof dropOffView>
 export type RegistrationView = ReturnType<typeof registrationView>
-export type ComplaintView = ReturnType<typeof complaintView>
+export type ComplaintView = ReturnType<typeof complaintView> & { capped: boolean }
 export type WaitView = ReturnType<typeof waitView>

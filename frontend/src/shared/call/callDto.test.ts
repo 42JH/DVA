@@ -57,7 +57,17 @@ assert.equal(row.callerNumber, '01066382047') // 하이픈 제거
 assert.equal(row.durationSec, 220)
 assert.equal(row.isNew, true)
 assert.deepEqual(row.counts, { accept: 3, lookup: 0, cancel: null, faq: 2 }) // null(못 모음)을 0으로 바꾸지 않음
-assert.deepEqual(row.complaints, [{ type: 'REPEATED_QUESTION', reason: '세 번 물음' }])
+assert.deepEqual(row.complaints, [
+  {
+    type: 'REPEATED_QUESTION',
+    reason: '세 번 물음',
+    offsetSeconds: 31,
+    utteranceOrders: [8, 9],
+    target: null, // !476 전 판정 · 고객 불만이 아닌 유형은 대상 · 강도 없음
+    level: null,
+  },
+])
+assert.equal(row.hasComplaint, true)
 assert.equal(row.persona, '빠른 접수형')
 assert.equal(row.callbackAsked, true) // 서버 값을 그대로 (11/05 리뷰: 전엔 버려짐)
 assert.equal(row.handoffAsked, false)
