@@ -122,11 +122,15 @@ def main():
         for side, port in (('monolith', 3000), ('order', 3002)):
             run('docker', 'stop', '--time=5', RUN+'-'+side+'-app', label=side+'-payment-read-stop')
             start_app(side, port, payment_reads=True)
+        runtime = LOGS/'monolith-runtime'
+        runtime.mkdir(exist_ok=True)
+        run('docker', 'cp', RUN+'-monolith-app:/app/dist/.', str(runtime), label='reference-runtime')
         name = RUN+'-differential'
         create(name, images['order-checks'], '-e', 'NODE_ENV=test', '-e', 'PGPASSWORD='+password, '-e', 'PGDATABASE=dva_webhook_test',
                '-e', 'CUSTOMER_AUTH_TOKEN='+password, '-e', 'CONSULTATION_AUTH_TOKEN='+token,
                command=('node', '--test', 'test/order-reads-parity.test.cjs'))
         run('docker', 'cp', str(ROOT/'msa/parity/order-reads-parity.test.cjs'), name+':/app/service/test/order-reads-parity.test.cjs', label='differential-copy')
+        run('docker', 'cp', str(runtime), name+':/app/service/test/monolith-runtime', label='differential-source-copy')
         complete(name)
         for side in ('monolith', 'order'):
             run('docker', 'stop', '--time=5', RUN+'-'+side+'-payment-read-app', label=side+'-payment-read-finish')
@@ -164,9 +168,6 @@ def main():
                    '-e', 'DELIVERY_URL=http://delivery-app:3003', '-e', 'CUSTOMER_AUTH_TOKEN='+password)
             run('docker', 'start', name, label=side+'-billing-controlled-start')
             wait_app(side, 3000 if side == 'monolith' else 3002, name)
-        runtime = LOGS/'billing-monolith-runtime'
-        runtime.mkdir(exist_ok=True)
-        run('docker', 'cp', RUN+'-monolith-app:/app/dist/.', str(runtime), label='billing-source-runtime')
         for suite in ('billing-months-parity', 'billing-months-recovery'):
             name = RUN+'-'+suite
             create(name, images['order-checks'], '-e', 'NODE_ENV=test', '-e', 'PGPASSWORD='+password, '-e', 'PGDATABASE=dva_webhook_test',

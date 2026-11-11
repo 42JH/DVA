@@ -1,5 +1,6 @@
-import { Controller, Get, Header, Param, Res } from '@nestjs/common';
+import { Body, Controller, Get, Header, HttpCode, Param, Post, Req, Res } from '@nestjs/common';
 import {
+  ApiCookieAuth,
   ApiExcludeEndpoint,
   ApiOkResponse,
   ApiOperation,
@@ -19,10 +20,11 @@ import { join } from 'node:path';
 import type { Response } from 'express';
 import { ConfigService } from '@nestjs/config';
 import { Environment } from '../config/environment';
-import { PublicAuth } from '../auth/auth.guard';
+import { PublicAuth, type AuthRequest } from '../auth/auth.guard';
+import { AuditOperation } from '../audit/audit-operation';
 import { ApiException } from '../common/errors/api.exception';
 import { PaymentsService } from './payments.service';
-import { PaymentIdDto, PaymentStatusDto } from './payment.dto';
+import { EmptyPaymentDto, PaymentIdDto, PaymentStatusDto } from './payment.dto';
 import { paymentPage } from './payment-page';
 import { ErrorResponseDto, RequestMetaDto } from '../common/dto/api-response.dto';
 const paymentEnvelope = {
@@ -46,6 +48,50 @@ const paymentEnvelope = {
 @ApiServiceUnavailableResponse({ type: ErrorResponseDto })
 @Controller('payments')
 export class PaymentsController {
+  @Post('notifications/:id/completion/retry')
+  @HttpCode(200)
+  @ApiCookieAuth('adminSession')
+  @AuditOperation({
+    action: 'ORDER_PAYMENT_COMPLETION_NOTIFICATION_RETRIED',
+    targetType: 'ORDER',
+    target: 'none',
+  })
+  @ApiOperation({
+    summary: '관리자 결제 완료 안내 재발송',
+    description:
+      '결제 완료가 저장된 요청만 재발송합니다. 결제·디버 접수는 다시 처리하지 않습니다. UNKNOWN은 채널 수신 여부를 확인한 뒤 요청하며 중복 메시지 가능성이 있습니다.',
+  })
+  @ApiOkResponse(paymentEnvelope)
+  retryCompletionNotification(
+    @Param() p: PaymentIdDto,
+    @Body() _body: EmptyPaymentDto,
+    @Req() req: AuthRequest,
+  ) {
+    return this.payments.retryCompletionNotification(p.id, req.admin.adminUserSeq, req.requestId);
+  }
+
+  @Post('notifications/:id/retry')
+  @HttpCode(200)
+  @ApiCookieAuth('adminSession')
+  @AuditOperation({
+    action: 'ORDER_PAYMENT_NOTIFICATION_RETRIED',
+    targetType: 'ORDER',
+    target: 'none',
+  })
+  @ApiOperation({
+    summary: '관리자 결제 안내 재발송',
+    description:
+      '발송 결과와 채널 수신을 확인한 관리자가 요청합니다. 동일한 유효 결제 링크를 다시 발송 대기시킵니다. UNKNOWN의 경우 중복 메시지 가능성이 있습니다.',
+  })
+  @ApiOkResponse(paymentEnvelope)
+  retryNotification(
+    @Param() p: PaymentIdDto,
+    @Body() _body: EmptyPaymentDto,
+    @Req() req: AuthRequest,
+  ) {
+    return this.payments.retryNotification(p.id, req.admin.adminUserSeq, req.requestId);
+  }
+
   constructor(
     private readonly payments: PaymentsService,
     private readonly config: ConfigService<Environment, true>,

@@ -700,5 +700,100 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
       await databases.customer.query("UPDATE customers SET status='ACTIVE' WHERE customer_seq=1");
     } finally { await blocker.query('ROLLBACK');blocker.release();await pending?.catch(()=>{}); }
   });
+  await t.test('payment notification retries and workers preserve queue, audit and delivery outcomes', async () => {
+    const id = n => '00000000-0000-4000-8000-'+String(n).padStart(12,'0');
+    const pending=id(1), paid=id(4), expired=id(3), requests=[];
+    const path=(key,completion=false)=>'/api/payments/notifications/'+key+(completion?'/completion':'')+'/retry';
+    async function post(url,expected,extra={},body={}) {
+      const requestId=randomUUID();
+      requests.push(requestId);
+      const results=[];
+      for (const side of sides) {
+        const response=await fetch(side.base+url,{method:'POST',signal:AbortSignal.timeout(15000),
+          headers:{...headers,Origin:'http://localhost:5173','Content-Type':'application/json','X-Request-Id':requestId,...extra},
+          body:JSON.stringify(body)});
+        const result=await response.json();
+        assert.equal(response.status,expected,side.name+' '+url+' '+JSON.stringify(result));
+        results.push(result);
+      }
+      assert.deepEqual(results[1],results[0],url);
+      return results[0].data;
+    }
+    const docs=await Promise.all(sides.map(async side=>(await fetch(side.base+'/api/docs-json')).json()));
+    for(const route of [path('{id}'),path('{id}',true)])
+      assert.deepEqual(docs[1].paths[route].post,docs[0].paths[route].post,route);
+    assert.deepEqual(docs[1].components.schemas.EmptyPaymentDto,docs[0].components.schemas.EmptyPaymentDto);
+
+    await post(path(pending),401,{Cookie:''});
+    await post(path(pending),403,{Origin:'http://wrong.invalid'});
+    await post(path(pending),400,{}, {unexpected:true});
+    await post(path(id(999)),404);
+    await post(path(expired),409);
+    await post(path(pending,true),409);
+    for(let repeat=0;repeat<2;repeat++) {
+      assert.equal((await post(path(pending),200)).notificationStatus,'PENDING');
+      assert.equal((await post(path(paid,true),200)).completionNotificationStatus,'PENDING');
+    }
+
+    const messages=[];
+    const server=require('node:http').createServer(async(req,res)=>{
+      const chunks=[];for await(const chunk of req)chunks.push(chunk);
+      const text=JSON.parse(Buffer.concat(chunks)).text;
+      messages.push(text);
+      res.writeHead(text.includes('/p/'+paid)?503:200);
+      res.end('ok');
+    });
+    await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+    const outputs=[];
+    try {
+      for (const [db,runtime,mono] of [[reference,'./monolith-runtime',true],[databases.order,'../dist',false]]) {
+        await db.query("UPDATE order_payment_requests SET notification_status='SENDING',notification_attempted_at=clock_timestamp()-interval '46 seconds' WHERE payment_request_id=$1",[expired]);
+        const database={pool:db,async transaction(work) {
+          const client=await db.connect();
+          try {await client.query('BEGIN');const result=await work(client);await client.query('COMMIT');return result;}
+          catch(error){await client.query('ROLLBACK');throw error;}
+          finally{client.release();}
+        }};
+        const config={get(key){return {
+          ORDER_PAYMENTS_ENABLED:true, PAYMENT_PUBLIC_URL:'https://payments.example.test/api/payments',
+          PAYMENT_MATTERMOST_WEBHOOK_URL:'http://127.0.0.1:'+server.address().port+'/notice',
+        }[key];}};
+        const {PaymentsRepository}=require(runtime+'/payments/payments.repository');
+        const {PaymentsService}=require(runtime+'/payments/payments.service');
+        const {PaymentsWorker}=require(runtime+'/payments/payments.worker');
+        const {PaymentClient}=require(runtime+'/payments/payment.client');
+        const repository=new PaymentsRepository(database);
+        const client=new PaymentClient(config);
+        const service=mono
+          ? new PaymentsService(config,repository,client,new (require(runtime+'/orders/order-payments.repository').OrderPaymentsRepository)(undefined,database))
+          : new PaymentsService(config,repository,database,undefined,client);
+        const worker=new PaymentsWorker(config,service,repository);
+        messages.length=0;
+        const current=worker.run();
+        assert.equal(worker.run(),current);
+        await current;
+        await worker.run();
+        assert.equal(messages.length,2,'no automatic re-send of uncertain notification');
+        assert.ok(messages[0].includes('/p/'+paid)&&messages[1].includes('/p/'+pending));
+        outputs.push([...messages]);
+        const state=(await db.query(`SELECT payment_request_id AS id,notification_status AS initial,
+          completion_notification_status AS completion,notification_sent_at IS NOT NULL AS sent
+          FROM order_payment_requests WHERE payment_request_id=ANY($1::uuid[]) ORDER BY payment_request_id`,[[pending,paid,expired]])).rows;
+        assert.deepEqual(state,[
+          {id:pending,initial:'SENT',completion:'WAITING',sent:true},
+          {id:expired,initial:'UNKNOWN',completion:'WAITING',sent:false},
+          {id:paid,initial:'SENT',completion:'UNKNOWN',sent:false},
+        ]);
+      }
+    } finally { await new Promise((resolve,reject)=>server.close(error=>error?reject(error):resolve())); }
+    assert.deepEqual(outputs[1],outputs[0],'identical Mattermost message payloads');
+    const audit=async db=>(await db.query(`SELECT request_id,action,result,target_type,target_seq,actor_type,actor_seq,metadata
+      FROM audit_logs WHERE request_id=ANY($1::uuid[]) ORDER BY request_id,action`,[requests])).rows;
+    const expected=await audit(reference);
+    assert.deepEqual(await audit(databases.operations),expected);
+    assert.deepEqual(expected.filter(row=>row.result==='SUCCESS').map(row=>row.target_seq).sort(),[1002,1006]);
+    assert.equal((await post(path(paid,true),200)).completionNotificationStatus,'PENDING');
+    t.diagnostic('notification HTTP pairs: '+requests.length+'; actual worker claims, stale SENDING and exact webhook messages');
+  });
   console.log('Compared HTTP requests: '+compared);
 });

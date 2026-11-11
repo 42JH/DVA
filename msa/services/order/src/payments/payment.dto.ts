@@ -7,6 +7,7 @@ const uuidCase = ({ value }: { value: unknown }) =>
 export class PaymentIdDto {
   @ApiProperty({ format: 'uuid' }) @Transform(uuidCase) @IsUUID('4') id!: string;
 }
+export class EmptyPaymentDto {}
 export class PaymentStatusDto {
   @ApiProperty({ format: 'uuid' }) token!: string;
   @ApiProperty() orderName!: string;

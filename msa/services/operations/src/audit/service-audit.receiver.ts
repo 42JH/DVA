@@ -123,6 +123,8 @@ function auditInput(
             'ORDER_CANCELLED',
             'ORDER_PARCEL_CANCELLED',
             'ORDER_AMOUNT_CHANGED',
+            'ORDER_PAYMENT_NOTIFICATION_RETRIED',
+            'ORDER_PAYMENT_COMPLETION_NOTIFICATION_RETRIED',
           ].includes(audit.action as string)
         : consultationActions.has(audit.action as string)) ||
     !(service === 'customer'
@@ -197,7 +199,12 @@ function auditInput(
         (payload.result === 'SUCCESS' &&
           (!(billingInitialization
             ? audit.actorType === 'SYSTEM'
-            : ['ORDER_DELETED', 'PARCEL_DRAFT_DELETED'].includes(audit.action as string)
+            : [
+                  'ORDER_DELETED',
+                  'PARCEL_DRAFT_DELETED',
+                  'ORDER_PAYMENT_NOTIFICATION_RETRIED',
+                  'ORDER_PAYMENT_COMPLETION_NOTIFICATION_RETRIED',
+                ].includes(audit.action as string)
               ? audit.actorType === 'ADMIN'
               : ['ADMIN', 'AI'].includes(audit.actorType as string)) ||
             audit.targetId === null)))) ||
