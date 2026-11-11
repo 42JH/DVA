@@ -53,7 +53,7 @@ export function useFaqs() {
     error: list.error ? 'FAQ를 불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.' : null,
     adding,
     from: state?.from,
-    addCategory: cat ?? FAQ_CATEGORIES[0].name,
+    addCategory: cat ?? null, // 추가 칸의 처음 분류 = 왼쪽에서 고른 분류. 전체 · 미답변에서 오면 없음(직접 고름, 11/11 — 전엔 말없이 '접수')
     startAdd: () => setAdding(true),
     finishAdd,
   }

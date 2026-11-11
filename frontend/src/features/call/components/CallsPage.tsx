@@ -12,7 +12,7 @@ const COLS = [
   { label: '번호', className: 'w-[84px]' },
   { label: '상태', className: 'w-[80px]' },
   { label: '시작', className: 'w-[140px]' },
-  { label: '고객', className: 'w-[150px]' },
+  { label: '고객', className: 'w-[142px]' }, // 1440에서 고객 불만 칩 셋(서비스 정책)이 들어가게 150 → 142 (이름은 넘치면 말줄임)
   { label: '구분', className: 'w-[80px] max-[1600px]:hidden' }, // 1600 아래에선 숨김 (통화 상세에 있음)
   { label: '전화번호', className: 'w-[130px]' },
   { label: '접수 주문', className: 'w-[100px]' },
@@ -98,11 +98,11 @@ export function CallsPage() {
 }
 
 // 칩이 다 생겼을 때를 바닥으로 — 쪽마다 칩 수에 따라 칸이 줄었다 늘었다 하지 않게 (11/11 사용자: 모든 칩이 생겼을 때 기준)
-// 고객 용건: 한 자리 숫자 칩 4개(택배 접수 · 주문 확인 · 접수 취소 · 문의). 고객 불만: 대상 칩 3개(AI 응대 · 요금 정책 · 배송)
+// 고객 용건: 한 자리 숫자 칩 4개(택배 접수 · 주문 확인 · 접수 취소 · 문의). 고객 불만: 대상 칩 3개(AI 응대 · 서비스 정책 · 배송)
 const KINDS_BASE = 310
-const COMPLAINTS_BASE = 172
+const COMPLAINTS_BASE = 182
 
-/** 두 칩 칸이 남는 자리를 칩이 다 생겼을 때 폭의 비율(용건 310 : 불만 172)로 나눔 — 넓은 화면에서 한쪽만 커지지 않게 (11/11 사용자: 균형)
+/** 두 칩 칸이 남는 자리를 칩이 다 생겼을 때 폭의 비율(용건 310 : 불만 182)로 나눔 — 넓은 화면에서 한쪽만 커지지 않게 (11/11 사용자: 균형)
  *  고객 불만 칸 폭을 정하고 고객 용건 칸이 나머지(table-layout fixed). 바닥보다 좁아지면 표 최소 너비를 늘려 가로 스크롤 */
 function useChipColumns(ref: RefObject<HTMLTableElement | null>, rows: unknown) {
   const [minWidth, setMinWidth] = useState(1120)
