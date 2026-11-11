@@ -14,9 +14,9 @@ export const AI_ERROR_TYPES = [
 /** 고객 불만 대상 — 순서 = 목록 칩 · 통계 범례 순서 */
 export const TARGETS = ['ai_service', 'price_policy', 'delivery_other'] as const
 export const TARGET_LABEL: Record<ComplaintTarget, string> = {
-  ai_service: 'AI 응대',
-  price_policy: '서비스 정책', // 규칙 · 요금 · 업무 범위 자체가 불만 (11/11: '요금 정책'은 요금만으로 읽혀 조회 범위 · 금지 물품 거절 등이 어색)
-  delivery_other: '배송',
+  ai_service: 'AI 상담가 불만', // 11/11: 'AI 응대'가 AI 응대 오류로 읽혀서 끝에 '불만'을 붙임
+  price_policy: '정책 불만', // 규칙 · 요금 · 업무 범위 자체가 불만 (11/11: '요금 정책'은 요금만으로 읽혀 조회 범위 · 금지 물품 거절 등이 어색)
+  delivery_other: '배송 불만',
 }
 export const LEVEL_TEXT: Record<ComplaintLevel, string> = {
   explicit: '강하게 항의함',

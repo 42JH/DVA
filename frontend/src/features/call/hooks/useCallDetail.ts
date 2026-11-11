@@ -69,7 +69,7 @@ function toSegments(utterances: Timed[], all: Complaint[]): ScriptSegment[] {
       time: u.labelSec === null ? '' : fmtClock(u.labelSec),
       who: u.speaker === 'AI' ? 'AI' : '고객',
       text: u.text,
-      ...(said ? { complaint: `고객 불만: ${TARGET_LABEL[said.target]}` } : {}),
+      ...(said ? { complaint: TARGET_LABEL[said.target] } : {}),
     }
     const last = segments[segments.length - 1]
     const sameGroup =
@@ -252,7 +252,7 @@ export function useCallDetail(callId: number, fromFaq?: number) {
                 key: i,
                 at: Math.min(1, sec / lengthSec),
                 tone: cust ? ('stop' as const) : ('wait' as const),
-                title: `${cust ? `고객 불만: ${TARGET_LABEL[c.target]}` : COMPLAINT_LABEL[c.type]} ${fmtClock(Math.floor(sec))}`,
+                title: `${cust ? TARGET_LABEL[c.target] : COMPLAINT_LABEL[c.type]} ${fmtClock(Math.floor(sec))}`,
                 onClick: () => goComplaint(c),
               },
             ]
