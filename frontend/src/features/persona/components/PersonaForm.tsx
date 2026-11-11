@@ -35,7 +35,7 @@ export function PersonaForm({
   children,
 }: {
   vm: FormVm
-  onVoice?: () => void // 수정에만 — 등록은 기본 음성으로 만든 뒤 조절 (11/11)
+  onVoice?: () => void // [음성 세부 조절] — 넘길 때만 버튼
   children?: ReactNode // 화면 위에 띄울 창 (음성 세부 조절)
 }) {
   return (

@@ -1,9 +1,18 @@
 import { Badge, Btn, SelectField } from '@/shared/ui'
 import { Choice, Label } from '@/shared/ui/Field'
 import { Modal } from '@/shared/ui/Modal'
-import type { usePromptEditor } from '@/features/persona/hooks/usePromptEditor'
+import type { useAddPersona } from '@/features/persona/hooks/useAddPersona'
+import type { useVoiceDraft } from '@/features/persona/hooks/useVoiceDraft'
+
+// 등록 · 수정 훅 둘 다 이 모양 — 음성 값(useVoiceDraft) + 창 제목 + standalone일 때 쓰는 저장 칸
+type VoiceVm = ReturnType<typeof useVoiceDraft> &
+  Pick<
+    ReturnType<typeof useAddPersona>,
+    'voiceTitle' | 'cancel' | 'emptyNotice' | 'saveError' | 'canSave' | 'save' | 'saveLabel'
+  >
 
 // 07 음성 세부 조절 창 (와이어프레임 07_페르소나관리_음성세부조절, 10/31) — 수정 화면 위에
+// 11/11 상담가 등록 화면에서도 같은 창 (등록 [등록]으로 같이 저장)
 // 'v8 작성 중' (+ 바꾸면 '음성 설정 바뀜') → 목소리 ▾ · 발화 속도 · 말 끝 기다리기 · 미리 듣기 ▶
 // 저장 버튼 없음: 고르는 즉시 작성 중 버전에 반영, 수정 화면 [저장]으로 프롬프트와 같이 저장
 // 11/10 다른 화면과 같은 창(Modal) · 칸(Field) · 버튼(Btn). 아래 줄은 [닫기](✕ · Esc와 같음)만
@@ -13,7 +22,7 @@ export function VoiceModal({
   subtitle,
   standalone = false,
 }: {
-  vm: ReturnType<typeof usePromptEditor>
+  vm: VoiceVm
   subtitle: string
   standalone?: boolean
 }) {
