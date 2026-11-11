@@ -197,10 +197,9 @@ export const createCompany = async (
 export const renameCompany = (id: number, name: string): Promise<void> =>
   api.patch(`/companies/${id}`, { body: { name } })
 
-/** 기업 삭제 — DELETE /companies 배열 API에 1곳만 (단건 /companies/{id}도 같은 처리, 11/08 백엔드 통합).
- * 소속 · 부서 삭제, 고객 · 주문 · 통화 · 청구 기록은 보존. 하나라도 없으면 404로 전체 롤백 */
-export const deleteCompany = (id: number): Promise<void> =>
-  api.delete('/companies', { body: { organizationSeqs: [id] } })
+/** 기업 삭제 — 1~100곳 · 중복 불가 · 하나라도 없으면 404 + 전체 롤백 · 204. 소속 · 부서 · 기업 PIN 삭제, 고객 · 주문 · 통화 이력은 보존 */
+export const deleteCompanies = (ids: number[]): Promise<void> =>
+  api.delete('/companies', { body: { organizationSeqs: ids } })
 
 /** 사원 등록 — 1~1000건 · 전체 트랜잭션 · 204. 같은 사번이면 고객 정보 갱신(= 수정) */
 export const addMembers = (id: number, items: MemberItem[]): Promise<void> =>
