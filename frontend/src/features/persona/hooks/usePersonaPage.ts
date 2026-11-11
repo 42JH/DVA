@@ -45,7 +45,7 @@ export interface HistoryRow {
   time: string // '오늘 오후 3:07'
   voice: string // 'marin' — 그 버전에 쓰인 음성 이름 (11/11)
   author: string // 모르면 ''
-  badges: Badge[] // 현재 버전 · 통화에 사용 중 · 적용 대기
+  badges: Badge[] // 통화에 사용 중 · 적용 대기
   selected: boolean
 }
 
@@ -122,7 +122,6 @@ export function usePersonaPage() {
   const voiceName = (v: string) => v || DEFAULT_VOICE_LABEL
   const badges = (v: PersonaVersion) => {
     const b: Badge[] = []
-    if (v === head) b.push(VERSION_BADGE.head)
     if (v.status === 'ACTIVE') b.push(VERSION_BADGE.ACTIVE)
     if (v.status === 'PENDING') b.push(VERSION_BADGE.PENDING)
     return b
