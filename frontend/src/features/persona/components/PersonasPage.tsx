@@ -19,7 +19,7 @@ export function PersonasPage() {
       <PageHead title="AI 상담가">
         {vm.canAdd && !vm.editing && !vm.adding && (
           <Btn kind="primary" className="ml-auto" onClick={vm.openAdd}>
-            <Icon name="bot" />
+            <Icon name="plus" />
             상담가 등록
           </Btn>
         )}
@@ -144,12 +144,12 @@ function PersonaCard({ p, vm }: { p: PersonaItem; vm: Vm }) {
             options={h.options}
           />
           <span className="flex gap-2">
-            <Btn kind="neutralBadge" onClick={vm.startTestCall}>
+            <Btn kind="plainBadge" onClick={vm.startTestCall}>
               시험 통화
             </Btn>
             {h.canApply && (
               <Btn
-                kind="infoBadge"
+                kind="lineBadge"
                 disabled={!h.canApplyNow}
                 title={h.canApplyNow ? undefined : '시험 통화를 끝낸 버전만 적용할 수 있습니다'}
                 onClick={vm.askApply}
@@ -161,7 +161,7 @@ function PersonaCard({ p, vm }: { p: PersonaItem; vm: Vm }) {
         </div>
       )}
       {p.canUse && (
-        <Btn kind="infoBadge" className="mt-3" onClick={() => vm.askUse(p.personaSeq)}>
+        <Btn kind="lineBadge" className="mt-3" onClick={() => vm.askUse(p.personaSeq)}>
           통화에 사용하기
         </Btn>
       )}
@@ -178,17 +178,17 @@ function Prompt({ vm }: { vm: Vm }) {
         <span className="text-[13px] text-ops-sub">{p.subtitle}</span>
         <span className="ml-auto flex gap-2">
           {p.compareLabel && (
-            <Btn kind="neutralBadge" onClick={vm.startCompare}>
+            <Btn kind="plainBadge" onClick={vm.startCompare}>
               {p.compareLabel}
             </Btn>
           )}
           {p.canEdit && (
-            <Btn kind="warning" onClick={vm.startVoice}>
+            <Btn kind="editBadge" onClick={vm.startVoice}>
               음성 세부 조절
             </Btn>
           )}
           {p.canEdit && (
-            <Btn kind="warning" onClick={vm.startEdit}>
+            <Btn kind="editBadge" onClick={vm.startEdit}>
               프롬프트 수정
             </Btn>
           )}
@@ -223,7 +223,7 @@ function Compare({ vm }: { vm: Vm }) {
         </span>
         <span className="text-ops-stop">빠진 줄 {c.removed}</span>
         <span className="text-ops-done">더한 줄 {c.added}</span>
-        <Btn kind="neutralBadge" className="ml-auto" onClick={vm.closeCompare}>
+        <Btn kind="plainBadge" className="ml-auto" onClick={vm.closeCompare}>
           비교 닫기
         </Btn>
       </header>

@@ -135,7 +135,7 @@ export function AdminsPage() {
                       <span className="flex items-center justify-center gap-1">
                         {r.pending ? (
                           <>
-                            <Btn kind="infoBadge" disabled={busy} onClick={() => vm.approve(r.id)}>
+                            <Btn kind="lineBadge" disabled={busy} onClick={() => vm.approve(r.id)}>
                               승인
                             </Btn>
                             <Btn kind="dangerBadge" onClick={() => vm.ask('reject', r.id)}>
@@ -150,10 +150,10 @@ export function AdminsPage() {
                                 a === 'delete'
                                   ? 'dangerBadge'
                                   : a === 'deactivate'
-                                    ? 'neutralBadge'
+                                    ? 'plainBadge'
                                     : a === 'reset'
-                                      ? 'warning'
-                                      : 'infoBadge' // 활성화 — 비활성화와 같은 자리 · 같은 배지 모양
+                                      ? 'editBadge'
+                                      : 'lineBadge' // 활성화 — 비활성화와 같은 자리 · 같은 배지 모양
                               }
                               disabled={busy}
                               onClick={() =>

@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { Segments } from '@/shared/ui'
+import { BUTTON_LOOK } from '@/shared/ui/actionBadge'
 import { Link } from 'react-router'
 import type {
   CardState,
@@ -149,7 +150,7 @@ function GraphLink({ to }: { to: string }) {
   return (
     <Link
       to={to}
-      className="ml-auto inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md bg-ops-route-soft px-3 text-[13px] font-semibold text-ops-route outline-none hover:bg-[#d6e4ff] focus-visible:ring-2 focus-visible:ring-ops-route"
+      className={`ml-auto inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md px-3 text-[13px] font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ops-route ${BUTTON_LOOK.plain}`}
     >
       <svg
         viewBox="0 0 20 20"

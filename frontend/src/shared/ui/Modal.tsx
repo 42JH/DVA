@@ -106,7 +106,7 @@ export function Confirm({
             {closeLabel}
           </Btn>
           <Btn
-            kind={ok === '삭제' || danger ? 'danger' : 'primary'}
+            kind={ok === '삭제' || danger ? 'dangerSolid' : 'primary'}
             disabled={busy}
             onClick={onOk}
             autoFocus

@@ -194,9 +194,7 @@ export function ConfirmDialog({
           </Button>
           <Button
             big={big}
-            kind={
-              okLabel === '삭제' ? 'deleteBadge' : big && okKind === 'primary' ? 'brand' : okKind
-            }
+            kind={okLabel === '삭제' ? 'danger' : big && okKind === 'primary' ? 'brand' : okKind}
             onClick={onOk}
             disabled={pending}
           >

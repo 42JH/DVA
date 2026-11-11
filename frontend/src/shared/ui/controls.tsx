@@ -1,6 +1,6 @@
 // 화면 공통 부품 (버튼 · 탭 · 뱃지 · 아이콘 · 정렬 칸 머리). 색은 global.css의 ops-* 토큰
 import type { ButtonHTMLAttributes, ReactNode } from 'react'
-import { ACTION_BADGE_COLOR, ACTION_BADGE_SIZE } from './actionBadge'
+import { ACTION_BADGE_SIZE, BUTTON_LOOK } from './actionBadge'
 
 export type Tone = 'idle' | 'wait' | 'done' | 'stop' | 'route' | 'cancel'
 
@@ -24,19 +24,18 @@ export function Badge({ tone, children }: { tone: Tone; children: ReactNode }) {
   )
 }
 
-// 색 = 뜻 (11/11 사용자: 색이 같으면 모양도 같게) — 파랑 저장 · 입력, 노랑 수정, 빨강 삭제 · 취소, 회색 그 밖
-// 버튼은 32px 연한 채움, *Badge는 목록 줄 안에 넣는 22px
+// 버튼 모양 · 색 규칙은 actionBadge.ts BUTTON_LOOK. kind = 속성, 이름이 …Badge로 끝나면 목록 줄 안에 넣는 22px (나머지 32px)
 const BTN = {
-  primary: 'bg-ops-route-soft text-ops-route hover:bg-[#d6e4ff]',
-  primaryLime: 'bg-[#eaf5d3] text-[#4d7a1f] hover:bg-[#dcebb4]',
-  warning: ACTION_BADGE_COLOR.edit,
-  dangerBadge: ACTION_BADGE_COLOR.delete,
-  infoBadge: ACTION_BADGE_COLOR.info,
-  neutralBadge: ACTION_BADGE_COLOR.neutral,
-  plain: 'bg-white text-ops-ink ring-1 ring-ops-line ring-inset hover:bg-ops-paper',
-  edit: ACTION_BADGE_COLOR.edit,
-  danger: ACTION_BADGE_COLOR.delete,
-  ghost: 'text-ops-sub hover:bg-ops-paper hover:text-ops-ink',
+  primary: BUTTON_LOOK.solid, // 만들기 · 저장 · 확정 — 그 칸 · 창의 주 버튼 하나
+  line: BUTTON_LOOK.line, // 보조 만들기 (CSV로 등록)
+  lineBadge: BUTTON_LOOK.line, // 줄 안 승인 · 적용 · 등록
+  edit: BUTTON_LOOK.edit, // 수정 · 설정 열기
+  editBadge: BUTTON_LOOK.edit,
+  danger: BUTTON_LOOK.danger, // 삭제 · 탈퇴 · 끝내기 (되돌릴 수 없음)
+  dangerBadge: BUTTON_LOOK.danger,
+  dangerSolid: BUTTON_LOOK.solidDanger, // 확인 창의 삭제 확정
+  plain: BUTTON_LOOK.plain, // 닫기 · 취소 · 보기 · 이동 · 파일
+  plainBadge: BUTTON_LOOK.plain,
 }
 
 /** 버튼 높이 32 (기업 피드백: 버튼이 너무 큼) */
@@ -49,7 +48,7 @@ export function Btn({
     <button
       type="button"
       {...rest}
-      className={`${kind === 'warning' || kind === 'dangerBadge' || kind === 'infoBadge' || kind === 'neutralBadge' ? ACTION_BADGE_SIZE : 'inline-flex h-8 items-center justify-center rounded-md px-3 text-[13px] leading-none font-semibold'} shrink-0 gap-1.5 whitespace-nowrap outline-none focus-visible:ring-2 focus-visible:ring-ops-route disabled:pointer-events-none disabled:opacity-40 ${BTN[kind]} ${className}`}
+      className={`${kind.endsWith('Badge') ? ACTION_BADGE_SIZE : 'inline-flex h-8 items-center justify-center rounded-md px-3 text-[13px] leading-none font-semibold'} shrink-0 gap-1.5 whitespace-nowrap outline-none focus-visible:ring-2 focus-visible:ring-ops-route disabled:pointer-events-none disabled:opacity-40 ${BTN[kind]} ${className}`}
     />
   )
 }

@@ -34,7 +34,7 @@ export function FaqsPage() {
           label="FAQ 검색"
         />
         <Btn kind="primary" className="ml-auto" onClick={vm.startAdd} disabled={vm.adding}>
-          <Icon name="book" />
+          <Icon name="plus" />
           FAQ 등록
         </Btn>
       </PageHead>

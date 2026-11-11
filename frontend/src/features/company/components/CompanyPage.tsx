@@ -36,12 +36,12 @@ export function CompanyPage() {
             <Icon name="gear" />
             결제 설정
           </Btn>
-          <Btn kind="primaryLime" onClick={vm.openCsv}>
+          <Btn kind="line" onClick={vm.openCsv}>
             <Icon name="sheet" />
             CSV로 사원 등록
           </Btn>
           <Btn kind="primary" onClick={vm.openAdd}>
-            <Icon name="users" />
+            <Icon name="plus" />
             사원 등록
           </Btn>
         </span>
@@ -115,7 +115,7 @@ export function CompanyPage() {
                     </td>
                     <td>
                       <span className="flex justify-center gap-1">
-                        <Btn kind="warning" onClick={() => vm.openEdit(r.member)}>
+                        <Btn kind="editBadge" onClick={() => vm.openEdit(r.member)}>
                           수정
                         </Btn>
                         <Btn kind="dangerBadge" onClick={() => vm.askDelete(r.member)}>
