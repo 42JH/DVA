@@ -11,7 +11,7 @@ import {
   type WaitTime,
 } from './personaMap'
 
-export const PERSONA_DEMO = true
+export const PERSONA_DEMO = false
 
 /** 저장 · 추가 본문 — 서버로 보내던 것과 같은 모양 */
 interface PersonaBody extends Partial<PromptFields> {
