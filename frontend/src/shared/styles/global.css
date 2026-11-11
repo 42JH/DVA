@@ -4,6 +4,13 @@ thead th {
   text-align: center;
 }
 
+/* 스크롤 상자는 막대 자리를 늘 비워 둠 — 페이지를 넘기며 행 수가 바뀔 때 막대가 생겼다 없어지면서
+   내용 폭이 흔들리던 것 (11/11 미답변 표). 화면 전체에 같은 규칙 */
+.overflow-auto,
+.overflow-y-auto {
+  scrollbar-gutter: stable;
+}
+
 @layer base {
   tbody td {
     text-align: center;
