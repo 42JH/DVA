@@ -15,7 +15,7 @@ export const AI_ERROR_TYPES = [
 export const TARGETS = ['ai_service', 'price_policy', 'delivery_other'] as const
 export const TARGET_LABEL: Record<ComplaintTarget, string> = {
   ai_service: 'AI 응대',
-  price_policy: '요금 정책',
+  price_policy: '서비스 정책', // 규칙 · 요금 · 업무 범위 자체가 불만 (11/11: '요금 정책'은 요금만으로 읽혀 조회 범위 · 금지 물품 거절 등이 어색)
   delivery_other: '배송',
 }
 export const LEVEL_TEXT: Record<ComplaintLevel, string> = {
