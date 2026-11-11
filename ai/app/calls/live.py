@@ -34,7 +34,7 @@ from app.policy.render import decision_questions
 from app.tools import MODEL_TOOLS, run_tool
 from app.tools.cancel import cancel_parcel
 from app.tools.lookup import lookup_order_facts, resume_destination, status_text
-from app.tools.outcome import DESTINATION_CHANGE_QUESTIONS, state_summary
+from app.tools.outcome import destination_change_question, state_summary
 from app.tools.record import RecordArgs, record_fields
 
 log = logging.getLogger(__name__)
@@ -48,8 +48,14 @@ GREETING_ORDER = re.compile(
     r"(?:택배)?접수(?:를)?(?:도와드릴까요|도와드려도될까요|해드릴까요|하시겠어요|하실까요|할까요|하시는건가요)$"
 )
 SHORT_YES = re.compile(r"(?:아|어|음)?(?:네|예|응|맞아요|맞습니다|그렇습니다)+")
-DESTINATION_OTHER_ADDRESS = re.compile(r"(?:다른|새|새로운)주소|(?:주소|받는곳)(?:가|는)?(?:다르|달라)|주소만(?:바꾸|바꿀|바꿔|변경)")
-DESTINATION_OTHER_PERSON = re.compile(r"(?:다른|새|새로운)(?:사람|받는분|수신인)|(?:받는분|수신인)(?:이|은)?(?:다르|달라|새로)|(?:받는분|수신인)만(?:바꾸|바꿀|바꿔|변경)")
+DESTINATION_ADDRESS_ONLY = re.compile(r"(?:주소|배송지|받는곳)만(?:바꾸|바꿀|바꿔|변경|다르게|달라)")
+DESTINATION_OTHER_ADDRESS = re.compile(
+    r"(?:다른|새로운|새|딴)(?:주소|배송지|받는곳|곳|데|장소)|(?:주소|배송지|받는곳)(?:가|는)?(?:다르|달라|말고)"
+    r"|(?:주소|배송지|받는곳)(?:를|을|만)?(?:바꾸|바꿀|바꿔|변경)|이사(?:한|간|옮긴)(?:곳|데|집|주소)")
+DESTINATION_OTHER_PERSON = re.compile(
+    r"(?:다른|새|새로운)(?:사람|받는사람|받는분|분|수신인)"
+    r"|(?:같은|동일한)(?:사람|분)(?:은|이|에게|한테)?(?:아니|안보내|보내지않|보내지말)"
+    r"|(?:받는분|받는사람|수신인)(?:이|은)?(?:다르|달라|새로)|(?:받는분|수신인)만(?:바꾸|바꿀|바꿔|변경)")
 DESTINATION_OTHER_TASK = re.compile(r"보내는분|발송(?:지|주소)|출발(?:지|주소)|취소|조회|상담원|끊어")
 GREETING_OTHER_ORIGIN = re.compile(r"(?:네|예|아니요)?(?:오늘은|이번에는)?다른(?:주소|곳)에서"
                                   r"(?:보낼게요|보내려고요|보냅니다|발송할게요|발송하려고요)")
@@ -1357,9 +1363,8 @@ def _asked_receiver_name(text: str, expecting_name: bool) -> bool:
 
 def _asked_destination(candidates: CandidateSet, text: str) -> bool:
     question = re.sub(r"[\s,.!?…~]+", "", _last_question(text))
-    if candidates.destination_clarification:
-        expected = DESTINATION_CHANGE_QUESTIONS[candidates.destination_clarification]
-        return question == re.sub(r"[\s?]+", "", expected)
+    if expected := destination_change_question(candidates):
+        return question == re.sub(r"[\s,.!?…~]+", "", expected)
     return (bool(re.search(r"보내|받는|받으", question))
             and any("".join(place.name.split()) in question for place in candidates.items if place.name))
 
@@ -1370,22 +1375,28 @@ def _explicit_destination_reply(candidates: CandidateSet, question: str, text: s
     compact = re.sub(r"[\s,.!?…~]+", "", text)
     if DESTINATION_OTHER_TASK.search(compact):
         return None
-    address_changed = DESTINATION_OTHER_ADDRESS.search(compact)
+    name = re.escape("".join(candidates.items[0].name.split()))
+    address_only = DESTINATION_ADDRESS_ONLY.search(compact)
+    address_changed = address_only or DESTINATION_OTHER_ADDRESS.search(compact)
     person_changed = DESTINATION_OTHER_PERSON.search(compact)
     if address_changed and person_changed:
         return None
     if candidates.destination_clarification in ("recipient", "address"):
-        if SHORT_YES.fullmatch(compact) or (re.match(r"\s*(?:네|예|맞아요|맞습니다)[ ,.]", text)
-                                              and not re.search(r"아니|안맞|맞지않", compact)):
+        confirmed_name = (candidates.destination_clarification == "recipient" and name
+                          and re.fullmatch(rf"{name}(?:님)?(?:입니다|이에요|예요|맞아요)?", compact))
+        if confirmed_name or SHORT_YES.fullmatch(compact) or (re.match(r"\s*(?:네|예|맞아요|맞습니다)[ ,.]", text)
+                                                               and not re.search(r"아니|안맞|맞지않", compact)):
             if candidates.destination_clarification == "recipient" and not person_changed:
                 return "new_address_1"
             if candidates.destination_clarification == "address" and not address_changed:
                 return "new_recipient_1"
     if address_changed:
-        name = re.escape("".join(candidates.items[0].name.split()))
-        same_person = re.search(rf"(?:그분|그사람|받는분|수신인|{name})(?:님)?(?:한테|에게|은|는|이|가)?"
-                                r"(?:그대로보내(?!지않|지말)|맞아요|맞습니다|맞고|같아요|같고)", compact)
-        if same_person or re.search(r"주소만(?:바꿀|바꾸|바꿔|변경)", compact):
+        same_person = re.search(
+            rf"(?:같은|동일한)(?:사람|받는사람|분|받는분|수신인)"
+            rf"|(?:그분|그사람|받는분|받는사람|수신인|{name})(?:님)?(?:한테|에게|은|는|이|가)?"
+            r"(?:그대로(?:보내(?!지않|지말)|인데|이고|예요|고|할|(?=새|다른|딴|이사|배송지|주소))"
+            r"|변경없이|맞아요|맞습니다|맞는데|맞고|같아요|같고|같은데)", compact)
+        if same_person or address_only:
             return "new_address_1"
         return "clarify_recipient"
     if person_changed:

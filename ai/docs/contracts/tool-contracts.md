@@ -6,7 +6,7 @@
 
 **결과 형식** `ToolOutcome.to_output()`: `{status, code?, facts?, needs?: [{field, reason}], stage?, fields?, missing?, can_proceed?, parcels?}`. `status` ∈ ok · needs_input · needs_choice · needs_confirmation · rejected · unavailable · unknown(`error-recovery.md` §1). 값 기록 결과에는 상태 요약(fields = 필드별 상태, 값은 없음)을 붙인다.
 
-**받는 곳 부분 변경**: 개인 주소록·이전 도착지 후보 확인에서 서버가 `destination_change_question`을 보내면 그대로 확인한다. `destination_partial_change`가 `address`이면 기존 이름·연락처를 유지하고 새 주소를 받는다. `recipient`이면 기존 주소·상세주소를 유지하고 새 이름·연락처를 받는다. 이미 들은 새 값은 `record_fields`에 넣는다. 범위 확인 중 받은 새 값은 현재 후보에 보관해 답변 후 검증한다. 부분 변경 중 `find_destination`은 `DEST_CHANGE_USE_RECORD`와 현재 누락 항목을 반환한다.
+**받는 곳 부분 변경**: 개인 주소록·이전 도착지 후보 확인에서 서버가 `destination_change_question`을 보내면 후보 이름을 포함한 질문을 그대로 한다. `destination_partial_change`가 `address`이면 기존 이름·연락처를 유지하고 새 주소를 받는다. `recipient`이면 기존 주소·상세주소를 유지하고 새 이름·연락처를 받는다. 구체적인 새 값만 `record_fields`에 넣는다. 범위 확인 중 받은 새 값은 현재 후보에 보관해 답변 후 검증한다. 주소로 검증되지 않고 도로명·지번과 번호도 없는 입력은 `RECEIVER_ADDRESS_VALUE_REQUIRED`를 반환한다. 부분 변경 중 `find_destination`은 `DEST_CHANGE_USE_RECORD`와 현재 누락 항목을 반환한다.
 
 **접수 조회 주소**: 선택된 택배의 `lookup_order`에 `sender_address_detail`과 `receiver_address_detail`을 해당 기본주소와 함께 전달한다. 빈 문자열은 상세주소 없음, 누락은 조회 결과로 확인할 수 없음을 뜻한다.
 

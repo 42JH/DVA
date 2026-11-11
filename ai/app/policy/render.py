@@ -185,7 +185,9 @@ def decision_questions(policy: Policy, stage_id: str, *, pending: bool = False,
             clarifications = ("clarify_recipient", "clarify_address") if len(pick_labels) == 1 else ("clarify_candidate",)
             instructions += (
                 " 받는 곳 후보는 사람과 주소를 구분한다. 사람과 주소를 모두 그대로 쓸 때만 후보 이름표를 직접 고른다. "
-                "'그분 맞고 주소만 바꿀게요'는 아래 주소 변경 선택지, '주소는 맞고 받는 분만 바꿀게요'는 아래 받는 분 변경 선택지다. "
+                "고객 표현이 달라도 어떤 정보를 유지하겠다는 뜻인지 판정한다. "
+                "'그분 맞고 주소만 바꿀게요', '같은 사람인데 딴 데로요'는 아래 주소 변경 선택지, "
+                "'주소는 맞고 받는 분만 바꿀게요'는 아래 받는 분 변경 선택지다. "
                 "새 주소나 새 성함을 같은 답에서 말해도 그대로 둘 항목이 명확하면 해당 변경 선택지를 고른다. "
                 "사람과 주소를 모두 바꾸거나 후보와 무관한 새 배송지라고 하면 none이다. "
                 "후보가 한 명이고 '다른 주소예요'만으로 같은 사람인지 불분명하면 clarify_recipient, "

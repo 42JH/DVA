@@ -155,6 +155,18 @@ def clean_text(text: str) -> str:
     return re.sub(r"\s+", " ", text[0]).strip()
 
 
+def has_numbered_address(text: str) -> bool:
+    """주소 검색이 불가능해도 도로명·법정동과 건물번호·지번을 함께 말했는지 확인한다."""
+    cleaned = re.sub(r"(?<=[로길동리가읍면])(?=\d)", " ", clean_text(text))
+    for head, branch, number in parse(cleaned):
+        place = head[:-1] if head and head[-1] == "산" else head
+        if number and number[0].isdigit() and place and (
+                branch is not None or re.search(r"[가-힣0-9][로길동리가읍면]$", place[-1])
+                or len(place) > 1 and place[-1] == "길"):
+            return True
+    return False
+
+
 def split_detail(text: str, is_area=None) -> list[tuple[str, str, bool]]:
     """들은 문장 → [(기본주소, 상세주소 원문, 확실한 경계인가), ...] 자르기 후보, 그럴듯한 순서. 상세가 없으면 [].
     경계가 띄어쓰기·이름 자리면 확실한 후보 하나다. 수사가 붙어 와("오십삼백십이동") 경계를 모르면 수사 안 모든 지점이

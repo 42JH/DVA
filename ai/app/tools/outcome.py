@@ -7,7 +7,7 @@ from typing import Literal
 from app.domain.address_book import (missing_sender_address, origin_confirmation, receiver_questions_deferred,
                                      sender_change_next)
 from app.domain.assess import assess
-from app.domain.state import ConversationState, FieldStatus, Items, Place, Source
+from app.domain.state import CandidateSet, ConversationState, FieldStatus, Items, Place, Source
 from app.policy.model import Policy
 
 Status = Literal["ok", "needs_input", "needs_choice", "needs_confirmation", "rejected", "unavailable", "unknown"]
@@ -16,6 +16,15 @@ DESTINATION_CHANGE_QUESTIONS = {
     "address": "받는 곳은 주소록에 있는 주소가 맞으세요?",
     "candidate": "어느 후보의 어떤 정보를 그대로 쓰실까요?",
 }
+
+
+def destination_change_question(candidates: CandidateSet) -> str | None:
+    clarification = candidates.destination_clarification
+    if clarification == "recipient" and len(candidates.items) == 1:
+        name = candidates.items[0].name.strip()
+        if name:
+            return f"받는 분은 {name} 님 그대로 하시는 거죠?"
+    return DESTINATION_CHANGE_QUESTIONS.get(clarification)
 
 
 @dataclass
@@ -60,8 +69,8 @@ def state_summary(state: ConversationState, policy: Policy) -> dict:
         if "sender_name" not in a.missing and (destination or state.current.deferred_destination):
             summary.update(stage="address", missing=list(missing), can_proceed=False)
     elif state.intent == "order" and destination:
-        if destination.destination_clarification:
-            summary["destination_change_question"] = DESTINATION_CHANGE_QUESTIONS[destination.destination_clarification]
+        if question := destination_change_question(destination):
+            summary["destination_change_question"] = question
             summary["missing"] = []
         else:
             summary["destination_choices"] = list(destination.labels)
