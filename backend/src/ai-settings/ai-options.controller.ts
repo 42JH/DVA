@@ -30,6 +30,6 @@ export class AiOptionsController {
     type: ErrorResponseDto,
   })
   options() {
-    return this.ai.options();
+    return this.ai.sharedOptions();
   }
 }

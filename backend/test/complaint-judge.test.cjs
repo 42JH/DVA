@@ -272,3 +272,70 @@ test('집기가 지연되어 fill이 겹쳐도 설정한 동시 판정 수를 �
     worker.onApplicationShutdown();
   }
 });
+
+test('one call builds shared instructions once while retaining independent votes and usage', async () => {
+  let reads = 0;
+  const faq = {
+    get question() {
+      reads++;
+      return 'Synthetic question';
+    },
+    answer: 'Synthetic answer',
+  };
+  const record = judge.fromEvents(
+      [
+        {
+          kind: 'UTTERANCE',
+          occurredAt: '2026-11-01T00:00:00Z',
+          offsetSeconds: 0,
+          payload: { utteranceOrder: 1, speaker: 'CUSTOMER', utteranceText: '요금이 궁금합니다.' },
+        },
+      ],
+      '',
+      null,
+    ),
+    requests = [];
+  const output = await judge.run(
+    record,
+    async (...args) => {
+      requests.push(args);
+      return {
+        data: {
+          turns: [],
+          call: { purposes: ['inquiry'], goal: 'achieved', mood: 'neutral', summary: 'Synthetic' },
+        },
+        usage: { input: 3, cached: 0, output: 2, reasoning: 1 },
+      };
+    },
+    [faq],
+  );
+  assert.equal(reads, 1);
+  assert.equal(requests.length, 3);
+  assert.deepEqual(requests[0], requests[1]);
+  assert.deepEqual(requests[1], requests[2]);
+  assert.equal(output.votes, 3);
+  assert.deepEqual(output.usage, { input: 9, cached: 0, output: 6, reasoning: 3 });
+  const newer = [];
+  await judge.run(
+    record,
+    async (...args) => {
+      newer.push(args);
+      return { data: { turns: [], call: {} }, usage: null };
+    },
+    [{ question: 'Changed question', answer: 'Changed answer' }],
+  );
+  assert.notEqual(requests[0][0], newer[0][0]);
+  assert.equal(
+    await judge.run(record, async () => {
+      throw new Error('must not call provider');
+    }, [
+      {
+        get question() {
+          throw new Error('malformed FAQ');
+        },
+        answer: 'unused',
+      },
+    ]),
+    null,
+  );
+});

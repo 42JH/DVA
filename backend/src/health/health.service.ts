@@ -5,6 +5,20 @@ import { Environment } from '../config/environment';
 
 @Injectable()
 export class HealthService {
+  private pendingAi?: { url: string; promise: Promise<boolean> };
+
+  private checkAi(url: string): Promise<boolean> {
+    if (!this.pendingAi || this.pendingAi.url !== url) {
+      const promise = fetch(url + '/health', { signal: AbortSignal.timeout(2000) })
+        .then((response) => response.ok)
+        .catch(() => false)
+        .finally(() => {
+          if (this.pendingAi?.promise === promise) this.pendingAi = undefined;
+        });
+      this.pendingAi = { url, promise };
+    }
+    return this.pendingAi.promise;
+  }
   constructor(
     private readonly database: DatabaseService,
     private readonly config: ConfigService<Environment, true>,
@@ -20,9 +34,7 @@ export class HealthService {
         .query('SELECT 1')
         .then(() => true)
         .catch(() => false),
-      fetch(`${aiUrl}/health`, { signal: AbortSignal.timeout(2000) })
-        .then((response) => response.ok)
-        .catch(() => false),
+      this.checkAi(aiUrl),
     ]);
 
     const body = {

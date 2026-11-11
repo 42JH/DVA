@@ -169,3 +169,16 @@ test('identical final wait replay remains successful after late PBX timing corre
   );
   await service.saveResponseWait(1, wait(), '00000000-0000-4000-8000-000000000001');
 });
+
+test('prepared statement identity depends on SQL, while request values remain bound', () => {
+  const { preparedQuery } = require('../dist/database/prepared-query');
+  const values = ["untrusted' value", 17];
+  const first = preparedQuery('SELECT $1::text,$2::int', values);
+  const second = preparedQuery('SELECT $1::text,$2::int', ['different', 23]);
+  assert.equal(first.name, second.name);
+  assert.notEqual(first.name, preparedQuery('SELECT $1::text').name);
+  assert.ok(Buffer.byteLength(first.name) <= 63);
+  assert.equal(first.text, 'SELECT $1::text,$2::int');
+  assert.equal(first.values, values);
+  assert.ok(!first.name.includes('untrusted'));
+});

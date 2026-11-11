@@ -617,9 +617,11 @@ export async function run(
   const text = describe(rec);
   if (chars(text).length > MAX_INPUT_CHARS) return null;
   const need = Math.min(NEED, votes);
+  let requestInstructions: string | undefined;
   const judgeOnce = async () => {
     try {
-      const { data, usage } = await ask(instructions(faqs), text, 'call_analysis', SCHEMA);
+      requestInstructions ??= instructions(faqs);
+      const { data, usage } = await ask(requestInstructions, text, 'call_analysis', SCHEMA);
       return { ...check(data, rec), usage };
     } catch {
       return null;

@@ -1,3 +1,4 @@
+import { preparedQuery } from '../database/prepared-query';
 import { readPage, PageRows } from '../common/pagination-query';
 import { Injectable } from '@nestjs/common';
 import { PoolClient } from 'pg';
@@ -99,8 +100,10 @@ export class UnansweredQuestionsRepository {
   async findCall(client: PoolClient, id: number): Promise<string | undefined> {
     return (
       await client.query<{ providerCallId: string }>(
-        'SELECT provider_call_id AS "providerCallId" FROM call_sessions WHERE call_session_seq=$1 AND deleted_at IS NULL AND (incoming_at IS NULL OR incoming_at>clock_timestamp()-interval \'5 years\') FOR SHARE',
-        [id],
+        preparedQuery(
+          'SELECT provider_call_id AS "providerCallId" FROM call_sessions WHERE call_session_seq=$1 AND deleted_at IS NULL AND (incoming_at IS NULL OR incoming_at>clock_timestamp()-interval \'5 years\') FOR SHARE',
+          [id],
+        ),
       )
     ).rows[0]?.providerCallId;
   }
@@ -112,17 +115,19 @@ export class UnansweredQuestionsRepository {
   ): Promise<number | undefined> {
     return (
       await client.query<{ id: number }>(
-        `INSERT INTO unanswered_questions(event_id,call_session_seq,question_text,occurred_at,offset_seconds,reason,payload_hash)
+        preparedQuery(
+          `INSERT INTO unanswered_questions(event_id,call_session_seq,question_text,occurred_at,offset_seconds,reason,payload_hash)
          VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(event_id) DO NOTHING RETURNING unanswered_question_seq AS id`,
-        [
-          input.eventId,
-          input.callSessionSeq,
-          input.questionText,
-          input.occurredAt,
-          input.offsetSeconds,
-          input.reason ?? null,
-          hash,
-        ],
+          [
+            input.eventId,
+            input.callSessionSeq,
+            input.questionText,
+            input.occurredAt,
+            input.offsetSeconds,
+            input.reason ?? null,
+            hash,
+          ],
+        ),
       )
     ).rows[0]?.id;
   }
@@ -130,9 +135,11 @@ export class UnansweredQuestionsRepository {
   async findExisting(client: PoolClient, eventId: string) {
     return (
       await client.query<{ id: number; callSessionSeq: number; hash: string }>(
-        `SELECT unanswered_question_seq AS id,call_session_seq AS "callSessionSeq",payload_hash AS hash
+        preparedQuery(
+          `SELECT unanswered_question_seq AS id,call_session_seq AS "callSessionSeq",payload_hash AS hash
          FROM unanswered_questions WHERE event_id=$1 FOR KEY SHARE`,
-        [eventId],
+          [eventId],
+        ),
       )
     ).rows[0];
   }

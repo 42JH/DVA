@@ -86,7 +86,22 @@ export function validatePersonaOptions(
 
 @Injectable()
 export class AiPersonaClient {
+  private pendingOptions?: { key: string; promise: Promise<AiCapabilities> };
   constructor(private readonly config: ConfigService<Environment, true>) {}
+
+  async sharedOptions(): Promise<AiCapabilities> {
+    const key = JSON.stringify([
+      this.config.get('AI_AGENT_URL', { infer: true }),
+      this.config.get('AI_PERSONA_TOKEN', { infer: true }),
+    ]);
+    if (!this.pendingOptions || this.pendingOptions.key !== key) {
+      const promise = this.options().finally(() => {
+        if (this.pendingOptions?.promise === promise) this.pendingOptions = undefined;
+      });
+      this.pendingOptions = { key, promise };
+    }
+    return structuredClone(await this.pendingOptions.promise);
+  }
 
   async options(): Promise<AiCapabilities> {
     const response = await this.request('/internal/persona/options');
