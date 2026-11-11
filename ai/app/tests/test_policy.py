@@ -66,7 +66,8 @@ def test_persona_first_then_fixed_business_rules_and_fallback_on_blank():
 def test_server_results_are_rendered_from_workflow_policy():
     text = render_live(None, POLICY)
     for key in ("call_started", "closing", "agent", "phones_to_read", "missing", "origin_confirm", "pickup",
-                "confirm_route", "readback", "sender_change_question", "address_detail_question", "destination_choices"):
+                "confirm_route", "readback", "sender_change_question", "address_detail_question", "destination_choices",
+                "destination_change_question", "destination_partial_change"):
         assert text.count(f"\n- {key}: {POLICY.results[key]}") == 1
     assert "이대로 접수할까요?" in POLICY.results["readback"]  # 간소화한 되읽기도 질문으로 끝나야 G3을 통과한다
     assert "접수 정보를 수집할 때만" in text
@@ -117,6 +118,18 @@ def test_decision_questions_per_stage(stage, pending, expected):
 def test_pick_question_is_built_from_candidate_labels():
     qs = decision_questions(POLICY, "receiver", pick_labels=("집", "회사"))
     assert [c["value"] for c in qs[-1]["choices"]] == ["집", "회사", "none", "not_answer"]
+
+
+def test_partial_pick_choices_apply_only_to_personal_destinations():
+    from app.domain.state import CandidateSet, Place, Source
+
+    labels = ("이영희 강남구", "박민수 중구")
+    pin = Place("이영희", "01055556666", "서울 강남구 테헤란로 211", "", source=Source.PIN)
+    company = Place("박민수", "01011112222", "서울 중구 세종대로 110", "4층", source=Source.COMPANY)
+    candidates = CandidateSet("destination", labels, (pin, company))
+    question = decision_questions(POLICY, "address", pick_labels=labels, destination_candidates=candidates)[-1]
+    assert [choice["value"] for choice in question["choices"]] == [
+        *labels, "new_address_1", "new_recipient_1", "clarify_candidate", "none", "not_answer"]
 
 
 @pytest.mark.parametrize("breakage, message", [

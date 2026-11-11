@@ -88,6 +88,7 @@ class CandidateSet:
     labels: tuple[str, ...]
     items: tuple[Any, ...]         # destination: Place, order: 조회 결과 dict
     total: int | None = None
+    destination_clarification: Literal["recipient", "address", "candidate"] | None = None
 
 
 @dataclass
@@ -125,6 +126,7 @@ class ParcelDraft:
     sender_address_change: bool = False  # 접수 시작에서 새 발송 주소를 먼저 받는 중
     deferred_destination: CandidateSet | None = None  # 보내는 분 정보를 받은 뒤 제시할 받는 곳
     destination_search_id: int = 0
+    destination_partial_change: Literal["address", "recipient"] | None = None
 
     def __getitem__(self, name: str) -> FieldState:
         return self.fields[name]

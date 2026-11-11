@@ -1357,3 +1357,83 @@ def test_tool_call_on_answer_to_candidates_waits_for_pick():
     conn = run(scenario())
     out = json.loads(next(e for e in conn.sent if e["type"] == "response.item.create")["item"]["output"])
     assert out["fields"]["receiver_phone"] == "valid" and "receiver_phone" not in out["missing"]
+
+
+@pytest.mark.parametrize("change", ["address", "recipient"])
+@pytest.mark.parametrize("clarify", [False, True])
+def test_destination_partial_change_keeps_only_confirmed_fields(change, clarify):
+    from app.domain.candidates import offer
+    from app.domain.state import Geo, Place, Source
+
+    svc, client = flow()
+    pin = Place("이영희", "01055556666", "부산광역시 서구 대신공원로 1", "201호",
+                Geo("x", "y", "00000"), Source.PIN)
+    label = "이영희 서구 서대신동"
+    partial = f"new_{change}_1"
+    clarify_pick = "clarify_recipient" if change == "address" else "clarify_address"
+
+    async def decide(model, input, questions):
+        pick = next(question for question in questions if question["name"] == "pick")
+        assert {partial, clarify_pick} <= {item["value"] for item in pick["choices"]}
+        if clarify and "고객 발화: 아니요" in input:
+            return SimpleNamespace(answers=[choice("pick", clarify_pick)])
+        if clarify:
+            assert f"그 질문에 동의하면 {partial}" in pick["instructions"]
+        await asyncio.sleep(0.3)  # 새 값을 기록하는 도구가 판단 결과보다 먼저 들어온다.
+        return SimpleNamespace(answers=[choice("pick", partial), choice("switch", "edit_parcel"),
+                                        choice("sender_change", "address"), choice("origin", "no")])
+
+    client.decisions.create = decide
+
+    async def scenario():
+        task = asyncio.create_task(svc.on_incoming(incoming()))
+        await until(lambda: client.conns)
+        conn = client.conns[0]
+        conn.push(started())
+        s = svc.registry.calls["live_1"]
+        await until(lambda: s.phase == Phase.ACTIVE)
+        async with s.lock:
+            s.state.intent = "order"
+            s.state.origin_mentioned_in_greeting = True
+            s.state.record("sender_name", "김철수")
+            s.state.record("sender_address", "서울특별시 강남구 테헤란로 211")
+            s.state.record("sender_address_detail", "")
+            offer(s.state, "destination", (label,), (pin,))
+        await ai(conn, f"{label}로 보내시나요?", 0)
+        if clarify:
+            await say(conn, "아니요 다른 주소예요" if change == "address" else "아니요 다른 사람이에요", 1200)
+            await until(lambda: any('"destination_change_question"' in e.get("content", "") for e in conn.sent))
+            assert s.state.current["receiver_phone"].value is None
+            assert s.state.current["receiver_address"].value is None
+            await ai(conn, "받는 분은 주소록에 있는 그분이 맞으세요?" if change == "address"
+                     else "받는 곳은 주소록에 있는 주소가 맞으세요?", 3000)
+        new_address = "서울 중구 세종대로 110"
+        if change == "address":
+            text = f"네 {new_address}로요" if clarify else f"네 주소만 바꿀게요 {new_address}로요"
+            fields = {"receiver_address": new_address}
+        else:
+            text = "네 받는 분은 박민수예요" if clarify else "네 주소는 같고 받는 분은 박민수예요"
+            fields = {"receiver_name": "박민수"}
+        await say(conn, text, 4500)
+        conn.push({"type": "session.delegation.created", "delegation": {"id": "d1"}, "offset_ms": 4600})
+        conn.push({"type": "response.event", "delegation_id": "d1", "event": {
+            "type": "response.output_item.done", "item": {"type": "function_call", "call_id": "c1",
+                                                         "name": "record_fields", "arguments": json.dumps(fields)}}})
+        await until(lambda: "response.item.create" in sent_types(conn), timeout=3.0)
+        out = json.loads(next(e for e in conn.sent if e["type"] == "response.item.create")["item"]["output"])
+        draft = s.state.current
+        assert s.state.candidates is None and s.state.editing is None
+        assert not draft.sender_address_change and draft["sender_address"].value == "서울특별시 강남구 테헤란로 211"
+        if change == "address":
+            assert out["missing"][0] == "receiver_address_detail"
+            assert (draft["receiver_name"].value, draft["receiver_phone"].value) == (pin.name, pin.phone)
+            assert draft["receiver_address"].value == new_address and draft.receiver_geo is None
+        else:
+            assert out["missing"][0] == "receiver_phone" and draft["receiver_phone"].value is None
+            assert draft["receiver_name"].value == "박민수"
+            assert (draft["receiver_address"].value, draft["receiver_address_detail"].value, draft.receiver_geo) == (
+                pin.address, pin.address_detail, pin.geo)
+        conn.push({"type": "session.closed", "reason": "remote_hangup"})
+        await task
+
+    run(scenario())

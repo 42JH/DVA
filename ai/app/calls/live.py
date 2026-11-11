@@ -21,12 +21,13 @@ from app.domain.address_book import (begin_sender_name_change, origin_confirmati
                                      receiver_questions_deferred, request_sender_address_change, save_offer, sender_change_available,
                                      sender_change_next)
 from app.domain.assess import assess, readback_facts
-from app.domain.candidates import apply_pick, offer, reject_candidates
+from app.domain.candidates import (DESTINATION_CLARIFICATIONS, apply_destination_change, apply_pick,
+                                   destination_changes, offer, reject_candidates)
 from app.domain.claims import truth, unverified_claims, unverified_values
 from app.domain.confirm import (ConfirmAnswer, Utterance, asks, asks_parcel_confirmation, check_gate, commit_parcel,
                                 explicitly_requests_parcel, issue_cancel_confirmation, issue_parcel_confirmation,
                                 release, take_cancel)
-from app.domain.state import BOX_SIZE_NAMES, BoxProposal, ConversationState
+from app.domain.state import BOX_SIZE_NAMES, BoxProposal, CandidateSet, ConversationState, ParcelDraft
 from app.domain.store import hold_unclassified_items, item_issues_pending
 from app.observability.trace import span
 from app.policy.render import decision_questions
@@ -311,6 +312,7 @@ class LiveFlow:
         # readback 단계는 확인 대기가 풀려 있어도 confirm을 듣는다(Live가 스스로 확인 질문을 하면 '네'가 갈 곳이 없음, 운영 통화 56c133c8)
         questions = decision_questions(self.policy, stage, pending=pending is not None or stage == "readback",
                                        pick_labels=pick, callback=callback, origin=origin,
+                                       destination_candidates=candidates if pick else None,
                                        sender_change=sender_change, sender_name_scope=name_scope,
                                        cancel_current=cancel_current,
                                        box_label=box.label if box else None)
@@ -352,7 +354,8 @@ class LiveFlow:
                {"stage": stage, "pending": pending_id, "input": text, "ms": ms,
                 "answers": {k: {"choice": v[0], "confidence": round(v[1], 3), "probabilities": v[2]}
                             for k, v in answers.items()}})
-        await self.apply(s, utt, prev, answers, pending_id, box=box, greeting=bool(greeting))
+        await self.apply(s, utt, prev, answers, pending_id, box=box, candidates=candidates,
+                         candidate_draft=current, greeting=bool(greeting))
 
     async def _clarify_greeting(self, s: CallSession, utt: Spoken) -> None:
         async with s.lock:
@@ -361,7 +364,8 @@ class LiveFlow:
         s.spawn(self.notify(s, "N2", {"greeting_confirmation": "ask_intent"}), "clarify_greeting")
 
     async def apply(self, s: CallSession, utt: Spoken, prev: Spoken | None, answers: dict, pending_id: str | None,
-                    *, box: BoxProposal | None = None, greeting: bool = False):
+                    *, box: BoxProposal | None = None, candidates: CandidateSet | None = None,
+                    candidate_draft: ParcelDraft | None = None, greeting: bool = False):
         rt, st, th = self.rt(s), s.state, self.cfg.decision_min_confidence
         followups = []
         async with s.lock:
@@ -375,6 +379,12 @@ class LiveFlow:
             if switch and switch[1] >= th and switch[0] in ("agent", "end", "cancel_current"):
                 # 연결·종료·현재 택배 취소 요청이 섞인 "네"는 접수 확인으로 처리하지 않는다.
                 answers = {"switch": switch}
+            destination_reply = (st.current is candidate_draft and
+                                 self._apply_destination_reply(s, utt, prev, candidates, answers.get("pick"), switch))
+            if destination_reply:
+                for name in ("pick", "confirm", "origin", "sender_change", "sender_name_scope"):
+                    answers.pop(name, None)
+                followups.append(("destination_change", utt))
             if (box and st.intent == "order" and not st.pending and st.current and st.current.box_proposal is box
                     and (answer := answers.get("box")) and answer[1] >= th and answer[0] in ("yes", "no")
                     and (not switch or switch[1] < th or switch[0] == "none")
@@ -461,9 +471,12 @@ class LiveFlow:
             elif c and c[0] in ("no", "change") and c[1] >= th:
                 st.awaiting_fix = True  # 고친 값이 올 때까지 되읽기를 다시 열지 않는다
             picked_lookup = False
+            active_candidates = st.candidates
             if ((p := answers.get("pick")) and p[1] >= th
-                    and not (st.candidates and st.candidates.kind == "destination" and receiver_questions_deferred(st))):
-                kind = st.candidates.kind if st.candidates else None
+                    and active_candidates and (candidates is None or active_candidates is candidates)
+                    and (active_candidates.kind != "destination" or active_candidates is candidates
+                         and st.current is candidate_draft and not receiver_questions_deferred(st))):
+                kind = active_candidates.kind
                 if p[0] == "none":
                     reject_candidates(st)
                 elif p[0] != "not_answer" and apply_pick(st, p[0]):
@@ -479,7 +492,7 @@ class LiveFlow:
             elif greeting:
                 followups.append(("clarify_greeting", utt))
             if (w := answers.get("switch")) and w[1] >= th and w[0] != "none" and not sender_change \
-                    and not (origin_change and w[0] == "edit_parcel") \
+                    and not ((origin_change or destination_reply) and w[0] == "edit_parcel") \
                     and not (picked_lookup and w[0] == "lookup"):
                 followups.append(("intent", w[0]))
             if (m := answers.get("more")) and m[1] >= th and m[0] == "no_more" and st.parcels:
@@ -491,6 +504,26 @@ class LiveFlow:
         for f in followups:
             if f:
                 await self._follow(s, *f)
+
+    def _apply_destination_reply(self, s: CallSession, utt: Spoken, prev: Spoken | None,
+                                 candidates: CandidateSet | None, answer, switch) -> bool:
+        st, th = s.state, self.cfg.decision_min_confidence
+        if (not candidates or st.candidates is not candidates or st.intent != "order" or st.order_submitted
+                or receiver_questions_deferred(st) or not answer or answer[1] < th or not prev or not asks(prev.text)
+                or self.rt(s).customer_turns[-1:] != [utt]
+                or switch and switch[1] >= th and switch[0] not in ("none", "edit_parcel")):
+            return False
+        changes = destination_changes(candidates)
+        if change := changes.get(answer[0]):
+            apply_destination_change(st, *change)
+            self._sync_intake(s)
+            return True
+        clarification = DESTINATION_CLARIFICATIONS.get(answer[0])
+        if changes and clarification and (clarification == "candidate") == (len(candidates.labels) > 1):
+            st.candidates = replace(candidates, destination_clarification=clarification)
+            st.bump()
+            return True
+        return False
 
     def _on_confirm(self, s: CallSession, utt: Spoken, prev: Spoken | None, ans: tuple, pending_id: str):
         """잠금 안. yes → 관문(G1~G5) → G6(같은 발화 위임 보류) → 확정 지연 / no·change → 즉시 해제."""
@@ -665,6 +698,9 @@ class LiveFlow:
             await self._answer_box(s, *value)
         elif what == "lookup_picked":
             await self.notify(s, "N2", {"lookup_order": value})
+        elif what == "destination_change":
+            s.spawn(self.notify(s, "N2", {"summary": state_summary(st, self.policy)}, again=True,
+                                unless_tool_turn=value), "destination_change")
         elif what == "picked":
             async with s.lock:
                 issued = issue_cancel_confirmation(st, s.tools.clock()) if st.intent == "cancel" else None
@@ -1006,6 +1042,8 @@ class LiveFlow:
         arguments = _args(item.get("arguments"))
         records_sender_name = name == "record_fields" and isinstance(arguments, dict) and bool(arguments.get("sender_name"))
         if ((st.origin_offered and st.origin_answer is None and not st.origin_applied) or sender_change_available(st)
+                or name in ("record_fields", "find_destination", "get_state")
+                and st.candidates and st.candidates.kind == "destination"
                 or records_sender_name and st.customer.customer_seq):
             await self._customer_quiet(s)  # 고객 발화 끝에 보내는 분 변경을 판단한 뒤 그 발화의 값을 기록한다.
         await self._decided(s)
