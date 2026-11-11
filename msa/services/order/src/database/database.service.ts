@@ -43,6 +43,7 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
       'SELECT deleted_at,closed_at,billing_organization_seq FROM orders LIMIT 0',
     );
     await this.pool.query('SELECT status,notified_price FROM order_parcels LIMIT 0');
+    await this.pool.query('SELECT customer_seq FROM order_billing_charges LIMIT 0');
     await this.pool.query(
       'SELECT call_session_seq,legacy_order_seq,status,retention_started_at FROM order_parcel_drafts LIMIT 0',
     );

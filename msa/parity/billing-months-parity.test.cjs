@@ -173,5 +173,86 @@ test('billing HTTP, snapshots, monthly initialization and audit groups match the
     }
   });
   assert.deepEqual(await stable(),originalBusiness,'billing reads/rollover do not change orders, parcels, payment requests, charges or empty AI results');
+  await t.test('personal billing reads preserve principal, Korean month boundaries, customer visibility and administrator access',async()=>{
+    for(const side of sides) {
+      for(const [id,status,deleted] of [[92001,'ACTIVE',false],[92002,'WITHDRAWN',false],[92003,'ACTIVE',true]])
+        await side.org.query("INSERT INTO customers(customer_seq,name,phone_number,status,monthly_billing_enabled,deleted_at)"+
+          " OVERRIDING SYSTEM VALUE VALUES($1,'개인 청구 검증 고객',$2,$3,false,$4)",
+          [id,'010'+String(id).padStart(8,'0'),status,deleted?'2026-01-01T00:00:00Z':null]);
+      const client=await side.ledger.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query("SET LOCAL session_replication_role='replica'");
+        let n=0;
+        for(const [customer,organization,amount,at] of [
+          [92001,null,100,'2035-03-31T14:59:59Z'],[92001,null,200,'2035-03-31T15:00:00Z'],
+          [92001,null,300,'2035-04-30T14:59:59Z'],[92001,null,400,'2035-04-30T15:00:00Z'],
+          [92001,998877,1000,'2035-04-01T00:00:00Z'],[92002,null,50,'2035-04-01T00:00:00Z'],
+          [92003,null,60,'2035-04-01T00:00:00Z'],
+        ]) {
+          const order=93000+(++n);
+          await client.query("INSERT INTO orders(order_seq,customer_seq,payment_method_type,status,paid_at,total_amount,creation_source)"+
+            " OVERRIDING SYSTEM VALUE VALUES($1,$2,'credit','PAID',$3,$4,'ADMIN')",[order,customer,at,amount]);
+          await client.query("INSERT INTO order_billing_charges(order_seq,organization_seq,customer_seq,billing_month,payment_method_type,amount,occurred_at)"+
+            " VALUES($1,$2,$3,date_trunc('month',$4::timestamptz AT TIME ZONE 'Asia/Seoul')::date,'credit',$5,$4)",
+            [order,organization,organization===null?customer:null,at,amount]);
+        }
+        await client.query('COMMIT');
+      } catch(error) {await client.query('ROLLBACK');throw error;}
+      finally{client.release();}
+    }
+    const before=await stable(),ownerRows=async()=>Promise.all(sides.map(async side=>(await side.org.query(
+      'SELECT to_jsonb(c) AS row FROM customers c WHERE customer_seq BETWEEN 92001 AND 92003 ORDER BY customer_seq',
+    )).rows));
+    const customersBefore=await ownerRows();
+    let reads=0;
+    async function read(id,query='',status=200,headers={Cookie:'dva_session='+'a'.repeat(64)}) {
+      const requestId=randomUUID(),results=[];
+      for(const side of sides) {
+        const response=await fetch(side.url+'/api/customers/'+id+'/billing'+query,{headers:{...headers,'X-Request-Id':requestId}});
+        const body=await response.json();
+        assert.equal(response.status,status,JSON.stringify(body));
+        assert.equal(response.headers.get('cache-control'),'no-store');
+        assert.equal(response.headers.get('x-request-id'),requestId);
+        results.push(body);
+      }
+      assert.deepEqual(results[1],results[0]);
+      reads++;
+      return results[0].data;
+    }
+    for(const [month,amount] of [['2035-03',100],['2035-04',500],['2035-05',400],['1000-01',0],['9999-12',0]]) {
+      const value=await read(92001,'?month='+month);
+      assert.deepEqual(value,{customerSeq:92001,month,monthlyAmount:amount});
+    }
+    for(const token of ['a','b','c'])
+      assert.equal((await read(92002,'?month=2035-04',200,{Cookie:'dva_session='+token.repeat(64)})).monthlyAmount,50);
+    await read(92001);
+    await read(92003,'?month=2035-04',404);
+    await read(2147483647,'?month=2035-04',404);
+    await read(0,'?month=2035-04',400);
+    for(const query of ['?month=2035-13','?month=0000-01','?month=0999-01','?month=2035-04&month=2035-05','?unknown=1'])
+      await read(92001,query,400);
+    await read(92001,'',401,{Authorization:'Bearer '+values.CUSTOMER_AUTH_TOKEN});
+    await read(92001,'',401,{Cookie:'dva_session=invalid'});
+    const docs=await Promise.all(sides.map(async side=>(await fetch(side.url+'/api/docs-json')).json()));
+    const path='/api/customers/{id}/billing';
+    assert.deepEqual(docs[1].paths[path],docs[0].paths[path]);
+    for(const name of ['CustomerBillingMonthEnvelopeDto','CustomerBillingMonthDto','BillingMonthQueryDto'])
+      assert.deepEqual(docs[1].components.schemas[name],docs[0].components.schemas[name],name);
+    const packet={eventId:randomUUID(),source:'customer',eventType:'CustomerBillingReadRequested',payload:{id:92001,month:'2035-04'}};
+    for(const token of ['',process.env.CONSULTATION_AUTH_TOKEN]) {
+      const response=await fetch('http://order-app:3002/internal/billing/customer',{method:'POST',
+        headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(packet)});
+      assert.equal(response.status,403);
+    }
+    for(const wrong of [{...packet,source:'order'},{...packet,payload:{...packet.payload,actorId:1}}]) {
+      const response=await fetch('http://order-app:3002/internal/billing/customer',{method:'POST',
+        headers:{Authorization:'Bearer '+values.CUSTOMER_AUTH_TOKEN,'Content-Type':'application/json'},body:JSON.stringify(wrong)});
+      assert.equal(response.status,422);
+    }
+    assert.deepEqual(await stable(),before);
+    assert.deepEqual(await ownerRows(),customersBefore);
+    t.diagnostic('personal billing HTTP pairs: '+reads+'; source principal and customer visibility retained');
+  });
   console.log('Compared billing HTTP requests: '+compared);
 });

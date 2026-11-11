@@ -6,6 +6,7 @@ import {
   type BillingMonth,
   type BillingRolloverEvent,
   type BillingView,
+  type CustomerBillingView,
 } from '@dva/events/billing.cjs';
 import { AuditService } from '../audit/audit.service';
 import { DatabaseService } from '../database/database.service';
@@ -19,6 +20,20 @@ export class BillingService {
     private readonly audit: AuditService,
     private readonly config: ConfigService<Environment, true>,
   ) {}
+
+  async readCustomer(id: number, month: string | null): Promise<CustomerBillingView> {
+    return (
+      await this.database.pool.query<CustomerBillingView>(
+        `SELECT $1::integer AS "customerSeq",to_char(m.month,'YYYY-MM') AS month,
+         coalesce(sum(b.amount),0)::float8 AS "monthlyAmount"
+         FROM (SELECT coalesce(to_date($2,'YYYY-MM'),
+          date_trunc('month',clock_timestamp() AT TIME ZONE 'Asia/Seoul')::date) AS month) m
+         LEFT JOIN order_billing_charges b ON b.customer_seq=$1 AND b.billing_month=m.month
+         GROUP BY m.month`,
+        [id, month],
+      )
+    ).rows[0];
+  }
 
   async read(id: number, month: string | null, organizationName: string | null) {
     const result = (

@@ -18,6 +18,7 @@ before(async()=>{
     if(mode==='domain'){res.writeHead(404).end(JSON.stringify({error:{code:'NOT_FOUND',message:'기업을 찾을 수 없습니다.',details:[]}}));return;}
     if(mode==='oversized'){res.end(' '.repeat(4097));return;}
     const payload=input.eventType==='BillingRolloverRequested'?true:input.eventType==='BillingOrganizationsReadRequested'?[1,2]:
+      input.eventType==='CustomerBillingReadRequested'?{customerSeq:mode==='customer'?2:1,month:'2026-11',monthlyAmount:mode==='amount'?-1:Number.MAX_SAFE_INTEGER+1}:
       {organizationSeq:1,organizationName:null,month:'2026-11',monthlyAmount:Number.MAX_SAFE_INTEGER,groupBillingAmount:0};
     res.end(mode==='json'?'{' : mode==='utf8'?Buffer.from([255]):JSON.stringify({eventId:mode==='id'?randomUUID():input.eventId,status:mode==='status'?'received':'processed',payload:mode==='payload'?null:payload}));
   });
@@ -33,13 +34,21 @@ test('billing commands reject forged owners, balances, names, duplicate or overs
   }
   const scoped={...rollover(),source:'customer'};scoped.payload.organizations=[{organizationSeq:1,name:'기업'}];
   validateBilling(scoped,'BillingRolloverRequested','customer');
+  const personal={eventId:randomUUID(),source:'customer',eventType:'CustomerBillingReadRequested',payload:{id:1,month:null}};
+  validateBilling(personal,'CustomerBillingReadRequested','customer');
+  for(const changed of [{...personal,source:'order'},{...personal,payload:{id:0,month:null}},
+    {...personal,payload:{id:1,month:'2026-13'}},{...personal,payload:{id:1,month:null,amount:1}}])
+    assert.throws(()=>validateBilling(changed,'CustomerBillingReadRequested','customer'));
   for(const organizations of [[{organizationSeq:2,name:'위조'}],[{organizationSeq:1,name:'이름',amount:100}],Array(2).fill(scoped.payload.organizations[0])])
     assert.throws(()=>validateBilling({...scoped,payload:{...scoped.payload,organizations}},'BillingRolloverRequested','customer'));
 });
-test('billing requires matching strict ACKs, preserves domain errors and accepts safe integer amounts',async()=>{
+test('billing requires matching strict ACKs, preserves domain errors and source float8 totals',async()=>{
   mode='valid';assert.equal(await requestBilling(url,token,rollover()),true);
   assert.deepEqual(await requestBilling(url,token,{eventId:randomUUID(),source:'order',eventType:'BillingOrganizationsReadRequested',payload:{}}),[1,2]);
   assert.equal((await requestBilling(url,token,{eventId:randomUUID(),source:'customer',eventType:'BillingReadRequested',payload:{id:1,month:'2026-11',organizationName:null}})).monthlyAmount,Number.MAX_SAFE_INTEGER);
+  const personal={eventId:randomUUID(),source:'customer',eventType:'CustomerBillingReadRequested',payload:{id:1,month:'2026-11'}};
+  assert.equal((await requestBilling(url,token,personal)).monthlyAmount,Number.MAX_SAFE_INTEGER+1);
+  for(mode of ['id','status','payload','customer','amount'])await assert.rejects(requestBilling(url,token,personal));
   for(mode of ['lost','redirect','html','json','utf8','id','status','payload','oversized'])await assert.rejects(requestBilling(url,token,rollover()));
   mode='domain';await assert.rejects(requestBilling(url,token,rollover()),e=>e instanceof BillingError&&e.status===404&&e.error.message==='기업을 찾을 수 없습니다.');
 });

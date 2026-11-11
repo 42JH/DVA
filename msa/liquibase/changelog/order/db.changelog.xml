@@ -21,4 +21,7 @@
   <changeSet id="005-parcel-draft-order-reservation" author="dva" dbms="postgresql" runInTransaction="true">
     <sqlFile path="005-parcel-draft-order-reservation.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
   </changeSet>
+  <changeSet id="006-customer-monthly-billing" author="dva" dbms="postgresql" runInTransaction="true">
+    <sqlFile path="006-customer-monthly-billing.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
+  </changeSet>
 </databaseChangeLog>

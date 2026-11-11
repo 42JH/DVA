@@ -111,6 +111,14 @@ BEGIN
    RAISE EXCEPTION 'Invalid billing charge accepted: %',invalid_case;
   EXCEPTION WHEN check_violation THEN NULL; END;
  END LOOP;
+ UPDATE order_billing_charges SET organization_seq=NULL,customer_seq=998877,payment_method_type='credit'
+ WHERE order_seq=o;
+ FOREACH invalid_case IN ARRAY ARRAY['customer_seq=NULL','organization_seq=998877','payment_method_type=''groupBilling'''] LOOP
+  BEGIN
+   EXECUTE format('UPDATE order_billing_charges SET %s WHERE order_seq=$1',invalid_case) USING o;
+   RAISE EXCEPTION 'Invalid personal billing target accepted: %',invalid_case;
+  EXCEPTION WHEN check_violation THEN NULL; END;
+ END LOOP;
  BEGIN
   INSERT INTO order_billing_charges(order_seq,organization_seq,billing_month,payment_method_type,amount,occurred_at)
   VALUES(-99999,998877,'2026-11-01','credit',1,clock_timestamp());

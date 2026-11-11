@@ -143,6 +143,7 @@ describe('Customer read API (e2e)', () => {
           '/api/customers': ['delete', 'get', 'post'],
           '/api/customers/context': ['post'],
           '/api/customers/{id}': ['get', 'patch'],
+          '/api/customers/{id}/billing': ['get'],
           '/api/customers/{id}/pins': ['get', 'post'],
           '/api/pins/{id}': ['patch'],
           '/api/pins': ['delete'],

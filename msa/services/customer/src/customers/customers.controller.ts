@@ -27,6 +27,9 @@ import { CustomersService } from './customers.service';
 import { AuditOperation } from '../audit/audit-operation';
 import { CallerContextEnvelopeDto, CallerContextRequestDto } from './dto/caller-context.dto';
 import { DeleteCustomersDto } from './dto/delete-customers.dto';
+import { BillingMonthQueryDto } from '../organizations/dto/billing-month.dto';
+import { CustomerBillingMonthEnvelopeDto } from './dto/customer-billing-month.dto';
+import { OrganizationBillingService } from '../organizations/organization-billing.service';
 import {
   CreateCustomerDto,
   CustomerIdParamsDto,
@@ -48,7 +51,22 @@ import {
 @ApiResponse({ status: 503, type: ErrorResponseDto })
 @Controller('customers')
 export class CustomersController {
-  constructor(private readonly customers: CustomersService) {}
+  constructor(
+    private readonly customers: CustomersService,
+    private readonly billing: OrganizationBillingService,
+  ) {}
+
+  @Get(':id/billing')
+  @ApiCookieAuth('adminSession')
+  @ApiOperation({
+    summary: '고객 개인 월결제 사용액 조회',
+    description:
+      '모든 ACTIVE 관리자. 결제 확정 시각의 한국 시간 월을 기준으로 개인 월결제 원금만 합산합니다. month 생략 시 한국 시간 이번 달입니다.',
+  })
+  @ApiOkResponse({ type: CustomerBillingMonthEnvelopeDto })
+  billingMonth(@Param() params: CustomerIdParamsDto, @Query() query: BillingMonthQueryDto) {
+    return this.billing.readCustomer(params.id, query.month);
+  }
 
   @Delete()
   @HttpCode(204)

@@ -1,4 +1,5 @@
 import { OrderReadScopeController } from './order-read-scope.controller';
+import { OrganizationBillingService } from '../organizations/organization-billing.service';
 import { CallReadReferencesController } from './call-read-references.controller';
 import { CallScopeModule } from '../call-scope/call-scope.module';
 import { CallContextClient } from './call-context.client';
@@ -17,7 +18,7 @@ import { CustomersService } from './customers.service';
     CallerContextQueryController,
     CallReadReferencesController,
   ],
-  providers: [CustomersService, CustomersRepository, CallContextClient],
+  providers: [CustomersService, CustomersRepository, CallContextClient, OrganizationBillingService],
   exports: [CustomersService],
 })
 export class CustomersModule {}
