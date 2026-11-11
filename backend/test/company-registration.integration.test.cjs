@@ -39,7 +39,7 @@ before(async () => {
   await migrate(pool);
   app = await startTestApp(apps);
   base = await app.getUrl();
-  for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN']) {
+  for (const role of ['OPERATOR', 'SYSTEM_ADMIN']) {
     const loginId = 'reg' + randomUUID().replaceAll('-', '').slice(0, 16);
     const { rows } = await pool.query(
       "INSERT INTO admin_users(login_id,name,password_hash,role,status) VALUES($1,'통합 등록 검증',$2,$3,'ACTIVE') RETURNING admin_user_seq",

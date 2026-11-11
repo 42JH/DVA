@@ -38,7 +38,13 @@ async function order() {
   return { ...result, key, body };
 }
 const remove = (kind, id, actor = 0, headers = {}) =>
-  f.write('DELETE', `/api/${kind}/${id}`, undefined, actor, headers);
+  f.write(
+    'DELETE',
+    `/api/${kind}`,
+    { [{ calls: 'callSessionSeqs', orders: 'orderSeqs' }[kind]]: [id] },
+    actor,
+    headers,
+  );
 const ai = (path, body) =>
   fetch(f.base + path, {
     method: 'POST',
@@ -494,7 +500,7 @@ test('company deletion preserves rows and historical identifiers while membershi
       [cu],
     )
   ).rows[0];
-  assert.equal((await remove('companies', co)).status, 204);
+  assert.equal((await f.write('DELETE', '/api/companies', { organizationSeqs: [co] })).status, 204);
   for (const [table, key, id] of [
     ['organizations', 'organization_seq', co],
     ['memberships', 'membership_seq', old.membership_seq],
@@ -530,3 +536,4 @@ test('company deletion preserves rows and historical identifiers while membershi
   assert.equal(links[1].deleted_at, null);
   assert.notEqual(links[1].membership_seq, old.membership_seq);
 });
+require('./delete-array-contracts.cjs')(f);

@@ -496,7 +496,7 @@ test('separate reads require active admin sessions; AI service tokens cannot rea
       await error(await readEvents(c, path, '', headers), 401, 'UNAUTHORIZED');
       await error(await readEvents({ id: 2147483647 }, path, '', headers), 401, 'UNAUTHORIZED');
     }
-    for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN']) {
+    for (const role of ['OPERATOR', 'SYSTEM_ADMIN']) {
       const account = await readSession(role);
       assert.deepEqual(await readBody(await readEvents(c, path, '', account.headers)), {
         data: [],

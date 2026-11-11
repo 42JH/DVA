@@ -36,8 +36,7 @@ export class AdminQueryDto extends PaginationQueryDto {
 }
 export class UpdateAdminDto {
   @ApiPropertyOptional({
-    description:
-      '변경할 권한. OPERATOR·SUPERVISOR만 지정하며 role과 status 중 하나 이상 필요합니다.',
+    description: '변경할 권한. OPERATOR만 지정하며 role과 status 중 하나 이상 필요합니다.',
     enum: ASSIGNABLE_ADMIN_ROLES,
   })
   @ValidateIf((_object, value) => value !== undefined)
@@ -45,7 +44,7 @@ export class UpdateAdminDto {
   role?: AssignableAdminRole;
   @ApiPropertyOptional({
     description:
-      'PENDING → ACTIVE 가입 승인, OPERATOR·SUPERVISOR의 ACTIVE ↔ INACTIVE 전환. 같은 상태나 PENDING으로의 변경은 불가합니다.',
+      'PENDING → ACTIVE 가입 승인, OPERATOR의 ACTIVE ↔ INACTIVE 전환. 같은 상태나 PENDING으로의 변경은 불가합니다.',
     enum: ADMIN_STATUSES,
   })
   @ValidateIf((_object, value) => value !== undefined)

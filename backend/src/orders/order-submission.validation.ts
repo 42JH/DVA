@@ -1,5 +1,8 @@
 import { ApiException, ErrorDetail } from '../common/errors/api.exception';
-import { MOBILE_PHONE_PATTERN } from '../common/mobile-phone';
+import {
+  DELIVERY_RECIPIENT_PHONE_PATTERN,
+  DELIVERY_SENDER_PHONE_PATTERN,
+} from '../common/delivery-phone';
 import { isZonedDate, ORDER_ADDRESS_FIELDS, OrderDraft } from './order-draft';
 import { orderItemPriceError } from './order-pricing';
 const QUANTITY_FIELDS = [
@@ -45,8 +48,10 @@ export function assertOrderSubmissionReady(
         if (value === null || (typeof value === 'string' && !value.trim()))
           missing(`${prefix}.${side}.${field}`);
       }
-      if (address.phoneNumber?.trim() && !MOBILE_PHONE_PATTERN.test(address.phoneNumber))
-        invalid(`${prefix}.${side}.phoneNumber`, 'mobilePhone');
+      const phonePattern =
+        side === 'origin' ? DELIVERY_SENDER_PHONE_PATTERN : DELIVERY_RECIPIENT_PHONE_PATTERN;
+      if (address.phoneNumber?.trim() && !phonePattern.test(address.phoneNumber))
+        invalid(`${prefix}.${side}.phoneNumber`, side === 'origin' ? 'mobilePhone' : 'phoneNumber');
       if (address.postalCode?.trim() && !/^[0-9]{5}$/.test(address.postalCode))
         invalid(`${prefix}.${side}.postalCode`, 'postalCode');
     }

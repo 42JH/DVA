@@ -26,35 +26,39 @@ export class ConsultationsService {
     private readonly database: DatabaseService,
   ) {}
 
-  async delete(id: number, adminId: number, requestId: string): Promise<void> {
+  async delete(id: number | number[], adminId: number, requestId: string): Promise<void> {
+    const ids = (Array.isArray(id) ? [...id] : [id]).sort((a, b) => a - b);
     await this.database
       .transaction(async (client) => {
         await client.query("SET LOCAL lock_timeout='2s'");
-        const call = await this.repository.lockForDeletion(client, id);
-        if (!call) throw new ApiException(404, 'NOT_FOUND', '통화 기록을 찾을 수 없습니다.');
-        if (!call.endedAt || (await this.repository.recordingInProgress(client, id)))
-          throw new ApiException(
-            409,
-            'INVALID_STATE',
-            '통화 종료와 녹취 저장이 완료된 뒤 삭제해 주세요.',
+
+        for (const id of ids) {
+          const call = await this.repository.lockForDeletion(client, id);
+          if (!call) throw new ApiException(404, 'NOT_FOUND', '통화 기록을 찾을 수 없습니다.');
+          if (!call.endedAt || (await this.repository.recordingInProgress(client, id)))
+            throw new ApiException(
+              409,
+              'INVALID_STATE',
+              '통화 종료와 녹취 저장이 완료된 뒤 삭제해 주세요.',
+            );
+          if (await this.repository.orderIntakeInProgress(client, id))
+            throw new ApiException(
+              409,
+              'INVALID_STATE',
+              '배송 초안의 주문 확정을 마친 뒤 통화를 삭제해 주세요.',
+            );
+          await this.repository.softDelete(client, id);
+          await this.audit.recordSuccess(
+            {
+              actorId: adminId,
+              targetId: id,
+              targetType: 'CALL_SESSION',
+              action: 'CALL_DELETED',
+              requestId,
+            },
+            client,
           );
-        if (await this.repository.orderIntakeInProgress(client, id))
-          throw new ApiException(
-            409,
-            'INVALID_STATE',
-            '배송 초안의 주문 확정을 마친 뒤 통화를 삭제해 주세요.',
-          );
-        await this.repository.softDelete(client, id);
-        await this.audit.recordSuccess(
-          {
-            actorId: adminId,
-            targetId: id,
-            targetType: 'CALL_SESSION',
-            action: 'CALL_DELETED',
-            requestId,
-          },
-          client,
-        );
+        }
       })
       .catch((error: unknown) => {
         if (error && typeof error === 'object' && 'code' in error && error.code === '55P03')

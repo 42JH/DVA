@@ -162,7 +162,7 @@ async function call(changes = {}) {
   if (opts.stage !== undefined)
     await sent(await post(c, 'stage-metrics', { dropoffStage: opts.stage }));
   if (opts.wait !== undefined) await sent(await post(c, 'response-wait-metrics', opts.wait));
-  if (opts.deleted) await sent(await f.write('DELETE', '/api/calls/' + c.id));
+  if (opts.deleted) await sent(await f.write('DELETE', '/api/calls', { callSessionSeqs: [c.id] }));
   if (opts.expired)
     await f.pool.query(
       "UPDATE call_sessions SET incoming_at=statement_timestamp()-interval '5 years 1 day' WHERE call_session_seq=$1",

@@ -492,7 +492,7 @@ test('a final NO_ORDER AI result after PBX completion preserves the closed call 
 });
 
 test('all ACTIVE administrator roles can read; missing, expired, inactive and disallowed-origin requests are rejected', async () => {
-  for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN']) {
+  for (const role of ['OPERATOR', 'SYSTEM_ADMIN']) {
     const session = await createTestSession(pool, (await account(role)).id);
     assert.equal(await count(0, session), 0);
   }

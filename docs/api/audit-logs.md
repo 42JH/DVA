@@ -1,5 +1,7 @@
 # 감사 로그
 
+관리자 권한은 SYSTEM_ADMIN·OPERATOR 두 개이며 계정 관리 4개만 최상위 전용입니다. DELETE와 권한의 최신 통합 계약은 [프론트 전달 명세](../../backend/docs/frontend-delete-admin-roles.md)를 우선합니다.
+
 ## 2026-11-11 누락 보완
 
 - 자동 불만 판정은 `CALL_COMPLAINT_JUDGED / SUCCESS`로 통화 번호와 `hasComplaint`, `complaintCount`만 기록한다. 모델·녹음 장애와 입력 초과는 `CALL_COMPLAINT_FAILED / FAILED` 및 고정 사유 코드로 기록한다. 판정 결과·재시도 변경과 감사는 같은 트랜잭션이며 이미 판정된 행은 성공 감사를 추가하지 않는다. 녹음·발화가 준비되기를 기다리는 내부 대기는 실패 감사로 기록하지 않는다.
@@ -11,7 +13,7 @@
 기업·부서 삭제는 `ORGANIZATION_DELETED`, `DEPARTMENT_DELETED`, 연결 정리는 `MEMBERSHIP_REMOVED`로 기록한다. 053 이후 새 기업 PIN 감사는 생성하지 않으며 과거 `COMPANY_PIN_CREATED/UPDATED/DELETED` 이력은 보존한다. 같은 requestId와 당시 기업/부서 번호·이름으로 삭제 후에도 추적한다. 요청 관리자는 ADMIN·표시명 운영자이며 작업자 번호·이름을 보존한다. [삭제 감사와 트랜잭션 계약](company-deletion.md)을 따른다.
 
 관련 Jira: [S15P31D109-101](https://ssafy.atlassian.net/browse/S15P31D109-101).
-조회는 `dva_session`으로 인증한 ACTIVE 상태의 SUPERVISOR·SYSTEM_ADMIN만 가능하다.
+조회는 `dva_session`으로 인증한 ACTIVE 상태의 OPERATOR·SYSTEM_ADMIN만 가능하다.
 
 ## 조회 API
 

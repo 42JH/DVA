@@ -116,7 +116,7 @@ test('all 12 shared entries require business authentication or an administrator 
       assert.equal(disabled.status, 503, `${route[0]} ${route[1]}`);
       assert.equal((await disabled.json()).error.code, 'DEPENDENCY_UNAVAILABLE');
     }
-    for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN']) {
+    for (const role of ['OPERATOR', 'SYSTEM_ADMIN']) {
       const admin = await account(role);
       for (const route of routes) {
         const response = await send(route, { Cookie: admin.cookie, Origin: origin });
@@ -383,7 +383,7 @@ test('customer list and status changes require a real active administrator; forg
   }
   assert.equal((await (await request('/' + id)).json()).data.status, 'ACTIVE');
   assert.notEqual((await (await request('/' + id)).json()).data.name, '실패');
-  for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN']) {
+  for (const role of ['OPERATOR', 'SYSTEM_ADMIN']) {
     const { cookie } = await account(role);
     const headers = { Cookie: cookie, Origin: origin };
     assert.equal((await request('', { headers })).status, 200);
@@ -1002,7 +1002,7 @@ test('AI basic address changes require a matching ongoing call while administrat
   assert.equal(customer.name, '주소 권한 고객');
   assert.deepEqual(customer.address, replacement);
   assert.equal((await patch(id, { name: '기존 이름 수정' })).status, 204);
-  for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN']) {
+  for (const role of ['OPERATOR', 'SYSTEM_ADMIN']) {
     const actor = await account(role);
     assert.equal(
       (await patch(id, { address: null }, { Cookie: actor.cookie, Origin: origin })).status,
@@ -1076,7 +1076,7 @@ test('a customer address write waiting behind call termination rechecks the end 
 });
 
 test('admin arrays soft-delete customers, memberships and PINs while preserving orders and calls', async () => {
-  for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN']) {
+  for (const role of ['OPERATOR', 'SYSTEM_ADMIN']) {
     const actor = await account(role);
     const ids = [await register(), await register()];
     const organization = (

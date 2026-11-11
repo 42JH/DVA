@@ -90,7 +90,7 @@ test('every company operation rejects missing, forged and malformed sessions bef
 });
 
 test('all active administrator roles can register, list, read and update companies', async () => {
-  const supervisor = await account('companySupervisor', 'SUPERVISOR');
+  const supervisor = await account('companySupervisor', 'OPERATOR');
   for (const cookie of [sessionA, cookies.get(baseB), await createTestSession(pool, supervisor)]) {
     const name = '역할 검증 ' + randomUUID();
     const created = await request('', {
@@ -208,7 +208,16 @@ test('patch updates name/status with no response body and preserves memberships/
   const filtered = await (await request('?status=INACTIVE')).json();
   assert.ok(filtered.data.some((row) => row.organizationSeq === id));
   assert.equal((await patch(id, { status: 'ACTIVE' })).status, 204);
-  assert.equal((await request('/' + id, { method: 'DELETE' })).status, 204);
+  assert.equal(
+    (
+      await request('', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ organizationSeqs: [id] }),
+      })
+    ).status,
+    204,
+  );
   assert.equal((await request('/' + id)).status, 404);
 });
 

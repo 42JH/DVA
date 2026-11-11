@@ -1,3 +1,4 @@
+import { DeleteDepartmentsDto } from '../common/dto/delete-request.dto';
 import {
   Body,
   Controller,
@@ -47,7 +48,7 @@ import { ErrorResponseDto } from '../common/dto/api-response.dto';
 @ApiNotFoundResponse({ type: ErrorResponseDto })
 @ApiConflictResponse({ type: ErrorResponseDto })
 @ApiServiceUnavailableResponse({ type: ErrorResponseDto })
-@Roles('OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN')
+@Roles('OPERATOR', 'SYSTEM_ADMIN')
 @Controller()
 export class DepartmentsController {
   constructor(
@@ -94,16 +95,26 @@ export class DepartmentsController {
     );
   }
 
-  @Delete('departments/:id')
+  @Delete('departments')
   @HttpCode(204)
-  @AuditOperation({ action: 'DEPARTMENT_DELETED', targetType: 'DEPARTMENT', target: 'id' })
+  @AuditOperation({
+    action: 'DEPARTMENT_DELETED',
+    targetType: 'DEPARTMENT',
+    target: 'ids',
+    idsField: 'departmentSeqs',
+  })
   @ApiOperation({
     summary: '부서 삭제',
     description:
       '소속 사원의 기업·부서 소속을 해제하고 해당 부서 PIN만 삭제합니다. 개인 회원·기업 공용 PIN·업무 이력을 보존합니다. 미배정 부서명 PIN이 있으면 409입니다.',
   })
   @ApiNoContentResponse({ description: '삭제 완료. 응답 본문 없음.' })
-  remove(@Param() params: OrganizationIdParamsDto, @Req() request: AuthRequest) {
-    return this.deletion.remove(params.id, true, request.admin!.adminUserSeq, request.requestId);
+  remove(@Body() input: DeleteDepartmentsDto, @Req() request: AuthRequest) {
+    return this.deletion.remove(
+      input.departmentSeqs,
+      true,
+      request.admin!.adminUserSeq,
+      request.requestId,
+    );
   }
 }

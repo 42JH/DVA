@@ -1,3 +1,4 @@
+import { DeleteOrdersDto } from '../common/dto/delete-request.dto';
 import {
   Body,
   Delete,
@@ -79,14 +80,19 @@ import { OrderRequestKey } from './order-request-key';
   description: '접근 권한·Origin 오류 또는 고객·통화·주소록 접근 불가.',
   type: ErrorResponseDto,
 })
-@Roles('OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN')
+@Roles('OPERATOR', 'SYSTEM_ADMIN')
 @Controller('orders')
 export class OrdersController {
   constructor(private readonly orders: OrdersService) {}
 
-  @Delete(':id')
+  @Delete()
   @HttpCode(204)
-  @AuditOperation({ action: 'ORDER_DELETED', targetType: 'ORDER', target: 'id' })
+  @AuditOperation({
+    action: 'ORDER_DELETED',
+    targetType: 'ORDER',
+    target: 'ids',
+    idsField: 'orderSeqs',
+  })
   @ApiOperation({
     summary: '주문 soft delete',
     description:
@@ -95,8 +101,8 @@ export class OrdersController {
   @ApiNoContentResponse({ description: '삭제 처리 완료.' })
   @ApiNotFoundResponse({ type: ErrorResponseDto, description: '없거나 삭제·만료된 주문.' })
   @ApiConflictResponse({ type: ErrorResponseDto, description: '진행 중인 통화·결제·접수.' })
-  delete(@Param() params: OrderIdParamsDto, @Req() request: AuthRequest) {
-    return this.orders.delete(params.id, request.admin.adminUserSeq, request.requestId);
+  delete(@Body() input: DeleteOrdersDto, @Req() request: AuthRequest) {
+    return this.orders.delete(input.orderSeqs, request.admin.adminUserSeq, request.requestId);
   }
 
   @Get()

@@ -42,24 +42,33 @@ export class OrdersService {
     private readonly cardPayments: OrderCardPaymentsService,
   ) {}
 
-  async delete(id: number, adminId: number, requestId: string): Promise<void> {
+  async delete(id: number | number[], adminId: number, requestId: string): Promise<void> {
+    const ids = (Array.isArray(id) ? [...id] : [id]).sort((a, b) => a - b);
     await writeOrder(this.database, async (client) => {
-      const order = await this.repository.lockOrder(client, id);
-      if (!order) throw new ApiException(404, 'NOT_FOUND', '주문을 찾을 수 없습니다.');
-      if (
-        !['COLLECTING', 'CANCELLED', 'ACCEPTED'].includes(order.status) ||
-        (await this.repository.deletionBlocked(client, id))
-      )
-        throw new ApiException(
-          409,
-          'INVALID_STATE',
-          '진행 중인 통화·결제·접수 처리를 마친 뒤 삭제해 주세요.',
+      for (const id of ids) {
+        const order = await this.repository.lockOrder(client, id);
+        if (!order) throw new ApiException(404, 'NOT_FOUND', '주문을 찾을 수 없습니다.');
+        if (
+          !['COLLECTING', 'CANCELLED', 'ACCEPTED'].includes(order.status) ||
+          (await this.repository.deletionBlocked(client, id))
+        )
+          throw new ApiException(
+            409,
+            'INVALID_STATE',
+            '진행 중인 통화·결제·접수 처리를 마친 뒤 삭제해 주세요.',
+          );
+        await this.repository.softDelete(client, id);
+        await this.audit.recordSuccess(
+          {
+            actorId: adminId,
+            action: 'ORDER_DELETED',
+            targetType: 'ORDER',
+            targetId: id,
+            requestId,
+          },
+          client,
         );
-      await this.repository.softDelete(client, id);
-      await this.audit.recordSuccess(
-        { actorId: adminId, action: 'ORDER_DELETED', targetType: 'ORDER', targetId: id, requestId },
-        client,
-      );
+      }
     });
   }
 

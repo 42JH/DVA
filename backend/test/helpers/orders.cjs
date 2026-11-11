@@ -56,7 +56,7 @@ module.exports = function ordersFixture() {
 
   before(async () => {
     await migrate(pool);
-    for (const [index, role] of ['OPERATOR', 'SYSTEM_ADMIN', 'SUPERVISOR'].entries()) {
+    for (const [index, role] of ['OPERATOR', 'SYSTEM_ADMIN', 'OPERATOR'].entries()) {
       const result = await pool.query(
         `INSERT INTO admin_users(login_id,name,password_hash,role,status) VALUES($1,'주문 검증','not-for-login',$2,'ACTIVE') RETURNING admin_user_seq`,
         [`orderTest${index}`, role],

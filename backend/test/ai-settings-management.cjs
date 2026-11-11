@@ -13,7 +13,7 @@ module.exports = function registerAiSettingsManagement(suite) {
     saveVersion,
     options,
   } = suite;
-  test('persona reads allow every active administrator while OPERATOR cannot change settings', async () => {
+  test('persona reads and management allow active operators while keeping session and Origin checks', async () => {
     const version = await create();
     for (const actor of [0, 1, 2]) {
       const listed = await data(await call('GET', '/api/personas?limit=100', undefined, actor));
@@ -29,28 +29,22 @@ module.exports = function registerAiSettingsManagement(suite) {
       assert.equal(history[0].aiPersonaVersionSeq, version.aiPersonaVersionSeq);
     }
     for (const actor of [1]) {
-      await error(await call('POST', '/api/personas', input(), actor), 403, 'FORBIDDEN');
-      await error(
-        await call(
-          'PATCH',
-          `/api/personas/${version.aiPersonaSeq}`,
-          { expectedVersion: 1, name: '권한 없음' },
-          actor,
-        ),
-        403,
-        'FORBIDDEN',
+      const managed = await data(await call('POST', '/api/personas', input(), actor), 201);
+      assert.equal(managed.createdByAdminUserSeq, actorIds[actor]);
+      const edited = await data(
+        await saveVersion(managed.aiPersonaSeq, { expectedVersion: 1, name: '운영자 수정' }, actor),
       );
-      await error(
+      assert.equal(edited.createdByAdminUserSeq, actorIds[actor]);
+      await data(
         await call(
           'POST',
-          `/api/personas/${version.aiPersonaSeq}/activate`,
-          { aiPersonaVersionSeq: version.aiPersonaVersionSeq, expectedVersion: 1 },
+          `/api/personas/${managed.aiPersonaSeq}/activate`,
+          { aiPersonaVersionSeq: edited.aiPersonaVersionSeq, expectedVersion: 2 },
           actor,
         ),
-        403,
-        'FORBIDDEN',
+        202,
       );
-      await error(await call('GET', '/api/ai/options', undefined, actor), 403, 'FORBIDDEN');
+      assert.deepEqual(await data(await call('GET', '/api/ai/options', undefined, actor)), options);
     }
     await error(
       await call('GET', '/api/personas', undefined, 99, { Authorization: `Bearer ${token}` }),

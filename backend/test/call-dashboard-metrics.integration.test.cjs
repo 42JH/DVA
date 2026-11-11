@@ -284,7 +284,7 @@ test('soft-deleted and retention-expired calls reject new metric writes and pres
   const deleted = await createCall();
   await ok(await post(deleted, 'stage-metrics', stage(deleted)));
   const first = await stored(deleted);
-  await ok(await f.write('DELETE', '/api/calls/' + deleted.id));
+  await ok(await f.write('DELETE', '/api/calls', { callSessionSeqs: [deleted.id] }));
   for (const [section, body] of [
     ['stage-metrics', stage(deleted)],
     ['response-wait-metrics', wait(deleted)],

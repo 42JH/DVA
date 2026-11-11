@@ -1,5 +1,7 @@
 # 기업·직원 결제 권한 및 등록 카드 프론트 연동 명세
 
+카드 DELETE의 최신 배열 입력과 기존 AI/관리자 권한은 [전체 DELETE 통합 명세](delete-array-contracts.md)를 따릅니다. GET·PUT 등록/조회 경로는 유지하며 구형 단건 DELETE는 제거합니다.
+
 2026-11-11 원격 develop-backend b87007c4 기준.
 
 **구현·로컬 검증 완료 명세다. 실제 운영 배포와 PG 상점 승인 검증은 별도이며, 서버 배포 후 연동한다.**
@@ -111,10 +113,10 @@ GET /api/companies/{id}/members의 membership에 monthlyBillingEnabled와 groupB
 | --- | --- | --- | --- |
 | 개인 카드 조회 | GET | /api/customers/{id}/card | 200 |
 | 개인 카드 등록·교체 | PUT | /api/customers/{id}/card | 200 |
-| 개인 카드 해제 | DELETE | /api/customers/{id}/card | 204 |
+| 개인 카드 해제 | DELETE | /api/customers/cards — customerSeqs 배열 | 204 |
 | 기업 카드 조회 | GET | /api/companies/{id}/group-card | 200 |
 | 기업 카드 등록·교체 | PUT | /api/companies/{id}/group-card | 200 |
-| 기업 카드 해제 | DELETE | /api/companies/{id}/group-card | 204 |
+| 기업 카드 해제 | DELETE | /api/companies/group-cards — organizationSeqs 배열 | 204 |
 
 id는 각 경로의 customerSeq 또는 organizationSeq다.
 소유자당 활성 카드 한 개를 관리하며 교체 성공 시 이전 카드는 soft delete한다.

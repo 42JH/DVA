@@ -364,7 +364,10 @@ test('group selection requires a registered company card and employee permission
   assert.equal(restricted.organization.monthlyBillingEnabled, true);
   assert.equal(restricted.membership.monthlyBillingEnabled, false);
   assert.deepEqual(restricted.availablePaymentMethods, ['billing']);
-  assert.equal((await f.write('DELETE', '/api/companies/' + id + '/group-card')).status, 204);
+  assert.equal(
+    (await f.write('DELETE', '/api/companies/group-cards', { organizationSeqs: [id] })).status,
+    204,
+  );
   assert.equal(await json(await f.get('/api/companies/' + id + '/group-card')), null);
   assert.equal((await json(await f.get('/api/companies/' + id))).groupCardRegistered, false);
 });

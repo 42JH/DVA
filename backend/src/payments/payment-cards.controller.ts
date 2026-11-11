@@ -1,3 +1,5 @@
+import { DeleteCompanyCardsDto } from '../common/dto/delete-request.dto';
+import { DeleteCustomerCardsDto } from '../common/dto/delete-request.dto';
 import { Get } from '@nestjs/common';
 import { Body, Controller, Delete, Headers, HttpCode, Param, Put, Req } from '@nestjs/common';
 import {
@@ -113,46 +115,56 @@ export class PaymentCardsController {
     );
   }
 
-  @Delete('customers/:id/card')
+  @Delete('customers/cards')
   @HttpCode(204)
   @MvpAiCustomerAccess()
-  @AuditOperation({ action: 'PAYMENT_CARD_DELETED', targetType: 'CUSTOMER', target: 'id' })
+  @AuditOperation({
+    action: 'PAYMENT_CARD_DELETED',
+    targetType: 'CUSTOMER',
+    target: 'ids',
+    idsField: 'customerSeqs',
+  })
   @ApiOperation({
     summary: '개인 카드 등록 해제',
     security: [{ adminSession: [] }, { bearer: [] }],
   })
   @ApiNoContentResponse()
   removeCustomer(
-    @Param() params: CustomerIdParamsDto,
+    @Body() input: DeleteCustomerCardsDto,
     @Req() request: AuthRequest,
     @Headers('call_session_seq') call?: string,
   ) {
     return this.cards.remove(
       'CUSTOMER',
-      params.id,
+      input.customerSeqs,
       request.admin?.adminUserSeq ?? null,
       request.requestId,
       call,
     );
   }
 
-  @Delete('companies/:id/group-card')
+  @Delete('companies/group-cards')
   @HttpCode(204)
   @MvpAiCustomerAccess()
-  @AuditOperation({ action: 'PAYMENT_CARD_DELETED', targetType: 'ORGANIZATION', target: 'id' })
+  @AuditOperation({
+    action: 'PAYMENT_CARD_DELETED',
+    targetType: 'ORGANIZATION',
+    target: 'ids',
+    idsField: 'organizationSeqs',
+  })
   @ApiOperation({
     summary: '기업 카드 등록 해제',
     security: [{ adminSession: [] }, { bearer: [] }],
   })
   @ApiNoContentResponse()
   removeCompany(
-    @Param() params: CustomerIdParamsDto,
+    @Body() input: DeleteCompanyCardsDto,
     @Req() request: AuthRequest,
     @Headers('call_session_seq') call?: string,
   ) {
     return this.cards.remove(
       'ORGANIZATION',
-      params.id,
+      input.organizationSeqs,
       request.admin?.adminUserSeq ?? null,
       request.requestId,
       call,
