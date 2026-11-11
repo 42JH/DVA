@@ -870,7 +870,8 @@ def test_registered_greeting_answer_preserves_address_scope_without_model(greeti
 
 
 @pytest.mark.parametrize("explicit_origin_question", [True, False])
-def test_short_yes_only_applies_after_the_pending_origin_question(explicit_origin_question):
+@pytest.mark.parametrize("address_in_greeting", [True, False])
+def test_short_yes_only_applies_after_the_pending_origin_question(explicit_origin_question, address_in_greeting):
     from backend_client.order import Place as BPlace
 
     svc, client = flow()
@@ -884,9 +885,11 @@ def test_short_yes_only_applies_after_the_pending_origin_question(explicit_origi
         conn.push(started())
         await until(lambda: svc.registry.calls["live_1"].phase == Phase.ACTIVE)
         s = svc.registry.calls["live_1"]
-        await ai(conn, "안녕하세요, 김철수님, 서울 강남구 가람구길 이백십이에서 보내시는 택배 접수 도와드릴까요?", 0)
+        address = "서울 강남구 가람구길 이백십이에서 보내시는 " if address_in_greeting else ""
+        await ai(conn, f"안녕하세요, 김철수님, {address}택배 접수 도와드릴까요?", 0)
         await say(conn, "택배를 새로 보낼게요", 1500)
-        await until(lambda: any('"origin_confirm": "registered"' in e.get("content", "") for e in conn.sent))
+        expected_origin = "registered" if address_in_greeting else "서울특별시 강남구 가람9길 212"
+        await until(lambda: any(f'"origin_confirm": "{expected_origin}"' in e.get("content", "") for e in conn.sent))
         client.decisions.create = AsyncMock(return_value=SimpleNamespace(
             answers=[choice("origin", "yes", 0.30), choice("switch", "none")]))
         question = "등록된 발송 주소로 보내실까요?" if explicit_origin_question else "받는 분 연락처를 알려주시겠어요?"
@@ -1455,3 +1458,60 @@ def test_tool_call_on_answer_to_candidates_waits_for_pick():
     conn = run(scenario())
     out = json.loads(next(e for e in conn.sent if e["type"] == "response.item.create")["item"]["output"])
     assert out["fields"]["receiver_phone"] == "valid" and "receiver_phone" not in out["missing"]
+
+
+@pytest.mark.parametrize(("question", "reply", "answer_at", "replace_candidates", "selected"), [
+    ("구미시 가람구 길 이십으로 보내시는 게 맞으실까요?", "네, 맞습니다", 2000, False, 2),
+    ("이영희 구미시 인의동 받는 곳으로 보내시는 게 맞으실까요?", "예", 2000, False, 2),
+    ("구미시 가람구길 이십이 다시 일로 보내시는 게 맞으실까요?", "네", 2000, False, None),
+    ("가람구길 이십이 다시 일, 가람구길 이십 중에 어느 곳으로 보내실까요?", "네", 2000, False, None),
+    ("구미시 가람구길 이십으로 보내시는 게 맞으실까요?", "네, 다른 주소로 바꿀게요", 2000, False, None),
+    ("구미시 가람구길 이십으로 보내시는 게 맞으실까요?", "네", 1200, False, None),
+    ("구미시 가람구길 이십으로 보내시는 게 맞으실까요?", "네", 2000, True, None),
+])
+def test_short_yes_selects_only_the_destination_named_in_the_heard_question(
+        question, reply, answer_at, replace_candidates, selected):
+    from app.domain.candidates import offer
+    from app.domain.state import Place
+
+    svc, client = flow()
+    labels = ("이영희 구미시 인의동 501호", "이영희 구미시 인의동 502호", "이영희 구미시 인의동")
+    ambiguous_address = question.startswith("구미시 가람구길 이십이 다시 일로")
+    ignore_pick = replace_candidates or ambiguous_address
+    client.decisions.create = AsyncMock(return_value=SimpleNamespace(
+        answers=[choice("pick", labels[2] if ignore_pick else "not_answer")]))
+    places = (
+        Place("이영희", "01011111111", "경상북도 구미시 가람9길 22-1", "501호"),
+        Place("이영희", "01022222222", "경상북도 구미시 가람9길 22-1", "502호"),
+        Place("이영희", "01033333333", "경상북도 구미시 가람9길 20", ""),
+    )
+
+    async def scenario():
+        task = asyncio.create_task(svc.on_incoming(incoming()))
+        await until(lambda: client.conns)
+        conn = client.conns[0]
+        conn.push(started())
+        s = svc.registry.calls["live_1"]
+        await until(lambda: s.phase == Phase.ACTIVE)
+        async with s.lock:
+            s.state.intent = "order"
+            offer(s.state, "destination", labels, places)
+        await ai(conn, question, 1000)
+        if replace_candidates:
+            async with s.lock:
+                offer(s.state, "destination", labels, places)
+        await say(conn, reply, answer_at)
+        if selected is None:
+            client.decisions.create.assert_awaited_once()
+            assert s.state.candidates and not s.state.field_of("receiver_address").valid
+            if ignore_pick:
+                assert all(q["name"] != "pick" for q in client.decisions.create.call_args.kwargs["questions"])
+        else:
+            client.decisions.create.assert_not_awaited()
+            assert s.state.candidates is None
+            assert s.state.field_of("receiver_address").value == places[selected].address
+            assert s.state.field_of("receiver_phone").value == places[selected].phone
+        conn.push({"type": "session.closed", "reason": "remote_hangup"})
+        await task
+
+    run(scenario())
