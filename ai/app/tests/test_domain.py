@@ -1,11 +1,11 @@
-"""도메인 단위 테스트: Business State·assess·확인 관문(G1~G5)·담은 택배 수정(P5)·통화 결과·결과 문구 검사."""
+"""도메인 단위 테스트: Business State·assess·확인 관문(G1~G5)·담은 택배 수정(P5)·통화 결과."""
 
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
 from app.domain.assess import assess, readback_facts
-from app.domain.claims import unverified_claims, unverified_values
+from app.domain.claims import unverified_values
 from app.domain.confirm import ConfirmAnswer, Utterance, check_gate, commit_parcel, issue_parcel_confirmation, release
 from app.domain.outcome import decide_outcome
 from app.domain.state import ConversationState, Customer, FieldStatus, Geo, Items, Source
@@ -243,31 +243,6 @@ def test_outcome_fare_geo_pickup_and_empty_cases():
     assert decide_outcome(s, P, NOW, fare).kind == "CANCELLED"
 
 
-# --- 결과 문구 검사 ---
-
-def test_unverified_claims():
-    s = ConversationState()
-    assert unverified_claims("네, 접수 완료되었습니다", s, P) == ["접수되었"]
-    assert unverified_claims("성함 확인했습니다", s, P) == []  # 정상 안내에도 쓰는 말은 검사하지 않음
-    s.result_accepted = True
-    assert unverified_claims("접수되었습니다", s, P) == []
-    assert unverified_claims("결제 완료됐어요", s, P) == ["결제되었"]  # 결제 완료는 늘 금지
-
-
-def test_ready_receipt_allows_only_one_parcel_acknowledgement():
-    s = ConversationState()
-    receipt = "택배가 접수됐습니다"
-    assert unverified_claims(f"{receipt}. 더 보내실 택배가 있으세요?", s, P, ready_receipt=True) == []
-    assert unverified_claims(f"{receipt} 더 보내실 택배가 있으세요?", s, P, ready_receipt=True) == []
-    assert unverified_claims(receipt, s, P) == ["접수되었"]
-    assert unverified_claims(f"{receipt}. {receipt}.", s, P, ready_receipt=True) == ["접수되었"]
-    assert unverified_claims(f"{receipt}. 주문 접수 완료됐습니다.", s, P, ready_receipt=True) == ["접수되었"]
-    # 통화 504: "택배 한 건 접수됐습니다"가 오탐돼 N3 → 맞는 안내를 번복했다.
-    for said in ("택배 한 건 접수됐습니다", "택배 한 건이 접수되었습니다", "택배 접수됐습니다"):
-        assert unverified_claims(f"{said}. 더 보내실 택배가 있으세요?", s, P, ready_receipt=True) == []
-    assert unverified_claims("택배 두 건 접수됐습니다", s, P, ready_receipt=True) == ["접수되었"]
-
-
 def test_domain_and_policy_do_not_import_sdk_http_or_be_contract():
     """overview.md §2.1: domain·policy는 SDK·HTTP·BE 계약을 import하지 않는다."""
     import ast
@@ -279,14 +254,6 @@ def test_domain_and_policy_do_not_import_sdk_http_or_be_contract():
             names = [n.module or "" for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)]
             names += [a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names]
             assert not [m for m in names if m.split(".")[0] in banned or m.startswith(banned)], f
-
-
-def test_claims_skip_negation_and_future_s5_call():
-    s = ConversationState()
-    assert unverified_claims("네, 접수 요청은 확인했습니다. 다만 아직 접수 완료 결과는 확인되지 않았습니다.", s, P) == []
-    assert unverified_claims("접수 처리 진행하겠습니다", s, P) == []
-    assert unverified_claims("접수되었는지 확인할게요", s, P) == []
-    assert unverified_claims("네. 접수 완료됐습니다.", s, P) == ["접수되었"]
 
 
 def test_gate_requires_previous_ai_line_to_be_the_question():
@@ -330,14 +297,6 @@ def test_unregistered_customer_name_is_sender_name_in_body():
     call = {"providerCallId": "live_1", "callerPhoneNumber": "01012345678", "incomingAt": "2026-11-03T01:00:00Z"}
     body = submit_body(o, call, None, None, "01012345678")
     assert body["customer"] == {"name": "김철수", "phoneNumber": "01012345678"} and "customerSeq" not in body
-
-
-def test_progress_claim_only_while_confirmation_pending():
-    s = ConversationState()
-    assert unverified_claims("네, 접수 진행하겠습니다", s, P) == []  # 확인 대기 없음: 정상 안내
-    s.pending = object()
-    assert unverified_claims("네, 접수 진행하겠습니다. 잠시만 기다려주세요", s, P) == ["진행하겠"]
-    assert unverified_claims("이대로 진행할까요?", s, P) == []  # 확인 질문은 괜찮다
 
 
 def test_clean_name_strips_spoken_endings():

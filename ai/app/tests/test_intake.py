@@ -60,16 +60,10 @@ def test_live_confirmation_saves_and_lookup_combines_both_sources(tmp_path):
         retry = Spoken(3, "바뀐 받는 분은", 5000, 7000, 103, 103, readback_id=pending.id)
         await lf.apply(s, Spoken(4, "네, 맞습니다. 그냥 그렇게 접수해 주세요", 6200, 6900, 104, 104), retry,
                        {"confirm": ("proceed", 0.98, {"proceed": 0.98})}, pending.id)
-        await until(lambda: s.rt.ready_notice is not None)
+        await until(lambda: any(e.get("data", {}).get("content", {}).get("draft_intake") == "ready" for e in s.events))
         [first] = db.drafts.values()
         assert first["status"] == "READY"
         assert db.intakes[first["callSessionSeq"]].get("complete") is None
-        assert s.rt.ready_notice is not None
-        lf.on_output(s, {"delta": "네, 이대로 택배가 접수됐습니다. 더 보내실 택배가 있으세요?"})
-        s.rt.ai_end.cancel()
-        lf._ai_done(s)
-        assert not any(event["kind"] == "결과 문구" for event in s.events)
-        assert s.rt.ready_notice is None
         return first
 
     first = run(scenario())
@@ -210,7 +204,26 @@ def test_confirmation_reports_missing_requirements_instead_of_ready(tmp_path):
         [draft] = db.drafts.values()
         assert draft["status"] == "EDITING"
         assert any(e.get("data", {}).get("content", {}).get("draft_intake") == "not_ready" for e in s.events)
-        assert s.rt.ready_notice is None
+
+    run(scenario())
+
+
+def test_failed_draft_save_reports_failure_and_suggests_agent_without_pending(tmp_path):
+    """통화 471: 접수 요청 뒤 저장이 400으로 실패하면 '확인 중'(pending) 없이 실패 안내 + 상담원 연결 제안."""
+    class Rejects(MockBackend):
+        async def create_draft(self, call_seq, body):
+            raise BackendError("INVALID_REQUEST", 400, "INVALID_REQUEST")
+
+    intake, results, db, s = setup_intake(tmp_path, Rejects())
+    svc, _ = flow()
+    svc.intake, svc.results, svc.d.backend = intake, results, results.backend
+    lf = LiveFlow(svc)
+
+    async def scenario():
+        await lf.commit(s, issue_parcel_confirmation(s.state, P, 100).id)
+        sent = [e["data"]["content"] for e in s.events if e["kind"] == "전달 N2"]
+        assert sent and sent[-1]["draft_intake"] == "failed" and sent[-1]["agent"] == "suggest"
+        assert not any(c.get("draft_intake") == "pending" for c in sent)
 
     run(scenario())
 

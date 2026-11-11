@@ -56,5 +56,5 @@ async def cancel_parcel(ctx: ToolContext, order_seq: int, order_parcel_seq: int)
 def _finish(ctx: ToolContext, key: str, status: str, outcome: ToolOutcome) -> ToolOutcome:
     ctx.ops[key] = {"status": status}
     if status in ("done", "already"):
-        ctx.state.cancel_done = True  # 결과 문구 검사(claims)의 근거
+        ctx.state.cancel_done = True
     return outcome
