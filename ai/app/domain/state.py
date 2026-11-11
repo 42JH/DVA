@@ -89,6 +89,7 @@ class CandidateSet:
     items: tuple[Any, ...]         # destination: Place, order: 조회 결과 dict
     total: int | None = None
     destination_clarification: Literal["recipient", "address", "candidate"] | None = None
+    destination_buffer: dict[str, str] = field(default_factory=dict, compare=False)
 
 
 @dataclass
