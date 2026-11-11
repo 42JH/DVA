@@ -1306,3 +1306,110 @@ test('a due retry gets its turn ahead of newer unchecked approvals', async () =>
     client.release();
   }
 });
+
+test('payment failures audit HTTP validation, Origin rejection and provider outcomes once without payment secrets', async () => {
+  const order = await create(),
+    id = order.paymentRequest.paymentRequestId;
+  const attempts = [
+    await request(`/payments/requests/${id}/confirm`, {}),
+    await request(`/payments/requests/${id}/reconcile`, {}, false, 'POST', false),
+    await confirm(order, 'reject_PRIVATE_payment_key'),
+  ];
+  assert.deepEqual(
+    attempts.map((r) => r.status),
+    [400, 403, 422],
+  );
+  for (const response of attempts) {
+    const rows = (
+      await pool.query(
+        'SELECT action,result,target_seq,metadata FROM audit_logs WHERE request_id=$1',
+        [response.body.meta.requestId],
+      )
+    ).rows;
+    assert.equal(rows.length, 1, JSON.stringify(rows));
+    assert.equal(rows[0].result, response.status === 403 ? 'DENIED' : 'FAILED');
+    assert.ok(!JSON.stringify(rows).match(/PRIVATE|paymentKey|paymentRequestId|phone|address/));
+    if (response.status === 422) {
+      assert.equal(rows[0].target_seq, order.orderSeq);
+      assert.deepEqual(rows[0].metadata, { reason: 'PAYMENT_DECLINED' });
+    }
+  }
+  assert.equal((await stored(order.orderSeq)).status, 'notPaid');
+  const original = app.get(require('../dist/audit/audit.service').AuditService).repository.insert;
+  const auditRepo = app.get(require('../dist/audit/audit.service').AuditService).repository;
+  auditRepo.insert = async () => {
+    throw Error('audit unavailable');
+  };
+  try {
+    assert.equal((await confirm(order, 'reject_PRIVATE_another')).status, 422);
+  } finally {
+    auditRepo.insert = original;
+  }
+  assert.equal((await confirm(order)).status, 200);
+});
+
+test('both notification streams audit every actual transition once, including ambiguous results and audit rollback', async () => {
+  const { OrderPaymentsRepository } = require('../dist/orders/order-payments.repository');
+  const { AuditService } = require('../dist/audit/audit.service');
+  const repo = app.get(OrderPaymentsRepository),
+    audit = app.get(AuditService);
+  const order = await create(),
+    id = order.paymentRequest.paymentRequestId;
+  for (const completion of [false, true]) {
+    const prefix = completion ? 'completion_' : '';
+    const action = `ORDER_PAYMENT_${completion ? 'COMPLETION_' : ''}NOTIFICATION_`;
+    const finish = completion
+      ? repo.finishCompletionNotification.bind(repo)
+      : repo.finishNotification.bind(repo);
+    for (const status of ['SENT', 'FAILED', 'UNKNOWN']) {
+      await pool.query(
+        `UPDATE order_payment_requests SET ${prefix}notification_status='SENDING' WHERE payment_request_id=$1`,
+        [id],
+      );
+      const before = (
+        await pool.query(
+          'SELECT count(*)::int AS n FROM audit_logs WHERE target_type=$1 AND target_seq=$2 AND action=$3',
+          ['ORDER', order.orderSeq, action + status],
+        )
+      ).rows[0].n;
+      await finish(id, status);
+      await finish(id, status);
+      const rows = (
+        await pool.query(
+          'SELECT result,metadata FROM audit_logs WHERE target_type=$1 AND target_seq=$2 AND action=$3',
+          ['ORDER', order.orderSeq, action + status],
+        )
+      ).rows;
+      assert.equal(rows.length, before + 1);
+      assert.ok(
+        rows.every(
+          (r) =>
+            r.result === (status === 'SENT' ? 'SUCCESS' : 'FAILED') &&
+            JSON.stringify(r.metadata) === '{}',
+        ),
+      );
+    }
+    await pool.query(
+      `UPDATE order_payment_requests SET ${prefix}notification_status='SENDING' WHERE payment_request_id=$1`,
+      [id],
+    );
+    const original = audit.recordResult;
+    audit.recordResult = async function (event, ...args) {
+      if (event.action === action + 'SENT') throw Error('audit unavailable');
+      return original.call(this, event, ...args);
+    };
+    try {
+      await assert.rejects(finish(id, 'SENT'), /audit unavailable/);
+    } finally {
+      audit.recordResult = original;
+    }
+    assert.equal((await storedPayment(id))[prefix + 'notification_status'], 'SENDING');
+    await pool.query(
+      `UPDATE order_payment_requests SET ${prefix}notification_attempted_at=clock_timestamp()-interval '2 minutes' WHERE payment_request_id=$1`,
+      [id],
+    );
+    if (completion) await repo.claimCompletionNotification();
+    else await repo.claimNotification();
+    assert.equal((await storedPayment(id))[prefix + 'notification_status'], 'UNKNOWN');
+  }
+});

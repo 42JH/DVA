@@ -2,6 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
 import { PoolClient } from 'pg';
 import { OrganizationBillingService } from '../organizations/organization-billing.service';
+import { AuditService } from '../audit/audit.service';
+import { randomUUID } from 'node:crypto';
 
 export interface PaymentRequest {
   paymentCardSeq: number | null;
@@ -62,7 +64,40 @@ export class OrderPaymentsRepository {
   constructor(
     private readonly billing: OrganizationBillingService,
     private readonly database: DatabaseService,
+    private readonly audit: AuditService,
   ) {}
+
+  async paymentOrderId(id: string): Promise<number | null> {
+    return (
+      (
+        await this.database.pool.query<{ id: number }>(
+          'SELECT order_seq AS id FROM order_payment_requests WHERE payment_request_id=$1',
+          [id],
+        )
+      ).rows[0]?.id ?? null
+    );
+  }
+
+  private async notificationAudit(
+    client: PoolClient,
+    rows: Array<{ orderSeq: number }>,
+    completion: boolean,
+    status: string,
+  ) {
+    for (const row of rows)
+      await this.audit.recordResult(
+        {
+          actorId: null,
+          actorType: 'SYSTEM',
+          targetType: 'ORDER',
+          targetId: row.orderSeq,
+          action: `ORDER_PAYMENT_${completion ? 'COMPLETION_' : ''}NOTIFICATION_${status === 'SENDING' ? 'ATTEMPTED' : status}`,
+          requestId: randomUUID(),
+        },
+        ['SENT', 'SENDING'].includes(status) ? 'SUCCESS' : 'FAILED',
+        client,
+      );
+  }
   async eligibility(client: PoolClient, customerId: number) {
     const customer = (
       await client.query<{ monthlyBillingEnabled: boolean }>(
@@ -312,8 +347,12 @@ export class OrderPaymentsRepository {
 
   async claimNotification() {
     return this.database.transaction(async (client) => {
-      await client.query(`UPDATE order_payment_requests SET notification_status='UNKNOWN'
-        WHERE notification_status='SENDING' AND notification_attempted_at<clock_timestamp()-interval '45 seconds'`);
+      const stale = await client.query<{
+        orderSeq: number;
+      }>(`UPDATE order_payment_requests SET notification_status='UNKNOWN'
+        WHERE notification_status='SENDING' AND notification_attempted_at<clock_timestamp()-interval '45 seconds'
+        RETURNING order_seq AS "orderSeq"`);
+      await this.notificationAudit(client, stale.rows, false, 'UNKNOWN');
       const row = (
         await client.query<{
           id: string;
@@ -323,28 +362,35 @@ export class OrderPaymentsRepository {
         ORDER BY r.created_at LIMIT 1 FOR UPDATE OF r SKIP LOCKED`)
       ).rows[0];
       if (!row) return;
-      await client.query(
-        `UPDATE order_payment_requests SET notification_status='SENDING',notification_attempted_at=clock_timestamp() WHERE payment_request_id=$1`,
+      const sending = await client.query<{ orderSeq: number }>(
+        `UPDATE order_payment_requests SET notification_status='SENDING',notification_attempted_at=clock_timestamp() WHERE payment_request_id=$1 RETURNING order_seq AS "orderSeq"`,
         [row.id],
       );
+      await this.notificationAudit(client, sending.rows, false, 'SENDING');
       return row.id;
     });
   }
 
   async finishNotification(id: string, status: string) {
-    await this.database.pool.query(
-      `UPDATE order_payment_requests SET notification_status=$2,
+    await this.database.transaction(async (client) => {
+      const result = await client.query<{ orderSeq: number }>(
+        `UPDATE order_payment_requests SET notification_status=$2,
       notification_sent_at=CASE WHEN $2='SENT' THEN clock_timestamp() ELSE NULL END
-      WHERE payment_request_id=$1 AND notification_status='SENDING'`,
-      [id, status],
-    );
+      WHERE payment_request_id=$1 AND notification_status='SENDING' RETURNING order_seq AS "orderSeq"`,
+        [id, status],
+      );
+      await this.notificationAudit(client, result.rows, false, status);
+    });
   }
 
   async claimCompletionNotification() {
     return this.database.transaction(async (client) => {
-      await client.query(`UPDATE order_payment_requests SET completion_notification_status='UNKNOWN'
+      const stale = await client.query<{
+        orderSeq: number;
+      }>(`UPDATE order_payment_requests SET completion_notification_status='UNKNOWN'
         WHERE completion_notification_status='SENDING'
-        AND completion_notification_attempted_at<clock_timestamp()-interval '45 seconds'`);
+        AND completion_notification_attempted_at<clock_timestamp()-interval '45 seconds' RETURNING order_seq AS "orderSeq"`);
+      await this.notificationAudit(client, stale.rows, true, 'UNKNOWN');
       const row = (
         await client.query<{
           id: string;
@@ -353,21 +399,25 @@ export class OrderPaymentsRepository {
         ORDER BY completed_at LIMIT 1 FOR UPDATE SKIP LOCKED`)
       ).rows[0];
       if (!row) return;
-      await client.query(
+      const sending = await client.query<{ orderSeq: number }>(
         `UPDATE order_payment_requests SET completion_notification_status='SENDING',
-        completion_notification_attempted_at=clock_timestamp() WHERE payment_request_id=$1`,
+        completion_notification_attempted_at=clock_timestamp() WHERE payment_request_id=$1 RETURNING order_seq AS "orderSeq"`,
         [row.id],
       );
+      await this.notificationAudit(client, sending.rows, true, 'SENDING');
       return row.id;
     });
   }
 
   async finishCompletionNotification(id: string, status: string) {
-    await this.database.pool.query(
-      `UPDATE order_payment_requests SET completion_notification_status=$2,
+    await this.database.transaction(async (client) => {
+      const result = await client.query<{ orderSeq: number }>(
+        `UPDATE order_payment_requests SET completion_notification_status=$2,
       completion_notification_sent_at=CASE WHEN $2='SENT' THEN clock_timestamp() ELSE NULL END
-      WHERE payment_request_id=$1 AND completion_notification_status='SENDING'`,
-      [id, status],
-    );
+      WHERE payment_request_id=$1 AND completion_notification_status='SENDING' RETURNING order_seq AS "orderSeq"`,
+        [id, status],
+      );
+      await this.notificationAudit(client, result.rows, true, status);
+    });
   }
 }

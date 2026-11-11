@@ -405,3 +405,71 @@ test('concurrent metrics requests share one bounded database read', async () => 
   assert.match(queries[0], /READ ONLY/);
   assert.ok(queries.every((sql) => !/UPDATE|INSERT|DELETE/.test(sql)));
 });
+
+test('background event names survive redaction while complaint summaries never contain source data', () => {
+  const events = [
+    'call_complaint_claim_deferred',
+    'call_complaint_failed',
+    'call_complaint_recording_unavailable',
+    'call_complaint_input_too_long',
+    'call_complaint_model_unavailable',
+    'call_complaint_judged',
+    'active_call_count_unavailable',
+    'card_payment_deferred',
+    'order_intake_finalization_deferred',
+    'order_intake_submission_deferred',
+    'order_intake_recovery_failed',
+    'card_revocation_deferred',
+    'call_end_matching_deferred',
+  ];
+  for (const event of events) {
+    const record = logRecord('warn', {
+      event,
+      callSessionSeq: 459,
+      orderSeq: 231,
+      hasComplaint: true,
+      complaintCount: 3,
+      phoneNumber: '01012345678',
+      cardNumber: '4111111111111111',
+      billingKey: 'private-billing-key',
+      paymentKey: 'private-payment-key',
+      types: ['PRIVATE evidence'],
+      votes: 'PRIVATE votes',
+      utteranceText: 'PRIVATE transcript',
+      address: 'PRIVATE address',
+      error: new Error('PRIVATE error'),
+    });
+    assert.equal(record.event, event);
+    assert.ok(!JSON.stringify(record).match(/PRIVATE|private-|01012345678|4111111111111111/));
+    assert.equal(record.callSessionSeq, 459);
+    if (event === 'call_complaint_judged') {
+      assert.equal(record.hasComplaint, true);
+      assert.equal(record.complaintCount, 3);
+    }
+  }
+  assert.equal(logRecord('info', { event: 'unknown-private-event' }).event, 'application_message');
+  assert.equal(
+    logRecord('info', { event: 'call_complaint_judged', complaintCount: 'PRIVATE' }).complaintCount,
+    undefined,
+  );
+});
+
+test('one failed attempt is audited once across domain and HTTP boundaries without suppressing a later request', async () => {
+  const { AuditService } = require('../dist/audit/audit.service');
+  const rows = [];
+  const audit = new AuditService({ insert: async (...args) => rows.push(args) });
+  const error = new Error('PRIVATE payment key');
+  const event = {
+    actorId: null,
+    targetId: 1,
+    targetType: 'ORDER',
+    action: 'ORDER_CARD_PAYMENT',
+    requestId: randomUUID(),
+  };
+  await audit.recordFailure(event, error);
+  await audit.recordFailure({ ...event, action: 'ORDER_PAYMENT_RECONCILED' }, error);
+  assert.equal(rows.length, 1);
+  await audit.recordFailure({ ...event, requestId: randomUUID() }, error);
+  assert.equal(rows.length, 2);
+  assert.ok(!JSON.stringify(rows).includes('PRIVATE'));
+});

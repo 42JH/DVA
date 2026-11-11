@@ -75,6 +75,42 @@ export class OrderPaymentsService {
     return this.repository.releaseClaim(id, claimId, declined);
   }
 
+  async recordPaymentFailure(
+    id: string,
+    requestId: string,
+    error: unknown,
+    action: 'ORDER_PAYMENT_CONFIRMATION' | 'ORDER_PAYMENT_RECONCILED' | 'ORDER_CARD_PAYMENT',
+  ) {
+    let orderId: number | null = null;
+    try {
+      orderId = await this.repository.paymentOrderId(id);
+    } catch {
+      /* Preserve the payment error when the DB is unavailable. */
+    }
+    const response = error instanceof ApiException ? error.getResponse() : null;
+    const code =
+      response && typeof response === 'object' && 'code' in response ? response.code : null;
+    await this.audit.recordFailure(
+      {
+        actorId: null,
+        actorType: 'SYSTEM',
+        targetType: 'ORDER',
+        targetId: orderId,
+        action,
+        requestId,
+        metadata: {
+          reason:
+            code === 'PAYMENT_FAILED'
+              ? 'PAYMENT_DECLINED'
+              : code === 'PAYMENT_RESULT_UNKNOWN'
+                ? 'PAYMENT_RESULT_UNKNOWN'
+                : 'PAYMENT_REQUEST_FAILED',
+        },
+      },
+      error,
+    );
+  }
+
   async claimCardApproval(id: string) {
     return this.database.transaction(async (client) => {
       await client.query("SET LOCAL lock_timeout='2s'");

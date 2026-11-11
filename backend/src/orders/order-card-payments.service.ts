@@ -26,6 +26,14 @@ export class OrderCardPaymentsService {
     }
   }
   async process(id: string, requestId: string) {
+    try {
+      return await this.processApproval(id, requestId);
+    } catch (error: unknown) {
+      await this.orders.recordPaymentFailure(id, requestId, error, 'ORDER_CARD_PAYMENT');
+      throw error;
+    }
+  }
+  private async processApproval(id: string, requestId: string) {
     const claim = await this.orders.claimCardApproval(id);
     if (claim.done) return;
     try {
