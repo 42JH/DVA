@@ -715,6 +715,7 @@ def test_order_intent_notice_carries_missing_so_first_question_follows_order():
 
 @pytest.mark.parametrize(("greeting_address", "reply", "expected"), [
     ("서울 강남구 가람구길 이백십이에서 보내시는 ", "네", "prefilled"),
+    ("서울 강남구 가람구길 이백십이에서 보내시는 ", "아 네", "prefilled"),
     ("서울 강남구 가람구길 이백십이에서 보내시는 ", "네, 다른 주소에서 보낼게요", "name_only"),
     ("서울 강남구 가람구길 이백십삼에서 보내시는 ", "예", "ask_origin"),
     ("", "예", "ask_origin"),
@@ -768,6 +769,91 @@ def test_registered_greeting_answer_preserves_address_scope_without_model(greeti
         assert s.state.origin_answer is (False if expected == "name_only" else None)
 
 
+@pytest.mark.parametrize("explicit_origin_question", [True, False])
+def test_short_yes_only_applies_after_the_pending_origin_question(explicit_origin_question):
+    from backend_client.order import Place as BPlace
+
+    svc, client = flow()
+    svc.d.backend.api.add_customer(CALLER, "김철수", default_origin=BPlace(
+        name="김철수", phone=CALLER, address="서울특별시 강남구 가람9길 212", address_detail="1201호"))
+
+    async def scenario():
+        task = asyncio.create_task(svc.on_incoming(incoming()))
+        await until(lambda: client.conns)
+        conn = client.conns[0]
+        conn.push(started())
+        await until(lambda: svc.registry.calls["live_1"].phase == Phase.ACTIVE)
+        s = svc.registry.calls["live_1"]
+        await ai(conn, "안녕하세요, 김철수님, 서울 강남구 가람구길 이백십이에서 보내시는 택배 접수 도와드릴까요?", 0)
+        await say(conn, "택배를 새로 보낼게요", 1500)
+        await until(lambda: any('"origin_confirm": "registered"' in e.get("content", "") for e in conn.sent))
+        client.decisions.create = AsyncMock(return_value=SimpleNamespace(
+            answers=[choice("origin", "yes", 0.30), choice("switch", "none")]))
+        question = "등록된 발송 주소로 보내실까요?" if explicit_origin_question else "받는 분 연락처를 알려주시겠어요?"
+        await ai(conn, question, 3200)
+        await say(conn, "네", 4200)
+        if explicit_origin_question:
+            await until(lambda: any('"origin": "prefilled"' in e.get("content", "") for e in conn.sent))
+            client.decisions.create.assert_not_awaited()
+            assert s.state.current["sender_address_detail"].value == "1201호"
+        else:
+            client.decisions.create.assert_awaited_once()
+            assert not s.state.current["sender_address"].valid
+        conn.push({"type": "session.closed", "reason": "remote_hangup"})
+        await task
+
+    run(scenario())
+
+
+@pytest.mark.parametrize(("explicit_sender_change", "question"), [
+    (False, "네, 이제 받는 분 성함을 알려 주세요."),
+    (False, "성함을 알려주시겠어요?"),
+    (True, "네, 이제 받는 분 성함을 알려 주세요."),
+])
+def test_receiver_name_question_cannot_clear_sender_without_a_sender_request(explicit_sender_change, question):
+    from backend_client.order import Place as BPlace
+
+    svc, client = flow()
+    svc.d.backend.api.add_customer(CALLER, "김철수", default_origin=BPlace(
+        name="김철수", phone=CALLER, address="서울특별시 강남구 가람9길 212", address_detail="1201호"))
+    client.decisions.create = AsyncMock(return_value=SimpleNamespace(
+        answers=[choice("sender_change", "name"), choice("sender_name_scope", "once_pending"),
+                 choice("switch", "none")]))
+
+    async def scenario():
+        task = asyncio.create_task(svc.on_incoming(incoming()))
+        await until(lambda: client.conns)
+        conn = client.conns[0]
+        conn.push(started())
+        await until(lambda: svc.registry.calls["live_1"].phase == Phase.ACTIVE)
+        s = svc.registry.calls["live_1"]
+        await ai(conn, "안녕하세요, 김철수님, 서울 강남구 가람구길 이백십이에서 보내시는 택배 접수 도와드릴까요?", 0)
+        await say(conn, "아 네", 1500)
+        await until(lambda: any('"origin": "prefilled"' in e.get("content", "") for e in conn.sent))
+        await ai(conn, question, 2800)
+        if explicit_sender_change:
+            await say(conn, "이번만 보내는 분을 다른 분으로 할게요", 3800)
+            await until(lambda: any('"sender_change_next": "sender_name"' in e.get("content", "") for e in conn.sent))
+            assert not s.state.current["sender_name"].valid
+        else:
+            reply = "제 이름은 이영희예요" if question.startswith("성함") else "이영희요"
+            await say(conn, reply, 3800)
+            conn.push({"type": "session.delegation.created", "delegation": {"id": "receiver-name"}, "offset_ms": 3800})
+            conn.push({"type": "response.event", "delegation_id": "receiver-name", "event": {
+                "type": "response.output_item.done", "item": {"type": "function_call", "call_id": "receiver-name",
+                                                             "name": "record_fields",
+                                                             "arguments": json.dumps({"receiver_name": "이영희"})}}})
+            conn.push({"type": "response.event", "delegation_id": "receiver-name", "event": {"type": "response.completed"}})
+            await until(lambda: s.state.current["receiver_name"].valid)
+            assert s.state.current["sender_name"].value == "김철수"
+            assert s.state.current.sender_name_scope_pending is None
+            assert s.state.current["sender_address_detail"].value == "1201호"
+        conn.push({"type": "session.closed", "reason": "remote_hangup"})
+        await task
+
+    run(scenario())
+
+
 def test_origin_answer_alone_prioritizes_new_sender_address():
     from backend_client.order import Place as BPlace
 
@@ -789,7 +875,7 @@ def test_origin_answer_alone_prioritizes_new_sender_address():
         client.decisions.create = AsyncMock(return_value=SimpleNamespace(
             answers=[choice("origin", "no"), choice("switch", "edit_parcel")]))
         await ai(conn, "등록된 발송 주소로 보내실까요?", 3200)
-        await say(conn, "이번에는 다른 곳에서 보낼 거예요", 4200)
+        await say(conn, "네, 이번에는 다른 곳에서 보낼 거예요", 4200)
         await until(lambda: any('"sender_change_next": "sender_address"' in e.get("content", "") for e in conn.sent))
         notice = next(e["content"] for e in conn.sent if '"sender_change_next": "sender_address"' in e.get("content", ""))
         assert json.loads(notice.split("[서버 결과] ", 1)[1])["summary"]["missing"] == ["sender_address"]

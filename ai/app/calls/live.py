@@ -46,9 +46,14 @@ TOOL_LATENCY = {"record_fields": "INFORMATION_INPUT", "find_destination": "ADDRE
 GREETING_ORDER = re.compile(
     r"(?:택배)?접수(?:를)?(?:도와드릴까요|도와드려도될까요|해드릴까요|하시겠어요|하실까요|할까요|하시는건가요)$"
 )
-GREETING_YES = re.compile(r"(?:네|예|응|맞아요|맞습니다|그렇습니다)+")
+SHORT_YES = re.compile(r"(?:아|어|음)?(?:네|예|응|맞아요|맞습니다|그렇습니다)+")
 GREETING_OTHER_ORIGIN = re.compile(r"(?:네|예|아니요)?(?:오늘은|이번에는)?다른(?:주소|곳)에서"
                                   r"(?:보낼게요|보내려고요|보냅니다|발송할게요|발송하려고요)")
+REGISTERED_ORIGIN_QUESTION = re.compile(
+    r"(?:등록된|기존|저장된)발송주소(?:로|에서)(?:그대로)?(?:보내실까요|보내시나요|발송하실까요|발송하시나요)$"
+)
+RECEIVER_NAME_QUESTION = re.compile(r"(?:받는|받으시는|받으실)\s*(?:분|사람)|수취인|수령인")
+SENDER_NAME_REFERENCE = re.compile(r"(?:보내는|보내시는|보내실)\s*(?:분|사람|성함|이름)|발송인|송하인|발신자")
 
 
 @dataclass
@@ -267,8 +272,10 @@ class LiveFlow:
         async with s.lock:
             rt = self.rt(s)
             stage = assess(s.state, self.policy).stage
-            greeting = (_greeting_offer(s.state, prev.text) if stage == "intent" and prev and rt.customer_turns == [utt]
-                        and utt.start_ms >= prev.end_ms - self.policy.confirm.answer_after_readback_tolerance_ms else None)
+            heard_question = prev and utt.start_ms >= prev.end_ms - self.policy.confirm.answer_after_readback_tolerance_ms
+            greeting = (_greeting_offer(s.state, prev.text)
+                        if stage == "intent" and heard_question and rt.customer_turns == [utt] else None)
+            origin_question = bool(heard_question and _asked_pending_origin(s.state, prev.text))
             if greeting in ("registered_origin", "origin_mentioned"):
                 s.state.origin_mentioned_in_greeting = True
             pending = s.state.pending
@@ -286,9 +293,9 @@ class LiveFlow:
                                                                            "item", "readback"))
             box = current.box_proposal if current and s.state.intent == "order" and not pending else None
             cancel_current = s.tools.draft_intake and current is not None and not current.empty()
-        reply = re.sub(r"[\s,.!?…~]+", "", utt.text) if greeting else ""
+        reply = re.sub(r"[\s,.!?…~]+", "", utt.text) if greeting or origin_question else ""
         other_origin = GREETING_OTHER_ORIGIN.fullmatch(reply)
-        if greeting and (other_origin or GREETING_YES.fullmatch(reply)):
+        if greeting and (other_origin or SHORT_YES.fullmatch(reply)):
             answers = {"task": ("order", 1.0)}
             if other_origin or greeting == "registered_origin":
                 answers["origin"] = ("no" if other_origin else "yes", 1.0)
@@ -296,6 +303,10 @@ class LiveFlow:
                 answers["sender_change"] = ("address", 1.0)
             s.note("Decision", "첫 인사 동의", {"origin": greeting})
             await self.apply(s, utt, prev, answers, pending_id, greeting=True)
+            return
+        if origin_question and SHORT_YES.fullmatch(reply):
+            s.note("Decision", "발송 주소 확인 동의")
+            await self.apply(s, utt, prev, {"origin": ("yes", 1.0)}, pending_id)
             return
         # readback 단계는 확인 대기가 풀려 있어도 confirm을 듣는다(Live가 스스로 확인 질문을 하면 '네'가 갈 곳이 없음, 운영 통화 56c133c8)
         questions = decision_questions(self.policy, stage, pending=pending is not None or stage == "readback",
@@ -375,6 +386,14 @@ class LiveFlow:
             origin_answer = answers.get("origin")
             change = answers.get("sender_change")
             next_sender = sender_change_next(st)
+            draft = st.current
+            expecting_receiver_name = (st.intent == "order" and draft and draft["sender_name"].valid
+                                       and not draft["receiver_name"].valid and not next_sender
+                                       and not origin_confirmation(st))
+            receiver_name_answer = (prev and _asked_receiver_name(prev.text, bool(expecting_receiver_name))
+                                    and not SENDER_NAME_REFERENCE.search(utt.text))
+            if receiver_name_answer and change and change[0] in ("name", "both"):
+                change = None  # 받는 분 질문의 답으로 이미 기록된 보내는 분 성함을 비우지 않는다.
             origin_change = False
             sender_change = (sender_change_available(st)
                              and (st.intent == "order" or task and task[0] == "order" and task[1] >= th)
@@ -392,16 +411,17 @@ class LiveFlow:
                     followups.append(("sender_change", utt))
             scope = answers.get("sender_name_scope")
             scope_choice = scope[0] if scope and scope[1] >= th else None
-            if scope_choice in ("once", "save"):
+            if scope_choice in ("once", "save") and not receiver_name_answer:
                 utt.sender_name_scope = scope_choice
             scope_waits_for_name = (scope_choice in ("once_pending", "save_pending") and st.customer.customer_seq
+                                    and not receiver_name_answer
                                     and (not switch or switch[1] < th or switch[0] == "none")
                                     and (st.intent == "order" or task and task[0] == "order" and task[1] >= th))
             if scope_waits_for_name:
                 st.clear("sender_name")
                 st.current.sender_name_scope_pending = scope_choice.removesuffix("_pending")
                 st.current.ask_customer_name_save = st.current.save_sender_name = False
-            scope_resolved = (st.current and st.current.ask_customer_name_save and (
+            scope_resolved = (not receiver_name_answer and st.current and st.current.ask_customer_name_save and (
                 next_sender == "ask_name_save" and scope_choice in ("confirm_once", "confirm_save")
                 or not st.current["sender_name"].valid and utt.sender_name_scope is not None))
             if scope_resolved:
@@ -664,10 +684,8 @@ class LiveFlow:
                         and st.pending and st.pending.kind == "parcel"):
                     facts["readback"] = readback_facts(st.pending.snapshot)
                     facts["readback_id"] = st.pending.id
-            if sender_change or what == "sender_change":
+            if sender_change or what == "sender_change" or facts.get("origin"):
                 s.spawn(self.notify(s, "N2", facts, unless_tool_turn=value), "sender_change")
-            elif facts.get("origin"):
-                await self.notify(s, "N1'", facts)
         elif what == "callback":  # 콜백 동의(yes) → 분석 hasCallbackRequest, 안내는 "담당자가 연락"
             s.note("콜백", value)
             await self.notify(s, "N2", {"agent": "callback_registered" if value == "yes" else "callback_declined"})
@@ -1237,9 +1255,29 @@ def _answer(a) -> tuple[str, float, dict]:
     return str(a.choice), float(a.confidence or 0), probs
 
 
+def _last_question(text: str) -> str:
+    return re.split(r"[.!?…]", text.rstrip(" .!?…"))[-1]
+
+
+def _asked_pending_origin(state: ConversationState, text: str) -> bool:
+    origin = origin_confirmation(state)
+    if not origin or not asks(text):
+        return False
+    if origin == "registered" and REGISTERED_ORIGIN_QUESTION.search("".join(_last_question(text).split())):
+        return True
+    return _greeting_offer(state, text) == "registered_origin"
+
+
+def _asked_receiver_name(text: str, expecting_name: bool) -> bool:
+    question = _last_question(text)
+    if not asks(text) or not re.search(r"성함|이름|누구", question):
+        return False
+    return bool(RECEIVER_NAME_QUESTION.search(question) or expecting_name and not SENDER_NAME_REFERENCE.search(question))
+
+
 def _greeting_offer(state: ConversationState, text: str) -> str | None:
     """첫 인사에서 실제로 들려준 접수 질문과 등록 주소를 대조한다."""
-    question = re.split(r"[.!?…]", text.rstrip(" .!?…"))[-1]
+    question = _last_question(text)
     place = state.customer.origin_place
     location = re.search(r"(.+?)에서\s*(?:발송|보내)", question)
     offered_origin = state.origin_offered and place and place.address and location
