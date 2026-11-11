@@ -339,7 +339,7 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
     const oldName=(await databases.customer.query('SELECT name FROM customers WHERE customer_seq=1')).rows[0].name;
     const oldStarted=(await databases.consultation.query("SELECT to_jsonb(incoming_at)#>>'{}' AS started FROM call_sessions WHERE call_session_seq=1101")).rows[0].started;
     let entered,release;const arrivals=new Promise(r=>entered=r),gate=new Promise(r=>release=r),seen=[];let pending=[];
-    const counts={all:0,incomplete:0,notPaid:0,paid:0,submissionFailed:0,cancelled:0};
+    const counts={all:0,incomplete:0,notPaid:0,paid:0,accepted:0,submissionFailed:0,cancelled:0};
     const server=createServer(async(req,res)=>{
       try {
         assert.equal(req.url,'/internal/admin-order-read');assert.equal(req.headers.authorization,'Bearer '+token);
@@ -511,7 +511,7 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
   await t.test('admin screen searches NFC, formatted phones and literal special characters and groups states',async()=> {
     for(const query of ['', '?limit=1','?offset=999','?q=한글','?q=010-9876-5432','?q=%25','?q=_','?q=%27%20OR%201%3D1--',
       '?from=2030-02-01T00:00:00Z&to=2030-02-10T00:00:00Z&limit=2']) await compare('/api/admin/orders'+query);
-    for(const group of ['COLLECTING','notPaid','PAID','SUBMISSION_FAILED','CANCELLED']) await compare('/api/admin/orders?statusGroup='+group);
+    for(const group of ['COLLECTING','notPaid','PAID','ACCEPTED','SUBMISSION_FAILED','CANCELLED']) await compare('/api/admin/orders?statusGroup='+group);
     for(const organization of [6001,6002,6003,2147483647])for(const group of ['', '&statusGroup=COLLECTING','&statusGroup=PAID','&statusGroup=CANCELLED'])await compare('/api/admin/orders?organizationSeq='+organization+group+'&limit=1&offset=1');
     for(const query of ['?organizationSeq=0','?organizationSeq=2147483648','?organizationSeq=1&organizationSeq=2'])await compare('/api/admin/orders'+query,400);
     const original=await compare('/api/admin/orders?limit=1&offset=1');
@@ -629,7 +629,7 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
     for(const call of [undefined,'','abc','0','-1','2147483648','1,2']) await compare('/api/orders',400,call===undefined?{}:ai(call));
     for(const cookie of ['dva_session=expired','dva_session='+tokens[0]+'; dva_session='+tokens[0]]) await compare('/api/orders',401,{Cookie:cookie,...ai(1011)});
     for(const query of ['', '?direction=BAD','?direction=ORIGIN&unknown=1','?direction=ORIGIN&direction=DESTINATION','?direction=ORIGIN&limit=101']) await compare('/api/customers/1/addresses'+query,400);
-    for(const query of ['?statusGroup=ACCEPTED','?q='+encodeURIComponent('\0'),'?q='+'x'.repeat(201)]) await compare('/api/admin/orders'+query,400);
+    for(const query of ['?statusGroup=UNKNOWN','?q='+encodeURIComponent('\0'),'?q='+'x'.repeat(201)]) await compare('/api/admin/orders'+query,400);
   });
   await t.test('more simultaneous AI reads than any owner pool finish without a callback deadlock',async()=> {
     const path='/api/orders/1001',requestId=randomUUID();

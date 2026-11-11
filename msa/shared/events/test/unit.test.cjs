@@ -280,9 +280,10 @@ test('administrator order read protocol preserves owner addresses, scopes and co
   const {requestDraftCallReferences}=require('../parcel-drafts.cjs');
   const input={eventId:randomUUID(),source:'order',eventType:'AdminOrdersReadRequested',payload:{query:{limit:20,offset:0,q:'_%'},orderAddress:null}};
   validateAdminOrderRead(input,'order');
+  validateAdminOrderRead({...input,payload:{...input.payload,query:{...input.payload.query,statusGroup:'ACCEPTED'}}},'order');
   for(const changed of [{...input,source:'customer'},{...input,payload:{...input.payload,orderAddress:'169.254.169.254'}},{...input,payload:{...input.payload,query:{limit:101,offset:0}}},{...input,payload:{...input.payload,query:{limit:20,offset:0,extra:true}}}])assert.throws(()=>validateAdminOrderRead(changed,'order'));
   const oldFetch=global.fetch;let mode='ok',seen=0;
-  const counts={all:0,incomplete:0,notPaid:0,paid:0,submissionFailed:0,cancelled:0};
+  const counts={all:0,incomplete:0,notPaid:0,paid:0,accepted:0,submissionFailed:0,cancelled:0};
   global.fetch=async(url,options)=>{
     const packet=JSON.parse(options.body);seen++;
     if(packet.eventType==='AdminOrdersReadRequested'){

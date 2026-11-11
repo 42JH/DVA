@@ -40,13 +40,13 @@ export class AdminOrderListQueryDto extends PickType(OrderQueryDto, [
   q?: string;
 
   @ApiPropertyOptional({
-    enum: ['COLLECTING', 'notPaid', 'PAID', 'SUBMISSION_FAILED', 'CANCELLED'],
+    enum: ['COLLECTING', 'notPaid', 'PAID', 'ACCEPTED', 'SUBMISSION_FAILED', 'CANCELLED'],
     description:
-      '전체는 생략하며 실제 주문과 INCOMPLETE 초안을 함께 조회합니다. COLLECTING은 INCOMPLETE 초안만 조회합니다. PAID는 PAID·SUBMITTING·ACCEPTED, SUBMISSION_FAILED는 두 실패 상태를 조회합니다.',
+      '전체는 생략하며 실제 주문과 INCOMPLETE 초안을 함께 조회합니다. COLLECTING은 INCOMPLETE 초안만 조회합니다. PAID는 PAID·SUBMITTING·SUBMITTING_FAILED, ACCEPTED는 접수 완료, SUBMISSION_FAILED는 최종 접수 실패만 조회합니다.',
   })
   @IsOptional()
-  @IsIn(['COLLECTING', 'notPaid', 'PAID', 'SUBMISSION_FAILED', 'CANCELLED'])
-  statusGroup?: 'COLLECTING' | 'notPaid' | 'PAID' | 'SUBMISSION_FAILED' | 'CANCELLED';
+  @IsIn(['COLLECTING', 'notPaid', 'PAID', 'ACCEPTED', 'SUBMISSION_FAILED', 'CANCELLED'])
+  statusGroup?: 'COLLECTING' | 'notPaid' | 'PAID' | 'ACCEPTED' | 'SUBMISSION_FAILED' | 'CANCELLED';
 }
 
 export class OrderListPartyDto extends PickType(OrderAddressValueDto, [
@@ -126,9 +126,11 @@ export class AdminOrderStatusCountsDto {
   incomplete!: number;
   @ApiProperty({ minimum: 0 })
   notPaid!: number;
-  @ApiProperty({ minimum: 0, description: 'PAID·SUBMITTING·ACCEPTED 주문 수.' })
+  @ApiProperty({ minimum: 0, description: 'PAID·SUBMITTING·SUBMITTING_FAILED 주문 수.' })
   paid!: number;
-  @ApiProperty({ minimum: 0, description: 'SUBMITTING_FAILED·SUBMISSION_FAILED 주문 수.' })
+  @ApiProperty({ minimum: 0, description: 'ACCEPTED 주문 수.' })
+  accepted!: number;
+  @ApiProperty({ minimum: 0, description: 'SUBMISSION_FAILED 주문 수.' })
   submissionFailed!: number;
   @ApiProperty({ minimum: 0 })
   cancelled!: number;

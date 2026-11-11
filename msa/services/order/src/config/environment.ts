@@ -92,7 +92,7 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
     (typeof businessToken !== 'string' || !/^[\x21-\x7e]{32,256}$/.test(businessToken))
   )
     errors.push('AI_BUSINESS_TOKEN');
-  const dverSetting = raw.DVER_API_URL ?? 'https://public-n8n.dvercorp.co.kr:47514/webhook/parcel';
+  const dverSetting = raw.DVER_API_URL ?? 'https://purple-wood-25a4.summer2.workers.dev';
   const dverUrl = typeof dverSetting === 'string' ? dverSetting : '';
   try {
     const url = new URL(dverUrl);

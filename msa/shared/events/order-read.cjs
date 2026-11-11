@@ -90,7 +90,7 @@ function validateAdminOrderRead(event, source) {
      !object(q)||!Object.keys(q).every(k=>['limit','offset','q','from','to','organizationSeq','statusGroup'].includes(k))||
      !Number.isInteger(q.limit)||q.limit<1||q.limit>100||!amount(q.offset)||
      q.organizationSeq!==undefined&&!id(q.organizationSeq)||
-     q.statusGroup!==undefined&&!['COLLECTING','notPaid','PAID','SUBMISSION_FAILED','CANCELLED'].includes(q.statusGroup)||
+     q.statusGroup!==undefined&&!['COLLECTING','notPaid','PAID','ACCEPTED','SUBMISSION_FAILED','CANCELLED'].includes(q.statusGroup)||
      q.q!==undefined&&(!text(q.q)||q.q.includes('\0')||[...q.q].length>200)||
      ['from','to'].some(k=>q[k]!==undefined&&!text(q[k]))||
      ['orderAddress',...(source==='order'?[]:['consultationAddress']),...(source==='customer'?['customerAddress']:[])].some(k=>p[k]!==null&&!require('./call-event-reference.cjs').privateAddress(p[k])))
@@ -99,7 +99,7 @@ function validateAdminOrderRead(event, source) {
 const adminParty=value=>keys(value,'detailAddress,jibunAddress,name,phoneNumber,roadAddress')&&Object.values(value).every(field=>nullable(field,text));
 function adminPage(value,limit) {
   return keys(value,'data,hasNext,statusCounts,total_count')&&Array.isArray(value.data)&&value.data.length<=limit&&
-    typeof value.hasNext==='boolean'&&amount(value.total_count)&&keys(value.statusCounts,'all,cancelled,incomplete,notPaid,paid,submissionFailed')&&Object.values(value.statusCounts).every(amount)&&
+    typeof value.hasNext==='boolean'&&amount(value.total_count)&&keys(value.statusCounts,'accepted,all,cancelled,incomplete,notPaid,paid,submissionFailed')&&Object.values(value.statusCounts).every(amount)&&
     value.data.every(row=>keys(row,'createdAt,customerSeq,draftSeq,orderSeq,organizationName,parcels,pickupRequestedAt,status')&&id(row.orderSeq)&&nullable(row.customerSeq,id)&&nullable(row.draftSeq,id)&&nullable(row.organizationName,text)&&instant(row.createdAt)&&nullable(row.pickupRequestedAt,instant)&&ORDER_STATUSES.includes(row.status)&&
       Array.isArray(row.parcels)&&row.parcels.every(p=>keys(p,'bigBoxCount,destination,documentCount,mediumBoxCount,orderParcelSeq,origin,otherItemDescription,smallBoxCount,status')&&nullable(p.orderParcelSeq,id)&&['ACTIVE','CANCELLED'].includes(p.status)&&adminParty(p.origin)&&adminParty(p.destination)&&text(p.otherItemDescription)&&['documentCount','smallBoxCount','mediumBoxCount','bigBoxCount'].every(k=>amount(p[k]))));
 }

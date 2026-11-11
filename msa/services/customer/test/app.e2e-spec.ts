@@ -239,6 +239,10 @@ describe('Customer read API (e2e)', () => {
       .get('/api/companies/search?q=test')
       .set('Cookie', 'dva_session=stale')
       .set('Authorization', 'Bearer ' + businessToken)
+      .expect(401);
+    await request(app.getHttpServer())
+      .get('/api/companies/search?q=test')
+      .set('Authorization', 'Bearer ' + businessToken)
       .expect(200);
     await request(app.getHttpServer())
       .get('/api/companies/members/search?q=test')
