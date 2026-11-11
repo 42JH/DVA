@@ -154,6 +154,14 @@ class CallService:
                     "service_tier": "priority"}}}
         if persona and persona.voice:  # 원본 live_session.build_session과 같은 자리
             config["audio"] = {"output": {"voice": persona.voice}}
+        if self.d.cfg.turn_mode == "server":
+            config["delegation"] = {"type": "client"}
+            config["instructions"] += (
+                "\n[서버 주도 통화] 아래 규칙이 발화 절차보다 우선합니다. 첫 인사는 서버의 call_started에만 합니다. "
+                "고객이 말한 뒤에는 다음 서버 결과를 기다립니다. 스스로 질문·업무 선택·기록 완료 안내를 만들지 않습니다. "
+                "서버 결과의 next_question 또는 지정 안내 하나만 전달하고 기다립니다. "
+                "고객이 끼어들면 듣습니다. 위임 신호 자체에는 말하지 않습니다."
+            )
         return config
 
     # --- 고객 확인 2단계(be-api.md §1, call-lifecycle.md §2.2) ---

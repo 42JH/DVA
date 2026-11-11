@@ -3,7 +3,8 @@
 import asyncio
 import re
 import time
-from dataclasses import dataclass
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 
 from openai import APIError
@@ -14,13 +15,14 @@ from app.domain.address_book import (begin_sender_name_change, origin_confirmati
                                      sender_change_available, sender_change_next)
 from app.domain.assess import assess
 from app.domain.candidates import apply_pick, reject_candidates
-from app.domain.confirm import ConfirmAnswer, Utterance, check_gate, commit_parcel, release
+from app.domain.confirm import (ConfirmAnswer, Utterance, check_gate, commit_parcel, explicitly_requests_parcel,
+                                issue_cancel_confirmation, release)
 from app.domain.state import ConversationState
 from app.domain.store import hold_unclassified_items
 from app.policy.model import Policy
 from app.policy.render import decision_questions
 from app.tools.context import ToolContext
-from app.tools.lookup import resume_destination
+from app.tools.lookup import lookup_order_facts, resume_destination
 from app.tools.outcome import state_summary
 from app.tools.record import RecordArgs, record_fields
 
@@ -40,8 +42,11 @@ class TurnInput:
     destination: str | None = None
     pick_allowed: bool = False
     end_question: bool = False
+    end_waiting: bool = False
     spoken_question: str | None = None
     receiver_name_answer: bool = False
+    tools: ToolContext | None = None
+    before_lookup: Callable[[], Awaitable[None]] | None = None
 
 
 @dataclass(frozen=True)
@@ -59,6 +64,8 @@ class TurnResult:
     status: str = "ok"
     tool_calls: int = 0
     address_unverified: bool = False
+    facts: dict = field(default_factory=dict)
+    commit_pending: str | None = None
 
 
 def observe_turn(state: ConversationState, policy: Policy, action: str | None = None) -> TurnState:
@@ -89,9 +96,11 @@ class TurnPipeline:
             state.origin_mentioned_in_greeting = True
         review = hold_unclassified_items(state, self.policy.parcel_items, customer.utterance_id, text)
         if review:
-            return self._result(state, "closed", "item_review")
+            return self._result(state, "closed", "item_review", facts={"item_review": review})
         if turn.end_question and (yes or no):
             return self._result(state, "closed", "end" if yes else "readback")
+        if turn.end_waiting and (yes or no):
+            return self._result(state, "closed", "confirm_end")
         if turn.greeting and yes:
             state.intent = "order"
             self._origin_step(state, True if turn.greeting == "registered_origin" else None)
@@ -107,17 +116,18 @@ class TurnPipeline:
             return self._result(state, "closed")
         if turn.spoken_question == "callback" and state.callback_offered and (yes or no):
             state.callback_offered, state.callback_requested = False, yes
-            return self._result(state, "closed", "callback")
+            return self._result(state, "closed", "callback",
+                                facts={"agent": "callback_registered" if yes else "callback_declined"})
         if turn.spoken_question == "box" and state.current and state.current.box_proposal and (yes or no):
             box = state.current.box_proposal
             if no:
                 state.current.box_proposal = None
                 state.bump()
-            else:
-                field = f"{box.size}_box_count"
-                await record_fields(self._tools(turn), RecordArgs(add_item_counts=[field], **{field: box.count}),
-                                    expected_box=box)
-            return self._result(state, "closed")
+                return self._result(state, "closed", facts={"box_proposal_declined": True})
+            field = f"{box.size}_box_count"
+            out = await record_fields(self._tools(turn), RecordArgs(add_item_counts=[field], **{field: box.count}),
+                                      expected_box=box)
+            return self._result(state, "closed", facts=out.facts | ({"needs": out.needs} if out.needs else {}))
 
         answers, decision_status = await self._decide(turn)
         confidence = {name: choice for name, (choice, score, _) in answers.items() if score >= ACTION_CONFIDENCE}
@@ -131,13 +141,32 @@ class TurnPipeline:
             return self._result(state, "closed", "confirm_end")
         if switch in ("end", "agent"):
             return self._result(state, "closed", switch)
-        if switch in ("lookup", "cancel", "cancel_current", "inquiry", "edit_parcel", "edit_other_parcel"):
+        if turn.spoken_question == "more_parcels" and state.parcels:
+            more = confidence.get("more")
+            if more == "no_more":
+                state.no_more_parcels = True
+                return self._result(state, "closed")
+            if more == "more" or yes:
+                state.current = None
+                state.origin_answer = None
+                state.origin_applied = False
+                self._origin_step(state, None)
+                next_question = observe_turn(state, self.policy).next_question
+                if next_question == "more_parcels":
+                    next_question = "sender_name" if not state.customer.customer_seq else "sender_address"
+                return self._result(state, "closed", next_question)
+        if switch in ("cancel_current", "edit_parcel", "edit_other_parcel") or (
+                turn.tools is None and switch in ("lookup", "cancel", "inquiry")):
             return self._result(state, "closed", switch, "external_action")
+        if switch in ("lookup", "cancel") or switch == "inquiry" and state.intent is None:
+            if state.intent != switch:
+                state.pending, state.candidates, state.selected_order = None, None, None
+            state.intent = switch
         if confidence.get("task") == "order" and state.intent is None:
             state.intent = "order"
             self._origin_step(state, None)
-            if hold_unclassified_items(state, self.policy.parcel_items, customer.utterance_id, text):
-                return self._result(state, "closed", "item_review")
+            if review := hold_unclassified_items(state, self.policy.parcel_items, customer.utterance_id, text):
+                return self._result(state, "closed", "item_review", facts={"item_review": review})
         sender_change = confidence.get("sender_change")
         if sender_change in ("name", "both") and turn.receiver_name_answer:
             sender_change = None
@@ -165,13 +194,22 @@ class TurnPipeline:
             if answer in ("no", "change") and score >= ACTION_CONFIDENCE:
                 release(state, pending.id)
                 selected = True
-            elif answer in ("yes", "proceed") and not mixed and check_gate(
+            elif answer in ("yes", "proceed") and (not mixed or (
+                    explicitly_requests_parcel(text) and not (value and value[0] == "yes" and value[1] >= 0.5)
+            )) and check_gate(
                     state, self.policy, pending.id, ConfirmAnswer(answer, probabilities), customer, turn.previous,
                     latest_applied_utterance=None, closed=False).ok:
+                if turn.tools is not None:
+                    return TurnResult(observe_turn(state, self.policy), "closed", commit_pending=pending.id)
                 if pending.kind == "cancel":
                     return self._result(state, "closed", "cancel", "external_action")
                 selected = commit_parcel(state, self.policy, pending.id) is not None
         if not mixed and selected:
+            if turn.tools is not None and pick_applied and state.selected_order:
+                if state.intent == "cancel":
+                    issue_cancel_confirmation(state, turn.tools.clock())
+                elif state.intent == "lookup":
+                    return self._result(state, "closed", facts={"lookup_order": lookup_order_facts(state.selected_order)})
             return self._result(state, "closed")
 
         scope = None if turn.receiver_name_answer else confidence.get("sender_name_scope")
@@ -194,16 +232,18 @@ class TurnPipeline:
         findings["pick_applied"] = pick_applied
         backend = await self.backend.run(self._tools(turn, scope), {
             "customer": text, "previous_question": turn.previous.text if turn.previous else None,
-            "state": summary, "decision": findings, "now": turn.now.isoformat(),
-        })
+            "state": summary, "decision": findings, "now": turn.now.isoformat(), "requested_action": switch,
+        }, before_lookup=turn.before_lookup)
+        if turn.tools is not None and state.intent == "cancel" and state.selected_order:
+            issue_cancel_confirmation(state, turn.tools.clock())
         return TurnResult(observe_turn(state, self.policy), "backend",
                           backend.status if backend.status != "ok" else decision_status,
-                          backend.tool_calls, backend.address_unverified)
+                          backend.tool_calls, backend.address_unverified, backend.facts)
 
     def _tools(self, turn: TurnInput, scope: str | None = None) -> ToolContext:
-        return ToolContext("shadow", turn.state, self.policy, backend=None, now=lambda: turn.now,
-                           item_utterance=(turn.customer.utterance_id, turn.customer.text),
-                           sender_name_scope=scope if scope in ("once", "save") else None)
+        tools = turn.tools or ToolContext("shadow", turn.state, self.policy, backend=None, now=lambda: turn.now)
+        return replace(tools, item_utterance=(turn.customer.utterance_id, turn.customer.text),
+                       sender_name_scope=scope if scope in ("once", "save") else None)
 
     def _origin_step(self, state: ConversationState, use_registered: bool | None) -> None:
         if use_registered is not None:
@@ -219,8 +259,9 @@ class TurnPipeline:
             state.origin_applied = True
             resume_destination(state)
 
-    def _result(self, state: ConversationState, route: str, action: str | None = None, status: str = "ok") -> TurnResult:
-        return TurnResult(observe_turn(state, self.policy, action), route, status)
+    def _result(self, state: ConversationState, route: str, action: str | None = None, status: str = "ok",
+                *, facts: dict | None = None) -> TurnResult:
+        return TurnResult(observe_turn(state, self.policy, action), route, status, facts=facts or {})
 
     async def _decide(self, turn: TurnInput) -> tuple[dict, str]:
         state = turn.state
@@ -232,6 +273,7 @@ class TurnPipeline:
             sender_change=sender_change_available(state),
             sender_name_scope=bool(state.customer.customer_seq and state.intent in (None, "order")
                                    and not turn.receiver_name_answer),
+            cancel_current=bool(turn.tools and turn.tools.draft_intake and state.current and not state.current.empty()),
         )
         for question in questions:
             if question["name"] == "switch":

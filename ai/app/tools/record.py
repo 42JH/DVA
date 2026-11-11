@@ -21,6 +21,7 @@ from app.domain.address_book import (begin_sender_name_change, origin_confirmati
                                      request_sender_address_change, save_offer, sender_change_available,
                                      sender_change_next)
 from app.domain.assess import area_label, readback_facts
+from app.domain.candidates import reset_receiver_destination
 from app.domain.confirm import issue_parcel_confirmation
 from app.domain.parcel_items import (ItemIssue, contextual_keyword, excluded_evidence, measurements, mentions,
                                      size_issues, supported_box_correction, unclassified_mentions)
@@ -37,6 +38,7 @@ from app.tools.outcome import ToolOutcome, state_summary
 
 TEXT = ("sender_name", "sender_address_detail", "receiver_name", "receiver_address_detail")
 ADDRESSES = ("sender_address", "receiver_address")
+ROLE_RECEIVER = ("receiver_name", "receiver_phone", "receiver_address", "receiver_address_detail")
 COUNTS = ("document_count", "small_box_count", "medium_box_count", "big_box_count")
 BOX_COUNTS = COUNTS[1:]
 CountField = Literal["document_count", "small_box_count", "medium_box_count", "big_box_count"]
@@ -61,6 +63,10 @@ class RecordArgs(Args):
     sender_address: str | None = Field(None, max_length=120, description="발송 기본주소(도로명·지번). '○○에서 보낼게요'의 ○○")
     sender_address_detail: str | None = Field(None, max_length=60, description="발송지 상세주소. 없다고 하면 빈 문자열")
     receiver_name: str | None = Field(None, max_length=30)
+    keep_receiver_destination: bool | None = Field(
+        None, description="받는 분 성함만 정정하는 같은 사람이거나 고객이 기존 주소와 연락처를 그대로 쓰라고 한 경우에만 true")
+    keep_receiver_address: bool | None = Field(
+        None, description="다른 받는 분으로 바꾸면서 받는 곳 주소는 그대로 쓰라고 명시했을 때만 true. 연락처는 유지하지 않는다")
     receiver_phone: str | None = Field(None, max_length=40, description="들은 그대로(한글 숫자 가능)")
     receiver_address: str | None = Field(None, max_length=120, description="받는 곳 기본주소(도로명·지번). '○○로 보낼게요'의 ○○")
     receiver_address_detail: str | None = Field(None, max_length=60, description="받는 곳 상세주소. 없다고 하면 빈 문자열")
@@ -173,7 +179,13 @@ async def record_fields(ctx: ToolContext, args: RecordArgs, *, expected_box: Box
         deps = {a: s.field_of(a).version for a in ADDRESSES}
         current = {a: s.field_of(a).value for a in ADDRESSES}
         draft = s.current
-    heard = {a: given[a].strip() for a in ADDRESSES if a in given and given[a].strip() != current[a]}
+        recipient = draft["receiver_name"]
+        replace_recipient = bool(recipient.valid and (name := values.get("receiver_name"))
+                                 and recipient.value != name and not args.keep_receiver_destination)
+        recipient_versions = tuple(draft[key].version for key in ROLE_RECEIVER)
+    clear_receiver_address = replace_recipient and not args.keep_receiver_address
+    heard = {a: given[a].strip() for a in ADDRESSES if a in given and (
+        given[a].strip() != current[a] or a == "receiver_address" and clear_receiver_address)}
     results = dict(zip(heard, await asyncio.gather(*(_resolve(ctx, h) for h in heard.values()))))  # ②
 
     async with ctx.lock:  # ③
@@ -182,8 +194,14 @@ async def record_fields(ctx: ToolContext, args: RecordArgs, *, expected_box: Box
         facts: dict = {"recorded": [], "changed": [], "cleared": []}
         if draft is not s.current:
             return ToolOutcome("needs_input", "RESULT_SUPERSEDED", summary=state_summary(s, policy))
+        if (values.get("receiver_name") and recipient_versions[0] != draft["receiver_name"].version or
+                replace_recipient and recipient_versions != tuple(draft[key].version for key in ROLE_RECEIVER)):
+            return ToolOutcome("needs_input", "RESULT_SUPERSEDED", summary=state_summary(s, policy))
         if expected_box is not None and (draft.box_proposal is not expected_box or s.intent != "order" or s.pending):
             return ToolOutcome("needs_input", "RESULT_SUPERSEDED", summary=state_summary(s, policy))
+        if replace_recipient:
+            facts["cleared"].extend(reset_receiver_destination(s, keep_address=not clear_receiver_address))
+            deps["receiver_address"] = draft["receiver_address"].version
         sender_address_pending = sender_change_next(s) in ("sender_address", "sender_address_detail")
         old_items = draft["items"].value if draft["items"].valid else None
         was_box_pending = draft.box_size_pending
