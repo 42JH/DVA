@@ -1,11 +1,24 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsUUID } from 'class-validator';
+import { IsInt, IsString, IsUUID, Matches, Max, MaxLength, Min } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { ORDER_STATUSES } from '../orders/orders.types';
 const uuidCase = ({ value }: { value: unknown }) =>
   typeof value === 'string' ? value.toLowerCase() : value;
 export class PaymentIdDto {
   @ApiProperty({ format: 'uuid' }) @Transform(uuidCase) @IsUUID('4') id!: string;
+}
+export class ConfirmPaymentDto {
+  @ApiProperty({ format: 'uuid' }) @Transform(uuidCase) @IsUUID('4') orderId!: string;
+  @ApiProperty({ minimum: 1, maximum: 2147483647 })
+  @IsInt()
+  @Min(1)
+  @Max(2147483647)
+  amount!: number;
+  @ApiProperty({ maxLength: 200 })
+  @IsString()
+  @MaxLength(200)
+  @Matches(/^[\x21-\x7e]+$/)
+  paymentKey!: string;
 }
 export class EmptyPaymentDto {}
 export class PaymentStatusDto {

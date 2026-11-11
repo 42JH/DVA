@@ -839,7 +839,10 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
       } catch(error) {await client.query('ROLLBACK');throw error;}
       finally {client.release();}
     }
-    await post(1005,503);
+    for(const runtime of ['./monolith-runtime','../dist']) {
+      const {DverClient}=require(runtime+'/orders/dver.client');
+      assert.throws(()=>new DverClient({get:()=>undefined}).ensureConfigured(),error=>error.getStatus()===503);
+    }
 
     const providerRequests=[], deliveryRequests=[];
     let dropped=false;
@@ -934,6 +937,116 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
       ' FROM audit_logs WHERE request_id=ANY($1::uuid[]) ORDER BY request_id,action',[requests])).rows;
     assert.deepEqual(await audit(databases.operations),await audit(reference));
     t.diagnostic('submission HTTP pairs: '+(requests.length-1)+'; Dver request, shipment persistence and duplicate acknowledgement');
+  });
+  await t.test('payment approval and reconciliation preserve provider calls, paid state and delivery', async () => {
+    const pending='00000000-0000-4000-8000-000000000001';
+    const second='00000000-0000-4000-8000-000000000021';
+    const requests=[];
+    const path=(id,action)=>'/api/payments/requests/'+id+'/'+action;
+    const docs=await Promise.all(sides.map(async side=>(await fetch(side.base+'/api/docs-json')).json()));
+    for(const action of ['confirm','reconcile'])
+      assert.deepEqual(docs[1].paths[path('{id}',action)].post,docs[0].paths[path('{id}',action)].post);
+    assert.deepEqual(docs[1].components.schemas.ConfirmPaymentDto,docs[0].components.schemas.ConfirmPaymentDto);
+    for(const db of [reference,databases.order]) {
+      const client=await db.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query("SET LOCAL session_replication_role='replica'");
+        await client.query("UPDATE order_parcels SET origin_name=COALESCE(origin_name,'발송인'),item_price=1000,notified_price=3500 WHERE order_seq=1002");
+        await client.query('INSERT INTO orders(order_seq,customer_seq,payment_method_type,status,version,created_at,updated_at,creation_source,total_amount,payment_due_at,pickup_requested_at) '+
+          'OVERRIDING SYSTEM VALUE SELECT 1051,customer_seq,payment_method_type,status,version,created_at,updated_at,creation_source,total_amount,payment_due_at,pickup_requested_at FROM orders WHERE order_seq=1002');
+        await client.query('INSERT INTO order_parcels(order_parcel_seq,order_seq,parcel_position,origin_name,origin_phone_number,'+
+          'origin_road_address,origin_jibun_address,origin_dong_name,origin_postal_code,destination_name,destination_phone_number,'+
+          'destination_road_address,destination_jibun_address,destination_dong_name,destination_postal_code,document_count,item_price,notified_price) '+
+          'OVERRIDING SYSTEM VALUE SELECT 20511,1051,1,origin_name,origin_phone_number,origin_road_address,origin_jibun_address,origin_dong_name,origin_postal_code,'+
+          'destination_name,destination_phone_number,destination_road_address,destination_jibun_address,destination_dong_name,destination_postal_code,1,1000,7000 '+
+          'FROM order_parcels WHERE order_parcel_seq=20021');
+        await client.query("INSERT INTO order_payment_requests(payment_request_id,order_seq,amount,expires_at,notification_status) VALUES($1,1051,7000,'2094-01-01T00:00:00Z','SENT')",[second]);
+        await client.query('COMMIT');
+      } catch(error) {await client.query('ROLLBACK');throw error;}
+      finally {client.release();}
+    }
+    const origin='https://payments.example.test';
+    async function post(id,action,body,expected,extra={}) {
+      const requestId=randomUUID(), results=[];
+      requests.push(requestId);
+      for(const side of sides) {
+        const response=await fetch(side.base+path(id,action),{method:'POST',signal:AbortSignal.timeout(20000),
+          headers:{Origin:origin,Cookie:'dva_session=invalid','Content-Type':'application/json','X-Request-Id':requestId,...extra},
+          body:JSON.stringify(body)});
+        const result=await response.json();
+        assert.equal(response.status,expected,side.name+' '+action+' '+JSON.stringify(result));
+        assert.equal(response.headers.get('cache-control'),'no-store');
+        if(expected===200)assert.equal(response.headers.get('referrer-policy'),'no-referrer');
+        results.push(result);
+      }
+      assert.deepEqual(results[1],results[0],action+' '+id);
+      return results[0].data;
+    }
+    const input=(id,key)=>({orderId:id,amount:7000,paymentKey:key});
+    await post(pending,'confirm',input(pending,'unused'),403,{Origin:'http://wrong.invalid'});
+    await post(pending,'confirm',input(second,'unused'),400);
+    await post(pending,'confirm',{...input(pending,'unused'),amount:1},409);
+    await post(pending,'confirm',{...input(pending,'unused'),paymentKey:'invalid key'},400);
+    await post(pending,'reconcile',{unexpected:true},400);
+    await post(pending,'reconcile',{},409);
+    await post(pending,'confirm',input(pending,'reject-card'),422);
+    for(const db of [reference,databases.order]) {
+      const {rows}=await db.query('SELECT provider_payment_key,approval_started_at FROM order_payment_requests WHERE payment_request_id=$1',[pending]);
+      assert.deepEqual(rows,[{provider_payment_key:null,approval_started_at:null}]);
+    }
+    await post(pending,'confirm',input(pending,'approve-unknown'),502);
+    await post(pending,'confirm',input(pending,'other-key'),409);
+    for(const [db,runtime] of [[reference,'./monolith-runtime'],[databases.order,'../dist']]) {
+      const {PaymentsRepository}=require(runtime+'/payments/payments.repository');
+      const repo=new PaymentsRepository({pool:db});
+      assert.deepEqual(await repo.pendingApprovals(),[{id:pending}]);
+      assert.deepEqual(await repo.pendingApprovals(),[]);
+    }
+    const recovered=await post(pending,'reconcile',{},200);
+    const approved=await post(second,'confirm',input(second,'approve-normal'),200);
+    for(const view of [recovered,approved]) {
+      assert.equal(view.status,'PAID');
+      assert.equal(view.orderStatus,'ACCEPTED');
+      assert.equal(view.approvedAt,'2030-03-01T09:01:00.000Z');
+      assert.equal(view.pickupRequestedAt,'2030-03-02T00:00:00.000Z');
+      assert.equal(view.completionNotificationStatus,'PENDING');
+    }
+    assert.deepEqual(await post(pending,'reconcile',{},200),recovered);
+    assert.deepEqual(await post(second,'confirm',input(second,'approve-normal'),200),approved);
+    const calls=await Promise.all(['monolith','order'].map(async owner=>{
+      const response=await fetch('http://'+owner+'-app:8000/__requests',{headers:{Authorization:'Bearer '+process.env.CUSTOMER_AUTH_TOKEN}});
+      assert.equal(response.status,200);
+      return response.json();
+    }));
+    assert.deepEqual(calls[1],calls[0]);
+    assert.deepEqual(calls[0].map(call=>[call.method,call.path]),[
+      ['POST','/v1/payments/confirm'],['POST','/v1/payments/confirm'],['GET','/v1/payments/approve-unknown'],
+      ['POST','/parcel'],['POST','/v1/payments/confirm'],['POST','/parcel'],
+    ]);
+    const stored=async db=>(await db.query(
+      'SELECT r.payment_request_id,r.provider_reference,r.provider_payment_key,r.provider_approved_at,'+
+      'r.approval_claim_id,r.approval_claimed_until,r.completed_at IS NOT NULL AS completed,'+
+      'r.completion_notification_status,o.status,o.parcel_no,o.dver_received_at,o.paid_at,o.pickup_requested_at,o.total_amount,o.version '+
+      'FROM order_payment_requests r JOIN orders o USING(order_seq) WHERE payment_request_id=ANY($1::uuid[]) ORDER BY payment_request_id',
+      [[pending,second]],
+    )).rows;
+    assert.deepEqual(await stored(databases.order),await stored(reference));
+    const audit=async db=>(await db.query('SELECT request_id,action,result,target_type,target_seq,actor_type,actor_seq,metadata'+
+      ' FROM audit_logs WHERE request_id=ANY($1::uuid[]) ORDER BY request_id,action',[requests])).rows;
+    const expected=await audit(reference);
+    assert.deepEqual(await audit(databases.operations),expected);
+    assert.equal(expected.filter(row=>row.action==='ORDER_PAYMENT_COMPLETED').length,2);
+    const delivery=new Pool({host:'delivery-db',user:'delivery_app'});
+    try {
+      const shipments=async db=>(await db.query(
+        'SELECT order_parcel_seq,s.status,h.to_status,h.actor_type FROM shipments s JOIN shipment_status_history h USING(shipment_seq) '+
+        'WHERE order_parcel_seq=ANY($1::int[]) ORDER BY order_parcel_seq',[[20021,20022,20511]],
+      )).rows;
+      assert.equal((await shipments(reference)).length,3);
+      assert.deepEqual(await shipments(delivery),await shipments(reference));
+    } finally {await delivery.end();}
+    t.diagnostic('approval HTTP pairs: '+requests.length+'; provider idempotency, approval recovery, paid state and shipments');
   });
   console.log('Compared HTTP requests: '+compared);
 });

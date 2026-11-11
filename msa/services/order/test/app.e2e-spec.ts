@@ -70,6 +70,8 @@ describe('Order read API (e2e)', () => {
           '/api/payments/notifications/{id}/completion/retry',
           '/api/payments/notifications/{id}/retry',
           '/api/payments/requests/{id}',
+          '/api/payments/requests/{id}/confirm',
+          '/api/payments/requests/{id}/reconcile',
           '/order/health',
           '/order/health/ready',
         ]);

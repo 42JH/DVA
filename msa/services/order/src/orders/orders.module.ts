@@ -53,6 +53,6 @@ import { OrderSubmissionWorker } from './order-submission.worker';
     OrderSubmissionService,
     OrderSubmissionWorker,
   ],
-  exports: [OrderSubmissionService],
+  exports: [OrderSubmissionService, OrdersRepository],
 })
 export class OrdersModule {}

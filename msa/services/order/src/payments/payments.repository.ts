@@ -118,6 +118,81 @@ export class PaymentsRepository {
     return { ...request, order };
   }
 
+  async reserveApproval(client: PoolClient, id: string, key: string, claimId: string) {
+    const result = await client.query(
+      `UPDATE order_payment_requests SET provider_payment_key=$2,
+        approval_started_at=COALESCE(approval_started_at,clock_timestamp()),approval_claim_id=$3,
+        approval_claimed_until=clock_timestamp()+interval '45 seconds' WHERE payment_request_id=$1
+        AND EXISTS(SELECT 1 FROM orders o WHERE o.order_seq=order_payment_requests.order_seq
+          AND o.deleted_at IS NULL AND COALESCE(o.closed_at,o.created_at)>clock_timestamp()-interval '5 years')`,
+      [id, key, claimId],
+    );
+    return result.rowCount === 1;
+  }
+
+  async markPaid(client: PoolClient, id: number, approvedAt?: string) {
+    await client.query(
+      `WITH paid AS (SELECT COALESCE($2::timestamptz,clock_timestamp()) AS at),
+       pickup AS (SELECT at,date_trunc('day',at AT TIME ZONE 'Asia/Seoul') AS local_day FROM paid)
+       UPDATE orders SET status='PAID',paid_at=pickup.at,pickup_requested_at=CASE
+         WHEN pickup_requested_at>=pickup.at THEN pickup_requested_at
+         WHEN pickup.at+interval '1 hour'>(pickup.local_day+interval '17 hours') AT TIME ZONE 'Asia/Seoul'
+           THEN (pickup.local_day+interval '1 day 9 hours') AT TIME ZONE 'Asia/Seoul'
+         ELSE GREATEST(pickup.at+interval '1 hour',(pickup.local_day+interval '9 hours') AT TIME ZONE 'Asia/Seoul') END,
+       billing_organization_seq=NULL,billing_department_seq=NULL,
+       billing_organization_name=NULL,billing_department_name=NULL
+       FROM pickup WHERE order_seq=$1`,
+      [id, approvedAt ?? null],
+    );
+  }
+
+  async complete(client: PoolClient, id: string, reference: string) {
+    await client.query(
+      "UPDATE order_payment_requests SET completed_at=clock_timestamp(),provider_reference=$2,approval_claim_id=NULL,approval_claimed_until=NULL,completion_notification_status='PENDING' WHERE payment_request_id=$1",
+      [id, reference],
+    );
+  }
+
+  async releaseClaim(id: string, claimId: string, declined = false) {
+    const result = await this.database.pool.query(
+      `UPDATE order_payment_requests SET approval_claim_id=NULL,approval_claimed_until=NULL,
+      approval_started_at=CASE WHEN $3 THEN NULL ELSE approval_started_at END,
+      provider_payment_key=CASE WHEN $3 THEN NULL ELSE provider_payment_key END,
+      approval_next_check_at=CASE WHEN $3 THEN NULL ELSE approval_next_check_at END
+      WHERE payment_request_id=$1 AND approval_claim_id=$2 AND completed_at IS NULL
+      AND (NOT $3 OR (provider_approved_at IS NULL AND invalidated_at IS NULL
+        AND approval_claimed_until>clock_timestamp()))`,
+      [id, claimId, declined],
+    );
+    return result.rowCount === 1;
+  }
+
+  async recordApproval(id: string, key: string, approvedAt: string) {
+    await this.database.pool.query(
+      'UPDATE order_payment_requests SET provider_approved_at=$3 WHERE payment_request_id=$1 AND provider_payment_key=$2',
+      [id, key, approvedAt],
+    );
+  }
+
+  async pendingApprovals() {
+    // Schedule before I/O so even unreadable requests yield their place after a failed lookup.
+    return (
+      await this.database.pool.query<{
+        id: string;
+      }>(`WITH candidates AS (
+      SELECT r.payment_request_id FROM order_payment_requests r JOIN orders o USING(order_seq)
+      WHERE r.provider_payment_key IS NOT NULL AND r.approval_started_at IS NOT NULL AND r.invalidated_at IS NULL
+      AND r.completed_at IS NULL AND (r.approval_claimed_until IS NULL OR r.approval_claimed_until<=clock_timestamp())
+      AND (r.approval_next_check_at IS NULL OR r.approval_next_check_at<=clock_timestamp())
+      AND o.deleted_at IS NULL AND COALESCE(o.closed_at,o.created_at)>statement_timestamp()-interval '5 years'
+      ORDER BY COALESCE(r.approval_next_check_at,r.approval_started_at),r.payment_request_id
+      LIMIT 20 FOR UPDATE OF r SKIP LOCKED)
+      UPDATE order_payment_requests r SET approval_next_check_at=clock_timestamp()+interval '1 minute'
+      FROM candidates c WHERE r.payment_request_id=c.payment_request_id
+      RETURNING r.payment_request_id AS id`)
+    ).rows;
+  }
+
   async queueNotification(client: PoolClient, id: string) {
     await client.query(
       "UPDATE order_payment_requests SET notification_status='PENDING',notification_attempted_at=NULL,notification_sent_at=NULL WHERE payment_request_id=$1",

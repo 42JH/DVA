@@ -2,6 +2,8 @@ import { Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy } from '@ne
 import { ConfigService } from '@nestjs/config';
 import { Environment } from '../config/environment';
 import { PaymentsService } from './payments.service';
+import { PaymentsRepository } from './payments.repository';
+import { randomUUID } from 'node:crypto';
 @Injectable()
 export class PaymentsWorker implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly logger = new Logger(PaymentsWorker.name);
@@ -11,6 +13,7 @@ export class PaymentsWorker implements OnApplicationBootstrap, OnModuleDestroy {
   constructor(
     private readonly config: ConfigService<Environment, true>,
     private readonly payments: PaymentsService,
+    private readonly repository: PaymentsRepository,
   ) {}
   onApplicationBootstrap() {
     if (
@@ -37,6 +40,13 @@ export class PaymentsWorker implements OnApplicationBootstrap, OnModuleDestroy {
     if (!this.config.get('ORDER_PAYMENTS_ENABLED', { infer: true })) return;
     for (let i = 0; i < 10; i++) if (!(await this.payments.notifyCompletionOne())) break;
     for (let i = 0; i < 10; i++) if (!(await this.payments.notifyOne())) break;
+    for (const { id } of await this.repository.pendingApprovals()) {
+      try {
+        await this.payments.reconcile(id, randomUUID());
+      } catch {
+        this.logger.warn({ event: 'payment_reconcile_deferred' });
+      }
+    }
   }
   async onModuleDestroy() {
     this.stopped = true;

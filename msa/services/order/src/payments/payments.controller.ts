@@ -17,14 +17,14 @@ import {
 } from '@nestjs/swagger';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import { ConfigService } from '@nestjs/config';
 import { Environment } from '../config/environment';
 import { PublicAuth, type AuthRequest } from '../auth/auth.guard';
 import { AuditOperation } from '../audit/audit-operation';
 import { ApiException } from '../common/errors/api.exception';
 import { PaymentsService } from './payments.service';
-import { EmptyPaymentDto, PaymentIdDto, PaymentStatusDto } from './payment.dto';
+import { ConfirmPaymentDto, EmptyPaymentDto, PaymentIdDto, PaymentStatusDto } from './payment.dto';
 import { paymentPage } from './payment-page';
 import { ErrorResponseDto, RequestMetaDto } from '../common/dto/api-response.dto';
 const paymentEnvelope = {
@@ -106,6 +106,13 @@ export class PaymentsController {
       "default-src 'self'; script-src 'self' https://js.tosspayments.com; style-src 'self'; style-src-attr 'unsafe-inline'; connect-src 'self' https://*.tosspayments.com https://*.toss.im; frame-src https:; img-src 'self' data: https:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
     );
   }
+  private origin(request: Request) {
+    if (
+      request.get('Origin') !==
+      new URL(this.config.get('PAYMENT_PUBLIC_URL', { infer: true })).origin
+    )
+      throw new ApiException(403, 'FORBIDDEN', '결제 페이지에서 요청해 주세요.');
+  }
   @Get('assets/:name')
   @PublicAuth()
   @ApiExcludeEndpoint()
@@ -162,5 +169,44 @@ export class PaymentsController {
   @ApiOkResponse(paymentEnvelope)
   read(@Param() p: PaymentIdDto) {
     return this.payments.read(p.id);
+  }
+  @Post('requests/:id/confirm')
+  @HttpCode(200)
+  @PublicAuth()
+  @Header('Referrer-Policy', 'no-referrer')
+  @ApiOperation({
+    summary: '토스 결제 승인 확인 및 디버 접수',
+    security: [],
+    description:
+      '서버가 저장된 주문번호·금액·토스 승인 결과를 검증합니다. JSON 결제 완료 자가 신고는 허용하지 않습니다.',
+  })
+  @ApiOkResponse(paymentEnvelope)
+  confirm(
+    @Param() p: PaymentIdDto,
+    @Body() body: ConfirmPaymentDto,
+    @Req() req: Request & { requestId: string },
+  ) {
+    this.payments.ensureEnabled();
+    this.origin(req);
+    return this.payments.confirm(p.id, body.orderId, body.amount, body.paymentKey, req.requestId);
+  }
+  @Post('requests/:id/reconcile')
+  @HttpCode(200)
+  @PublicAuth()
+  @Header('Referrer-Policy', 'no-referrer')
+  @ApiOperation({
+    summary: '불명확한 결제 결과 재조회',
+    security: [],
+    description: '저장된 토스 결제 키로 조회만 수행하며 재승인하지 않습니다.',
+  })
+  @ApiOkResponse(paymentEnvelope)
+  reconcile(
+    @Param() p: PaymentIdDto,
+    @Body() _body: EmptyPaymentDto,
+    @Req() req: Request & { requestId: string },
+  ) {
+    this.payments.ensureEnabled();
+    this.origin(req);
+    return this.payments.reconcile(p.id, req.requestId);
   }
 }

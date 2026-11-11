@@ -79,6 +79,8 @@ function auditInput(
   const audit = payload.audit;
   const billingInitialization =
     service === 'order' && object(audit) && audit.action === 'BILLING_MONTH_INITIALIZED';
+  const paymentCompleted =
+    service === 'order' && object(audit) && audit.action === 'ORDER_PAYMENT_COMPLETED';
   const submission =
     service === 'order' &&
     object(audit) &&
@@ -126,6 +128,7 @@ function auditInput(
       ? actions.has(audit.action as string)
       : service === 'order'
         ? submission ||
+          paymentCompleted ||
           [
             'BILLING_MONTH_INITIALIZED',
             'ORDER_DELETED',
@@ -191,23 +194,29 @@ function auditInput(
           !Number.isSafeInteger(audit.metadata.amountBefore) ||
           Number(audit.metadata.amountBefore) < 0 ||
           audit.metadata.amountAfter !== 0
-        : audit.action === 'ORDER_AMOUNT_CHANGED'
+        : paymentCompleted
           ? payload.result !== 'SUCCESS' ||
+            audit.actorType !== 'SYSTEM' ||
             !object(audit.metadata) ||
-            Object.keys(audit.metadata).sort().join(',') !==
-              'amountAfter,amountBefore,orderParcelSeqs' ||
-            ![audit.metadata.amountBefore, audit.metadata.amountAfter].every(
-              (value) =>
-                value === null ||
-                (Number.isInteger(value) && Number(value) >= 0 && Number(value) <= 2147483647),
-            ) ||
-            !Array.isArray(audit.metadata.orderParcelSeqs) ||
-            audit.metadata.orderParcelSeqs.length < 1 ||
-            !audit.metadata.orderParcelSeqs.every(integer) ||
-            new Set(audit.metadata.orderParcelSeqs).size !== audit.metadata.orderParcelSeqs.length
-          : audit.metadata !== undefined) ||
+            Object.keys(audit.metadata).join(',') !== 'amountAfter' ||
+            !integer(audit.metadata.amountAfter)
+          : audit.action === 'ORDER_AMOUNT_CHANGED'
+            ? payload.result !== 'SUCCESS' ||
+              !object(audit.metadata) ||
+              Object.keys(audit.metadata).sort().join(',') !==
+                'amountAfter,amountBefore,orderParcelSeqs' ||
+              ![audit.metadata.amountBefore, audit.metadata.amountAfter].every(
+                (value) =>
+                  value === null ||
+                  (Number.isInteger(value) && Number(value) >= 0 && Number(value) <= 2147483647),
+              ) ||
+              !Array.isArray(audit.metadata.orderParcelSeqs) ||
+              audit.metadata.orderParcelSeqs.length < 1 ||
+              !audit.metadata.orderParcelSeqs.every(integer) ||
+              new Set(audit.metadata.orderParcelSeqs).size !== audit.metadata.orderParcelSeqs.length
+            : audit.metadata !== undefined) ||
         (payload.result === 'SUCCESS' &&
-          (!(billingInitialization
+          (!(billingInitialization || paymentCompleted
             ? audit.actorType === 'SYSTEM'
             : submission
               ? audit.actorType === 'SYSTEM' ||

@@ -59,12 +59,22 @@ def main():
                '-e', 'CORS_ORIGINS=http://localhost:5173,https://payments.example.test', '-e', 'SWAGGER_ENABLED=true', '-e', 'AI_BUSINESS_TOKEN='+password,
                *(['-e', 'ORDER_PAYMENTS_ENABLED=true', '-e', 'PAYMENT_PUBLIC_URL=https://payments.example.test/api/payments',
                   '-e', 'TOSS_TEST_CLIENT_KEY=test_gck_parity', '-e', 'TOSS_TEST_SECRET_KEY=test_gsk_parity',
+                  '-e', 'PAYMENT_TOSS_BASE_URL=http://127.0.0.1:8000',
+                  '-e', 'DVER_API_URL=http://127.0.0.1:8000/parcel', '-e', 'DVER_API_KEY='+password,
                   '-e', 'PAYMENT_MATTERMOST_WEBHOOK_URL=https://mattermost.example.test/hooks/parity'] if payment_reads else []),
                '-e', 'AI_AGENT_URL=http://ai.invalid:8000', '-e', 'OPERATIONS_URL=http://operations-app:3005',
                '-e', 'CUSTOMER_URL=http://customer-app:3001', '-e', 'CONSULTATION_URL=http://consultation-app:3004',
                '-e', 'DELIVERY_URL=http://delivery-app:3003', '-e', 'ORDER_URL=http://order-app:3002', '-e', 'CUSTOMER_AUTH_TOKEN='+password, '-e', 'CONSULTATION_AUTH_TOKEN='+token)
         run('docker', 'start', name, label=side+('-payment-read-start' if payment_reads else '-app-start'))
         wait_app(side, port, name)
+        if payment_reads:
+            peer = RUN+'-'+side+'-payment-peer'
+            create(peer, images[side], '-e', 'NODE_ENV=test', '-e', 'FINAL_SERVICE_TOKEN='+password,
+                   '-e', 'FINAL_TOSS_TEST_SECRET_KEY=test_gsk_parity',
+                   command=('node', '/tmp/final-peer.cjs'), network='container:'+name)
+            run('docker', 'cp', str(ROOT/'msa/parity/final-peer.cjs'), peer+':/tmp/final-peer.cjs',
+                label=side+'-payment-peer-copy')
+            run('docker', 'start', peer, label=side+'-payment-peer-start')
 
     try:
         images = {}
@@ -133,6 +143,7 @@ def main():
         run('docker', 'cp', str(runtime), name+':/app/service/test/monolith-runtime', label='differential-source-copy')
         complete(name)
         for side in ('monolith', 'order'):
+            run('docker', 'stop', '--time=5', RUN+'-'+side+'-payment-peer', label=side+'-payment-peer-finish')
             run('docker', 'stop', '--time=5', RUN+'-'+side+'-payment-read-app', label=side+'-payment-read-finish')
             run('docker', 'start', RUN+'-'+side+'-app', label=side+'-production-restart')
             wait_app(side, 3000 if side == 'monolith' else 3002)
