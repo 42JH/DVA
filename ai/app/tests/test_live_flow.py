@@ -589,8 +589,10 @@ def test_three_unanswered_manual_searches_suggest_agent_then_reset():
     assert out["facts"]["agent"] == "suggest" and s.rt.unanswered == 0
 
 
-@pytest.mark.parametrize(("customer_request", "intent"), [("상담원 연결해 주세요", "agent"), ("끊어 주세요", "end")])
-def test_readback_handoff_or_end_takes_priority_over_yes(customer_request, intent):
+@pytest.mark.parametrize(("customer_request", "intent"), [
+    ("네, 그런데 상담원 연결해 주세요", "agent"), ("끊어 주세요", "end"),
+])
+def test_readback_handoff_or_clear_end_does_not_commit(customer_request, intent):
     from app.calls.live import Spoken
     from app.calls.session import CallSession
     from app.domain.confirm import issue_parcel_confirmation
@@ -607,13 +609,111 @@ def test_readback_handoff_or_end_takes_priority_over_yes(customer_request, inten
     pending = issue_parcel_confirmation(state, policy, 1.0)
     session = CallSession("live_1", "t", CALLER, INCOMING_AT, ToolContext("live_1", state, policy, None))
     previous = Spoken(1, "이대로 접수할까요?", 1000, 1800, 2.0, 2.8)
-    utterance = Spoken(2, f"네, 그런데 {customer_request}", 2000, 2800, 3.0, 3.8)
+    utterance = Spoken(2, customer_request, 2000, 2800, 3.0, 3.8)
 
     run(lf.judge(session, utterance, previous))
 
     assert client.decisions.calls[0][1] == ["confirm", "switch", "sender_name_scope"]
     lf._follow.assert_awaited_once_with(session, "intent", intent)
     assert state.pending is pending and not state.parcels and lf.rt(session).commit is None
+
+
+@pytest.mark.parametrize("end_call", [True, False])
+def test_conflicting_parcel_yes_and_end_asks_before_acting(end_call):
+    svc, client = flow()
+
+    async def scenario():
+        task = asyncio.create_task(svc.on_incoming(incoming()))
+        await until(lambda: client.conns)
+        conn = client.conns[0]
+        conn.push(started())
+        await until(lambda: svc.registry.calls["live_1"].phase == Phase.ACTIVE)
+        s = svc.registry.calls["live_1"]
+        await _collect_full(conn, s)
+        pending = s.state.pending
+        await ai(conn, "받는 분 이영희님, 이대로 접수할까요?", 5000)
+        decisions = client.decisions
+        client.decisions = SimpleNamespace(create=AsyncMock(return_value=SimpleNamespace(
+            answers=[choice("confirm", "yes", 0.85), choice("switch", "end", 0.80)])))
+        await say(conn, "네", 6500)
+        await until(lambda: any("end_confirmation" in e.get("content", "") for e in conn.sent))
+        assert s.phase == Phase.ACTIVE and s.state.pending is pending and not s.state.parcels
+        await say(conn, "네", 8000)  # 종료 질문을 듣기 전에는 같은 오분류가 와도 반영하지 않는다.
+        assert s.phase == Phase.ACTIVE and s.state.pending is pending and not s.state.parcels
+        await ai(conn, "통화를 마칠까요?", 9000)
+        await say(conn, "네" if end_call else "아니요", 10000)
+        if end_call:
+            await until(lambda: s.phase == Phase.CLOSING)
+            assert s.state.pending is pending and not s.state.parcels
+        else:
+            await until(lambda: _asks(conn))
+            assert s.phase == Phase.ACTIVE and s.state.pending is pending and not s.state.parcels
+            client.decisions = decisions
+            await ai(conn, "받는 분 이영희님, 이대로 접수할까요?", 11000)
+            await say(conn, "네", 12000)
+            await until(lambda: len(s.state.parcels) == 1)
+        conn.push({"type": "session.closed", "reason": "remote_hangup"})
+        await task
+
+    run(scenario())
+
+
+def test_same_turn_tool_can_finish_before_confirm_followup():
+    svc, client = flow()
+
+    async def scenario():
+        task = asyncio.create_task(svc.on_incoming(incoming()))
+        await until(lambda: client.conns)
+        conn = client.conns[0]
+        conn.push(started())
+        await until(lambda: svc.registry.calls["live_1"].phase == Phase.ACTIVE)
+        s = svc.registry.calls["live_1"]
+        await _collect_full(conn, s)
+        await ai(conn, "받는 분 이영희님, 이대로 접수할까요?", 5000)
+        resumes = sent_types(conn).count("response.create")
+        conn.push({"type": "session.delegation.created", "delegation": {"id": "confirm"}, "offset_ms": 6500})
+        await say(conn, "네", 6500)
+        assert s.rt.deciding.is_set() and not s.state.parcels
+        conn.push({"type": "response.event", "delegation_id": "confirm", "event": {
+            "type": "response.output_item.done", "item": {"type": "function_call", "call_id": "check-state",
+                                                         "name": "get_state", "arguments": "{}"}}})
+        conn.push({"type": "response.event", "delegation_id": "confirm", "event": {"type": "response.completed"}})
+        await until(lambda: any(t["name"] == "get_state" and t["output"] for t in s.tool_calls))
+        assert s.tool_calls[-1]["output"]["status"] == "ok", s.tool_calls[-1]
+        await until(lambda: sent_types(conn).count("response.create") > resumes)
+        conn.push({"type": "response.event", "delegation_id": "confirm", "event": {"type": "response.completed"}})
+        await until(lambda: s.state.parcels)
+        conn.push({"type": "session.closed", "reason": "remote_hangup"})
+        await task
+
+    run(scenario())
+
+
+def test_current_address_correction_keeps_the_draft_unless_another_parcel_is_identified():
+    from app.calls.live import Spoken
+    from app.calls.session import CallSession
+    from app.domain.state import copy_draft
+    from app.tests.test_calls import INCOMING_AT
+    from app.tests.test_domain import confirm_once, filled
+    from app.tools.context import ToolContext
+
+    svc, _ = flow()
+    lf = LiveFlow(svc)
+    state, policy = filled(), svc.d.policy
+    current = copy_draft(state.current)
+    parcel_id = confirm_once(state)
+    state.current = current
+    session = CallSession("live_1", "t", CALLER, INCOMING_AT, ToolContext("live_1", state, policy, None))
+
+    async def scenario():
+        correction = Spoken(1, "받는 주소 다시 말할게요", 1000, 1800, 2.0, 2.8)
+        await lf.apply(session, correction, None, {"switch": ("edit_parcel", 0.97)}, None)
+        assert state.current is current and state.editing is None and len(state.parcels) == 1
+        other = Spoken(2, "아까 담은 첫 번째 택배 주소를 고칠게요", 2000, 2800, 3.0, 3.8)
+        await lf.apply(session, other, None, {"switch": ("edit_other_parcel", 0.97)}, None)
+        assert state.current is not current and state.editing == parcel_id and len(state.parcels) == 2
+
+    run(scenario())
 
 
 def _agent_flow(uri="", now=None):

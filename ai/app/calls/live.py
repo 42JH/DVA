@@ -47,6 +47,8 @@ GREETING_ORDER = re.compile(
     r"(?:택배)?접수(?:를)?(?:도와드릴까요|도와드려도될까요|해드릴까요|하시겠어요|하실까요|할까요|하시는건가요)$"
 )
 SHORT_YES = re.compile(r"(?:아|어|음)?(?:네|예|응|맞아요|맞습니다|그렇습니다)+")
+SHORT_NO = re.compile(r"(?:아|어|음)?(?:아니|아니요|아뇨|아닙니다)+")
+END_QUESTION = re.compile(r"통화(?:를)?(?:이제)?(?:마칠까요|마무리할까요|종료할까요|끊을까요)$")
 GREETING_OTHER_ORIGIN = re.compile(r"(?:네|예|아니요)?(?:오늘은|이번에는)?다른(?:주소|곳)에서"
                                   r"(?:보낼게요|보내려고요|보냅니다|발송할게요|발송하려고요)")
 REGISTERED_ORIGIN_QUESTION = re.compile(
@@ -88,6 +90,7 @@ class Runtime:
     commit_pid: str | None = None
     ready_notice: str | None = None                    # 다음 AI 발화에 한해 접수를 안내할 수 있는 택배 ID
     readback_id: str | None = None                     # 현재 말할 서버 확인 내용의 pending ID
+    end_check_turn: Spoken | None = None               # 접수 확인과 종료가 동시에 분류된 발화
     n3: int = 0
     sent_hashes: set[str] = field(default_factory=set)
     intent_started: bool = False
@@ -188,8 +191,9 @@ class LiveFlow:
         if utt and utt.text.strip() and s.phase == Phase.ACTIVE:
             prev = next((a for a in reversed(rt.ai) if a.t_start < utt.t_start), None)
             gate = asyncio.Event() if self._awaiting_answer(s) else None
-            if s.state.customer.customer_seq and s.state.intent in (None, "order"):
-                utt.scope_decided = gate or asyncio.Event()
+            utt.scope_decided = gate
+            if gate is None and s.state.customer.customer_seq and s.state.intent in (None, "order"):
+                utt.scope_decided = asyncio.Event()
             # 위임은 OpenAI 쪽에서 Live가 시작해 서버가 늦출 수 없다. 대신 이 턴의 도구 호출이 반영을 기다린다(최근 발화 기준)
             rt.deciding = gate
             s.spawn(self._judge_customer(s, utt, prev, gate), "decision")
@@ -197,7 +201,8 @@ class LiveFlow:
     def _awaiting_answer(self, s: CallSession) -> bool:
         """서버가 고객 답으로 상태를 바꿀 질문을 열어 두었는가(Decision의 pick·confirm·origin·box·callback)."""
         st = s.state
-        return bool(st.candidates or st.pending or (st.callback_offered and not st.callback_requested)
+        return bool(self.rt(s).end_check_turn or st.candidates or st.pending
+                    or (st.callback_offered and not st.callback_requested)
                     or (st.origin_offered and st.origin_answer is None and not st.origin_applied)
                     or sender_change_available(st) and not (st.current and st.current.sender_name_for_parcel)
                     or (st.current and st.current.ask_customer_name_save)
@@ -273,6 +278,7 @@ class LiveFlow:
             rt = self.rt(s)
             stage = assess(s.state, self.policy).stage
             heard_question = prev and utt.start_ms >= prev.end_ms - self.policy.confirm.answer_after_readback_tolerance_ms
+            end_question = heard_question and _asked_end(rt, prev)
             greeting = (_greeting_offer(s.state, prev.text)
                         if stage == "intent" and heard_question and rt.customer_turns == [utt] else None)
             origin_question = bool(heard_question and _asked_pending_origin(s.state, prev.text))
@@ -293,7 +299,10 @@ class LiveFlow:
                                                                            "item", "readback"))
             box = current.box_proposal if current and s.state.intent == "order" and not pending else None
             cancel_current = s.tools.draft_intake and current is not None and not current.empty()
-        reply = re.sub(r"[\s,.!?…~]+", "", utt.text) if greeting or origin_question else ""
+        reply = re.sub(r"[\s,.!?…~]+", "", utt.text) if greeting or origin_question or end_question else ""
+        if end_question and (SHORT_YES.fullmatch(reply) or SHORT_NO.fullmatch(reply)):
+            await self.apply(s, utt, prev, {"switch": ("end" if SHORT_YES.fullmatch(reply) else "none", 1.0)}, pending_id)
+            return
         other_origin = GREETING_OTHER_ORIGIN.fullmatch(reply)
         if greeting and (other_origin or SHORT_YES.fullmatch(reply)):
             answers = {"task": ("order", 1.0)}
@@ -372,6 +381,43 @@ class LiveFlow:
                 return
             rt.latest_applied = utt.utterance_id
             switch = answers.get("switch")
+            confirmation = answers.get("confirm")
+            end_requested = switch and switch[0] == "end" and switch[1] >= th
+            confirmation_yes = (confirmation and confirmation[0] in ("yes", "proceed")
+                                and confirmation[1] >= self.policy.confirm.yes_min)
+            if end_requested and confirmation_yes and pending_id and (not st.pending or st.pending.id != pending_id):
+                return  # 판단을 요청했을 때의 확인 대기가 바뀌었다.
+            parcel_agreed = pending_id and st.pending and st.pending.kind == "parcel" and confirmation_yes
+            if rt.end_check_turn:
+                reply = re.sub(r"[\s,.!?…~]+", "", utt.text)
+                heard_end_question = (prev and _asked_end(rt, prev)
+                                      and utt.start_ms >= prev.end_ms - self.policy.confirm.answer_after_readback_tolerance_ms)
+                if heard_end_question:
+                    rt.end_check_turn = None
+                    if SHORT_YES.fullmatch(reply) or end_requested and not confirmation_yes and not SHORT_NO.fullmatch(reply):
+                        switch = ("end", 1.0)
+                        answers = {"switch": switch}
+                    else:
+                        answers = {key: answer for key, answer in answers.items() if key != "confirm"}
+                        if end_requested:
+                            switch = None
+                            answers.pop("switch")
+                        if st.pending and (not switch or switch[1] < th or switch[0] == "none"):
+                            followups.append(("ask_confirm", st.pending.id))
+                elif SHORT_YES.fullmatch(reply) or (end_requested and parcel_agreed):
+                    return  # 종료 질문을 듣기 전의 동의는 어느 쪽으로도 확정하지 않는다.
+                else:
+                    rt.end_check_turn = None
+            elif end_requested and parcel_agreed:
+                if rt.customer_turns and rt.customer_turns[-1] != utt:
+                    return
+                rt.end_check_turn = utt
+                if rt.commit:
+                    rt.commit.cancel()
+                    rt.commit = rt.commit_pid = None
+                s.note("Decision", "접수 동의와 통화 종료가 겹침")
+                s.spawn(self.notify(s, "N2", {"end_confirmation": True}, again=True), "confirm_end")
+                return
             if switch and switch[1] >= th and switch[0] in ("agent", "end", "cancel_current"):
                 # 연결·종료·현재 택배 취소 요청이 섞인 "네"는 접수 확인으로 처리하지 않는다.
                 answers = {"switch": switch}
@@ -481,16 +527,38 @@ class LiveFlow:
             if (w := answers.get("switch")) and w[1] >= th and w[0] != "none" and not sender_change \
                     and not (origin_change and w[0] == "edit_parcel") \
                     and not (picked_lookup and w[0] == "lookup"):
-                followups.append(("intent", w[0]))
+                if w[0] == "edit_other_parcel" and st.parcels:
+                    followups.append(("intent", w[0]))
+                elif w[0] != "edit_other_parcel" and (w[0] != "edit_parcel" or st.selected_order
+                        or st.parcels and (not st.current or st.current.empty())):
+                    followups.append(("intent", w[0]))
             if (m := answers.get("more")) and m[1] >= th and m[0] == "no_more" and st.parcels:
                 followups.append(("no_more", None))
             if (cb := answers.get("callback")) and cb[1] >= th and cb[0] in ("yes", "no") and st.callback_offered:
                 st.callback_offered = False
                 st.callback_requested = cb[0] == "yes"
                 followups.append(("callback", cb[0]))
-        for f in followups:
-            if f:
-                await self._follow(s, *f)
+        after_decision = []
+        for followup in filter(None, followups):
+            what, value = followup
+            if utt.scope_decided and not utt.scope_decided.is_set() and (
+                    what in ("hold", "ask_confirm_after_delegation", "ask_confirm", "lookup_picked",
+                             "box_answer", "callback", "no_more") or followup == ("intent", "end")):
+                after_decision.append(followup)
+            else:
+                await self._follow(s, what, value)
+        if after_decision:
+            s.spawn(self._follow_after_decision(s, utt, after_decision), "decision_followup")
+
+    async def _follow_after_decision(self, s: CallSession, utt: Spoken, followups: list[tuple]) -> None:
+        # 도구가 기다리는 Decision 완료 신호를 먼저 열어야 이 후속 작업에서 같은 도구의 완료를 기다릴 수 있다.
+        await utt.scope_decided.wait()
+        rt = self.rt(s)
+        for what, value in followups:
+            if s.phase != Phase.ACTIVE or rt.latest_applied != utt.utterance_id or (
+                    rt.customer_turns and rt.customer_turns[-1] != utt):
+                return
+            await self._follow(s, what, value)
 
     def _on_confirm(self, s: CallSession, utt: Spoken, prev: Spoken | None, ans: tuple, pending_id: str):
         """잠금 안. yes → 관문(G1~G5) → G6(같은 발화 위임 보류) → 확정 지연 / no·change → 즉시 해제."""
@@ -524,7 +592,7 @@ class LiveFlow:
         """잠금 안. readback 단계인데 확인 대기가 없으면(no·change로 푼 뒤 값이 다시 갖춰짐) 현재 값으로 다시 연다.
         고친 값을 기다리는 중(awaiting_fix)이면 열지 않는다(거절 직후 같은 내용을 되읽지 않게)."""
         st = s.state
-        if s.closed or st.pending or st.awaiting_fix or not st.pickup_at.valid or sender_change_next(st) \
+        if s.closed or self.rt(s).end_check_turn or st.pending or st.awaiting_fix or not st.pickup_at.valid or sender_change_next(st) \
                 or st.candidates and st.candidates.kind == "destination" \
                 or assess(st, self.policy).stage != "readback":
             return None
@@ -558,7 +626,7 @@ class LiveFlow:
         draft_cancel = None
         is_draft_cancel = False
         async with s.lock:
-            if s.closed or not s.state.pending or s.state.pending.id != pending_id:
+            if s.closed or rt.end_check_turn or not s.state.pending or s.state.pending.id != pending_id:
                 return
             kind = s.state.pending.kind
             if kind == "parcel":
@@ -690,8 +758,12 @@ class LiveFlow:
             s.note("콜백", value)
             await self.notify(s, "N2", {"agent": "callback_registered" if value == "yes" else "callback_declined"})
         elif what == "no_more":
+            rt = self.rt(s)
+            turn = rt.customer_turns[-1] if rt.customer_turns else None
             await self._wait_delegations(s)
             async with s.lock:
+                if s.phase != Phase.ACTIVE or rt.customer_turns and rt.customer_turns[-1] != turn:
+                    return
                 st.no_more_parcels = True
                 done = assess(st, self.policy).stage == "closing"
             if done:  # 접수 완료 단계 → 결과로 마무리 인사 뒤 끊는다
@@ -737,8 +809,8 @@ class LiveFlow:
                     facts = {"more_parcels": False, "closing": True}
                 else:
                     facts = {"closing": True}
-            elif intent == "edit_parcel":
-                facts = self._edit(s)
+            elif intent in ("edit_parcel", "edit_other_parcel"):
+                facts = self._edit(s, use_lookup=intent == "edit_parcel")
             elif intent == "cancel_current" and s.tools.draft_intake:
                 target = self.svc.intake.current_target(s)
                 if target:
@@ -1133,6 +1205,7 @@ class LiveFlow:
         again: 같은 내용이라도 다시 보낸다(마무리 인사 재요청)."""
         rt = self.rt(s)
         readback_id = facts.get("readback_id")
+        end_check_turn = rt.end_check_turn if facts.get("end_confirmation") else None
         readback_turn = rt.customer_turns[-1].utterance_id if rt.customer_turns else 0
         if readback_id:
             facts = {key: value for key, value in facts.items() if key != "readback_id"}
@@ -1151,6 +1224,9 @@ class LiveFlow:
             receipt_pid = facts.get("parcel_added") if facts.get("draft_intake") == "ready" else None
             t0 = time.monotonic()
             await self._wait_quiet(s, min_quiet_ms=self.cfg.utterance_gap_ms if receipt_pid else 0)
+            if facts.get("end_confirmation") and (
+                    end_check_turn is None or rt.end_check_turn is not end_check_turn or s.phase != Phase.ACTIVE):
+                return
             if unless_tool_turn:
                 turn = unless_tool_turn
                 if not rt.customer_turns or rt.customer_turns[-1] != turn or s.state.intent != "order":
@@ -1257,6 +1333,11 @@ def _answer(a) -> tuple[str, float, dict]:
 
 def _last_question(text: str) -> str:
     return re.split(r"[.!?…]", text.rstrip(" .!?…"))[-1]
+
+
+def _asked_end(rt: Runtime, prev: Spoken) -> bool:
+    return bool(rt.end_check_turn and prev.t_start >= rt.end_check_turn.t_last
+                and END_QUESTION.search("".join(_last_question(prev.text).split())))
 
 
 def _asked_pending_origin(state: ConversationState, text: str) -> bool:
