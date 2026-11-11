@@ -279,15 +279,19 @@ def test_find_parcels_reads_details_without_name_in_url():
         if req.url.path == "/api/orders":
             return httpx2.Response(200, json={"data": [{"orderSeq": 101}, {"orderSeq": 100}], "hasNext": False})
         if req.url.path == "/api/orders/101":
-            return httpx2.Response(200, json={"data": detail(101, "notPaid", [(301, "ACTIVE", "박민수", "대구로 1"),
-                                                                            (302, "CANCELLED", "최지우", "서울로 2")])})
+            order = detail(101, "notPaid", [(301, "ACTIVE", "박민수", "대구로 1"),
+                                            (302, "CANCELLED", "최지우", "서울로 2")])
+            order["parcels"][0]["origin"] = {"roadAddress": "부산로 3", "detailAddress": "201호", "phoneNumber": CALLER}
+            order["parcels"][0]["destination"].update(detailAddress="", phoneNumber=CALLER)
+            return httpx2.Response(200, json={"data": order})
         return httpx2.Response(404, json={"error": {"code": "NOT_FOUND"}})
 
     client, seen = api(handler)
     parcels = run(client.find_parcels(20, 5))
     assert parcels == [
         {"order_seq": 101, "order_parcel_seq": 301, "receiver_name": "박민수", "receiver_address": "대구로 1",
-         "status": "notPaid", "details": {"receiver_address": "대구로 1"}},
+         "status": "notPaid", "details": {"sender_address": "부산로 3", "sender_address_detail": "201호",
+                                           "receiver_address": "대구로 1", "receiver_address_detail": ""}},
         {"order_seq": 101, "order_parcel_seq": 302, "receiver_name": "최지우", "receiver_address": "서울로 2",
          "status": "CANCELLED", "details": {"receiver_address": "서울로 2"}}]  # 취소한 상세는 CANCELLED, 없는 주문(404)은 뺀다
     assert dict(seen[0].url.params) == {"limit": "5"}  # 받는 분 이름(개인정보)을 URL에 넣지 않는다

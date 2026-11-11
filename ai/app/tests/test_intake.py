@@ -47,6 +47,7 @@ def test_live_confirmation_saves_and_lookup_combines_both_sources(tmp_path):
 
     async def scenario():
         s.state.record("items", Items(document_count=10))
+        s.state.record("receiver_address_detail", "503호")
         s.tools.clock = lambda: 100
         combined = await run_tool(s.tools, "record_fields", '{"small_box_count": 1, "item_price": 30000}', "mixed-items")
         pending = s.state.pending
@@ -88,9 +89,11 @@ def test_live_confirmation_saves_and_lookup_combines_both_sources(tmp_path):
         assert selected["status"] == "READY"
         assert selected["receiver_address"] == first["parcel"]["destination"]["roadAddress"]
         assert selected["sender_address"] == first["parcel"]["origin"]["roadAddress"]
+        assert selected["sender_address_detail"] == first["parcel"]["origin"]["detailAddress"]
+        assert selected["receiver_address_detail"] == "503호"
         assert selected["items"] == {"document_count": 10, "small_box_count": 1}
         assert selected["item_price"] == 30000 and selected["shipping_fee"] > 0
-        assert not any("phone" in key or "detail" in key for key in selected)
+        assert not any("phone" in key for key in selected)
 
     run(pick_draft())
     s.state.intent = "order"

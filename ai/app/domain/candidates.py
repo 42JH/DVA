@@ -24,6 +24,18 @@ def destination_changes(candidates: CandidateSet | None) -> dict[str, tuple[int,
             for change in ("address", "recipient")}
 
 
+def buffer_destination_fields(state: ConversationState, given: dict) -> bool:
+    """확인 중 들은 받는 곳 값은 현재 후보에 묶어 두고, 답을 받은 뒤 검증한다."""
+    candidates = state.candidates
+    if state.intent != "order" or not candidates or not candidates.destination_clarification:
+        return False
+    for part in ROLE_FIELDS:
+        field = f"receiver_{part}"
+        if field in given:
+            candidates.destination_buffer[field] = given.pop(field)
+    return True
+
+
 def offer(state: ConversationState, kind: str, labels: tuple[str, ...], items: tuple, *, total: int | None = None) -> None:
     state.candidates = CandidateSet(kind, labels, items, total)
     state.bump()

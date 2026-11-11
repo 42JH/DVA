@@ -11,7 +11,7 @@ from pydantic import Field
 
 from app.address.parse import detail_text
 from app.domain.address_book import receiver_questions_deferred
-from app.domain.candidates import apply_pick, offer
+from app.domain.candidates import apply_pick, buffer_destination_fields, offer
 from app.domain.state import DOCUMENT_ITEM_PRICE, CandidateSet, Items, ParcelDraft, Place, Source
 from app.integrations.backend.gateway import BackendFailure
 from app.observability.trace import observe_latency
@@ -59,6 +59,10 @@ async def find_destination(ctx: ToolContext, args: DestinationArgs) -> ToolOutco
     name, place, detail = said.get("name"), said.get("place"), said.get("detail")
     company = said.get("organization") or said.get("department")
     async with ctx.lock:
+        spoken_fields = {key: value for key, value in (("receiver_name", name), ("receiver_address", place),
+                        ("receiver_address_detail", args.detail)) if value is not None}
+        if buffer_destination_fields(ctx.state, spoken_fields):
+            return ToolOutcome("ok", summary=state_summary(ctx.state, ctx.policy))
         ctx.state.field_of("sender_name")
         draft = ctx.state.current
         if draft.destination_partial_change:

@@ -1360,10 +1360,12 @@ def test_tool_call_on_answer_to_candidates_waits_for_pick():
 
 
 @pytest.mark.parametrize("change", ["address", "recipient"])
-@pytest.mark.parametrize("clarify", [False, True])
-def test_destination_partial_change_keeps_only_confirmed_fields(change, clarify):
+@pytest.mark.parametrize("mode", ["direct", "clarify", "buffer"])
+def test_destination_partial_change_keeps_only_confirmed_fields(change, mode):
     from app.domain.candidates import offer
     from app.domain.state import Geo, Place, Source
+    from app.integrations.address import AddressResult
+    from app.tools import run_tool
 
     svc, client = flow()
     pin = Place("이영희", "01055556666", "부산광역시 서구 대신공원로 1", "201호",
@@ -1371,16 +1373,21 @@ def test_destination_partial_change_keeps_only_confirmed_fields(change, clarify)
     label = "이영희 서구 서대신동"
     partial = f"new_{change}_1"
     clarify_pick = "clarify_recipient" if change == "address" else "clarify_address"
+    clarify = mode != "direct"
+    new_address = "서울 중구 세종대로 110"
+    fields = {"receiver_address": new_address} if change == "address" else {"receiver_name": "박민수"}
 
     async def decide(model, input, questions):
-        pick = next(question for question in questions if question["name"] == "pick")
+        pick = next((question for question in questions if question["name"] == "pick"), None)
+        if pick is None:
+            return SimpleNamespace(answers=[])
         assert {partial, clarify_pick} <= {item["value"] for item in pick["choices"]}
         if clarify and "고객 발화: 아니요" in input:
-            return SimpleNamespace(answers=[choice("pick", clarify_pick)])
+            return SimpleNamespace(answers=[choice("pick", partial, 0.46)])
         if clarify:
             assert f"그 질문에 동의하면 {partial}" in pick["instructions"]
         await asyncio.sleep(0.3)  # 새 값을 기록하는 도구가 판단 결과보다 먼저 들어온다.
-        return SimpleNamespace(answers=[choice("pick", partial), choice("switch", "edit_parcel"),
+        return SimpleNamespace(answers=[choice("pick", partial, 0.46), choice("switch", "edit_parcel"),
                                         choice("sender_change", "address"), choice("origin", "no")])
 
     client.decisions.create = decide
@@ -1392,6 +1399,12 @@ def test_destination_partial_change_keeps_only_confirmed_fields(change, clarify)
         conn.push(started())
         s = svc.registry.calls["live_1"]
         await until(lambda: s.phase == Phase.ACTIVE)
+        if mode == "buffer" and change == "address":
+            async def slow_address(heard):
+                await asyncio.sleep(1.6)
+                return AddressResult("off", heard, (), None)
+
+            s.tools.address = SimpleNamespace(resolve=slow_address)
         async with s.lock:
             s.state.intent = "order"
             s.state.origin_mentioned_in_greeting = True
@@ -1401,24 +1414,33 @@ def test_destination_partial_change_keeps_only_confirmed_fields(change, clarify)
             offer(s.state, "destination", (label,), (pin,))
         await ai(conn, f"{label}로 보내시나요?", 0)
         if clarify:
-            await say(conn, "아니요 다른 주소예요" if change == "address" else "아니요 다른 사람이에요", 1200)
+            ambiguous = "아니요 다른 주소예요" if change == "address" else "아니요 다른 사람이에요"
+            if mode == "buffer":
+                ambiguous += f" {new_address}로요" if change == "address" else " 박민수예요"
+            await say(conn, ambiguous, 1200)
             await until(lambda: any('"destination_change_question"' in e.get("content", "") for e in conn.sent))
             assert s.state.current["receiver_phone"].value is None
             assert s.state.current["receiver_address"].value is None
+            if mode == "buffer":
+                result = await run_tool(s.tools, "record_fields", json.dumps(fields), "before-clarification")
+                assert "destination_change_question" in result and s.state.candidates.destination_buffer == fields
             await ai(conn, "받는 분은 주소록에 있는 그분이 맞으세요?" if change == "address"
-                     else "받는 곳은 주소록에 있는 주소가 맞으세요?", 3000)
-        new_address = "서울 중구 세종대로 110"
+                     else "받는 곳은 주소록에 있는 주소가 맞으세요?", 3500)
         if change == "address":
-            text = f"네 {new_address}로요" if clarify else f"네 주소만 바꿀게요 {new_address}로요"
-            fields = {"receiver_address": new_address}
+            text = f"네 {new_address}로요"
+            if mode == "direct":
+                await say(conn, "아, 네. 근데 그 이영희한테 그대로 보내긴 할 텐데, 다른 주소로 보내려구요, 이번에는", 1200)
+                await until(lambda: s.state.current.destination_partial_change == "address")
+                assert s.state.current["receiver_phone"].value == pin.phone
+                await ai(conn, "새 받는 곳 주소를 알려주시겠어요?", 3500)
         else:
-            text = "네 받는 분은 박민수예요" if clarify else "네 주소는 같고 받는 분은 박민수예요"
-            fields = {"receiver_name": "박민수"}
-        await say(conn, text, 4500)
+            text = "네 받는 분은 박민수예요" if clarify else "네 주소는 그대로고 받는 분만 바꿀게요. 박민수예요"
+        await say(conn, "네" if mode == "buffer" else text, 4500)
         conn.push({"type": "session.delegation.created", "delegation": {"id": "d1"}, "offset_ms": 4600})
         conn.push({"type": "response.event", "delegation_id": "d1", "event": {
             "type": "response.output_item.done", "item": {"type": "function_call", "call_id": "c1",
-                                                         "name": "record_fields", "arguments": json.dumps(fields)}}})
+                                                         "name": "get_state" if mode == "buffer" else "record_fields",
+                                                         "arguments": json.dumps({} if mode == "buffer" else fields)}}})
         await until(lambda: "response.item.create" in sent_types(conn), timeout=3.0)
         out = json.loads(next(e for e in conn.sent if e["type"] == "response.item.create")["item"]["output"])
         draft = s.state.current

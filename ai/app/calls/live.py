@@ -21,7 +21,7 @@ from app.domain.address_book import (begin_sender_name_change, origin_confirmati
                                      receiver_questions_deferred, request_sender_address_change, save_offer, sender_change_available,
                                      sender_change_next)
 from app.domain.assess import assess, readback_facts
-from app.domain.candidates import (DESTINATION_CLARIFICATIONS, apply_destination_change, apply_pick,
+from app.domain.candidates import (DESTINATION_CHANGE_FIELDS, DESTINATION_CLARIFICATIONS, apply_destination_change, apply_pick,
                                    destination_changes, offer, reject_candidates)
 from app.domain.claims import truth, unverified_claims, unverified_values
 from app.domain.confirm import (ConfirmAnswer, Utterance, asks, asks_parcel_confirmation, check_gate, commit_parcel,
@@ -34,7 +34,7 @@ from app.policy.render import decision_questions
 from app.tools import MODEL_TOOLS, run_tool
 from app.tools.cancel import cancel_parcel
 from app.tools.lookup import lookup_order_facts, resume_destination, status_text
-from app.tools.outcome import state_summary
+from app.tools.outcome import DESTINATION_CHANGE_QUESTIONS, state_summary
 from app.tools.record import RecordArgs, record_fields
 
 log = logging.getLogger(__name__)
@@ -48,6 +48,9 @@ GREETING_ORDER = re.compile(
     r"(?:택배)?접수(?:를)?(?:도와드릴까요|도와드려도될까요|해드릴까요|하시겠어요|하실까요|할까요|하시는건가요)$"
 )
 SHORT_YES = re.compile(r"(?:아|어|음)?(?:네|예|응|맞아요|맞습니다|그렇습니다)+")
+DESTINATION_OTHER_ADDRESS = re.compile(r"(?:다른|새|새로운)주소|(?:주소|받는곳)(?:가|는)?(?:다르|달라)|주소만(?:바꾸|바꿀|바꿔|변경)")
+DESTINATION_OTHER_PERSON = re.compile(r"(?:다른|새|새로운)(?:사람|받는분|수신인)|(?:받는분|수신인)(?:이|은)?(?:다르|달라|새로)|(?:받는분|수신인)만(?:바꾸|바꿀|바꿔|변경)")
+DESTINATION_OTHER_TASK = re.compile(r"보내는분|발송(?:지|주소)|출발(?:지|주소)|취소|조회|상담원|끊어")
 GREETING_OTHER_ORIGIN = re.compile(r"(?:네|예|아니요)?(?:오늘은|이번에는)?다른(?:주소|곳)에서"
                                   r"(?:보낼게요|보내려고요|보냅니다|발송할게요|발송하려고요)")
 REGISTERED_ORIGIN_QUESTION = re.compile(
@@ -69,6 +72,7 @@ class Spoken:
     readback_id: str | None = None
     sender_name_scope: str | None = None
     scope_decided: asyncio.Event | None = None
+    buffered_destination_address: bool = False
 
     def utterance(self) -> Utterance:
         return Utterance(self.utterance_id, self.start_ms or 0, self.end_ms or 0, self.t_start, self.text, self.readback_id)
@@ -189,6 +193,8 @@ class LiveFlow:
         if utt and utt.text.strip() and s.phase == Phase.ACTIVE:
             prev = next((a for a in reversed(rt.ai) if a.t_start < utt.t_start), None)
             gate = asyncio.Event() if self._awaiting_answer(s) else None
+            candidates = s.state.candidates
+            utt.buffered_destination_address = bool(candidates and "receiver_address" in candidates.destination_buffer)
             if s.state.customer.customer_seq and s.state.intent in (None, "order"):
                 utt.scope_decided = gate or asyncio.Event()
             # 위임은 OpenAI 쪽에서 Live가 시작해 서버가 늦출 수 없다. 대신 이 턴의 도구 호출이 반영을 기다린다(최근 발화 기준)
@@ -208,11 +214,15 @@ class LiveFlow:
     async def _decided(self, s: CallSession, gate: asyncio.Event | None = None) -> None:
         """서버 질문에 답한 턴이면 Decision 반영까지 기다린다. Backend가 반영 전 상태로 다음 질문을 정하지 않게
         (운영 통화: 후보 선택으로 연락처가 채워졌는데 Backend가 연락처를 다시 물음)."""
-        gate = gate if gate is not None else self.rt(s).deciding
+        rt = self.rt(s)
+        gate = gate if gate is not None else rt.deciding
         if gate is not None and not gate.is_set():
             t0 = time.monotonic()
+            timeout = self.cfg.decision_budget_sec + 0.5
+            if rt.customer_turns and rt.customer_turns[-1].buffered_destination_address:
+                timeout += s.tools.tool_budget_sec
             try:
-                await asyncio.wait_for(gate.wait(), self.cfg.decision_budget_sec + 0.5)
+                await asyncio.wait_for(gate.wait(), timeout)
             except TimeoutError:
                 pass
             s.timing("도구→Decision 반영 대기", (time.monotonic() - t0) * 1000)
@@ -379,12 +389,12 @@ class LiveFlow:
             if switch and switch[1] >= th and switch[0] in ("agent", "end", "cancel_current"):
                 # 연결·종료·현재 택배 취소 요청이 섞인 "네"는 접수 확인으로 처리하지 않는다.
                 answers = {"switch": switch}
-            destination_reply = (st.current is candidate_draft and
-                                 self._apply_destination_reply(s, utt, prev, candidates, answers.get("pick"), switch))
-            if destination_reply:
+            destination_reply = (self._apply_destination_reply(s, utt, prev, candidates, answers.get("pick"), switch)
+                                 if st.current is candidate_draft else None)
+            if destination_reply is not None:
                 for name in ("pick", "confirm", "origin", "sender_change", "sender_name_scope"):
                     answers.pop(name, None)
-                followups.append(("destination_change", utt))
+                followups.append(("destination_change", (utt, candidate_draft, destination_reply)))
             if (box and st.intent == "order" and not st.pending and st.current and st.current.box_proposal is box
                     and (answer := answers.get("box")) and answer[1] >= th and answer[0] in ("yes", "no")
                     and (not switch or switch[1] < th or switch[0] == "none")
@@ -492,7 +502,7 @@ class LiveFlow:
             elif greeting:
                 followups.append(("clarify_greeting", utt))
             if (w := answers.get("switch")) and w[1] >= th and w[0] != "none" and not sender_change \
-                    and not ((origin_change or destination_reply) and w[0] == "edit_parcel") \
+                    and not ((origin_change or destination_reply is not None) and w[0] == "edit_parcel") \
                     and not (picked_lookup and w[0] == "lookup"):
                 followups.append(("intent", w[0]))
             if (m := answers.get("more")) and m[1] >= th and m[0] == "no_more" and st.parcels:
@@ -506,24 +516,40 @@ class LiveFlow:
                 await self._follow(s, *f)
 
     def _apply_destination_reply(self, s: CallSession, utt: Spoken, prev: Spoken | None,
-                                 candidates: CandidateSet | None, answer, switch) -> bool:
+                                 candidates: CandidateSet | None, answer, switch) -> dict[str, str] | None:
         st, th = s.state, self.cfg.decision_min_confidence
         if (not candidates or st.candidates is not candidates or st.intent != "order" or st.order_submitted
-                or receiver_questions_deferred(st) or not answer or answer[1] < th or not prev or not asks(prev.text)
+                or receiver_questions_deferred(st) or not prev or not asks(prev.text)
                 or self.rt(s).customer_turns[-1:] != [utt]
                 or switch and switch[1] >= th and switch[0] not in ("none", "edit_parcel")):
-            return False
+            return None
         changes = destination_changes(candidates)
-        if change := changes.get(answer[0]):
-            apply_destination_change(st, *change)
+        if not changes:
+            return None
+        heard_question = utt.start_ms >= prev.end_ms - self.policy.confirm.answer_after_readback_tolerance_ms
+        explicit = _explicit_destination_reply(candidates, prev.text, utt.text) if heard_question else None
+        pick = explicit or (answer[0] if answer and answer[1] >= th else None)
+        if pick is None and heard_question and answer and answer[0] in changes and _asked_destination(candidates, prev.text):
+            pick = ("clarify_candidate" if len(candidates.labels) > 1 else
+                    "clarify_recipient" if changes[answer[0]][1] == "address" else "clarify_address")
+        if change := changes.get(pick):
+            index, scope = change
+            buffered = {field: candidates.destination_buffer[field] for field in DESTINATION_CHANGE_FIELDS[scope]
+                        if field in candidates.destination_buffer}
+            apply_destination_change(st, index, scope)
             self._sync_intake(s)
-            return True
-        clarification = DESTINATION_CLARIFICATIONS.get(answer[0])
-        if changes and clarification and (clarification == "candidate") == (len(candidates.labels) > 1):
+            if explicit:
+                s.note("Decision", "받는 곳 변경 명시 답변", {"pick": pick})
+            return buffered
+        if pick == "none" and candidates.destination_clarification:
+            reject_candidates(st)
+            return candidates.destination_buffer
+        clarification = DESTINATION_CLARIFICATIONS.get(pick)
+        if clarification and (clarification == "candidate") == (len(candidates.labels) > 1):
             st.candidates = replace(candidates, destination_clarification=clarification)
             st.bump()
-            return True
-        return False
+            return {}
+        return None
 
     def _on_confirm(self, s: CallSession, utt: Spoken, prev: Spoken | None, ans: tuple, pending_id: str):
         """잠금 안. yes → 관문(G1~G5) → G6(같은 발화 위임 보류) → 확정 지연 / no·change → 즉시 해제."""
@@ -699,8 +725,24 @@ class LiveFlow:
         elif what == "lookup_picked":
             await self.notify(s, "N2", {"lookup_order": value})
         elif what == "destination_change":
-            s.spawn(self.notify(s, "N2", {"summary": state_summary(st, self.policy)}, again=True,
-                                unless_tool_turn=value), "destination_change")
+            utterance, draft, buffered = value
+            facts = {}
+            if buffered:
+                try:
+                    out = await asyncio.wait_for(record_fields(s.tools, RecordArgs(**buffered), expected_draft=draft),
+                                                 s.tools.tool_budget_sec)
+                except TimeoutError:
+                    facts["needs"] = [{"field": "receiver_address", "reason": "TOOL_TIMEOUT"}]
+                else:
+                    if out.code == "RESULT_SUPERSEDED":
+                        return
+                    facts.update(out.facts)
+                    if out.needs:
+                        facts["needs"] = out.needs
+                    async with s.lock:
+                        self._sync_intake(s)
+            facts["summary"] = state_summary(st, self.policy)
+            s.spawn(self.notify(s, "N2", facts, again=True, unless_tool_turn=utterance), "destination_change")
         elif what == "picked":
             async with s.lock:
                 issued = issue_cancel_confirmation(st, s.tools.clock()) if st.intent == "cancel" else None
@@ -1311,6 +1353,46 @@ def _asked_receiver_name(text: str, expecting_name: bool) -> bool:
     if not asks(text) or not re.search(r"성함|이름|누구", question):
         return False
     return bool(RECEIVER_NAME_QUESTION.search(question) or expecting_name and not SENDER_NAME_REFERENCE.search(question))
+
+
+def _asked_destination(candidates: CandidateSet, text: str) -> bool:
+    question = re.sub(r"[\s,.!?…~]+", "", _last_question(text))
+    if candidates.destination_clarification:
+        expected = DESTINATION_CHANGE_QUESTIONS[candidates.destination_clarification]
+        return question == re.sub(r"[\s?]+", "", expected)
+    return (bool(re.search(r"보내|받는|받으", question))
+            and any("".join(place.name.split()) in question for place in candidates.items if place.name))
+
+
+def _explicit_destination_reply(candidates: CandidateSet, question: str, text: str) -> str | None:
+    if len(candidates.items) != 1 or not _asked_destination(candidates, question):
+        return None
+    compact = re.sub(r"[\s,.!?…~]+", "", text)
+    if DESTINATION_OTHER_TASK.search(compact):
+        return None
+    address_changed = DESTINATION_OTHER_ADDRESS.search(compact)
+    person_changed = DESTINATION_OTHER_PERSON.search(compact)
+    if address_changed and person_changed:
+        return None
+    if candidates.destination_clarification in ("recipient", "address"):
+        if SHORT_YES.fullmatch(compact) or (re.match(r"\s*(?:네|예|맞아요|맞습니다)[ ,.]", text)
+                                              and not re.search(r"아니|안맞|맞지않", compact)):
+            if candidates.destination_clarification == "recipient" and not person_changed:
+                return "new_address_1"
+            if candidates.destination_clarification == "address" and not address_changed:
+                return "new_recipient_1"
+    if address_changed:
+        name = re.escape("".join(candidates.items[0].name.split()))
+        same_person = re.search(rf"(?:그분|그사람|받는분|수신인|{name})(?:님)?(?:한테|에게|은|는|이|가)?"
+                                r"(?:그대로보내(?!지않|지말)|맞아요|맞습니다|맞고|같아요|같고)", compact)
+        if same_person or re.search(r"주소만(?:바꿀|바꾸|바꿔|변경)", compact):
+            return "new_address_1"
+        return "clarify_recipient"
+    if person_changed:
+        if re.search(r"(?:같은|동일한)주소|(?:주소|받는곳)(?:가|는)?(?:그대로|맞아요|맞고|같아요|같고)|(?:받는분|수신인)만(?:바꿀|바꾸|바꿔|변경)", compact):
+            return "new_recipient_1"
+        return "clarify_address"
+    return None
 
 
 def _greeting_offer(state: ConversationState, text: str) -> str | None:

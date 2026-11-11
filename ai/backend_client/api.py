@@ -171,7 +171,9 @@ def parcel_lookup_details(parcel: dict) -> dict:
     """통화 중 선택된 택배에 대해 안내할 수 있는 백엔드 값만 남긴다."""
     origin, destination = parcel.get("origin") or {}, parcel.get("destination") or {}
     values = {"sender_name": origin.get("name"), "sender_address": origin.get("roadAddress"),
-              "receiver_address": destination.get("roadAddress"), "item_price": parcel.get("itemPrice"),
+              "sender_address_detail": origin.get("detailAddress"),
+              "receiver_address": destination.get("roadAddress"),
+              "receiver_address_detail": destination.get("detailAddress"), "item_price": parcel.get("itemPrice"),
               "shipping_fee": parcel.get("notifiedPrice"), "delivery_note": parcel.get("clientComment")}
     items = {name: parcel[key] for name, key in (("document_count", "documentCount"),
              ("small_box_count", "smallBoxCount"), ("medium_box_count", "mediumBoxCount"),

@@ -21,7 +21,7 @@ from app.domain.address_book import (begin_sender_name_change, origin_confirmati
                                      request_sender_address_change, save_offer, sender_change_available,
                                      sender_change_next)
 from app.domain.assess import area_label, readback_facts
-from app.domain.candidates import DESTINATION_CHANGE_FIELDS
+from app.domain.candidates import DESTINATION_CHANGE_FIELDS, buffer_destination_fields
 from app.domain.confirm import issue_parcel_confirmation
 from app.domain.parcel_items import (ItemIssue, contextual_keyword, excluded_evidence, measurements, mentions,
                                      size_issues, supported_box_correction, unclassified_mentions)
@@ -140,13 +140,19 @@ def clean_name(raw: str) -> str:
             "고객이 말한 택배 값(보내는 분·받는 분·주소·물품·물품 가액·요청 사항)을 기록한다(정정도 같은 도구). "
             "이번에 들은 항목만 채우고 나머지는 null. 전화번호는 들은 그대로 넘기면 서버가 숫자로 바꾸고 자릿수를 검사한다.",
             RecordArgs, args_factory=record_args)
-async def record_fields(ctx: ToolContext, args: RecordArgs, *, expected_box: BoxProposal | None = None) -> ToolOutcome:
+async def record_fields(ctx: ToolContext, args: RecordArgs, *, expected_box: BoxProposal | None = None,
+                        expected_draft: ParcelDraft | None = None) -> ToolOutcome:
     given = args.model_dump(exclude_none=True)
     if not given:
         return ToolOutcome("needs_input", "NOTHING_TO_RECORD")
     s, policy = ctx.state, ctx.policy
     if s.order_submitted:  # 접수 후 수정·추가 없음 — 받아 적으면 반영 안 된 값을 확정한 것처럼 안내하게 된다
         return ToolOutcome("rejected", "ORDER_SUBMITTED", {"order": "submitted"})
+    async with ctx.lock:
+        if expected_draft is not None and (s.current is not expected_draft or s.intent != "order"):
+            return ToolOutcome("needs_input", "RESULT_SUPERSEDED", summary=state_summary(s, policy))
+        if buffer_destination_fields(s, given) and not given:
+            return ToolOutcome("ok", summary=state_summary(s, policy))
     values, needs = {}, []
     for name in TEXT:
         if name in given:
@@ -181,7 +187,7 @@ async def record_fields(ctx: ToolContext, args: RecordArgs, *, expected_box: Box
         if s.order_submitted:
             return ToolOutcome("rejected", "ORDER_SUBMITTED", {"order": "submitted"})
         facts: dict = {"recorded": [], "changed": [], "cleared": []}
-        if draft is not s.current:
+        if draft is not s.current or expected_draft is not None and s.intent != "order":
             return ToolOutcome("needs_input", "RESULT_SUPERSEDED", summary=state_summary(s, policy))
         if expected_box is not None and (draft.box_proposal is not expected_box or s.intent != "order" or s.pending):
             return ToolOutcome("needs_input", "RESULT_SUPERSEDED", summary=state_summary(s, policy))
