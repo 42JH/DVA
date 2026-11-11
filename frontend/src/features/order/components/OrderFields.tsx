@@ -179,10 +179,10 @@ function PartyFields({
         />
         <SuggestInput
           label="전화번호"
-          value={fmtPhone(p.phone)} // 다 치면 010-1234-5678로 보임. 저장은 숫자만 (setPhone이 하이픈을 뗌)
+          value={p.phone}
           onChange={p.setPhone}
-          inputMode="tel"
-          placeholder="010-1234-5678"
+          inputMode="numeric"
+          placeholder="01012345678" // setPhone이 숫자만 남겨서 예시도 하이픈 없이
           error={p.phoneError ?? (showEmpty && !p.phone ? '전화번호를 입력해 주세요.' : undefined)}
           items={p.suggest.byPhone}
           itemKey={(s) => s.key}
