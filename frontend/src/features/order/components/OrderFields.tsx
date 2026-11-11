@@ -134,9 +134,14 @@ export function OrderFields({
 function SuggestRow(s: Suggestion) {
   return (
     <span className="flex min-w-0 flex-col">
-      <span className="flex items-baseline gap-2">
-        <span className="font-medium">{s.name}</span>
-        <span className="text-ops-sub tabular-nums">{fmtPhone(s.phoneNumber)}</span>
+      <span className="flex min-w-0 items-baseline gap-2 whitespace-nowrap">
+        <span className="shrink-0 font-medium">{s.name}</span>
+        <span className="shrink-0 text-ops-sub tabular-nums">{fmtPhone(s.phoneNumber)}</span>
+        {s.company && (
+          <span className="min-w-0 truncate text-[12px] text-ops-sub" title={s.company}>
+            {s.company}
+          </span>
+        )}
       </span>
       <span className="truncate text-[12px] text-ops-faint">
         {s.address ? `${s.address.roadAddress} ${s.address.detailAddress ?? ''}` : '주소 없음'}
@@ -165,6 +170,7 @@ function PartyFields({
           label="이름"
           value={p.name}
           onChange={p.setName}
+          placeholder="홍길동"
           error={p.nameError ?? (showEmpty && !p.name.trim() ? '이름을 입력해 주세요.' : undefined)}
           items={p.suggest.byName}
           itemKey={(s) => s.key}
@@ -173,10 +179,10 @@ function PartyFields({
         />
         <SuggestInput
           label="전화번호"
-          value={p.phone}
+          value={fmtPhone(p.phone)} // 다 치면 010-1234-5678로 보임. 저장은 숫자만 (setPhone이 하이픈을 뗌)
           onChange={p.setPhone}
-          inputMode="numeric"
-          placeholder="숫자만"
+          inputMode="tel"
+          placeholder="010-1234-5678"
           error={p.phoneError ?? (showEmpty && !p.phone ? '전화번호를 입력해 주세요.' : undefined)}
           items={p.suggest.byPhone}
           itemKey={(s) => s.key}
