@@ -48,9 +48,14 @@ export class PaymentsService {
     return promise;
   }
   async reconcile(id: string, requestId: string) {
-    const view = await this.read(id);
-    if (view.autoCharge) return this.processCard(id, requestId);
-    return this.process(id, view.amount, undefined, requestId);
+    try {
+      const view = await this.read(id);
+      if (view.autoCharge) return await this.processCard(id, requestId);
+      return await this.process(id, view.amount, undefined, requestId, 'ORDER_PAYMENT_RECONCILED');
+    } catch (error: unknown) {
+      await this.orders.recordPaymentFailure(id, requestId, error, 'ORDER_PAYMENT_RECONCILED');
+      throw error;
+    }
   }
 
   async processCard(id: string, requestId: string) {
@@ -59,7 +64,28 @@ export class PaymentsService {
     return this.repository.read(id);
   }
 
-  private async process(id: string, amount: number, key: string | undefined, requestId: string) {
+  private async process(
+    id: string,
+    amount: number,
+    key: string | undefined,
+    requestId: string,
+    action:
+      'ORDER_PAYMENT_CONFIRMATION' | 'ORDER_PAYMENT_RECONCILED' = 'ORDER_PAYMENT_CONFIRMATION',
+  ) {
+    try {
+      return await this.processApproval(id, amount, key, requestId);
+    } catch (error: unknown) {
+      await this.orders.recordPaymentFailure(id, requestId, error, action);
+      throw error;
+    }
+  }
+
+  private async processApproval(
+    id: string,
+    amount: number,
+    key: string | undefined,
+    requestId: string,
+  ) {
     const claim = await this.orders.claimApproval(id, amount, key);
     if (claim.done) return this.repository.read(id);
     try {

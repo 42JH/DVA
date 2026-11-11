@@ -27,12 +27,19 @@ test('only confirmed rejection can clear a payment key, never an absent lookup r
     await t.test(
       `${lookupOnly ? 'lookup' : 'confirm'} ${status} ${JSON.stringify(code)} release=${canRelease}`,
       async () => {
-        const released = [];
+        const released = [],
+          audited = [];
         const service = new PaymentsService(
           { get: () => true },
           {},
           { toss: async () => ({ status, data: { code } }) },
           {
+            recordPaymentFailure: async (id, requestId, error, action) => {
+              assert.equal(id, 'order');
+              assert.equal(requestId, 'request');
+              assert.equal(action, 'ORDER_PAYMENT_CONFIRMATION');
+              audited.push(error.getStatus());
+            },
             claimApproval: async () => ({ key: 'key', claimId: 'claim', lookupOnly }),
             releaseClaim: async (_id, _claim, declined = false) => {
               released.push(declined);
@@ -49,13 +56,15 @@ test('only confirmed rejection can clear a payment key, never an absent lookup r
           return true;
         });
         assert.deepEqual(released, expected === 422 || !canRelease ? [true, false] : [false]);
+        assert.deepEqual(audited, [expected]);
       },
     );
   }
   for (const code of ['NOT_FOUND_PAYMENT', 'NOT_FOUND_PAYMENT_SESSION', 'REJECT_CARD_PAYMENT']) {
     await t.test(`already processed then lookup ${code} retains the original attempt`, async () => {
       const modes = [],
-        released = [];
+        released = [],
+        audited = [];
       const service = new PaymentsService(
         { get: () => true },
         {},
@@ -68,6 +77,7 @@ test('only confirmed rejection can clear a payment key, never an absent lookup r
           },
         },
         {
+          recordPaymentFailure: async (_id, _requestId, error) => audited.push(error.getStatus()),
           claimApproval: async () => ({ key: 'key', claimId: 'claim', lookupOnly: false }),
           releaseClaim: async (_id, _claim, declined = false) => {
             released.push(declined);
@@ -81,12 +91,14 @@ test('only confirmed rejection can clear a payment key, never an absent lookup r
       );
       assert.deepEqual(modes, [false, true]);
       assert.deepEqual(released, [false]);
+      assert.deepEqual(audited, [502]);
     });
   }
 });
 
 test('an array instead of a terminal provider status cannot release an uncertain payment', async () => {
-  const released = [];
+  const released = [],
+    audited = [];
   const service = new PaymentsService(
     { get: () => true },
     {},
@@ -103,6 +115,7 @@ test('an array instead of a terminal provider status cannot release an uncertain
       }),
     },
     {
+      recordPaymentFailure: async (_id, _requestId, error) => audited.push(error.getStatus()),
       claimApproval: async () => ({ key: 'key', claimId: 'claim', lookupOnly: true }),
       releaseClaim: async (_id, _claim, declined = false) => {
         released.push(declined);
@@ -115,6 +128,7 @@ test('an array instead of a terminal provider status cannot release an uncertain
     (e) => e.getStatus() === 502,
   );
   assert.deepEqual(released, [false]);
+  assert.deepEqual(audited, [502]);
 });
 
 const checkout = readFileSync(join(__dirname, '../dist/payments/assets/checkout.js'), 'utf8');
