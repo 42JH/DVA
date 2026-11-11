@@ -30,19 +30,12 @@ const EXAMPLE_ROWS = [
   ['002', '이샘플', '010-0000-0002', '', '개발팀', ...ADDR, '예시 102호'],
   ['003', '박테스트', '010-0000-0003', '', '개발팀', ...ADDR, ''],
 ]
-// 기업 CSV (기업 목록 — 첫 칸 기업명, 한 파일에 여러 기업. 기업마다 담당자 Y 1명 이상, 11/11 사용자)
-const ADDR2 = [
-  '서울특별시 강남구 테헤란로 212',
-  '서울특별시 강남구 역삼동 718-5',
-  '역삼동',
-  '06220',
-]
+// 기업 CSV (기업 목록 — 첫 칸 기업명, 한 파일 = 한 기업. 담당자 Y 1명 이상, 11/11 사용자)
 const COMPANY_EXAMPLE_ROWS = [
   ['예시상사', '001', '김예시', '010-0000-0001', 'Y', '경영지원팀', ...ADDR, '예시 101호'],
-  ['예시상사', '002', '이샘플', '010-0000-0002', '', '개발팀', ...ADDR, '예시 102호'],
-  ['예시상사', '003', '박테스트', '010-0000-0003', '', '', ...ADDR, ''],
-  ['샘플물류', 'A01', '최담당', '010-0000-0004', 'Y', '', ...ADDR2, '5층'],
-  ['샘플물류', 'A02', '정사원', '010-0000-0005', '', '', ...ADDR2, '5층'],
+  ['예시상사', '002', '이샘플', '010-0000-0002', '', '경영지원팀', ...ADDR, '예시 102호'],
+  ['예시상사', '003', '박테스트', '010-0000-0003', '', '개발팀', ...ADDR, '예시 201호'],
+  ['예시상사', '004', '최샘플', '010-0000-0004', '', '개발팀', ...ADDR, ''],
 ]
 const KEEP_ZERO = new Set([0, 8]) // 사번 · 우편번호 열 (기업 CSV는 한 칸씩 뒤)
 export type CsvKind = 'members' | 'companies'
@@ -250,11 +243,15 @@ function readMembersRows(rows: string[][], kind: CsvKind = 'members'): CsvResult
       line,
     })
   })
-  // 기업마다 담당자 1명 이상 (11/11 사용자)
-  if (withCompany && errors.length === 0)
-    for (const g of groupByCompany(members))
-      if (!g.members.some((m) => m.leader))
-        errors.push(`${g.name}: 담당자를 1명 이상 Y로 표시해 주세요.`)
+  // 한 파일 = 한 기업 (11/11 사용자) · 담당자 1명 이상
+  if (withCompany && errors.length === 0) {
+    const groups = groupByCompany(members)
+    if (groups.length > 1)
+      errors.push(
+        `한 파일에는 한 기업만 넣어 주세요. (지금 ${groups.map((g) => g.name).join(', ')})`,
+      )
+    else if (!members.some((m) => m.leader)) errors.push('담당자를 1명 이상 Y로 표시해 주세요.')
+  }
   return errors.length ? fail(errors) : { ok: true, members }
 }
 

@@ -266,21 +266,11 @@ export function CompanyCsvModal({ onClose }: { onClose: () => void }) {
       onClose={onClose}
       footer={
         <>
-          <FootNote
-            hint={
-              vm.results
-                ? null
-                : vm.count > 0
-                  ? `기업 ${vm.companies}곳, 사원 ${vm.count}명을 등록합니다.`
-                  : null
-            }
-          />
-          <Btn onClick={onClose}>{vm.results ? '닫기' : '취소'}</Btn>
-          {!vm.results && (
-            <Btn kind="primary" disabled={!vm.canSubmit} onClick={vm.submit}>
-              {vm.isSubmitting ? '등록 중…' : '등록'}
-            </Btn>
-          )}
+          <FootNote error={vm.errorMessage} hint={vm.summary} />
+          <Btn onClick={onClose}>취소</Btn>
+          <Btn kind="primary" disabled={!vm.canSubmit} onClick={vm.submit}>
+            {vm.isSubmitting ? '등록 중…' : '등록'}
+          </Btn>
         </>
       }
     >
@@ -293,22 +283,7 @@ export function CompanyCsvModal({ onClose }: { onClose: () => void }) {
           onRemove={vm.removeFile}
         />
         <Example kind="companies" />
-        {vm.results ? (
-          // 기업마다 따로 등록돼 일부만 될 수 있음 — 된 곳 · 안 된 곳을 기업별로 (11/11)
-          <ul aria-label="등록 결과" className="flex flex-col gap-1.5 text-[13px]">
-            {vm.results.map((r) => (
-              <li key={r.name} className="flex gap-2">
-                <b className="font-semibold">{r.name}</b>
-                <span className={r.ok ? 'text-ops-done' : 'text-ops-stop'}>
-                  {r.ok ? '등록됨' : '등록 못 함'}
-                </span>
-                {r.message && <span className="text-ops-sub">{r.message}</span>}
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <CsvTable rows={vm.members} />
-        )}
+        <CsvTable rows={vm.members} />
       </div>
     </Modal>
   )
