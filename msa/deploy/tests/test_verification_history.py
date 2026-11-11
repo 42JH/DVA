@@ -89,13 +89,14 @@ class VerificationHistoryTests(unittest.TestCase):
         self.assertFalse(result['database'])
         self.assertEqual(result['paritySuites'], [])
 
-    def test_final_checker_change_does_not_run_unrelated_business_or_event_suites(self):
+    def test_order_shared_checker_helpers_select_only_the_order_suite(self):
         self.history(self.deployed)
-        self.commit('msa/parity/final-parity.cjs', 'updated manual diagnostic')
+        self.commit('msa/parity/final-parity.cjs', 'changed order schema and response helpers')
         result = self.selection()
         self.assertFalse(result['events'])
         self.assertFalse(result['database'])
-        self.assertEqual(result['paritySuites'], [])
+        self.assertEqual(result['paritySuites'], ['order'])
+        self.assertEqual((self.out / 'services.txt').read_text(), '')
 
     def test_service_documentation_does_not_rebuild_or_retest_runtime(self):
         self.history(self.deployed)
