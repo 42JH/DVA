@@ -7,7 +7,7 @@ import { MEMBER_ROLE } from '@/features/company/labels'
 import { useCompanyCsv } from '@/features/company/hooks/useCompanyCsv'
 import { useMemberCsv } from '@/features/company/hooks/useMemberCsv'
 import { useMemberForm } from '@/features/company/hooks/useMemberForm'
-import { Btn, Icon } from '@/shared/ui'
+import { Btn, Icon, SelectField } from '@/shared/ui'
 import { AddressPicker } from '@/shared/ui/AddressPicker'
 import { AddressButton, Choice, FileDrop, TextInput } from '@/shared/ui/Field'
 import { Modal } from '@/shared/ui/Modal'
@@ -39,14 +39,16 @@ export function MemberFormModal({
   member,
   onClose,
   onCsv,
+  initialDept = null,
 }: {
   companyId: number
   companyName: string
   member: Member | null // null = 추가
   onClose: () => void
+  initialDept?: number | null
   onCsv?: () => void // 추가 창에서 CSV로 여러 명 등록 창으로 바꿈 (11/11: 화면의 CSV 버튼을 이 창 안으로)
 }) {
-  const vm = useMemberForm(companyId, member, onClose)
+  const vm = useMemberForm(companyId, member, onClose, initialDept)
   return (
     <Modal
       title={vm.editing ? '사원 수정' : '사원 추가'}
@@ -117,6 +119,13 @@ export function MemberFormModal({
                 </p>
               )}
             </div>
+            <SelectField
+              label="부서"
+              value={vm.form.dept}
+              onChange={vm.setDept}
+              options={vm.deptOptions}
+              compact
+            />
           </div>
           <AddressButton value={vm.road} onClick={vm.openSearch} />
           <TextInput
