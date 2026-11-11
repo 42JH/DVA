@@ -17,7 +17,7 @@ import { UnansweredQuestionsService } from './unanswered-questions.service';
 
 @ApiTags('Unanswered Questions')
 @ApiCookieAuth('adminSession')
-@Roles('OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN')
+@Roles('OPERATOR', 'SYSTEM_ADMIN')
 @ApiResponse({ status: 400, type: ErrorResponseDto, description: '질문 번호 또는 요청 필드 오류.' })
 @ApiResponse({ status: 401, type: ErrorResponseDto, description: '활성 관리자 세션 필요.' })
 @ApiResponse({ status: 403, type: ErrorResponseDto, description: '권한 또는 Origin 오류.' })

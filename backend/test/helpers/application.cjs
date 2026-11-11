@@ -92,7 +92,8 @@ function applicationFixture(name = '통합 테스트 관리자') {
     await migrate(pool);
     f.app = await f.start();
     f.base = await f.app.getUrl();
-    for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN']) {
+    // Keep a second operator identity for cross-account scope checks.
+    for (const role of ['OPERATOR', 'OPERATOR', 'SYSTEM_ADMIN']) {
       const loginId = 'test' + randomUUID().replaceAll('-', '').slice(0, 16);
       f.loginIds.push(loginId);
       f.ids.push(

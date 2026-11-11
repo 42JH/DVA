@@ -165,7 +165,7 @@ async function error(response, status, code) {
 
 test('every active admin role can manage members and representative labels create no admin account', async () => {
   const before = (await pool.query('SELECT count(*) FROM admin_users')).rows[0].count;
-  for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN']) {
+  for (const role of ['OPERATOR', 'SYSTEM_ADMIN']) {
     const admin = await account(role);
     const co = await company();
     const cu = await customer();

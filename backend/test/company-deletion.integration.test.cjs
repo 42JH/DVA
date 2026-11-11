@@ -634,7 +634,7 @@ test('deletion requires an active admin session, valid origin and valid ID; all 
     400,
   );
   assert.equal((await request('DELETE', '/departments', { departmentSeqs: ['0'] })).status, 400);
-  for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN']) {
+  for (const role of ['OPERATOR', 'SYSTEM_ADMIN']) {
     const data = await fixture();
     const loginId = 'del' + randomUUID().slice(0, 8);
     const admin = await pool.query(

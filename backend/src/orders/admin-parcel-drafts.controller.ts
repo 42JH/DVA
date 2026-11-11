@@ -25,7 +25,7 @@ import { DraftIdParamsDto } from './dto/parcel-draft.dto';
 @ApiResponse({ status: 409, type: ErrorResponseDto })
 @ApiResponse({ status: 422, type: ErrorResponseDto })
 @ApiResponse({ status: 503, type: ErrorResponseDto })
-@Roles('OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN')
+@Roles('OPERATOR', 'SYSTEM_ADMIN')
 @Controller()
 export class AdminParcelDraftsController {
   constructor(private readonly drafts: AdminParcelDraftsService) {}

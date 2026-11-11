@@ -35,8 +35,13 @@ module.exports = function registerAiSettingsApplication(suite) {
       );
     await error(await runtime(), 404, 'NOT_FOUND');
     await error(await runtime('INACTIVE'), 400, 'INVALID_REQUEST');
-    await error(await call('GET', '/api/ai/config', undefined, 1), 403, 'FORBIDDEN');
-    await error(await call('POST', '/api/ai/config/apply-result', {}), 401, 'UNAUTHORIZED');
+    await error(await call('GET', '/api/ai/config', undefined, 1), 404, 'NOT_FOUND');
+    for (const actor of [0, 1])
+      await error(
+        await call('POST', '/api/ai/config/apply-result', {}, actor),
+        401,
+        'UNAUTHORIZED',
+      );
     await error(await serviceCall('POST', '/api/personas', input()), 403, 'FORBIDDEN');
     for (const [headers, expectedType, expectedStatus] of [
       [{ Authorization: 'Bearer incorrect' }, 'SYSTEM', 401],
@@ -84,6 +89,11 @@ module.exports = function registerAiSettingsApplication(suite) {
       (await data(await call('GET', '/api/ai/config'))).aiPersonaVersionSeq,
       active.aiPersonaVersionSeq,
     );
+    for (const actor of [1, 2])
+      assert.equal(
+        (await data(await call('GET', '/api/ai/config', undefined, actor))).aiPersonaVersionSeq,
+        active.aiPersonaVersionSeq,
+      );
     assert.equal((await data(await report(pending))).appliedAt, active.appliedAt);
     assert.equal((await data(await activate(version))).status, 'ACTIVE');
     const appliedActor = (

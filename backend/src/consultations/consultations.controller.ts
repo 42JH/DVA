@@ -15,7 +15,7 @@ import { AuditOperation } from '../audit/audit-operation';
 
 @ApiTags('Calls')
 @ApiCookieAuth('adminSession')
-@Roles('OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN')
+@Roles('OPERATOR', 'SYSTEM_ADMIN')
 @ApiResponse({
   status: 400,
   description: '조회 조건 또는 통화 번호 형식 오류.',

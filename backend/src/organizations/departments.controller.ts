@@ -48,7 +48,7 @@ import { ErrorResponseDto } from '../common/dto/api-response.dto';
 @ApiNotFoundResponse({ type: ErrorResponseDto })
 @ApiConflictResponse({ type: ErrorResponseDto })
 @ApiServiceUnavailableResponse({ type: ErrorResponseDto })
-@Roles('OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN')
+@Roles('OPERATOR', 'SYSTEM_ADMIN')
 @Controller()
 export class DepartmentsController {
   constructor(

@@ -586,7 +586,7 @@ test('audit success is atomic with writes and contains no address or phone; fail
 });
 
 test('all admin roles delete PIN arrays across customers without changing owners or order snapshots', async () => {
-  for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN']) {
+  for (const role of ['OPERATOR', 'SYSTEM_ADMIN']) {
     const headers = await admin(role);
     const a = await fixture(),
       b = await fixture();

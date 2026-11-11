@@ -1,5 +1,7 @@
 # 모놀리식 DELETE API 단건·다건 통합 — 프론트 전달 명세
 
+관리자 권한은 SYSTEM_ADMIN·OPERATOR 두 개이며 계정 관리 4개만 최상위 전용입니다. DELETE와 권한의 최신 통합 계약은 [프론트 전달 명세](frontend-delete-admin-roles.md)를 우선합니다.
+
 모든 DELETE는 리소스별로 ID 배열을 받는 API 하나로 단건·다건을 처리합니다. 기존 배열형 5개는 그대로 두고, 기업의 중복 단건 경로를 제거하며 나머지 단건 전용 9개를 교체합니다. 병행 API를 추가하지 않습니다. 최종 DELETE는 14개이며 MSA는 이번 변경에 포함하지 않습니다.
 
 ## 전체 경로와 입력
@@ -50,8 +52,8 @@ export const deleteCompany = (id: number): Promise<void> =>
 
 | 대상 | 권한·보호 조건 |
 | --- | --- |
-| 관리자 | SYSTEM_ADMIN 전용. OPERATOR·SUPERVISOR만 삭제하며 SYSTEM_ADMIN이 한 명이라도 포함되면 전체 403. 삭제 대상의 세션도 함께 종료 |
-| 페르소나 | SUPERVISOR·SYSTEM_ADMIN 전용. HEAD와 관계없이 실제 ACTIVE 버전이 있는 분류는 삭제 불가. 분류·전체 버전·초안을 함께 soft delete |
+| 관리자 | SYSTEM_ADMIN 전용. OPERATOR만 삭제하며 SYSTEM_ADMIN이 한 명이라도 포함되면 전체 403. 삭제 대상의 세션도 함께 종료 |
+| 페르소나 | OPERATOR·SYSTEM_ADMIN 전용. HEAD와 관계없이 실제 ACTIVE 버전이 있는 분류는 삭제 불가. 분류·전체 버전·초안을 함께 soft delete |
 | 나머지 일반 업무 DELETE | 기존 활성 관리자 세션 권한 유지. AI 토큰만으로 사용할 수 없음 |
 | 개인·기업 카드 해제 | 기존 활성 관리자 세션 또는 AI_BUSINESS_TOKEN Bearer 유지. AI는 기존 `call_session_seq` 헤더와 진행 중 본인 통화 범위가 필요하며 배열의 **모든 소유자**를 검사. 다른 고객/기업이 섞이면 전체 403. 관리자 권한을 AI 권한으로 교체하지 않음 |
 | 통화 | 진행 통화·녹취 저장/대기·주문 확정 진행 중에는 삭제 불가 |

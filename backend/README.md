@@ -1,5 +1,7 @@
 # 모놀리식 백엔드 공통 기반
 
+관리자 역할 이분화와 DELETE 배열 전환은 [프론트 통합 명세](docs/frontend-delete-admin-roles.md)를 따릅니다. 새 앱 전 migration 066을 적용하여 기존 SUPERVISOR 계정을 상태·세션을 보존한 OPERATOR로 이관하고 개인정보 없는 SYSTEM 감사 기록을 남깁니다. 계정 관리 4개만 SYSTEM_ADMIN 전용이며 ai/config·페르소나 관리·감사 조회를 포함한 나머지 관리자 업무는 OPERATOR도 허용합니다. AI 전용 인증은 유지합니다.
+
 모든 모놀리식 DELETE는 [배열 통합 명세](docs/delete-array-contracts.md)를 따릅니다. 기존 배열형은 유지하고 단건 전용 경로는 교체하며, 프론트 호출 전환 후 함께 배포합니다. 기존 권한·soft delete·감사·보관 정책과 SYSTEM_ADMIN/ACTIVE 페르소나 보호는 유지합니다.
 
 최종 홈 화면의 오늘 주문·통화 건수와 최대 11개 미리보기는 [프론트 QA 연동 명세](docs/frontend-qa-api.md)를 따른다. 주문 전체는 실제 주문과 유효한 미완료 배송 단건 초안을 함께 반환한다. 미완료의 24시간·최신 확정 통화 조건은 [만료 명세](docs/incomplete-expiry-latest-call.md)를 따른다. 미답변 질문의 정확한 발화 연결은 현행 보장 범위에 포함하지 않는다. [후속 작업·검증 기록](docs/final-wireframe-follow-up.md)을 함께 확인한다.

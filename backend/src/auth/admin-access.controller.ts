@@ -91,7 +91,7 @@ export class AdminAccessController {
   @ApiOperation({
     summary: '관리자 삭제',
     description:
-      'SYSTEM_ADMIN 전용. OPERATOR·SUPERVISOR를 상태와 관계없이 soft delete하고 모든 세션을 즉시 종료합니다. SYSTEM_ADMIN은 삭제할 수 없습니다. 계정은 삭제 후 5년 보관하며 감사 로그는 7일, 페르소나 작성자 이름은 별도 스냅샷으로 보관합니다.',
+      'SYSTEM_ADMIN 전용. OPERATOR를 상태와 관계없이 soft delete하고 모든 세션을 즉시 종료합니다. SYSTEM_ADMIN은 삭제할 수 없습니다. 계정은 삭제 후 5년 보관하며 감사 로그는 7일, 페르소나 작성자 이름은 별도 스냅샷으로 보관합니다.',
   })
   @ApiNoContentResponse({ description: '계정·세션 삭제 완료. 응답 본문 없음.' })
   remove(@Body() input: DeleteAdminsDto, @Req() request: AuthRequest) {
@@ -103,7 +103,7 @@ export class AdminAccessController {
   @ApiOperation({
     summary: '관리자 권한·활성 상태 변경·가입 승인',
     description:
-      'SYSTEM_ADMIN 전용. OPERATOR·SUPERVISOR의 권한 변경·ACTIVE ↔ INACTIVE 전환 또는 PENDING → ACTIVE 승인을 처리합니다. 비활성화 시 대상의 모든 세션을 종료하며 재활성화해도 이전 세션은 복구하지 않습니다. SYSTEM_ADMIN의 권한·활성 상태 전환은 금지합니다.',
+      'SYSTEM_ADMIN 전용. OPERATOR의 권한 변경·ACTIVE ↔ INACTIVE 전환 또는 PENDING → ACTIVE 승인을 처리합니다. 비활성화 시 대상의 모든 세션을 종료하며 재활성화해도 이전 세션은 복구하지 않습니다. SYSTEM_ADMIN의 권한·활성 상태 전환은 금지합니다.',
   })
   @ApiParam({
     name: 'id',

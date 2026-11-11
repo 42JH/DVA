@@ -298,7 +298,7 @@ test('administrator sessions and AI Bearer return the same directory while inval
   const authenticated = await result(await search({ q: c.name }));
   await error(await search({ q: c.name }, {}), 401, 'UNAUTHORIZED');
   await error(await search({ q: c.name }, { Authorization: 'Bearer wrong' }), 401, 'UNAUTHORIZED');
-  for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN']) {
+  for (const role of ['OPERATOR', 'SYSTEM_ADMIN']) {
     const headers = await account(role);
     assert.deepEqual(await result(await search({ q: c.name }, headers)), authenticated);
     assert.deepEqual(
@@ -488,7 +488,7 @@ test('administrator search keeps session roles, stable pagination, literal match
     c = await company();
   const first = await recipient(c, { name: term }),
     second = await recipient(c, { name: term });
-  for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN']) {
+  for (const role of ['OPERATOR', 'SYSTEM_ADMIN']) {
     const body = await result(await memberSearch({ q: term }, await account(role)));
     assert.deepEqual(
       body.data.map((row) => row.membershipSeq),

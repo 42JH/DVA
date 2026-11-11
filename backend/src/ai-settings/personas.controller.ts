@@ -46,7 +46,7 @@ import {
 
 @ApiTags('Personas')
 @ApiCookieAuth('adminSession')
-@Roles('SUPERVISOR', 'SYSTEM_ADMIN')
+@Roles('OPERATOR', 'SYSTEM_ADMIN')
 @ApiResponse({
   status: 400,
   description: '요청 형식 오류 또는 변경값 없음.',
@@ -133,7 +133,7 @@ export class PersonasController {
   }
 
   @Get()
-  @Roles('OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN')
+  @Roles('OPERATOR', 'SYSTEM_ADMIN')
   @ApiOperation({
     summary: '페르소나 목록 조회',
     description:
@@ -164,7 +164,7 @@ export class PersonasController {
   }
 
   @Get(':id')
-  @Roles('OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN')
+  @Roles('OPERATOR', 'SYSTEM_ADMIN')
   @ApiOperation({
     summary: '페르소나 상세 조회',
     description:
@@ -235,7 +235,7 @@ export class PersonasController {
   }
 
   @Get(':id/versions')
-  @Roles('OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN')
+  @Roles('OPERATOR', 'SYSTEM_ADMIN')
   @ApiOperation({
     summary: '페르소나 버전 이력 조회',
     description:

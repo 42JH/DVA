@@ -80,7 +80,7 @@ import { OrderRequestKey } from './order-request-key';
   description: '접근 권한·Origin 오류 또는 고객·통화·주소록 접근 불가.',
   type: ErrorResponseDto,
 })
-@Roles('OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN')
+@Roles('OPERATOR', 'SYSTEM_ADMIN')
 @Controller('orders')
 export class OrdersController {
   constructor(private readonly orders: OrdersService) {}

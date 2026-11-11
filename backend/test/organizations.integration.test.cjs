@@ -90,7 +90,7 @@ test('every company operation rejects missing, forged and malformed sessions bef
 });
 
 test('all active administrator roles can register, list, read and update companies', async () => {
-  const supervisor = await account('companySupervisor', 'SUPERVISOR');
+  const supervisor = await account('companySupervisor', 'OPERATOR');
   for (const cookie of [sessionA, cookies.get(baseB), await createTestSession(pool, supervisor)]) {
     const name = '역할 검증 ' + randomUUID();
     const created = await request('', {
