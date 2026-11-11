@@ -109,6 +109,7 @@ export async function saveDraft(
   input: {
     expectedVersion: number // HEAD 번호
     expectedDraftRevision: string | null
+    name?: string // 바뀌었을 때만
     prompt: Partial<PromptFields> // 바뀐 칸만 (서버는 생략한 칸을 유지)
     voice: Partial<VoiceSettings> // 바뀐 것만
     rateRange: AiOptions['rateRange']
@@ -116,6 +117,7 @@ export async function saveDraft(
 ): Promise<void> {
   const { voice, speed, waitTime } = input.voice
   const changed = {
+    ...(input.name !== undefined && { name: input.name }),
     ...input.prompt,
     ...(voice !== undefined && { voiceId: voice || null }),
     ...(speed !== undefined && { speakingRate: toRate(speed, input.rateRange) }),

@@ -1,7 +1,7 @@
 // AI 상담가 (11/06) — 가운데 시스템 프롬프트(또는 버전 비교) | 오른쪽 상담가 카드 (11/10: 왼쪽 목록 · 버전 기록을 카드 + 히스토리 드롭다운으로 합침)
 // 데이터 · 적용 · 시험 통화 · 수정 규칙은 기존 usePersonaPage 그대로. 프롬프트 수정 · 추가 · 시험 통화 창은 기존 부품을 그대로 씀
 import { usePersonaPage, type PersonaItem } from '@/features/persona/hooks/usePersonaPage'
-import { AddPersonaModal } from './AddPersonaModal'
+import { AddPersona } from './AddPersona'
 import { PromptEditor } from './PromptEditor'
 import { TestCallModal } from './TestCallModal'
 import { VoiceEditor } from './VoiceEditor'
@@ -17,7 +17,7 @@ export function PersonasPage() {
   return (
     <>
       <PageHead title="AI 상담가">
-        {vm.canAdd && !vm.editing && (
+        {vm.canAdd && !vm.editing && !vm.adding && (
           <Btn kind="primary" className="ml-auto" onClick={vm.openAdd}>
             <Icon name="bot" />
             상담가 등록
@@ -34,7 +34,12 @@ export function PersonasPage() {
           원래대로 돌아갑니다.
         </p>
       )}
-      {vm.error || vm.isLoading || vm.personas.length === 0 ? (
+      {vm.adding ? (
+        // 등록 — 수정과 같은 넓은 화면 (11/11). 목록이 비어 있어도 첫 상담가를 만들 수 있게 맨 앞에서 가름
+        <div className="flex min-h-0 flex-1 flex-col px-6 py-4">
+          <AddPersona onDone={vm.added} onClose={vm.closeAdd} />
+        </div>
+      ) : vm.error || vm.isLoading || vm.personas.length === 0 ? (
         <p className="flex flex-1 items-center justify-center py-16 text-center text-[14px] text-ops-sub">
           {vm.error ?? (vm.isLoading ? '불러오는 중…' : '상담가가 없습니다.')}
         </p>
@@ -78,7 +83,6 @@ export function PersonasPage() {
       {vm.voiceOnly && vm.editTarget && (
         <VoiceEditor target={vm.editTarget} onDone={vm.finishEdit} />
       )}
-      {vm.adding && <AddPersonaModal onDone={vm.added} onClose={vm.closeAdd} />}
       {vm.testCall && (
         <TestCallModal
           key={`${vm.testCall.personaSeq}-${vm.testCall.version}`}
