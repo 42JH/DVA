@@ -26,12 +26,13 @@ export function Badge({ tone, children }: { tone: Tone; children: ReactNode }) {
 
 // 버튼 모양 · 색 규칙은 actionBadge.ts BUTTON_LOOK. kind = 속성, 이름이 …Badge로 끝나면 목록 줄 안에 넣는 22px (나머지 32px)
 const BTN = {
-  primary: BUTTON_LOOK.solid, // 만들기 · 등록 · 저장 · 확정 (11/11 사용자: 같은 '등록'은 크기 · 자리와 상관없이 같은 진한 파랑)
-  primaryBadge: BUTTON_LOOK.solid, // 줄 안 등록 (미답변 줄 FAQ 등록)
+  primary: BUTTON_LOOK.solid, // 화면 맨 위 줄의 만들기(주문 추가 등) · 창의 저장 · 등록 · 확정 — 채움
+  primaryBadge: BUTTON_LOOK.line, // 줄 안 등록 (미답변 줄 FAQ 등록) — 줄 안은 테두리 (11/11 사용자)
   lineBadge: BUTTON_LOOK.line, // 줄 안 승인 · 적용
-  edit: BUTTON_LOOK.edit, // 수정 · 설정 열기
+  line: BUTTON_LOOK.line, // 화면 안(카드 · 패널) 만들기 · 등록 — 테두리
+  edit: BUTTON_LOOK.edit, // 수정 · 설정 열기 — 자리 상관없이 테두리
   editBadge: BUTTON_LOOK.edit,
-  danger: BUTTON_LOOK.danger, // 삭제 · 탈퇴 · 끝내기 (되돌릴 수 없음)
+  danger: BUTTON_LOOK.danger, // 삭제 · 탈퇴 · 끝내기 — 테두리 (꽉 찬 빨강은 눈이 아픔, 11/11 사용자). 확정은 dangerSolid
   dangerBadge: BUTTON_LOOK.danger,
   dangerSolid: BUTTON_LOOK.solidDanger, // 확인 창의 삭제 확정
   plain: BUTTON_LOOK.plain, // 닫기 · 취소 · 보기 · 이동 · 파일
@@ -127,6 +128,7 @@ const PATHS = {
   search: 'm21 21-4.3-4.3M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14Z',
   x: 'M18 6 6 18M6 6l12 12',
   plus: 'M12 5v14M5 12h14',
+  pen: 'M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z',
   phone:
     'M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2Z',
   box: 'M21 8 12 3 3 8v8l9 5 9-5V8ZM3 8l9 5 9-5M12 13v8',
