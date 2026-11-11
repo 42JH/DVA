@@ -218,7 +218,7 @@ function Row({ r, from, onWarm }: { r: CallsRow; from: string; onWarm: () => voi
           )}
         </span>,
         false,
-        'left',
+        'center', // 칩이 한두 개라 머리 글과 같이 가운데 (11/11 사용자: 왼쪽에 붙어 정렬이 어긋나 보임)
       )}
       {cell(
         <span className="w-full text-center text-[13px] whitespace-nowrap text-ops-sub tabular-nums">
