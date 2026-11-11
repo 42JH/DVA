@@ -102,10 +102,10 @@ export function usePersonaPage() {
   const [adding, setAdding] = useState(false)
   const qc = useQueryClient()
   const options = useVoiceOptions() // 다시 쓰기에서 속도를 AI 지원 범위로 맞춰 보낼 때
-  // 추가 · 수정 · 사용하기는 SUPERVISOR · SYSTEM_ADMIN만 (백엔드 persona-head-management.md) → OPERATOR는 보기 · 시험 통화만 (11/02 사용자)
-  // 내 정보를 불러오기 전(role undefined)에도 숨김
+  // 추가 · 수정 · 사용하기 · 삭제는 모든 관리자(OPERATOR · SYSTEM_ADMIN) — 11/11 백엔드 권한 이분화 (11/02 'OPERATOR는 보기만'을 뒤집음)
+  // 내 정보를 불러오기 전(role undefined)에는 숨김
   const { role } = useSession()
-  const canManage = role === 'SUPERVISOR' || role === 'SYSTEM_ADMIN'
+  const canManage = role !== undefined
 
   const personas = useQuery({
     ...personaQueries.list(),

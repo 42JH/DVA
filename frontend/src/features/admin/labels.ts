@@ -3,10 +3,8 @@ import type { AdminRole } from '@/shared/auth/sessionApi'
 import type { AdminStatus } from '@/features/admin/api/adminApi'
 
 // 디자인의 '슈퍼바이저' = SYSTEM_ADMIN = 최고 관리자 (11/01 결정)
-// SUPERVISOR는 화면에서 OPERATOR와 차이가 없어(감사 기록 화면 없음) 같은 '일반 관리자'로
 export const ROLE_LABEL: Record<AdminRole, string> = {
   OPERATOR: '일반 관리자',
-  SUPERVISOR: '일반 관리자',
   SYSTEM_ADMIN: '최고 관리자',
 }
 
