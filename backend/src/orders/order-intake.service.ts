@@ -1,3 +1,4 @@
+import { OrderCardPaymentsService } from './order-card-payments.service';
 import { Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
@@ -31,6 +32,7 @@ export class OrderIntakeService {
     private readonly submissions: OrderSubmissionService,
     private readonly audit: AuditService,
     private readonly payments: OrderPaymentsRepository,
+    private readonly cardPayments: OrderCardPaymentsService,
   ) {}
 
   async complete(id: number, input: CompleteOrderIntakeDto, requestId: string) {
@@ -64,12 +66,6 @@ export class OrderIntakeService {
         );
       await this.drafts.lockScope(client, call.customerSeq, call.callerPhoneNumber);
       const rows = await this.lockDrafts(client, id);
-      if (rows.some((row) => row.status === 'READY') && !input.paymentMethodType)
-        throw new ApiException(
-          422,
-          'VALIDATION_FAILED',
-          '완성된 배송 초안에는 결제수단이 필요합니다.',
-        );
       const ready = rows.filter((row) => row.status === 'READY');
       if (ready.length) {
         assertOrderAmount({
@@ -79,6 +75,12 @@ export class OrderIntakeService {
         if (call.customerSeq === null || !(await this.drafts.customer(client, call.customerSeq)))
           throw new ApiException(403, 'FORBIDDEN', '통화에 연결된 활성 고객이 필요합니다.');
         const policy = await this.payments.eligibility(client, call.customerSeq);
+        if (!input.paymentMethodType && !(policy.organizationSeq !== null && policy.monthly))
+          throw new ApiException(
+            422,
+            'VALIDATION_FAILED',
+            '완성된 배송 초안에는 결제수단이 필요합니다.',
+          );
         if (
           (input.paymentMethodType === 'credit' && !policy.monthly) ||
           (input.paymentMethodType === 'groupBilling' && !policy.group)
@@ -217,6 +219,7 @@ export class OrderIntakeService {
     }
     if (orderSeq !== null) {
       try {
+        await this.cardPayments.forOrder(orderSeq, requestId);
         await this.submissions.submitPaidOrder(orderSeq, requestId);
       } catch {
         this.logger.error({ event: 'order_intake_submission_deferred', orderSeq, requestId });

@@ -195,6 +195,9 @@ export class RetentionRepository {
         await client.query('DELETE FROM orders WHERE order_seq=$1', [order.id]);
       }
       // Child references remain valid until their own roots are expired.
+      await client.query(
+        `DELETE FROM payment_cards WHERE payment_card_seq IN (SELECT payment_card_seq FROM payment_cards WHERE deleted_at<=statement_timestamp()-interval '5 years' LIMIT 100 FOR UPDATE SKIP LOCKED)`,
+      );
       await client.query(`DELETE FROM memberships WHERE membership_seq IN (SELECT membership_seq FROM memberships
         WHERE deleted_at<=statement_timestamp()-interval '5 years' LIMIT 100 FOR UPDATE SKIP LOCKED)`);
       await client.query(`DELETE FROM personal_pins WHERE personal_pin_seq IN (SELECT personal_pin_seq FROM personal_pins
@@ -205,6 +208,7 @@ export class RetentionRepository {
       await client.query(`DELETE FROM organizations WHERE organization_seq IN (SELECT o.organization_seq FROM organizations o
         WHERE o.deleted_at<=statement_timestamp()-interval '5 years'
          AND NOT EXISTS(SELECT 1 FROM memberships m WHERE m.organization_seq=o.organization_seq)
+          AND NOT EXISTS(SELECT 1 FROM payment_cards c WHERE c.organization_seq=o.organization_seq)
          AND NOT EXISTS(SELECT 1 FROM departments d WHERE d.organization_seq=o.organization_seq) LIMIT 100 FOR UPDATE SKIP LOCKED)`);
       await client.query(`UPDATE customers SET name='삭제된 고객',phone_number='000'||customer_seq::text,address_data=NULL,
         monthly_billing_enabled=false,anonymized_at=clock_timestamp() WHERE customer_seq IN (SELECT customer_seq FROM customers
@@ -213,6 +217,7 @@ export class RetentionRepository {
         WHERE c.deleted_at<=statement_timestamp()-interval '5 years'
          AND NOT EXISTS(SELECT 1 FROM orders o WHERE o.customer_seq=c.customer_seq)
          AND NOT EXISTS(SELECT 1 FROM personal_pins p WHERE p.customer_seq=c.customer_seq)
+         AND NOT EXISTS(SELECT 1 FROM payment_cards pc WHERE pc.customer_seq=c.customer_seq)
          AND NOT EXISTS(SELECT 1 FROM memberships m WHERE m.customer_seq=c.customer_seq) LIMIT 100 FOR UPDATE SKIP LOCKED)`);
       await client.query(`DELETE FROM admin_users WHERE admin_user_seq IN (SELECT admin_user_seq FROM admin_users
         WHERE deleted_at<=statement_timestamp()-interval '5 years' LIMIT 100 FOR UPDATE SKIP LOCKED)`);

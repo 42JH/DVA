@@ -943,3 +943,50 @@ test('inline employee updates preserve an omitted role, membership identity, sta
   await empty(await registerMany(co, [{ ...input, role: 'MEMBER' }]));
   assert.deepEqual(await member(co, cu.id), { ...omitted, role: 'MEMBER' });
 });
+
+test('member payment permissions support atomic single and batch changes without changing account status', async () => {
+  const org = await company();
+  const first = await customer(),
+    second = await customer();
+  await empty(await create(org, first.id, 'PAY-1'));
+  await empty(await create(org, second.id, 'PAY-2'));
+  const a = await member(org, first.id);
+  const b = await member(org, second.id);
+  assert.equal(a.monthlyBillingEnabled, true);
+  assert.equal(a.groupBillingEnabled, false);
+  const body = {
+    membershipSeqs: [a.membershipSeq, b.membershipSeq],
+    monthlyBillingEnabled: false,
+    groupBillingEnabled: true,
+  };
+  const batch = (data) =>
+    request('/companies/' + org + '/members', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+  await empty(await batch(body));
+  for (const id of [first.id, second.id]) {
+    const current = await member(org, id);
+    assert.equal(current.monthlyBillingEnabled, false);
+    assert.equal(current.groupBillingEnabled, true);
+    assert.equal(current.status, 'ACTIVE');
+  }
+  await error(
+    await batch({
+      ...body,
+      membershipSeqs: [a.membershipSeq, 2147483647],
+      monthlyBillingEnabled: true,
+    }),
+    404,
+    'NOT_FOUND',
+  );
+  assert.equal((await member(org, first.id)).monthlyBillingEnabled, false);
+  await empty(await patch(a.membershipSeq, { monthlyBillingEnabled: true }));
+  assert.equal((await member(org, first.id)).monthlyBillingEnabled, true);
+  const audits = await pool.query(
+    "SELECT count(*)::int AS n FROM audit_logs WHERE action='MEMBERSHIP_UPDATED' AND target_seq=ANY($1::int[]) AND result='SUCCESS'",
+    [[a.membershipSeq, b.membershipSeq]],
+  );
+  assert.equal(audits.rows[0].n, 3);
+});

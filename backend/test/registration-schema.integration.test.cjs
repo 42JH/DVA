@@ -53,6 +53,93 @@ async function verify(changes = [], message = 'Registration dates schema or migr
 test('deployment verification accepts the complete current schema and migration checksums', () =>
   verify());
 
+test('deployment verification requires employee policy and usable card uniqueness', async () => {
+  await verify(
+    ["DELETE FROM db_migrations.applied_versions WHERE version='063-member-payment-policy.sql'"],
+    'Employee payment policy schema or migration missing',
+  );
+  for (const sql of [
+    "DELETE FROM db_migrations.applied_versions WHERE version='064-payment-cards.sql'",
+    'DROP INDEX payment_cards_company_active',
+    'ALTER TABLE order_payment_requests DROP COLUMN card_payment_order_id',
+  ])
+    await verify([sql], 'Registered payment card schema or migration missing');
+});
+
+test('063 preserves existing company policy and copies department permission to each employee', async () => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const org = (
+      await client.query(
+        "INSERT INTO organizations(name,status,monthly_billing_enabled) VALUES('이관 결제','ACTIVE',false) RETURNING organization_seq",
+      )
+    ).rows[0].organization_seq;
+    const members = [];
+    for (const flag of [false, true]) {
+      const customer = (
+        await client.query(
+          "INSERT INTO customers(name,phone_number,status) VALUES('이관 고객',$1,'ACTIVE') RETURNING customer_seq",
+          ['010' + require('node:crypto').randomInt(10000000, 100000000)],
+        )
+      ).rows[0].customer_seq;
+      const dept = (
+        await client.query(
+          'INSERT INTO departments(organization_seq,name,group_billing_enabled) VALUES($1,$2,$3) RETURNING department_seq',
+          [org, String(flag), flag],
+        )
+      ).rows[0].department_seq;
+      members.push(
+        (
+          await client.query(
+            "INSERT INTO memberships(customer_seq,organization_seq,department_seq,employee_no,status) VALUES($1,$2,$3,$4,'ACTIVE') RETURNING membership_seq",
+            [customer, org, dept, String(flag)],
+          )
+        ).rows[0].membership_seq,
+      );
+    }
+    await client.query(
+      'ALTER TABLE memberships DROP COLUMN monthly_billing_enabled, DROP COLUMN group_billing_enabled',
+    );
+    await client.query(
+      'ALTER TABLE organizations ALTER COLUMN monthly_billing_enabled SET DEFAULT false',
+    );
+    await client.query(readFileSync(join(directory, '063-member-payment-policy.sql'), 'utf8'));
+    assert.deepEqual(
+      (
+        await client.query(
+          'SELECT monthly_billing_enabled,group_billing_enabled FROM memberships WHERE membership_seq=ANY($1::int[]) ORDER BY membership_seq',
+          [members],
+        )
+      ).rows,
+      [
+        { monthly_billing_enabled: true, group_billing_enabled: false },
+        { monthly_billing_enabled: true, group_billing_enabled: true },
+      ],
+    );
+    assert.equal(
+      (
+        await client.query(
+          'SELECT monthly_billing_enabled FROM organizations WHERE organization_seq=$1',
+          [org],
+        )
+      ).rows[0].monthly_billing_enabled,
+      false,
+    );
+    assert.equal(
+      (
+        await client.query(
+          "INSERT INTO organizations(name,status) VALUES('신규 기본','ACTIVE') RETURNING monthly_billing_enabled",
+        )
+      ).rows[0].monthly_billing_enabled,
+      true,
+    );
+  } finally {
+    await client.query('ROLLBACK');
+    client.release();
+  }
+});
+
 test('deployment verification requires 055, logical references, uniqueness and the finalization guard', async () => {
   for (const sql of [
     "DELETE FROM db_migrations.applied_versions WHERE version='055-parcel-draft-intake.sql'",
@@ -65,7 +152,7 @@ test('deployment verification requires 055, logical references, uniqueness and t
     [
       'ALTER TABLE order_parcel_drafts ADD FOREIGN KEY(customer_seq) REFERENCES customers(customer_seq)',
     ],
-    'Expected 25 foreign keys, found 26',
+    'Expected 28 foreign keys, found 29',
   );
 });
 

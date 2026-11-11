@@ -3,6 +3,8 @@ import { CustomerResponseDto } from '../../customers/dto/customer-response.dto';
 import { MEMBER_ROLES, MEMBER_STATUSES, MemberRole, MemberStatus } from '../members.types';
 
 export class MembershipResponseDto {
+  @ApiProperty() monthlyBillingEnabled!: boolean;
+  @ApiProperty() groupBillingEnabled!: boolean;
   @ApiProperty({ type: Number, nullable: true, description: '부서가 없으면 null.' })
   departmentSeq!: number | null;
   @ApiProperty() membershipSeq!: number;

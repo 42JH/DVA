@@ -146,6 +146,7 @@ test('lists use stable pagination, status and literal name searches without expo
   for (const row of first.data)
     assert.deepEqual(Object.keys(row).sort(), [
       'createdAt',
+      'groupCardRegistered',
       'memberCount',
       'monthlyBillingEnabled',
       'name',
@@ -188,7 +189,8 @@ test('patch updates name/status with no response body and preserves memberships/
     createdAt: (
       await pool.query('SELECT created_at FROM organizations WHERE organization_seq=$1', [id])
     ).rows[0].created_at.toISOString(),
-    monthlyBillingEnabled: false,
+    monthlyBillingEnabled: true,
+    groupCardRegistered: false,
   });
   assert.equal(
     (await pool.query('SELECT count(*) FROM memberships WHERE organization_seq=$1', [id])).rows[0]

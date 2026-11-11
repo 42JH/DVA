@@ -3,7 +3,9 @@ import { Transform, TransformFnParams, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   ArrayMinSize,
+  ArrayUnique,
   IsArray,
+  IsBoolean,
   IsObject,
   IsIn,
   IsInt,
@@ -37,6 +39,15 @@ export class MemberIdParamsDto {
   id!: number;
 }
 export class CreateMemberDto {
+  @ApiPropertyOptional({ default: true })
+  @ValidateIf((_o, value) => value !== undefined)
+  @IsBoolean()
+  monthlyBillingEnabled?: boolean;
+
+  @ApiPropertyOptional({ default: false })
+  @ValidateIf((_o, value) => value !== undefined)
+  @IsBoolean()
+  groupBillingEnabled?: boolean;
   @ApiPropertyOptional({
     type: Number,
     nullable: true,
@@ -125,6 +136,15 @@ export class CreateMembersDto {
 }
 
 export class UpdateMemberDto {
+  @ApiPropertyOptional()
+  @ValidateIf((_o, value) => value !== undefined)
+  @IsBoolean()
+  monthlyBillingEnabled?: boolean;
+
+  @ApiPropertyOptional()
+  @ValidateIf((_o, value) => value !== undefined)
+  @IsBoolean()
+  groupBillingEnabled?: boolean;
   @ApiPropertyOptional({
     type: Number,
     nullable: true,
@@ -146,6 +166,27 @@ export class UpdateMemberDto {
   @ValidateIf((_object, value) => value !== undefined)
   @IsIn(MEMBER_STATUSES)
   status?: MemberStatus;
+}
+export class UpdateMemberPaymentsDto {
+  @ApiProperty({ type: [Number], minItems: 1, maxItems: 100 })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(100)
+  @ArrayUnique()
+  @IsInt({ each: true })
+  @Min(1, { each: true })
+  @Max(2147483647, { each: true })
+  membershipSeqs!: number[];
+
+  @ApiPropertyOptional()
+  @ValidateIf((_o, value) => value !== undefined)
+  @IsBoolean()
+  monthlyBillingEnabled?: boolean;
+
+  @ApiPropertyOptional()
+  @ValidateIf((_o, value) => value !== undefined)
+  @IsBoolean()
+  groupBillingEnabled?: boolean;
 }
 export class ListMembersQueryDto extends PaginationQueryDto {
   @ApiPropertyOptional({
