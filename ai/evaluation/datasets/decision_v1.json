@@ -1,0 +1,1000 @@
+{
+ "111cc443#20": {
+  "switch": "inquiry",
+  "note": "-"
+ },
+ "18ecdae3#7": {
+  "switch": "none",
+  "note": "-"
+ },
+ "1bd940b1#20": {
+  "switch": "none",
+  "note": "-"
+ },
+ "1e721972#41": {
+  "switch": "none",
+  "note": "-"
+ },
+ "2474a1f5#10": {
+  "switch": "inquiry",
+  "note": "-"
+ },
+ "2474a1f5#5": {
+  "switch": "lookup",
+  "note": "-"
+ },
+ "2b1762d6#14": {
+  "switch": "none",
+  "note": "-"
+ },
+ "4a9d9b67#30": {
+  "switch": "none",
+  "note": "-"
+ },
+ "4b512914#5": {
+  "switch": "none",
+  "note": "-"
+ },
+ "5eb7458a#55": {
+  "switch": "inquiry",
+  "note": "-"
+ },
+ "5eb7458a#7": {
+  "switch": "none",
+  "note": "-"
+ },
+ "5eb7458a#8": {
+  "switch": "none",
+  "note": "-"
+ },
+ "6f4fa871#10": {
+  "switch": "none",
+  "note": "-"
+ },
+ "6f4fa871#7": {
+  "switch": "none",
+  "note": "-"
+ },
+ "7b0b59ff#9": {
+  "switch": "none",
+  "note": "-"
+ },
+ "826f79a1#12": {
+  "switch": "none",
+  "note": "-"
+ },
+ "9f254f87#6": {
+  "switch": "none",
+  "note": "-"
+ },
+ "9f254f87#8": {
+  "switch": "none",
+  "note": "-"
+ },
+ "a3c34c41#4": {
+  "switch": "none",
+  "note": "-"
+ },
+ "a671ac4f#4": {
+  "switch": "none",
+  "note": "-"
+ },
+ "a97347a8#15": {
+  "switch": "none",
+  "note": "-"
+ },
+ "a97347a8#5": {
+  "switch": "none",
+  "note": "-"
+ },
+ "a97347a8#67": {
+  "switch": "lookup",
+  "note": "-"
+ },
+ "a97347a8#69": {
+  "switch": "end",
+  "note": "-"
+ },
+ "af964179#19": {
+  "switch": "none",
+  "note": "-"
+ },
+ "b197c501#57": {
+  "switch": "end",
+  "note": "-"
+ },
+ "b3855ab4#36": {
+  "switch": "none",
+  "note": "-"
+ },
+ "b47d4e3c#9": {
+  "switch": "none",
+  "note": "-"
+ },
+ "b95e0d81#11": {
+  "switch": "none",
+  "note": "-"
+ },
+ "b9b1eaab#4": {
+  "switch": "none",
+  "note": "-"
+ },
+ "bc1a4f4e#19": {
+  "switch": "none",
+  "note": "-"
+ },
+ "bc1a4f4e#22": {
+  "switch": "none",
+  "note": "-"
+ },
+ "bc1a4f4e#27": {
+  "switch": "none",
+  "sender_change": "none",
+  "note": "-"
+ },
+ "c8d995ec#9": {
+  "switch": "none",
+  "note": "-"
+ },
+ "e845618a#14": {
+  "switch": "none",
+  "note": "-"
+ },
+ "e845618a#17": {
+  "switch": "none",
+  "note": "-"
+ },
+ "e845618a#24": {
+  "switch": "none",
+  "note": "-"
+ },
+ "e845618a#26": {
+  "switch": "none",
+  "note": "-"
+ },
+ "fd5f640b#11": {
+  "switch": "none",
+  "note": "-"
+ },
+ "6f4fa871#13": {
+  "origin": "yes",
+  "switch": "none",
+  "note": "address_change"
+ },
+ "6f4fa871#14": {
+  "origin": "yes",
+  "switch": "none",
+  "note": "address_change"
+ },
+ "6f4fa871#16": {
+  "origin": "yes",
+  "switch": "none",
+  "note": "address_change"
+ },
+ "94c52328#5": {
+  "origin": "no",
+  "switch": "none",
+  "note": "address_change"
+ },
+ "9f254f87#11": {
+  "origin": "not_answer",
+  "switch": "none",
+  "note": "address_change"
+ },
+ "9f254f87#12": {
+  "origin": "yes",
+  "switch": "none",
+  "note": "address_change"
+ },
+ "9f254f87#14": {
+  "switch": "none",
+  "note": "address_change"
+ },
+ "b9b1eaab#10": {
+  "switch": "none",
+  "note": "address_change"
+ },
+ "b9b1eaab#13": {
+  "origin": "no",
+  "switch": "none",
+  "note": "address_change"
+ },
+ "b9b1eaab#6": {
+  "origin": "not_answer",
+  "switch": "none",
+  "note": "address_change"
+ },
+ "111cc443#17": {
+  "box": "not_answer",
+  "note": "box"
+ },
+ "115b1ae1#27": {
+  "box": "yes",
+  "note": "box"
+ },
+ "115b1ae1#29": {
+  "box": "not_answer",
+  "note": "box"
+ },
+ "115b1ae1#31": {
+  "box": "not_answer",
+  "note": "box"
+ },
+ "1bd940b1#67": {
+  "box": "not_answer",
+  "switch": "inquiry",
+  "note": "box"
+ },
+ "1bd940b1#70": {
+  "box": "not_answer",
+  "note": "box"
+ },
+ "1bd940b1#72": {
+  "box": "yes",
+  "note": "box"
+ },
+ "2b1762d6#27": {
+  "box": "yes",
+  "note": "box"
+ },
+ "6f4fa871#38": {
+  "box": "yes",
+  "note": "box"
+ },
+ "90285745#28": {
+  "box": "yes",
+  "note": "box"
+ },
+ "94c52328#31": {
+  "box": "yes",
+  "note": "box"
+ },
+ "b197c501#32": {
+  "box": "not_answer",
+  "note": "box"
+ },
+ "b197c501#35": {
+  "box": "yes",
+  "note": "box"
+ },
+ "115b1ae1#13": {
+  "task": "order",
+  "note": "greeting"
+ },
+ "115b1ae1#7": {
+  "task": "order",
+  "note": "greeting"
+ },
+ "16dab460#4": {
+  "task": "order",
+  "note": "greeting"
+ },
+ "18ecdae3#2": {
+  "task": "unclear",
+  "note": "greeting"
+ },
+ "18ecdae3#3": {
+  "task": "order",
+  "origin": "not_answer",
+  "note": "greeting"
+ },
+ "1d605fc0#5": {
+  "task": "order",
+  "note": "greeting"
+ },
+ "1e721972#4": {
+  "task": "order",
+  "note": "greeting"
+ },
+ "2b1762d6#2": {
+  "task": "order",
+  "origin": "no",
+  "note": "greeting"
+ },
+ "2b1762d6#6": {
+  "task": "order",
+  "note": "greeting"
+ },
+ "42eb84d7#2": {
+  "task": "order",
+  "note": "greeting"
+ },
+ "49d6bee7#14": {
+  "task": "order",
+  "note": "greeting"
+ },
+ "49d6bee7#5": {
+  "task": "order",
+  "origin": "yes",
+  "note": "greeting"
+ },
+ "5eb7458a#2": {
+  "task": "chit_chat",
+  "note": "greeting"
+ },
+ "736c3f63#2": {
+  "task": "order",
+  "origin": "yes",
+  "note": "greeting"
+ },
+ "8d647d7b#2": {
+  "task": "lookup",
+  "origin": "not_answer",
+  "note": "greeting"
+ },
+ "920af4d0#3": {
+  "task": "cancel",
+  "origin": "not_answer",
+  "note": "greeting"
+ },
+ "9cb08557#9": {
+  "task": "order",
+  "note": "greeting"
+ },
+ "a42d42b1#3": {
+  "task": "order",
+  "origin": "yes",
+  "note": "greeting"
+ },
+ "ab894a35#2": {
+  "task": "order",
+  "origin": "no",
+  "note": "greeting"
+ },
+ "b197c501#4": {
+  "task": "order",
+  "origin": "no",
+  "note": "greeting"
+ },
+ "b47d4e3c#1": {
+  "task": "cancel",
+  "note": "greeting"
+ },
+ "b95e0d81#2": {
+  "task": "order",
+  "origin": "no",
+  "note": "greeting"
+ },
+ "b9b1eaab#2": {
+  "task": "order",
+  "origin": "not_answer",
+  "note": "greeting"
+ },
+ "bb06ec8a#2": {
+  "task": "order",
+  "origin": "yes",
+  "note": "greeting"
+ },
+ "bc1a4f4e#2": {
+  "task": "order",
+  "origin": "yes",
+  "note": "greeting"
+ },
+ "d58a73e5#5": {
+  "task": "chit_chat",
+  "note": "greeting"
+ },
+ "dbbbafa5#2": {
+  "task": "order",
+  "note": "greeting"
+ },
+ "e6bcfdf1#2": {
+  "task": "order",
+  "origin": "yes",
+  "note": "greeting"
+ },
+ "edbbf20a#2": {
+  "task": "order",
+  "origin": "yes",
+  "note": "greeting"
+ },
+ "111cc443#35": {
+  "more": "no_more",
+  "switch": "lookup",
+  "note": "more"
+ },
+ "29c256e9#50": {
+  "more": "no_more",
+  "switch": "none",
+  "note": "more"
+ },
+ "363436e7#48": {
+  "more": "no_more",
+  "switch": "none",
+  "note": "more"
+ },
+ "4c63a511#26": {
+  "more": "no_more",
+  "switch": "none",
+  "note": "more"
+ },
+ "61c2f008#55": {
+  "more": "no_more",
+  "switch": "none",
+  "note": "more"
+ },
+ "6f9c0de1#43": {
+  "more": "no_more",
+  "switch": "none",
+  "note": "more"
+ },
+ "7b0b59ff#35": {
+  "more": "not_answer",
+  "switch": "none",
+  "note": "more"
+ },
+ "90285745#45": {
+  "more": "no_more",
+  "switch": "none",
+  "note": "more"
+ },
+ "94c52328#56": {
+  "more": "not_answer",
+  "note": "more"
+ },
+ "94c52328#57": {
+  "more": "not_answer",
+  "note": "more"
+ },
+ "9bb24167#33": {
+  "more": "not_answer",
+  "switch": "none",
+  "note": "more"
+ },
+ "9bb24167#35": {
+  "more": "not_answer",
+  "switch": "none",
+  "note": "more"
+ },
+ "9bb24167#38": {
+  "more": "not_answer",
+  "note": "more"
+ },
+ "9bb24167#40": {
+  "more": "not_answer",
+  "switch": "none",
+  "note": "more"
+ },
+ "9bb24167#41": {
+  "more": "not_answer",
+  "switch": "inquiry",
+  "note": "more"
+ },
+ "a97347a8#65": {
+  "more": "no_more",
+  "switch": "lookup",
+  "note": "more"
+ },
+ "b197c501#49": {
+  "more": "no_more",
+  "switch": "lookup",
+  "note": "more"
+ },
+ "b3855ab4#26": {
+  "more": "not_answer",
+  "switch": "lookup",
+  "note": "more"
+ },
+ "c4416f6d#52": {
+  "more": "not_answer",
+  "switch": "lookup",
+  "note": "more"
+ },
+ "c4416f6d#57": {
+  "more": "not_answer",
+  "switch": "lookup",
+  "note": "more"
+ },
+ "e6bcfdf1#33": {
+  "more": "no_more",
+  "switch": "none",
+  "note": "more"
+ },
+ "61c2f008#10": {
+  "sender_name_scope": "confirm_save",
+  "switch": "none",
+  "note": "name_save"
+ },
+ "6f4fa871#22": {
+  "sender_name_scope": "confirm_save",
+  "switch": "none",
+  "note": "name_save"
+ },
+ "94c52328#8": {
+  "sender_name_scope": "confirm_save",
+  "switch": "none",
+  "note": "name_save"
+ },
+ "9f254f87#16": {
+  "sender_name_scope": "confirm_once",
+  "switch": "none",
+  "note": "name_save"
+ },
+ "e845618a#29": {
+  "sender_name_scope": "not_answer",
+  "switch": "none",
+  "note": "name_save"
+ },
+ "e845618a#30": {
+  "sender_name_scope": "save",
+  "switch": "none",
+  "note": "name_save"
+ },
+ "115b1ae1#18": {
+  "origin": "not_answer",
+  "switch": "none",
+  "note": "origin"
+ },
+ "115b1ae1#20": {
+  "origin": "not_answer",
+  "switch": "none",
+  "note": "origin"
+ },
+ "115b1ae1#22": {
+  "origin": "not_answer",
+  "switch": "none",
+  "note": "origin"
+ },
+ "12347125#5": {
+  "origin": "yes",
+  "switch": "none",
+  "note": "origin"
+ },
+ "18ecdae3#5": {
+  "origin": "not_answer",
+  "switch": "none",
+  "note": "origin"
+ },
+ "1a0a9129#11": {
+  "origin": "not_answer",
+  "note": "origin"
+ },
+ "1a0a9129#13": {
+  "origin": "not_answer",
+  "switch": "none",
+  "note": "origin"
+ },
+ "1a0a9129#16": {
+  "origin": "not_answer",
+  "note": "origin"
+ },
+ "1a0a9129#8": {
+  "origin": "not_answer",
+  "switch": "none",
+  "note": "origin"
+ },
+ "1e721972#12": {
+  "origin": "not_answer",
+  "switch": "none",
+  "note": "origin"
+ },
+ "1e721972#9": {
+  "origin": "not_answer",
+  "switch": "none",
+  "note": "origin"
+ },
+ "26a3e005#5": {
+  "origin": "not_answer",
+  "switch": "none",
+  "note": "origin"
+ },
+ "82a3cbac#11": {
+  "origin": "yes",
+  "switch": "none",
+  "note": "origin"
+ },
+ "82a3cbac#6": {
+  "origin": "yes",
+  "switch": "none",
+  "note": "origin"
+ },
+ "af964179#5": {
+  "origin": "not_answer",
+  "note": "origin"
+ },
+ "af964179#6": {
+  "origin": "yes",
+  "switch": "none",
+  "note": "origin"
+ },
+ "bb06ec8a#11": {
+  "origin": [
+   "not_answer",
+   "no"
+  ],
+  "switch": "none",
+  "note": "origin"
+ },
+ "bb06ec8a#8": {
+  "origin": "not_answer",
+  "switch": "none",
+  "note": "origin"
+ },
+ "bc1a4f4e#10": {
+  "origin": "yes",
+  "switch": "none",
+  "note": "origin"
+ },
+ "bc1a4f4e#13": {
+  "origin": "yes",
+  "switch": "none",
+  "note": "origin"
+ },
+ "bc1a4f4e#4": {
+  "origin": "yes",
+  "switch": "none",
+  "note": "origin"
+ },
+ "bc1a4f4e#7": {
+  "origin": "yes",
+  "switch": "none",
+  "note": "origin"
+ },
+ "d5bce176#5": {
+  "origin": "not_answer",
+  "switch": "none",
+  "note": "origin"
+ },
+ "d82f2653#11": {
+  "origin": "not_answer",
+  "switch": "none",
+  "note": "origin"
+ },
+ "d82f2653#12": {
+  "origin": "not_answer",
+  "switch": "none",
+  "note": "origin"
+ },
+ "d82f2653#8": {
+  "switch": "none",
+  "note": "origin"
+ },
+ "e845618a#12": {
+  "origin": "yes",
+  "switch": "none",
+  "note": "origin"
+ },
+ "e845618a#5": {
+  "origin": "yes",
+  "switch": "none",
+  "note": "origin"
+ },
+ "111cc443#38": {
+  "pick": "#2",
+  "note": "pick"
+ },
+ "2474a1f5#7": {
+  "pick": "#1",
+  "note": "pick"
+ },
+ "2b1762d6#22": {
+  "pick": "#1",
+  "switch": "none",
+  "note": "pick"
+ },
+ "363436e7#22": {
+  "pick": "not_answer",
+  "switch": "none",
+  "note": "pick"
+ },
+ "363436e7#24": {
+  "pick": "not_answer",
+  "switch": "none",
+  "note": "pick"
+ },
+ "363436e7#28": {
+  "pick": "not_answer",
+  "switch": "none",
+  "note": "pick"
+ },
+ "47970a51#15": {
+  "pick": "not_answer",
+  "switch": "none",
+  "note": "pick"
+ },
+ "5c8b2c52#22": {
+  "pick": "not_answer",
+  "note": "pick"
+ },
+ "5c8b2c52#31": {
+  "pick": "#1",
+  "switch": "none",
+  "note": "pick"
+ },
+ "67d29423#40": {
+  "pick": "not_answer",
+  "switch": "none",
+  "note": "pick"
+ },
+ "67d29423#64": {
+  "pick": "not_answer",
+  "switch": "none",
+  "note": "pick"
+ },
+ "67d29423#72": {
+  "pick": "not_answer",
+  "switch": "none",
+  "note": "pick"
+ },
+ "6f4fa871#31": {
+  "pick": "not_answer",
+  "switch": "none",
+  "note": "pick"
+ },
+ "7b9d8f4a#26": {
+  "pick": "not_answer",
+  "switch": "none",
+  "note": "pick"
+ },
+ "7b9d8f4a#30": {
+  "pick": "not_answer",
+  "switch": "none",
+  "note": "pick"
+ },
+ "82a3cbac#38": {
+  "pick": "not_answer",
+  "switch": "none",
+  "note": "pick"
+ },
+ "82a3cbac#44": {
+  "pick": "#1",
+  "switch": "none",
+  "note": "pick"
+ },
+ "8ae20cb3#11": {
+  "pick": "#2",
+  "switch": "none",
+  "note": "pick"
+ },
+ "8d647d7b#28": {
+  "pick": "not_answer",
+  "switch": "end",
+  "note": "pick"
+ },
+ "8d647d7b#6": {
+  "pick": "#1",
+  "note": "pick"
+ },
+ "920af4d0#10": {
+  "pick": "not_answer",
+  "switch": "none",
+  "note": "pick"
+ },
+ "920af4d0#17": {
+  "pick": "not_answer",
+  "note": "pick"
+ },
+ "920af4d0#21": {
+  "pick": "not_answer",
+  "note": "pick"
+ },
+ "920af4d0#24": {
+  "pick": "not_answer",
+  "note": "pick"
+ },
+ "94c52328#17": {
+  "pick": "not_answer",
+  "note": "pick"
+ },
+ "94c52328#20": {
+  "switch": "none",
+  "note": "pick"
+ },
+ "b3855ab4#28": {
+  "pick": "#2",
+  "note": "pick"
+ },
+ "b9b1eaab#28": {
+  "pick": "#2",
+  "switch": "none",
+  "note": "pick"
+ },
+ "d9b5208e#28": {
+  "pick": "not_answer",
+  "switch": "none",
+  "note": "pick"
+ },
+ "edbbf20a#23": {
+  "pick": "not_answer",
+  "switch": "none",
+  "note": "pick"
+ },
+ "edbbf20a#32": {
+  "pick": "not_answer",
+  "switch": "end",
+  "note": "pick"
+ },
+ "061eb860#17": {
+  "confirm": [
+   "yes",
+   "proceed"
+  ],
+  "switch": "none",
+  "note": "readback"
+ },
+ "061eb860#21": {
+  "confirm": "not_answer",
+  "switch": "none",
+  "note": "readback"
+ },
+ "061eb860#30": {
+  "confirm": [
+   "yes",
+   "proceed"
+  ],
+  "switch": "none",
+  "note": "readback"
+ },
+ "111cc443#31": {
+  "confirm": [
+   "yes",
+   "proceed"
+  ],
+  "switch": "none",
+  "note": "readback"
+ },
+ "1a0a9129#59": {
+  "confirm": "not_answer",
+  "note": "readback"
+ },
+ "1a0a9129#64": {
+  "confirm": "not_answer",
+  "switch": "none",
+  "note": "readback"
+ },
+ "1a0a9129#76": {
+  "confirm": "yes",
+  "switch": "none",
+  "note": "readback"
+ },
+ "1bd940b1#92": {
+  "confirm": "not_answer",
+  "switch": "none",
+  "note": "readback"
+ },
+ "1bd940b1#96": {
+  "confirm": "not_answer",
+  "switch": "end",
+  "note": "readback"
+ },
+ "1e721972#62": {
+  "confirm": "not_answer",
+  "switch": "none",
+  "note": "readback"
+ },
+ "1e721972#68": {
+  "confirm": "not_answer",
+  "switch": "none",
+  "note": "readback"
+ },
+ "1e721972#74": {
+  "confirm": "yes",
+  "switch": "none",
+  "note": "readback"
+ },
+ "29c256e9#28": {
+  "confirm": "change",
+  "switch": "none",
+  "note": "readback"
+ },
+ "29c256e9#43": {
+  "confirm": [
+   "yes",
+   "proceed"
+  ],
+  "switch": "none",
+  "note": "readback"
+ },
+ "2b1762d6#37": {
+  "confirm": "yes",
+  "switch": "none",
+  "note": "readback"
+ },
+ "363436e7#44": {
+  "confirm": "yes",
+  "switch": "none",
+  "note": "readback"
+ },
+ "4c63a511#22": {
+  "confirm": "yes",
+  "switch": "none",
+  "note": "readback"
+ },
+ "61c2f008#49": {
+  "confirm": "not_answer",
+  "switch": "inquiry",
+  "note": "readback"
+ },
+ "6f4fa871#44": {
+  "confirm": [
+   "yes",
+   "proceed"
+  ],
+  "switch": "none",
+  "note": "readback"
+ },
+ "94c52328#37": {
+  "confirm": "yes",
+  "switch": "none",
+  "note": "readback"
+ },
+ "983bfc12#26": {
+  "confirm": "change",
+  "switch": "none",
+  "note": "readback"
+ },
+ "983bfc12#32": {
+  "confirm": [
+   "yes",
+   "proceed"
+  ],
+  "switch": "none",
+  "note": "readback"
+ },
+ "9bb24167#26": {
+  "confirm": [
+   "yes",
+   "proceed"
+  ],
+  "switch": "none",
+  "note": "readback"
+ },
+ "a97347a8#59": {
+  "confirm": [
+   "yes",
+   "proceed"
+  ],
+  "switch": "none",
+  "note": "readback"
+ },
+ "b3855ab4#21": {
+  "confirm": [
+   "yes",
+   "proceed"
+  ],
+  "switch": "none",
+  "note": "readback"
+ },
+ "c4416f6d#42": {
+  "confirm": "change",
+  "switch": "none",
+  "note": "readback"
+ },
+ "c4416f6d#45": {
+  "confirm": "yes",
+  "switch": "none",
+  "note": "readback"
+ },
+ "c8d995ec#42": {
+  "confirm": [
+   "yes",
+   "proceed"
+  ],
+  "switch": "none",
+  "note": "readback"
+ },
+ "e6bcfdf1#29": {
+  "confirm": [
+   "yes",
+   "proceed"
+  ],
+  "switch": "none",
+  "note": "readback"
+ },
+ "ec6da633#53": {
+  "confirm": [
+   "change",
+   "not_answer"
+  ],
+  "switch": "none",
+  "note": "readback"
+ },
+ "ec6da633#56": {
+  "confirm": [
+   "not_answer",
+   "change"
+  ],
+  "switch": "none",
+  "note": "readback"
+ }
+}

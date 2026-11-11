@@ -1062,7 +1062,9 @@ def test_greeting_sender_name_change_asks_only_for_unanswered_choices(
         if "등록 이름도" in input:
             assert "sender_name_scope" in names
             return SimpleNamespace(answers=[choice("sender_name_scope", f"confirm_{save_answer}")])
-        origin = address_answer if "발송 주소도" in input and address_answer in ("yes", "no") else "not_answer"
+        # 열린 질문 '발송 주소도 바꿀지'의 yes는 주소를 바꾼다는 뜻이다(address_answer는 등록 주소를 쓰는지).
+        origin = ({"yes": "no", "no": "yes"}[address_answer]
+                  if "열린 질문: 발송 주소도" in input and address_answer in ("yes", "no") else "not_answer")
         return SimpleNamespace(answers=[choice("origin", origin)])
 
     client.decisions.create = decide

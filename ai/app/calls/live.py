@@ -16,6 +16,7 @@ from dataclasses import dataclass, field, replace
 
 from app.address.matcher import sido_aliases
 from app.address.parse import clean_text, detail_text, parse, split_gil, unlink_gil
+from app.calls import decision_input
 from app.calls.backend_turn import BackendTurn
 from app.calls.session import CallSession, Phase
 from app.calls.turn import SHORT_NO, SHORT_YES, TurnInput, TurnPipeline, TurnResult, TurnState, observe_turn
@@ -76,6 +77,7 @@ class Spoken:
     sender_name_scope: str | None = None
     scope_decided: asyncio.Event | None = None
     destination_candidates: CandidateSet | None = None
+    ai_cut: tuple[int, int] | None = None   # 고객 발화가 시작될 때 말하던 AI 발화 (id, 그때까지의 글자 수)
 
     def utterance(self) -> Utterance:
         return Utterance(self.utterance_id, self.start_ms or 0, self.end_ms or 0, self.t_start, self.text, self.readback_id)
@@ -121,6 +123,7 @@ class Runtime:
     deciding: asyncio.Event | None = None
     shadow_sample: ShadowSample | None = None
     server_task: asyncio.Task | None = None
+    clarify: tuple[str, int] | None = None            # 선택지를 풀어 다시 물은 열린 질문과 연속 횟수
 
     def cancel(self) -> None:
         for h in (self.endpoint, self.ai_end, self.commit):
@@ -141,11 +144,11 @@ class LiveFlow:
         if self.cfg.turn_mode == "server":
             deps = service.d
             backend = BackendTurn(deps.client, deps.backend_model, deps.backend_effort, deps.policy, server=True)
-            self.server = TurnPipeline(deps.client, backend, deps.policy, self.cfg.decision_budget_sec)
+            self.server = TurnPipeline(deps.client, backend, deps.policy, self.cfg.decision_budget_sec, self.cfg)
         elif self.cfg.turn_shadow_enabled:
             deps = service.d
             backend = BackendTurn(deps.client, deps.backend_model, deps.backend_effort, deps.policy)
-            self.shadow = TurnPipeline(deps.client, backend, deps.policy, self.cfg.decision_budget_sec)
+            self.shadow = TurnPipeline(deps.client, backend, deps.policy, self.cfg.decision_budget_sec, self.cfg)
             service.on_finalize.append(self._finalize_shadow)
         h = service.handlers
         base_in, base_out = h["session.input_transcript.delta"], h["session.output_transcript.delta"]
@@ -183,7 +186,8 @@ class LiveFlow:
             rt.ready_notice = None
             rt.readback_id = None
             rt.seq += 1
-            rt.cust = Spoken(rt.seq, "", ev.get("start_ms") or 0, ev.get("end_ms") or 0, now, now)
+            rt.cust = Spoken(rt.seq, "", ev.get("start_ms") or 0, ev.get("end_ms") or 0, now, now,
+                             ai_cut=(rt.ai[-1].utterance_id, len(rt.ai[-1].text)) if rt.ai else None)
             rt.customer_turns.append(rt.cust)
             del rt.customer_turns[:-12]
         rt.cust.text += ev.get("delta", "")
@@ -338,11 +342,20 @@ class LiveFlow:
                               and not origin_confirmation(state))
         receiver_name_answer = bool(heard and _asked_receiver_name(prev.text, bool(expecting_receiver))
                                     and not SENDER_NAME_REFERENCE.search(utt.text))
+        recent, said = self._decision_context(rt, utt)
         return TurnInput(state, utt.utterance(), prev.utterance() if heard else None, s.tools.now(),
+                         recent_ai=recent, said=said,
                          greeting=greeting, origin_question=origin,
                          destination=matches[0] if len(matches) == 1 else None, pick_allowed=pick_allowed,
                          end_question=bool(heard and _asked_end(rt, prev)), spoken_question=spoken_question,
                          receiver_name_answer=receiver_name_answer, end_waiting=rt.end_check_turn is not None)
+
+    @staticmethod
+    def _decision_context(rt: Runtime, utt: Spoken) -> tuple[str, str]:
+        """Decision 입력의 (최근 AI 발화, 끊어진 앞 조각을 이어 붙인 고객 발화)."""
+        parts = decision_input.joined(rt.ai, rt.customer_turns, utt, rt.latest_applied)
+        return (decision_input.recent_ai(rt.ai, rt.customer_turns, parts[0], parts[0].ai_cut),
+                " ".join(part.text.strip() for part in parts))
 
     async def _run_server_turn(self, s: CallSession, utt: Spoken, prev: Spoken | None) -> None:
         async with s.lock:
@@ -366,6 +379,14 @@ class LiveFlow:
             s.note("Server turn", "failed", {"error_type": type(exc).__name__})
             await self.notify(s, "N2", {"server_turn_retry": True}, again=True, only_turn=utt)
             return
+        if d := result.decision:
+            s.stats["Decision 호출"] += 1
+            if "ms" in d:
+                s.decision_ms.append(d["ms"])
+                s.timing("Decision", d["ms"])
+            s.note("Decision", d.get("status") or ", ".join(
+                f"{name}={a['choice']}({a['probabilities'].get(a['choice'], a['confidence']):.2f})"
+                for name, a in d["answers"].items()) + f" {d['ms']}ms", d | {"input_chars": len(d["input"])})
 
         async with s.lock:
             if not self._current_turn(s, utt):
@@ -380,6 +401,7 @@ class LiveFlow:
                 if state.origin_answer is None and live.origin_offered:
                     state.origin_offered = True
                 s.tools.state = state
+                self.rt(s).latest_applied = utt.utterance_id  # 뒤에 이어지는 고객 조각을 이 발화에 다시 붙이지 않는다
                 if state.intent:
                     self._business(s, state.intent)
                 self._sync_intake(s)
@@ -420,6 +442,14 @@ class LiveFlow:
             await self._finish(s, only_turn=utt)
             return
         facts = result.facts.copy()
+        if kind := facts.get("clarify"):
+            count = rt.clarify[1] + 1 if rt.clarify and rt.clarify[0] == kind else 1
+            rt.clarify = (kind, count)
+            s.note("선택지 풀어 다시 묻기", f"{kind} {count}회")
+            if count >= 2:  # 두 번째도 알아듣지 못했다: 상담원 연결을 권한다
+                facts["agent"] = "suggest"
+        else:
+            rt.clarify = None
         if question in ("edit_parcel", "edit_other_parcel"):
             async with s.lock:
                 if not self._current_turn(s, utt):
@@ -617,7 +647,10 @@ class LiveFlow:
         if not questions:
             return  # 선택형 판단이 없는 단계: 부르지 않는다
         s.stats["Decision 호출"] += 1
-        text = f"직전 AI 발화: {prev.text.strip() if prev else '(없음)'}\n고객 발화: {utt.text.strip()}"
+        async with s.lock:
+            text, kind = decision_input.render(s.state, self.policy, *self._decision_context(rt, utt),
+                                               end_waiting=rt.end_check_turn is not None,
+                                               open_line=self.cfg.decision_open_question)
         started = time.monotonic()
         call = asyncio.ensure_future(self.svc.d.client.decisions.create(
             model="gpt-6-luna", input=text, questions=questions))
@@ -648,11 +681,14 @@ class LiveFlow:
         answers = {a.name: _answer(a) for a in d.answers if a.type == "choice"}
         if not pick:
             answers.pop("pick", None)
+        if kind == "address_change" and (og := answers.get("origin")) and og[0] in ("yes", "no"):
+            # '발송 주소도 바꿀지'의 예는 등록 주소를 쓰지 않는다는 뜻이다(origin no).
+            answers["origin"] = ("no" if og[0] == "yes" else "yes", *og[1:])
         if greeting in ("order", "origin_mentioned") and answers.get("origin", (None,))[0] == "yes":
             answers.pop("origin")  # 인사에서 등록 주소를 대조하지 못했으면 사용 여부는 별도로 묻는다.
         s.note("Decision", ", ".join(f"{k}={v[0]}({v[1]:.2f})" for k, v in answers.items()) + f" {ms}ms",
-               {"stage": stage, "pending": pending_id, "input": text, "ms": ms,
-                "answers": {k: {"choice": v[0], "confidence": round(v[1], 3), "probabilities": v[2]}
+               {"stage": stage, "pending": pending_id, "input": text, "ms": ms, "open_question": kind,
+                "input_chars": len(text), "answers": {k: {"choice": v[0], "confidence": round(v[1], 3), "probabilities": v[2]}
                             for k, v in answers.items()}})
         await self.apply(s, utt, prev, answers, pending_id, box=box, greeting=bool(greeting),
                          expected_candidates=candidates if pick else None)

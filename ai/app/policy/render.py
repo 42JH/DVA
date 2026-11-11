@@ -173,7 +173,8 @@ def decision_questions(policy: Policy, stage_id: str, *, pending: bool = False,
             out.append(item)
     if pick_labels:
         out.append({"type": "choice", "name": "pick", "instructions":
-                    "직전 AI가 후보를 고르라고 했고 고객이 골랐거나, 한 후보만 가리켜 맞는지 물었고 고객이 동의하면 그 후보를 고른다. "
+                    "열린 질문이 후보 선택일 때, 최근 AI 발화가 후보를 고르라고 했고 고객이 골랐거나, "
+                    "한 후보만 가리켜 맞는지 물었고 고객이 동의하면 그 후보를 고른다. "
                     "여러 후보를 나열한 질문에 어느 후보인지 알 수 없는 동의나 다른 질문의 답은 not_answer, 모든 후보를 거절하면 none.",
                     "choices": [{"value": v} for v in (*pick_labels, "none", "not_answer")]})
     return out
