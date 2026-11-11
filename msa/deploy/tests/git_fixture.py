@@ -16,8 +16,12 @@ class GitFixture:
         self.base = self.git('rev-parse', 'HEAD')
 
     def git(self, *args):
-        return subprocess.run(['git', *args], cwd=self.root, check=True,
-                              capture_output=True, text=True).stdout.strip()
+        try:
+            return subprocess.run(['git', *args], cwd=self.root, check=True,
+                                  capture_output=True, text=True).stdout.strip()
+        except subprocess.CalledProcessError as error:
+            error.add_note('Git fixture stderr\n' + error.stderr)
+            raise
 
     def commit(self, path, text):
         target = self.root / path
