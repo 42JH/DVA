@@ -235,16 +235,11 @@ function Prompt({ vm }: { vm: Vm }) {
         ))}
         {p.author && <span className="text-[13px] text-ops-sub">{p.author}</span>}
         <span className="ml-auto flex flex-wrap gap-2">
-          <Btn kind="plainBadge" onClick={vm.startTestCall}>
-            시험 통화
-          </Btn>
+          {p.reuse?.hint && (
+            <span className="self-center text-[13px] text-ops-sub">{p.reuse.hint}</span>
+          )}
           {p.reuse && (
-            <Btn
-              kind="editBadge"
-              disabled={p.reuse.disabled}
-              title={p.reuse.hint}
-              onClick={vm.askReuse}
-            >
+            <Btn kind="editBadge" disabled={p.reuse.disabled} onClick={vm.askReuse}>
               이 버전 다시 쓰기
             </Btn>
           )}
@@ -253,6 +248,9 @@ function Prompt({ vm }: { vm: Vm }) {
               프롬프트 수정
             </Btn>
           )}
+          <Btn kind="plainBadge" onClick={vm.startTestCall}>
+            시험 통화
+          </Btn>
         </span>
       </header>
       {/* 칸 제목은 고정 글, 본문만 마크다운 (11/10) */}

@@ -307,7 +307,7 @@ export function usePersonaPage() {
               canManage && past
                 ? {
                     disabled: reuseSame,
-                    hint: reuseSame ? '현재 버전과 내용이 같습니다' : undefined,
+                    hint: reuseSame ? '최신 버전과 내용이 같습니다' : undefined,
                   }
                 : null,
           } satisfies PromptView)
