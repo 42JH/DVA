@@ -1344,7 +1344,7 @@ class LiveFlow:
             self.rt(s).await_speech = ("재개→AI 발화", time.time())
             offer = d.pop("readback_offer", None)
             marked = offer is not None and self._mark_readback(s, *offer)
-            delivered = await self.send(s, {"type": "response.create"})
+            delivered = await self.send(s, {"type": "response.create"}, about=f"재개 {str(did)[-6:]}")
             if marked:
                 if delivered:
                     d["readback_sent_id"] = offer[0]
@@ -1461,15 +1461,34 @@ class LiveFlow:
         while self.rt(s).cust is not None and time.monotonic() < deadline:
             await asyncio.sleep(0.05)
 
-    async def send(self, s: CallSession, event: dict) -> bool:
+    async def send(self, s: CallSession, event: dict, about: str | None = None) -> bool:
         if s.sideband is None or s.phase in (Phase.CLOSED, Phase.FAILED, Phase.FINALIZING, Phase.DONE):
             return False
+        event_id = s.next_event_id()
+        s.sent[event_id] = _sent_summary(event, about)
+        while len(s.sent) > SENT_KEPT:
+            del s.sent[next(iter(s.sent))]
         try:
-            await s.sideband.send(event | {"event_id": s.next_event_id()})
+            await s.sideband.send(event | {"event_id": event_id})
         except Exception as e:
             log.warning("송신 실패 %s %s %s", s.call_id, event.get("type"), type(e).__name__)
             return False
         return True
+
+
+SENT_KEPT = 64
+
+
+def _sent_summary(event: dict, about: str | None) -> dict:
+    """Live 오류가 가리키는 이벤트를 알아볼 만큼만(본문 전체는 통화 기록의 전달·도구 사건에 이미 있다)."""
+    summary = {"type": event.get("type"), "at": time.time()}
+    if item := event.get("item"):
+        summary |= {"item_type": item.get("type"), "call_id": item.get("call_id")}
+    if content := event.get("content"):
+        summary["content"] = content[:120]
+    if about:
+        summary["about"] = about
+    return summary
 
 
 def _transcript(s: CallSession, speaker: str, u: Spoken) -> None:

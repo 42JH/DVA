@@ -59,6 +59,7 @@ class CallSession:
     last_output_end_ms: int = 0       # 출력 전사의 세션 타임라인 끝(오디오 재생 끝 추정용)
     events: list[dict] = field(default_factory=list)   # 관제·통화 기록 사건(data: Decision 입출력·Backend 출력·전달 원문 — 개인정보 포함)
     send_seq: int = 0
+    sent: dict[str, dict] = field(default_factory=dict)  # 최근 보낸 이벤트 요약(event_id → 종류): Live 오류의 client_event_id 대조용
     rt: Any = None                    # S5 통화 중 흐름 상태(app/calls/live.py Runtime)
     transcript: list[dict] = field(default_factory=list)  # 관제·통화 기록(개인정보: 관제는 인증, 기록은 logs/)
     closing_requested_t: float = 0.0

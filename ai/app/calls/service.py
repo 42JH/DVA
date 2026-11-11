@@ -266,8 +266,12 @@ class CallService:
 
     def _on_error(self, s: CallSession, ev: dict) -> None:
         err = ev.get("error") or {}
-        log.warning("Live 오류 %s %s client_event_id=%s", s.call_id, err.get("code"), err.get("client_event_id"))
-        s.note("오류", str(err.get("code")))
+        sent = s.sent.get(err.get("client_event_id") or "")
+        log.warning("Live 오류 %s %s client_event_id=%s type=%s message=%s sent=%s", s.call_id, err.get("code"),
+                    err.get("client_event_id"), err.get("type"), err.get("message"), sent)
+        # 관제(/monitor)·통화 기록: 오류 원문 전체와 거절된 송신 이벤트(code만으로는 사유를 알 수 없었다)
+        text = str(err.get("code")) + (f": {err['message']}" if err.get("message") else "")
+        s.note("오류", text[:300], {"error": err, "sent": sent})
 
     def _on_usage(self, s: CallSession, ev: dict) -> None:
         ratio = (ev.get("context_window") or {}).get("usage_ratio") or 0

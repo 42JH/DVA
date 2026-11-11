@@ -1137,3 +1137,9 @@
 - 운영 사례 `afc5ae01`을 가상 대본으로 재생했다. 기존 경로가 첫 동의를 놓치고 물품 질문을 내보낸 상황에서 그림자 경로는 앞의 접수 질문을 보존하고 받는 분 성함을 다음 질문으로 골랐다.
 - 직접 Responses 도구 호출에서 가상 연락처 기록과 도구 결과 재전달을 확인했다. 새 로그에는 비교 항목 이름, 질문 종류, 일치 여부, 지연만 남긴다. 주소 보정과 외부 조회는 그림자 경로에서 제한되며 실제 SIP 검증과 20건 비교는 남아 있다.
 - AI 전체 테스트 832개 통과. 통화 로그 집계 도구와 [측정 환경 실행 절차](architecture/server-turn-shadow-prep.md)를 추가했다.
+
+## 2026-11-11 — Live 오류에 원문과 거절된 송신 이벤트 남기기
+
+- 배경: 운영 통화에서 Live `invalid_request_error`가 났지만 `_on_error`가 code·client_event_id만 남겨 사유를 확정할 수 없었다. 송신 순번을 거꾸로 세어 위임 재개 `response.create`였음까지만 확인했다.
+- 변경: `LiveFlow.send`가 최근 64개 송신 이벤트 요약(type·item_type·call_id·content 앞 120자·about, 재개는 위임 id)을 `CallSession.sent`에 event_id로 보관한다. `_on_error`는 오류 원문 전체와 client_event_id가 가리키는 송신 요약을 로그와 "오류" 사건(data)에 남기고, 사건 text를 `code: message`로 한다. 관제(/monitor)는 오류 줄에 message가 보이고 "상세"에서 error·sent를 펼쳐 본다(화면 코드 변경 없음).
+- 테스트: 오류 기록·관제 스냅샷 단언 1개. 전체 AI 833 passed, monitor 5 passed.
