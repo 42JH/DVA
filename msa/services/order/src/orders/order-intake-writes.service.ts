@@ -10,8 +10,6 @@ import type { Environment } from '../config/environment';
 import { ApiException } from '../common/errors/api.exception';
 import { createValidationPipe } from '../common/http/validation.pipe';
 import { AuditService } from '../audit/audit.service';
-import { BillingService } from '../billing/billing.service';
-import { PaymentsRepository } from '../payments/payments.repository';
 import { ParcelDraftWriteScope } from './parcel-draft-write-scope.service';
 import { ParcelDraftWritesRepository } from './parcel-draft-writes.repository';
 import { OrdersRepository } from './orders.repository';
@@ -19,8 +17,6 @@ import { OrderSubmissionService } from './order-submission.service';
 import { CompleteOrderIntakeDto } from './dto/complete-order-intake.dto';
 import { orderDraft } from './order-draft';
 import { assertOrderAmount } from './order-pricing';
-import { assertOrderSubmissionReady } from './order-submission.validation';
-import { DverClient } from './dver.client';
 import type { ParcelDraftRow } from './parcel-drafts.types';
 
 @Injectable()
@@ -31,9 +27,6 @@ export class OrderIntakeWritesService {
     private readonly drafts: ParcelDraftWritesRepository,
     private readonly orders: OrdersRepository,
     private readonly audit: AuditService,
-    private readonly billing: BillingService,
-    private readonly payments: PaymentsRepository,
-    private readonly dver: DverClient,
     private readonly submissions: OrderSubmissionService,
   ) {}
 
@@ -183,7 +176,7 @@ export class OrderIntakeWritesService {
         ready[0].reservedOrderSeq,
       );
       orderSeq = created.orderSeq;
-      await this.prepareSubmission(client, orderSeq, call.customerSeq, requestId);
+      await this.submissions.prepareSubmission(client, orderSeq, call.customerSeq, null, requestId);
       const parcels = await this.orders.parcelReferences(client, orderSeq);
       parcelMappings = ready.map((row, index) => ({
         draftSeq: row.draftSeq,
@@ -233,64 +226,5 @@ export class OrderIntakeWritesService {
         requestId,
       },
     };
-  }
-
-  private async prepareSubmission(
-    client: PoolClient,
-    id: number,
-    customerId: number,
-    requestId: string,
-  ) {
-    const snapshot = await this.orders.detail(client, id, null);
-    assertOrderSubmissionReady(snapshot, Date.now(), false);
-    assertOrderAmount(snapshot);
-    const policy = await this.scope.paymentPolicy(customerId);
-    if (
-      (snapshot.paymentMethodType === 'credit' && !policy.monthly) ||
-      (snapshot.paymentMethodType === 'groupBilling' && !policy.group)
-    )
-      throw new ApiException(403, 'FORBIDDEN', '선택한 결제 방식의 사용 자격이 없습니다.');
-    for (const parcel of snapshot.parcels)
-      if (
-        parcel.status !== 'CANCELLED' &&
-        parcel.originPin?.scope === 'PERSONAL' &&
-        !(await this.scope.canUsePin(customerId, parcel.originPin.pinSeq))
-      )
-        throw new ApiException(403, 'FORBIDDEN', '고객이 사용할 수 없는 출발지 PIN입니다.');
-    if (snapshot.paymentMethodType === 'billing') {
-      await client.query(
-        "UPDATE orders SET status='notPaid',payment_due_at=clock_timestamp()+interval '24 hours' WHERE order_seq=$1",
-        [id],
-      );
-      await this.orders.replaceRequest(client, id);
-      await this.audit.recordSuccess(
-        {
-          actorId: null,
-          actorType: 'AI',
-          targetId: id,
-          targetType: 'ORDER',
-          action: 'ORDER_PAYMENT_PENDING',
-          requestId,
-          metadata: { amountAfter: snapshot.totalAmount },
-        },
-        client,
-      );
-      return;
-    }
-    this.dver.ensureConfigured();
-    await this.payments.markPaid(client, id, undefined, policy);
-    await this.billing.recordCharge(client, id, requestId);
-    await this.audit.recordSuccess(
-      {
-        actorId: null,
-        actorType: 'SYSTEM',
-        targetId: id,
-        targetType: 'ORDER',
-        action: 'ORDER_PAYMENT_COMPLETED',
-        requestId,
-        metadata: { amountAfter: snapshot.totalAmount },
-      },
-      client,
-    );
   }
 }

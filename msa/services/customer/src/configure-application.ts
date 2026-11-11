@@ -59,6 +59,10 @@ export function configureApplication(app: INestApplication, logger = new Logger(
         path: 'internal/call-read-references/parcel-draft-write/reference',
         method: RequestMethod.ALL,
       },
+      {
+        path: 'internal/call-read-references/parcel-draft-write/events',
+        method: RequestMethod.ALL,
+      },
       { path: 'internal/caller-context', method: RequestMethod.ALL },
       { path: 'internal/call-read-references', method: RequestMethod.ALL },
       { path: 'internal/call-read-references/for-orders', method: RequestMethod.ALL },

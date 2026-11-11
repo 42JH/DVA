@@ -133,7 +133,9 @@ export class ParcelDraftWriteController {
           id,
           event.payload.operation === 'CallRead',
           false,
-          this.executor.activeCalls.get(scopeId)?.operation === 'OrderUpdated',
+          ['OrderUpdated', 'OrderSubmitted'].includes(
+            this.executor.activeCalls.get(scopeId)?.operation ?? '',
+          ),
         );
       });
       return { eventId: event.eventId, status: 'processed', payload };

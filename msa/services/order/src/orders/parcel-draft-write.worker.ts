@@ -20,6 +20,12 @@ export class ParcelDraftWriteWorker implements OnApplicationBootstrap, OnModuleD
       pool: database.pool,
       source: 'order',
       destinations: {
+        customer: {
+          url:
+            config.get('CUSTOMER_URL', { infer: true }) +
+            '/internal/call-read-references/parcel-draft-write/events',
+          token: config.get('CUSTOMER_AUTH_TOKEN', { infer: true }),
+        },
         consultation: {
           url:
             config.get('CONSULTATION_URL', { infer: true }) + '/internal/parcel-draft-write/events',

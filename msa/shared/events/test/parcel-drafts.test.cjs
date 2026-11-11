@@ -354,3 +354,180 @@ test('order updates bind durable call links and preserve the original customer a
     mode='customer';assert.equal((await requestWriteReference('http://customer/private',token,{...reference,payload:{operation:'OrderCustomerRead',input:{id:3}}},randomUUID())).active,false);
   } finally {global.fetch=saved;}
 });
+
+test('order submission receipts bind recipients to the command and preserve unbounded stored address reads', async () => {
+  const {
+    validateRecipientAddresses,
+    validateRecipientPins,
+    validateRecipientReceipt,
+  } = require('../order-recipient-pins.cjs');
+  const {
+    validateDraftWrite,
+    requestDraftWrite,
+    requestWriteReference,
+  } = require('../parcel-draft-write.cjs');
+  const address = {
+    name: '수령인',
+    phoneNumber: '01012345678',
+    roadAddress: '도로',
+    jibunAddress: '지번',
+    detailAddress: '',
+    dongName: '동',
+    postalCode: '12345',
+  };
+  const pin = {
+    personalPinSeq: 4,
+    label: address.name,
+    address,
+  };
+  validateRecipientAddresses([address]);
+  validateRecipientPins([pin]);
+  for (const value of [
+    [{ ...address, name: null }],
+    [{ ...address, detailAddress: '\u0000' }],
+    [{ ...address, extra: true }],
+  ])
+    assert.throws(() => validateRecipientAddresses(value));
+  assert.throws(() => validateRecipientPins([pin, pin]));
+  assert.throws(() => validateRecipientPins([{ ...pin, label: 'changed' }]));
+  const requestId = randomUUID(),
+    writeEventId = randomUUID(),
+    receipt = {
+      eventId: randomUUID(),
+      payload: {
+        orderSeq: 42,
+        customerSeq: 3,
+        adminId: 1,
+        requestId,
+        pins: [pin],
+        writeEventId,
+      },
+    };
+  validateRecipientReceipt(receipt);
+  assert.throws(() =>
+    validateRecipientReceipt({
+      ...receipt,
+      payload: { ...receipt.payload, adminId: 0 },
+    }),
+  );
+  const input = {
+    eventId: writeEventId,
+    source: 'order',
+    eventType: 'ParcelDraftWriteRequested',
+    payload: {
+      orderAddress: null,
+      command: {
+        operation: 'OrderSubmitted',
+        id: 42,
+        adminId: 1,
+        callSessionSeq: 5,
+        input: { expectedVersion: 1 },
+        requestId,
+      },
+    },
+  };
+  validateDraftWrite(
+    {
+      ...input,
+      source: 'consultation',
+      payload: { ...input.payload, consultationAddress: null, call: null },
+    },
+    'consultation',
+  );
+  assert.throws(() =>
+    validateDraftWrite(
+      {
+        ...input,
+        source: 'consultation',
+        payload: {
+          ...input.payload,
+          command: { ...input.payload.command, adminId: null },
+          consultationAddress: null,
+          call: null,
+        },
+      },
+      'consultation',
+    ),
+  );
+  const addresses = Array.from({ length: 20000 }, () => address),
+    saved = global.fetch;
+  let mode = 'submission';
+  assert.ok(Buffer.byteLength(JSON.stringify(addresses)) > 256 * 1024);
+  global.fetch = async (url, options) => {
+    const event = JSON.parse(options.body);
+    return Response.json({
+      eventId: event.eventId,
+      status: 'processed',
+      payload:
+        mode === 'addresses'
+          ? addresses
+          : mode === 'receipt'
+            ? receipt
+            : {
+                data: { status: 'notPaid' },
+                receipt: null,
+                customerReceipt:
+                  mode === 'forged'
+                    ? {
+                        ...receipt,
+                        payload: { ...receipt.payload, orderSeq: 43 },
+                      }
+                    : mode === 'forgedScope'
+                      ? {
+                          ...receipt,
+                          payload: {
+                            ...receipt.payload,
+                            writeEventId: randomUUID(),
+                          },
+                        }
+                      : receipt,
+              },
+    });
+  };
+  try {
+    assert.equal(
+      (await requestDraftWrite('http://consultation/private', token, input))
+        .customerReceipt.eventId,
+      receipt.eventId,
+    );
+    mode = 'forged';
+    await assert.rejects(
+      requestDraftWrite('http://consultation/private', token, input),
+    );
+    mode = 'forgedScope';
+    await assert.rejects(
+      requestDraftWrite('http://consultation/private', token, input),
+    );
+    const event = {
+      eventId: randomUUID(),
+      source: 'customer',
+      eventType: 'ParcelDraftWriteReferenceRequested',
+      payload: { operation: 'OrderRecipientsRead', input: { id: 42 } },
+    };
+    mode = 'addresses';
+    assert.equal(
+      (
+        await requestWriteReference(
+          'http://order/private',
+          token,
+          event,
+          randomUUID(),
+        )
+      ).length,
+      20000,
+    );
+    mode = 'receipt';
+    assert.deepEqual(
+      await requestWriteReference('http://order/private', token, {
+        ...event,
+        payload: {
+          operation: 'RecipientReceiptRead',
+          input: { eventId: receipt.eventId },
+        },
+      }),
+      receipt,
+    );
+  } finally {
+    global.fetch = saved;
+  }
+});

@@ -1,3 +1,7 @@
+import { Res } from '@nestjs/common';
+import { ApiAcceptedResponse, ApiServiceUnavailableResponse } from '@nestjs/swagger';
+import type { Response } from 'express';
+import { SubmitOrderDto, SubmittedOrderDto } from './dto/submit-order.dto';
 import { Patch } from '@nestjs/common';
 import { ApiBody, ApiUnprocessableEntityResponse } from '@nestjs/swagger';
 import { MvpAiCustomerAccess as AiOrAdminAccess } from '../auth/auth.guard';
@@ -38,7 +42,15 @@ import { OrderIdParamsDto, OrderQueryDto } from './dto/order-query.dto';
 import { OrdersService } from './orders.service';
 
 @ApiTags('Orders')
-@ApiExtraModels(OrderSummaryDto, OrderDetailDto, RequestMetaDto, ErrorResponseDto, UpdatedOrderDto)
+@ApiExtraModels(
+  OrderSummaryDto,
+  OrderDetailDto,
+  RequestMetaDto,
+  ErrorResponseDto,
+  UpdatedOrderDto,
+  SubmitOrderDto,
+  SubmittedOrderDto,
+)
 @ApiBadRequestResponse({
   description: '요청 값의 형식·범위 오류 또는 필수 값 누락.',
   type: ErrorResponseDto,
@@ -347,5 +359,95 @@ export class OrdersController {
       request.requestId,
       callSessionSeq,
     );
+  }
+  @Post(':id/submit')
+  @AiOrAdminAccess()
+  @AuditOperation({ action: 'ORDER_SUBMITTED', targetType: 'ORDER', target: 'id' })
+  @ApiOperation({
+    summary: '기존 미완료 주문 최종 접수',
+    security: [{ adminSession: [] }, { bearer: [] }],
+    description:
+      '신규 AI 통화의 수정·취소·확정은 배송 초안과 통화 주문 완료 API를 사용하며 이 쓰기 경로는 409입니다. 관리자의 기존 권한과 이전 통화 호환은 유지합니다.\n\n기존 COLLECTING 주문을 최종 확정합니다. 개인 카드는 결제 대기, 월·그룹결제는 결제 완료 후 미취소 상세만 디버에 전송합니다. 이전 등록 통화의 AI 상담 완료는 POST /api/orders, 신규 AI 통화는 order-intake/complete로 처리합니다. 같은 주문 재호출은 현재 상태만 반환하며 Idempotency-Key는 필요하지 않습니다.\n\n결제: credit은 자격이 활성화된 월결제, groupBilling은 소속 부서의 그룹결제, billing은 개인·기업 고객의 개인 카드입니다. 최종 접수 시 결제수단·주소·물품·총액과 상세별 배송비가 필요합니다.\n\n관리자는 세션, AI는 진행 중 통화와 고객 범위를 확인합니다. AI는 AI_BUSINESS_TOKEN의 Bearer 인증, 관리자는 유효한 세션이 필요합니다. 결과가 불명확해도 자동 재접수하지 않습니다.',
+  })
+  @ApiHeader({
+    name: 'call_session_seq',
+    required: false,
+    description:
+      'DB call_sessions.call_session_seq. AI 필수·관리자 선택. 종료된 통화는 기존 연결 주문의 접수 상태 재확인만 허용.',
+    schema: { type: 'integer', minimum: 1, maximum: 2147483647 },
+  })
+  @ApiBody({
+    type: SubmitOrderDto,
+    description:
+      '고객에게 저장된 주소·물품·결제·수거 시각을 확인한 뒤 호출합니다. 주문 본문은 다시 보내지 않습니다.',
+    examples: {
+      confirmedVersion: { summary: '최종 확인한 주문 버전 접수', value: { expectedVersion: 4 } },
+    },
+  })
+  @ApiNotFoundResponse({ description: '주문·고객·통화가 없음(NOT_FOUND).', type: ErrorResponseDto })
+  @ApiForbiddenResponse({
+    description: '고객·통화·PIN 범위 또는 결제 방식 사용 자격 불일치(FORBIDDEN).',
+    type: ErrorResponseDto,
+  })
+  @ApiConflictResponse({
+    description:
+      '버전 불일치(VERSION_CONFLICT), 접수 불가 상태·통화 연결 충돌(INVALID_STATE), DB 잠금 대기 2초 초과(REQUEST_IN_PROGRESS). 소속 변경은 완료 후 이어서 처리합니다.',
+    type: ErrorResponseDto,
+  })
+  @ApiUnprocessableEntityResponse({
+    description: '필수 주문 정보 오류(VALIDATION_FAILED, details에 필드 경로).',
+    type: ErrorResponseDto,
+  })
+  @ApiServiceUnavailableResponse({
+    description: '디버 API 키 미설정. 주문은 COLLECTING 유지.',
+    type: ErrorResponseDto,
+  })
+  @ApiOkResponse({
+    description:
+      '결과 저장 완료. ACCEPTED만 접수 성공이며 notPaid는 결제 대기, SUBMITTING_FAILED는 10분 기한 안의 자동 재시도 중 실패, SUBMISSION_FAILED는 자동 재시도가 끝난 최종 실패입니다. 접수 참고번호·확인 시각은 주문 상세에서 조회합니다.',
+    schema: {
+      type: 'object',
+      required: ['data', 'meta'],
+      properties: {
+        data: { $ref: getSchemaPath(SubmittedOrderDto) },
+        meta: { $ref: getSchemaPath(RequestMetaDto) },
+      },
+    },
+  })
+  @ApiAcceptedResponse({
+    description:
+      'SUBMITTING: 처리 중 또는 결과 저장 미확정. Location의 상세를 조회합니다. 전송 시작 후 10초가 지난 미확정 시도는 SUBMITTING_FAILED로 복구하며 최초 전송 후 10분이 끝나면 SUBMISSION_FAILED로 자동 재시도를 종료합니다.',
+    headers: {
+      Location: {
+        description: '현재 주문 상세 URL.',
+        schema: { type: 'string', example: '/api/orders/123' },
+      },
+    },
+    schema: {
+      type: 'object',
+      required: ['data', 'meta'],
+      properties: {
+        data: { $ref: getSchemaPath(SubmittedOrderDto) },
+        meta: { $ref: getSchemaPath(RequestMetaDto) },
+      },
+    },
+  })
+  async submit(
+    @Req() request: AuthRequest,
+    @Res({ passthrough: true }) response: Response,
+    @Param() params: OrderIdParamsDto,
+    @Body() input: SubmitOrderDto,
+    @Headers('call_session_seq') callSessionSeq?: string,
+  ) {
+    const result = await this.orders.submit(
+      request.admin?.adminUserSeq ?? null,
+      params.id,
+      input,
+      request.requestId,
+      callSessionSeq,
+    );
+    response.status(result.status === 'SUBMITTING' ? 202 : 200);
+    if (result.status === 'SUBMITTING') response.setHeader('Location', `/api/orders/${params.id}`);
+    return result;
   }
 }

@@ -156,6 +156,7 @@ function auditInput(
             'BILLING_MONTH_INITIALIZED',
             'ORDER_CREATED',
             'ORDER_UPDATED',
+            'ORDER_SUBMITTED',
             'ORDER_DELETED',
             'PARCEL_DRAFT_DELETED',
             'ORDER_CANCELLED',

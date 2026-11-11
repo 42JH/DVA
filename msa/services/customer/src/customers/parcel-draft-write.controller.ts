@@ -1,3 +1,7 @@
+import { randomUUID } from 'node:crypto';
+import { validateEvent } from '@dva/events';
+import { OrderRecipientPinsService } from './order-recipient-pins.service';
+import type { RecipientAddress, RecipientReceipt } from '@dva/events/order-recipient-pins.cjs';
 import {
   Body,
   Controller,
@@ -12,6 +16,8 @@ import { ConfigService } from '@nestjs/config';
 import { ApiExcludeController } from '@nestjs/swagger';
 import {
   requestDraftWrite,
+  requestWriteReference,
+  type DraftWriteCommand,
   validateDraftWrite,
   validateWriteReference,
   type CustomerReference,
@@ -28,12 +34,16 @@ import { OrderReferenceScopes } from './order-reference-scopes.service';
 @SetMetadata('auth:internal-consultation', true)
 @Controller('internal/call-read-references/parcel-draft-write')
 export class ParcelDraftWriteController {
-  private readonly active = new Set<string>();
+  private readonly active = new Map<
+    string,
+    { command: DraftWriteCommand; orderAddress: string | null }
+  >();
 
   constructor(
     private readonly database: DatabaseService,
     private readonly config: ConfigService<Environment, true>,
     private readonly scopes: OrderReferenceScopes,
+    private readonly recipientPins: OrderRecipientPinsService,
   ) {}
 
   @Post()
@@ -49,7 +59,10 @@ export class ParcelDraftWriteController {
       return await this.database.transaction(async (client) => {
         await client.query("SET LOCAL lock_timeout='2s'");
         return this.scopes.run(event.eventId, client, async () => {
-          this.active.add(event.eventId);
+          this.active.set(event.eventId, {
+            command: event.payload.command,
+            orderAddress: event.payload.orderAddress,
+          });
           try {
             const payload = await requestDraftWrite(
               readCallbackUrl(
@@ -67,6 +80,8 @@ export class ParcelDraftWriteController {
                 },
               },
             );
+            if (payload.customerReceipt)
+              await this.recipientPins.apply(client, payload.customerReceipt);
             return { eventId: event.eventId, status: 'processed', payload };
           } finally {
             this.active.delete(event.eventId);
@@ -89,6 +104,7 @@ export class ParcelDraftWriteController {
       if (
         event.source !== 'order' ||
         ![
+          'RecipientPinsPrepared',
           'CustomerRead',
           'CustomerPhoneRead',
           'PinChecked',
@@ -109,6 +125,34 @@ export class ParcelDraftWriteController {
     try {
       const payload = await this.scopes.use(scopeId, async (client) => {
         const input = event.payload.input;
+        if (event.payload.operation === 'RecipientPinsPrepared') {
+          const active = this.active.get(scopeId)!;
+          if (active.command.operation !== 'OrderSubmitted' || active.command.id !== input.id)
+            throw new ApiException(403, 'FORBIDDEN', '주문 쓰기 범위를 확인해 주세요.');
+          const addresses = await requestWriteReference<RecipientAddress[]>(
+            readCallbackUrl(
+              this.config.get('ORDER_URL', { infer: true }),
+              '/internal/parcel-draft-write/reference',
+              active.orderAddress,
+            ),
+            this.config.get('CUSTOMER_AUTH_TOKEN', { infer: true }),
+            {
+              eventId: randomUUID(),
+              source: 'customer',
+              eventType: 'ParcelDraftWriteReferenceRequested',
+              payload: { operation: 'OrderRecipientsRead', input: { id: input.id } },
+            },
+            scopeId,
+          );
+          return this.recipientPins.prepare(
+            client,
+            Number(input.customerSeq),
+            addresses,
+            active.command.adminId,
+            active.command.requestId,
+            scopeId,
+          );
+        }
         if (event.payload.operation === 'CustomerPaymentPolicyRead')
           return this.paymentPolicy(client, Number(input.id));
         if (event.payload.operation === 'OrderCustomerRead')
@@ -145,6 +189,54 @@ export class ParcelDraftWriteController {
         );
       });
       return { eventId: event.eventId, status: 'processed', payload };
+    } catch (error) {
+      this.failure(error);
+    }
+  }
+
+  @Post('events')
+  @SetMetadata('auth:internal-operations', true)
+  @HttpCode(200)
+  async receive(@Body() event: unknown) {
+    try {
+      validateEvent(event);
+      if (
+        event.source !== 'order' ||
+        event.eventType !== 'OrderRecipientPinsWritten' ||
+        Object.keys(event.payload).sort().join(',') !== 'orderSeq,writeEventId' ||
+        !Number.isInteger(event.payload.orderSeq) ||
+        Number(event.payload.orderSeq) < 1 ||
+        Number(event.payload.orderSeq) > 2147483647
+      )
+        throw new Error('Invalid recipient event');
+      validateReadScope(event.payload.writeEventId);
+    } catch {
+      throw new HttpException({ error: 'INVALID_RECIPIENT_WRITE' }, 422);
+    }
+    try {
+      const receipt = await requestWriteReference<RecipientReceipt>(
+        this.config.get('ORDER_URL', { infer: true }) + '/internal/parcel-draft-write/reference',
+        this.config.get('CUSTOMER_AUTH_TOKEN', { infer: true }),
+        {
+          eventId: randomUUID(),
+          source: 'customer',
+          eventType: 'ParcelDraftWriteReferenceRequested',
+          payload: { operation: 'RecipientReceiptRead', input: { eventId: event.eventId } },
+        },
+      );
+      if (
+        receipt.payload.orderSeq !== event.payload.orderSeq ||
+        receipt.payload.writeEventId !== event.payload.writeEventId
+      )
+        throw new ApiException(
+          409,
+          'EVENT_PAYLOAD_CONFLICT',
+          '같은 이벤트의 내용을 변경할 수 없습니다.',
+        );
+      const status = await this.database.transaction((client) =>
+        this.recipientPins.apply(client, receipt),
+      );
+      return { eventId: event.eventId, status };
     } catch (error) {
       this.failure(error);
     }

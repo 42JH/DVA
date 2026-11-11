@@ -1,3 +1,8 @@
+import type {
+  RecipientAddress,
+  RecipientPin,
+  RecipientReceipt,
+} from '@dva/events/order-recipient-pins.cjs';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -37,11 +42,14 @@ type ActiveWrite = {
   call: DraftWriteCall | null;
   receipt: OwnerCallWriteReceipt | null;
   link: CallOrderLink | null;
+  customerReceipt: RecipientReceipt | null;
+  recipientAddresses: RecipientAddress[] | null;
 };
 
 @Injectable()
 export class ParcelDraftWriteScope {
   private readonly local = new AsyncLocalStorage<ActiveWrite>();
+  private readonly writes = new Map<string, ActiveWrite>();
 
   constructor(
     private readonly database: DatabaseService,
@@ -81,8 +89,69 @@ export class ParcelDraftWriteScope {
       call: null,
       receipt: null,
       link: null,
+      customerReceipt: null,
+      recipientAddresses: null,
     };
-    return this.local.run(state, async () => ({ data: await work(), receipt: state.receipt }));
+    this.writes.set(event.eventId, state);
+    return this.local.run(state, async () => {
+      try {
+        return this.result(await work());
+      } finally {
+        this.writes.delete(event.eventId);
+      }
+    });
+  }
+
+  private result(data: Record<string, unknown>): DraftWriteResult {
+    const state = this.active;
+    const result = { data, receipt: state.receipt };
+    return state.event.payload.command.operation === 'OrderSubmitted'
+      ? { ...result, customerReceipt: state.customerReceipt }
+      : result;
+  }
+
+  recipients(scopeId: string, id: number): RecipientAddress[] {
+    const state = this.writes.get(scopeId);
+    if (!state || state.event.payload.command.id !== id || state.recipientAddresses === null)
+      throw new ApiException(
+        503,
+        'DEPENDENCY_UNAVAILABLE',
+        '서비스를 일시적으로 사용할 수 없습니다.',
+      );
+    return state.recipientAddresses;
+  }
+
+  async prepareRecipientPins(
+    client: PoolClient,
+    id: number,
+    customerSeq: number,
+    addresses: RecipientAddress[],
+    adminId: number | null,
+    requestId: string,
+  ) {
+    this.active.recipientAddresses = addresses;
+    const pins = await this.reference<RecipientPin[]>('customer', 'RecipientPinsPrepared', {
+      id,
+      customerSeq,
+    });
+    if (pins.length === 0) return;
+    const eventId = await enqueue(client, {
+      destination: 'customer',
+      eventType: 'OrderRecipientPinsWritten',
+      aggregateSeq: id,
+      payload: { orderSeq: id, writeEventId: this.active.event.eventId },
+    });
+    this.active.customerReceipt = {
+      eventId,
+      payload: {
+        orderSeq: id,
+        customerSeq,
+        pins,
+        adminId,
+        requestId,
+        writeEventId: this.active.event.eventId,
+      },
+    };
   }
 
   private get active(): ActiveWrite {
@@ -129,6 +198,7 @@ export class ParcelDraftWriteScope {
           );
         replay = true;
         state.receipt = existing.payload.result.receipt;
+        state.customerReceipt = existing.payload.result.customerReceipt ?? null;
         return existing.payload.result.data as T;
       }
       const data = await work(client);
@@ -166,7 +236,7 @@ export class ParcelDraftWriteScope {
       }
       await client.query('UPDATE inbox_events SET payload=payload || $2::jsonb WHERE event_id=$1', [
         event.eventId,
-        JSON.stringify({ result: { data, receipt: state.receipt } }),
+        JSON.stringify({ result: this.result(data) }),
       ]);
       return data;
     });

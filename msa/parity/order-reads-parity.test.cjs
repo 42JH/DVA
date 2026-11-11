@@ -1244,7 +1244,7 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
       const {ParcelDraftWriteWorker}=require('../dist/orders/parcel-draft-write.worker');
       const {DatabaseService}=require('../dist/database/database.service');
       const config={get:key=>({NODE_ENV:'test',DB_HOST:'order-db',DB_PORT:5432,DB_USER:'order_app',DB_PASSWORD:process.env.PGPASSWORD,
-        DB_NAME:process.env.PGDATABASE,CONSULTATION_URL:'http://consultation-app:3004',CUSTOMER_AUTH_TOKEN:process.env.CUSTOMER_AUTH_TOKEN})[key]};
+        DB_NAME:process.env.PGDATABASE,CUSTOMER_URL:'http://customer-app:3001',CONSULTATION_URL:'http://consultation-app:3004',CUSTOMER_AUTH_TOKEN:process.env.CUSTOMER_AUTH_TOKEN})[key]};
       const db=new DatabaseService(config),worker=new ParcelDraftWriteWorker(db,config);
       try {
         const current=worker.run();assert.equal(worker.run(),current);await current;
@@ -3376,6 +3376,585 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
         'order update HTTP pairs: ' +
           pairs +
           '; legacy/new calls, all administrator states, personal/company pins, retained cancellation, totals and payment replacement',
+      );
+    },
+  );
+
+  await t.test(
+    'order submission preserves caller scope, all states, recipient pins and payment preparation',
+    async () => {
+      const started = Date.now(),
+        at = new Date().toISOString(),
+        stale = new Date(started - 120000).toISOString();
+      const delivery = new Pool({ host: 'delivery-db', user: 'delivery_app' });
+      t.after(() => delivery.end());
+      const owners = [
+        {
+          ...sides[0],
+          orders: reference,
+          calls: reference,
+          customers: reference,
+          shipments: reference,
+          audit: reference,
+        },
+        {
+          ...sides[1],
+          orders: databases.order,
+          calls: databases.consultation,
+          customers: databases.customer,
+          shipments: delivery,
+          audit: databases.operations,
+        },
+      ];
+      const address = (name) => ({
+        name,
+        phoneNumber: '01080808080',
+        roadAddress: '접수 도로',
+        jibunAddress: '접수 지번',
+        detailAddress: '101호',
+        dongName: '동',
+        postalCode: '12345',
+      });
+      const states = new Map([
+        [7, 'notPaid'],
+        [8, 'PAID'],
+        [9, 'SUBMITTING'],
+        [10, 'SUBMITTING'],
+        [11, 'SUBMISSION_FAILED'],
+        [12, 'CANCELLED'],
+      ]);
+      for (const side of owners) {
+        await side.customers.query(
+          "INSERT INTO customers(customer_seq,name,phone_number,status,monthly_billing_enabled,deleted_at) OVERRIDING SYSTEM VALUE VALUES(98001,'접수 개인','01080808080','ACTIVE',true,NULL),(98002,'탈퇴','01080808081','WITHDRAWN',false,NULL),(98003,'삭제','01080808082','ACTIVE',false,$1),(98004,'소속','01080808083','ACTIVE',false,NULL),(98005,'일반','01080808084','ACTIVE',false,NULL)",
+          [at],
+        );
+        await side.customers.query(
+          "INSERT INTO organizations(organization_seq,name,status,monthly_billing_enabled) OVERRIDING SYSTEM VALUE VALUES(9800,'일반 접수 기업','ACTIVE',true)",
+        );
+        await side.customers.query(
+          "INSERT INTO departments(department_seq,organization_seq,name,group_billing_enabled) OVERRIDING SYSTEM VALUE VALUES(9800,9800,'접수 부서',true)",
+        );
+        await side.customers.query(
+          "INSERT INTO memberships(membership_seq,customer_seq,organization_seq,department_seq,employee_no,status) OVERRIDING SYSTEM VALUE VALUES(9800,98004,9800,9800,'submit','ACTIVE')",
+        );
+        await side.customers.query(
+          "SELECT setval(pg_get_serial_sequence('personal_pins','personal_pin_seq'),200000,true)",
+        );
+        const client = await side.orders.connect();
+        try {
+          await client.query('BEGIN');
+          await client.query("SET LOCAL session_replication_role='replica'");
+          for (let n = 0; n <= 24; n++) {
+            const status = states.get(n) ?? 'COLLECTING',
+              customer =
+                n === 4
+                  ? 98002
+                  : n === 5
+                    ? 98003
+                    : n === 6
+                      ? null
+                      : n === 3
+                        ? 98004
+                        : n === 17
+                          ? 98005
+                          : 98001;
+            await client.query(
+              "INSERT INTO orders(order_seq,customer_seq,payment_method_type,status,total_amount,creation_source,version,created_at,updated_at,payment_due_at,paid_at,pickup_requested_at,submission_first_attempt_at,submission_last_attempt_at,closed_at) OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,$4,$5,$6,1,$7,$7,$8,$9,'2030-02-01T00:00:00Z',$10,$11,$12)",
+              [
+                62000 + n,
+                customer,
+                [2, 17].includes(n)
+                  ? 'credit'
+                  : n === 3
+                    ? 'groupBilling'
+                    : 'billing',
+                status,
+                n === 12 ? 0 : n === 24 ? 180 * 5000 : n === 1 ? 10000 : 5000,
+                n === 0 ? 'AI' : 'ADMIN',
+                at,
+                n === 7 ? new Date(started + 3600000).toISOString() : null,
+                ['PAID', 'SUBMITTING', 'SUBMISSION_FAILED'].includes(status)
+                  ? at
+                  : null,
+                [9, 10].includes(n) ? stale : null,
+                n === 9
+                  ? new Date(started + 300000).toISOString()
+                  : n === 10
+                    ? stale
+                    : null,
+                n === 12 ? at : null,
+              ],
+            );
+            const origin = address('발송인'),
+              destination = address('수령인 ' + n),
+              columns = Object.fromEntries(
+                ['origin', 'destination'].flatMap((prefix) =>
+                  Object.entries(
+                    prefix === 'origin' ? origin : destination,
+                  ).map(([key, value]) => [
+                    prefix +
+                      '_' +
+                      key.replace(/[A-Z]/g, (c) => '_' + c.toLowerCase()),
+                    value,
+                  ]),
+                ),
+              );
+            const parcel = {
+              ...columns,
+              order_parcel_seq: 76000 + n,
+              order_seq: 62000 + n,
+              parcel_position: 1,
+              status: n === 12 ? 'CANCELLED' : 'ACTIVE',
+              document_count: 1,
+              small_box_count: 0,
+              medium_box_count: 0,
+              big_box_count: 0,
+              other_item_description: '',
+              client_comment: '접수 검증',
+              item_price: 1000,
+              notified_price: n === 14 ? 4000 : 5000,
+              origin_pin_scope: n === 16 ? 'PERSONAL' : null,
+              origin_pin_seq: n === 16 ? 97002 : null,
+              created_at: at,
+              updated_at: at,
+            };
+            await client.query(
+              'INSERT INTO order_parcels OVERRIDING SYSTEM VALUE SELECT * FROM jsonb_populate_record(NULL::order_parcels,$1::jsonb)',
+              [parcel],
+            );
+          }
+          await client.query(
+            'INSERT INTO order_parcels OVERRIDING SYSTEM VALUE SELECT (jsonb_populate_record(NULL::order_parcels,to_jsonb(p)||$1::jsonb)).* FROM order_parcels p WHERE order_parcel_seq=76001',
+            [{ order_parcel_seq: 76100, parcel_position: 2 }],
+          );
+          await client.query(
+            "UPDATE order_parcels SET destination_detail_address=repeat('대',2000) WHERE order_seq=62024",
+          );
+          await client.query(
+            "INSERT INTO order_parcels OVERRIDING SYSTEM VALUE SELECT (jsonb_populate_record(NULL::order_parcels,to_jsonb(p)||jsonb_build_object('order_parcel_seq',77000+n,'parcel_position',n+1))).* FROM order_parcels p CROSS JOIN generate_series(1,179) n WHERE p.order_parcel_seq=76024",
+          );
+          await client.query(
+            "INSERT INTO order_parcel_drafts(draft_seq,reserved_order_seq,customer_seq,client_parcel_id,creation_payload,parcel_data,status,legacy_order_seq,legacy_order_parcel_seq) OVERRIDING SYSTEM VALUE SELECT 59000,9900000,98001,'00000000-0000-4000-8000-000000059000','{}',parcel_data,'INCOMPLETE',62013,76013 FROM order_parcel_drafts WHERE draft_seq=58000",
+          );
+          await client.query(
+            "SELECT setval(pg_get_serial_sequence('order_parcels','order_parcel_seq'),78000,true)",
+          );
+          await client.query('COMMIT');
+        } catch (error) {
+          await client.query('ROLLBACK');
+          throw error;
+        } finally {
+          client.release();
+        }
+        for (let n = 1; n <= 9; n++)
+          await side.calls.query(
+            'INSERT INTO call_sessions(call_session_seq,provider_call_id,caller_phone_number,customer_seq,order_seq,incoming_at,registered_at,order_intake_enabled,deleted_at,started_at,ended_at) OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,NULL,$4,$5,$6,$7,$8,$9,$9)',
+            [
+              98000 + n,
+              'order-submit-' + n,
+              n === 4
+                ? '01080808084'
+                : n === 7
+                  ? '010-8080-8080'
+                  : '01080808080',
+              n === 2 || n === 9 ? 62007 : n === 8 ? 62002 : null,
+              n === 1 ? null : [5, 6].includes(n) ? '2000-01-01T00:00:00Z' : at,
+              at,
+              n === 5,
+              [5, 6].includes(n) ? at : null,
+              [2, 3, 9].includes(n) ? at : null,
+            ],
+          );
+        const guard = await side.calls.connect();
+        await guard.query('BEGIN');
+        await guard.query(
+          'SELECT 1 FROM call_sessions WHERE call_session_seq IN(98005,98006) FOR KEY SHARE',
+        );
+        retention.push(guard);
+        await side.shipments.query(
+          "INSERT INTO shipments(order_parcel_seq,tracking_number,status) VALUES(76015,'submit-already-exists','received')",
+        );
+      }
+      const schemas = [];
+      for (const side of owners) {
+        const response = await fetch(
+          side.base +
+            (side.name === 'monolith' ? '/api' : '/order') +
+            '/docs-json',
+        );
+        schemas.push(await response.json());
+      }
+      const { envelope, schema } = require('./final-parity.cjs');
+      assert.deepEqual(
+        schema(schemas[1].paths['/api/orders/{id}/submit'].post, schemas[1]),
+        schema(schemas[0].paths['/api/orders/{id}/submit'].post, schemas[0]),
+      );
+      const requestIds = [];
+      let pairs = 0;
+      async function pair(
+        id,
+        input = { expectedVersion: 1 },
+        status = 200,
+        options = {},
+      ) {
+        const requestId = randomUUID(),
+          bodies = [];
+        requestIds.push(requestId);
+        const auth = options.ai
+          ? {
+              Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN,
+              call_session_seq: String(options.call ?? 98001),
+            }
+          : {
+              Cookie: 'dva_session=' + tokens[(options.admin ?? 1) - 1],
+              Origin: 'http://localhost:5173',
+            };
+        for (const side of owners) {
+          const response = await fetch(
+              side.base + '/api/orders/' + id + '/submit',
+              {
+                method: 'POST',
+                signal: AbortSignal.timeout(30000),
+                headers: {
+                  'Content-Type': 'application/json',
+                  'X-Request-Id': requestId,
+                  ...auth,
+                  ...options.headers,
+                },
+                body: JSON.stringify(input),
+              },
+            ),
+            body = await response.json();
+          assert.equal(
+            response.status,
+            status,
+            side.name + ' submit ' + id + ' ' + JSON.stringify(body),
+          );
+          assert.equal(response.headers.get('cache-control'), 'no-store');
+          assert.equal(
+            response.headers.get('location'),
+            status === 202 ? '/api/orders/' + id : null,
+          );
+          if (status < 300)
+            assert.deepEqual(Object.keys(body.data), ['status']);
+          bodies.push(envelope(body, requestId));
+        }
+        assert.deepEqual(bodies[1], bodies[0], 'submit ' + id);
+        pairs++;
+        return bodies[0].data;
+      }
+      await pair(62000, {}, 400);
+      await pair(62000, { expectedVersion: '1' }, 400);
+      await pair(62000, { expectedVersion: 1, extra: true }, 400);
+      await pair(62000, { expectedVersion: 1 }, 401, {
+        ai: true,
+        headers: { Authorization: '' },
+      });
+      await pair(62000, { expectedVersion: 1 }, 403, {
+        headers: { Origin: 'http://invalid.example' },
+      });
+      await pair(62000, { expectedVersion: 1 }, 400, {
+        headers: { call_session_seq: 'ignored' },
+      });
+      for (const [call, status] of [
+        [98003, 409],
+        [98004, 404],
+        [98005, 409],
+        [98006, 404],
+        [98007, 403],
+        [98008, 409],
+        [9999999, 404],
+      ])
+        await pair(62000, { expectedVersion: 1 }, status, { ai: true, call });
+      for (const [id, status] of [
+        [62004, 403],
+        [62005, 404],
+        [62006, 403],
+        [62012, 409],
+        [62013, 409],
+        [62014, 422],
+        [62015, 409],
+        [62016, 403],
+        [62017, 403],
+        [9999999, 404],
+      ])
+        await pair(id, { expectedVersion: 1 }, status);
+      await pair(62000, { expectedVersion: 2 }, 409);
+      assert.deepEqual(
+        await pair(62000, { expectedVersion: 1 }, 200, { ai: true }),
+        { status: 'notPaid' },
+      );
+      assert.deepEqual(
+        await pair(62000, { expectedVersion: 1 }, 200, { ai: true }),
+        { status: 'notPaid' },
+      );
+      assert.deepEqual(
+        await pair(62007, { expectedVersion: 999 }, 200, {
+          ai: true,
+          call: 98002,
+        }),
+        { status: 'notPaid' },
+      );
+      await pair(62009, { expectedVersion: 999 }, 202);
+      assert.deepEqual(await pair(62010), { status: 'SUBMITTING_FAILED' });
+      assert.deepEqual(await pair(62011, { expectedVersion: 999 }), {
+        status: 'SUBMISSION_FAILED',
+      });
+      assert.deepEqual(await pair(62001), { status: 'notPaid' });
+      await pair(62001, { expectedVersion: 999 });
+      assert.deepEqual(await pair(62002), { status: 'ACCEPTED' });
+      assert.deepEqual(
+        await pair(62003, { expectedVersion: 1 }, 200, { admin: 2 }),
+        { status: 'ACCEPTED' },
+      );
+      assert.deepEqual(
+        await pair(62008, { expectedVersion: 999 }, 200, { admin: 3 }),
+        { status: 'ACCEPTED' },
+      );
+      assert.deepEqual(
+        await pair(62020, { expectedVersion: 1 }, 200, {
+          headers: { call_session_seq: '9999999' },
+        }),
+        { status: 'notPaid' },
+      );
+      assert.deepEqual(
+        await pair(62021, { expectedVersion: 1 }, 200, {
+          headers: { call_session_seq: '98007' },
+        }),
+        { status: 'notPaid' },
+      );
+      assert.deepEqual(await pair(62024), { status: 'notPaid' });
+      const uuidMaps = [new Map(), new Map()];
+      function normalize(value, index, key = '') {
+        if (value === null) return null;
+        if (value instanceof Date) value = value.toISOString();
+        if (key === 'payment_request_id') {
+          assert.match(value, /^[0-9a-f-]{36}$/i);
+          const map = uuidMaps[index];
+          if (!map.has(value)) map.set(value, 'uuid-' + map.size);
+          return map.get(value);
+        }
+        if (
+          ['payment_due_at', 'expires_at'].includes(key) &&
+          Date.parse(value) > started + 23 * 3600000
+        ) {
+          assert.ok(
+            Date.parse(value) >= started + 86400000 - 1000 &&
+              Date.parse(value) <= Date.now() + 86400000 + 1000,
+          );
+          return '<24-hour deadline>';
+        }
+        if (
+          typeof value === 'string' &&
+          [
+            'created_at',
+            'updated_at',
+            'paid_at',
+            'occurred_at',
+            'status_changed_at',
+            'submission_first_attempt_at',
+            'submission_last_attempt_at',
+            'closed_at',
+          ].includes(key) &&
+          Date.parse(value) >= started - 1000 &&
+          Date.parse(value) <= Date.now() + 1000
+        )
+          return '<generated ' + key + '>';
+        if (Array.isArray(value))
+          return value.map((item) => normalize(item, index));
+        if (typeof value === 'object')
+          return Object.fromEntries(
+            Object.entries(value).map(([k, item]) => [
+              k,
+              normalize(item, index, k),
+            ]),
+          );
+        return value;
+      }
+      const stored = async (side) => ({
+        orders: (
+          await side.orders.query(
+            'SELECT to_jsonb(o) data FROM orders o WHERE order_seq BETWEEN 62000 AND 62024 ORDER BY order_seq',
+          )
+        ).rows,
+        parcels: (
+          await side.orders.query(
+            'SELECT to_jsonb(p) data FROM order_parcels p WHERE order_seq BETWEEN 62000 AND 62024 ORDER BY order_seq,parcel_position',
+          )
+        ).rows,
+        calls: (
+          await side.calls.query(
+            'SELECT call_session_seq,order_seq,customer_seq,order_intake_version FROM call_sessions WHERE call_session_seq BETWEEN 98001 AND 98009 ORDER BY call_session_seq',
+          )
+        ).rows,
+        payments: (
+          await side.orders.query(
+            'SELECT to_jsonb(p) data FROM order_payment_requests p WHERE order_seq BETWEEN 62000 AND 62024 ORDER BY order_seq',
+          )
+        ).rows,
+        charges: (
+          await side.orders.query(
+            'SELECT order_seq,organization_seq,customer_seq,billing_month::text,payment_method_type,amount,occurred_at FROM order_billing_charges WHERE order_seq BETWEEN 62000 AND 62024 ORDER BY order_seq',
+          )
+        ).rows,
+        pins: (
+          await side.customers.query(
+            'SELECT personal_pin_seq,customer_seq,label,address_data,version FROM personal_pins WHERE personal_pin_seq>200000 ORDER BY personal_pin_seq',
+          )
+        ).rows,
+      });
+      const before = await stored(owners[0]),
+        after = await stored(owners[1]);
+      assert.deepEqual(normalize(after, 1), normalize(before, 0));
+      assert.equal(
+        after.pins.filter((pin) => pin.label === '수령인 1').length,
+        1,
+      );
+      assert.equal(
+        after.pins.filter((pin) => pin.label === '수령인 0').length,
+        0,
+      );
+      assert.equal(
+        after.pins.filter((pin) => pin.label === '수령인 24').length,
+        1,
+      );
+      assert.equal(after.charges.length, 2);
+      const logs = async (db) =>
+        (
+          await db.query(
+            'SELECT actor_type,actor_seq,actor_name,action,result,target_type,target_seq,metadata,request_id FROM audit_logs WHERE request_id=ANY($1::uuid[]) ORDER BY request_id,action,target_seq',
+            [requestIds],
+          )
+        ).rows;
+      const originalAudits = await logs(reference);
+      for (let n = 0; n < 100; n++) {
+        if ((await logs(databases.operations)).length === originalAudits.length)
+          break;
+        await pause(25);
+      }
+      assert.deepEqual(await logs(databases.operations), originalAudits);
+      const faultRequestId = randomUUID(),
+        faultHeaders = {
+          Cookie: 'dva_session=' + tokens[0],
+          Origin: 'http://localhost:5173',
+          'Content-Type': 'application/json',
+          'X-Request-Id': faultRequestId,
+        };
+      await databases.customer.query(
+        "CREATE FUNCTION recipient_fixture_failure() RETURNS trigger LANGUAGE plpgsql AS $fixture$ BEGIN IF NEW.event_type='OrderRecipientPinsWritten' AND (NEW.payload->>'orderSeq')::int=62018 THEN RAISE EXCEPTION 'test-only recipient acknowledgement failure'; END IF; RETURN NEW; END $fixture$",
+      );
+      await databases.customer.query(
+        'CREATE TRIGGER recipient_fixture_failure BEFORE INSERT ON inbox_events FOR EACH ROW EXECUTE FUNCTION recipient_fixture_failure()',
+      );
+      let event;
+      try {
+        const response = await fetch(
+          owners[1].base + '/api/orders/62018/submit',
+          {
+            method: 'POST',
+            headers: faultHeaders,
+            body: JSON.stringify({ expectedVersion: 1 }),
+          },
+        );
+        assert.equal(response.status, 500);
+        await response.body.cancel();
+        assert.equal(
+          (
+            await databases.order.query(
+              'SELECT status FROM orders WHERE order_seq=62018',
+            )
+          ).rows[0].status,
+          'notPaid',
+        );
+        assert.equal(
+          (
+            await databases.customer.query(
+              "SELECT 1 FROM personal_pins WHERE customer_seq=98001 AND label='수령인 18'",
+            )
+          ).rowCount,
+          0,
+        );
+        const row = (
+          await databases.order.query(
+            "SELECT event_id,payload FROM outbox_events WHERE destination='customer' AND event_type='OrderRecipientPinsWritten' AND aggregate_seq=62018",
+          )
+        ).rows[0];
+        event = {
+          eventId: row.event_id,
+          source: 'order',
+          eventType: 'OrderRecipientPinsWritten',
+          payload: row.payload,
+        };
+      } finally {
+        await databases.customer.query(
+          'DROP TRIGGER recipient_fixture_failure ON inbox_events',
+        );
+        await databases.customer.query(
+          'DROP FUNCTION recipient_fixture_failure()',
+        );
+      }
+      const forged = await fetch(
+        'http://customer-app:3001/internal/call-read-references/parcel-draft-write/events',
+        {
+          method: 'POST',
+          headers: {
+            Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            ...event,
+            payload: { ...event.payload, writeEventId: randomUUID() },
+          }),
+        },
+      );
+      assert.equal(forged.status, 409);
+      await forged.body.cancel();
+      for (let n = 0; n < 2; n++) {
+        const response = await fetch(
+          'http://customer-app:3001/internal/call-read-references/parcel-draft-write/events',
+          {
+            method: 'POST',
+            headers: {
+              Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(event),
+          },
+        );
+        assert.equal(response.status, 200);
+        assert.ok(
+          ['processed', 'duplicate'].includes((await response.json()).status),
+        );
+      }
+      const pins = await databases.customer.query(
+        "SELECT personal_pin_seq FROM personal_pins WHERE customer_seq=98001 AND label='수령인 18'",
+      );
+      assert.equal(pins.rowCount, 1);
+      for (let n = 0; n < 100; n++) {
+        if (
+          (
+            await databases.operations.query(
+              "SELECT 1 FROM audit_logs WHERE request_id=$1 AND action='PERSONAL_PIN_CREATED'",
+              [faultRequestId],
+            )
+          ).rowCount === 1
+        )
+          break;
+        await pause(25);
+      }
+      assert.equal(
+        (
+          await databases.operations.query(
+            "SELECT 1 FROM audit_logs WHERE request_id=$1 AND action='PERSONAL_PIN_CREATED' AND target_seq=$2",
+            [faultRequestId, pins.rows[0].personal_pin_seq],
+          )
+        ).rowCount,
+        1,
+      );
+      t.diagnostic(
+        'order submit HTTP pairs: ' +
+          pairs +
+          '; all states, caller permissions, card/month/group, recipient deduplication, stored addresses over 256KiB and real customer rollback recovery',
       );
     },
   );

@@ -65,6 +65,7 @@ describe('Order read API (e2e)', () => {
           '/api/orders/{id}',
           '/api/orders/{id}/cancel',
           '/api/orders/{id}/parcels/cancel',
+          '/api/orders/{id}/submit',
           '/api/parcel-drafts',
           '/api/parcel-drafts/{id}',
           '/api/payments/notifications/{id}/completion/retry',

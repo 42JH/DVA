@@ -1,3 +1,4 @@
+import { OrderRecipientPinsService } from './order-recipient-pins.service';
 import { ParcelDraftWriteController } from './parcel-draft-write.controller';
 import { OrderReferenceScopes } from './order-reference-scopes.service';
 import { OrderReadScopeController } from './order-read-scope.controller';
@@ -22,6 +23,7 @@ import { CustomersService } from './customers.service';
     CallReadReferencesController,
   ],
   providers: [
+    OrderRecipientPinsService,
     OrderReferenceScopes,
     CustomersService,
     CustomersRepository,

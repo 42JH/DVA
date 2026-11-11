@@ -1,7 +1,8 @@
+import type {RecipientReceipt} from './order-recipient-pins.cjs';
 import type { Event } from './index.cjs';
 
 export interface DraftWriteCommand {
-  operation: 'ParcelDraftCreated' | 'ParcelDraftUpdated' | 'OrderIntakeSealed' | 'OrderIntakeFinalized' | 'OrderUpdated';
+  operation: 'ParcelDraftCreated' | 'ParcelDraftUpdated' | 'OrderIntakeSealed' | 'OrderIntakeFinalized' | 'OrderUpdated' | 'OrderSubmitted';
   id: number | null;
   adminId: number | null;
   callSessionSeq: number | null;
@@ -36,6 +37,7 @@ export interface CallWriteReceipt { eventId: string; payload: CallMutation }
 export interface DraftWriteResult {
   data: Record<string, unknown>;
   receipt: OwnerCallWriteReceipt | null;
+  customerReceipt?: RecipientReceipt | null;
 }
 export interface DraftWriteEvent extends Event {
   source: 'order' | 'consultation' | 'customer';
@@ -53,7 +55,7 @@ export interface WriteReferenceEvent extends Event {
   source: 'order' | 'customer' | 'consultation';
   eventType: 'ParcelDraftWriteReferenceRequested';
   payload: {
-    operation: 'OrderCustomerRead' | 'CallOrderLinked' | 'IntakeCallRead' | 'IntakeCallSealed' | 'IntakeFinalizationRead' | 'CustomerPaymentPolicyRead' | 'CustomerRead' | 'CustomerPhoneRead' | 'PinChecked' | 'CallRead' |
+    operation: 'RecipientPinsPrepared' | 'OrderRecipientsRead' | 'RecipientReceiptRead' | 'OrderCustomerRead' | 'CallOrderLinked' | 'IntakeCallRead' | 'IntakeCallSealed' | 'IntakeFinalizationRead' | 'CustomerPaymentPolicyRead' | 'CustomerRead' | 'CustomerPhoneRead' | 'PinChecked' | 'CallRead' |
       'CallBumped' | 'CallCustomerResolved' | 'PendingCallWritesRead';
     input: Record<string, unknown>;
   };

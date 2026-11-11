@@ -1,3 +1,9 @@
+import { BillingService } from '../billing/billing.service';
+import { PaymentsRepository } from '../payments/payments.repository';
+import { ParcelDraftWriteScope } from './parcel-draft-write-scope.service';
+import { OrderShipmentCheckClient } from './order-shipment-check.client';
+import { assertOrderSubmissionReady } from './order-submission.validation';
+import type { RecipientAddress } from '@dva/events/order-recipient-pins.cjs';
 import { Injectable, Logger } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import { AuditService } from '../audit/audit.service';
@@ -27,6 +33,10 @@ export class OrderSubmissionService {
     private readonly dver: DverClient,
     private readonly callCheck: OrderDeletionCheckClient,
     private readonly config: ConfigService<Environment, true>,
+    private readonly billing: BillingService,
+    private readonly payments: PaymentsRepository,
+    private readonly scope: ParcelDraftWriteScope,
+    private readonly shipmentCheck: OrderShipmentCheckClient,
   ) {}
 
   async recoverStale(
@@ -270,5 +280,81 @@ export class OrderSubmissionService {
       // 외부 접수가 성공했을 수 있다. 저장 실패 후에도 같은 주문을 다시 전송하지 않는다.
       return { status: 'SUBMITTING' };
     }
+  }
+  async prepareSubmission(
+    client: PoolClient,
+    id: number,
+    customerId: number,
+    adminId: number | null,
+    requestId: string,
+  ) {
+    const snapshot = await this.repository.detail(client, id, null);
+    assertOrderSubmissionReady(snapshot, Date.now(), false);
+    assertOrderAmount(snapshot);
+    const policy = await this.scope.paymentPolicy(customerId);
+    if (
+      (snapshot.paymentMethodType === 'credit' && !policy.monthly) ||
+      (snapshot.paymentMethodType === 'groupBilling' && !policy.group)
+    )
+      throw new ApiException(403, 'FORBIDDEN', '선택한 결제 방식의 사용 자격이 없습니다.');
+    for (let offset = 0; offset < snapshot.parcels.length; offset += 250)
+      if (
+        await this.shipmentCheck.blocked(
+          snapshot.parcels.slice(offset, offset + 250).map((parcel) => parcel.orderParcelSeq),
+        )
+      )
+        throw new ApiException(409, 'INVALID_STATE', '이미 배송 정보가 생성된 주문입니다.');
+    for (const parcel of snapshot.parcels)
+      if (
+        parcel.status !== 'CANCELLED' &&
+        parcel.originPin?.scope === 'PERSONAL' &&
+        !(await this.scope.canUsePin(customerId, parcel.originPin.pinSeq))
+      )
+        throw new ApiException(403, 'FORBIDDEN', '고객이 사용할 수 없는 출발지 PIN입니다.');
+    if (snapshot.creationSource === 'ADMIN') {
+      const addresses = snapshot.parcels
+        .filter((parcel) => parcel.status !== 'CANCELLED')
+        .map((parcel) => ({
+          ...parcel.destination,
+          detailAddress: parcel.destination.detailAddress ?? '',
+        })) as RecipientAddress[];
+      await this.scope.prepareRecipientPins(client, id, customerId, addresses, adminId, requestId);
+    }
+    if (snapshot.paymentMethodType === 'billing') {
+      await client.query(
+        "UPDATE orders SET status='notPaid',payment_due_at=clock_timestamp()+interval '24 hours' WHERE order_seq=$1",
+        [id],
+      );
+      await this.repository.replaceRequest(client, id);
+      await this.audit.recordSuccess(
+        {
+          actorId: adminId,
+          actorType: adminId === null ? 'AI' : 'ADMIN',
+          targetId: id,
+          targetType: 'ORDER',
+          action: 'ORDER_PAYMENT_PENDING',
+          requestId,
+          metadata: { amountAfter: snapshot.totalAmount },
+        },
+        client,
+      );
+      return;
+    }
+    this.dver.ensureConfigured();
+    await this.payments.markPaid(client, id, undefined, policy);
+    await this.billing.recordCharge(client, id, requestId);
+    await this.audit.recordSuccess(
+      {
+        actorId: null,
+        actorType: 'SYSTEM',
+        targetId: id,
+        targetType: 'ORDER',
+        action: 'ORDER_PAYMENT_COMPLETED',
+        requestId,
+        metadata: { amountAfter: snapshot.totalAmount },
+      },
+      client,
+    );
+    return true;
   }
 }

@@ -44,8 +44,9 @@ export class ParcelDraftWriteService {
       return await this.database.transaction(async (client) => {
         await client.query("SET LOCAL lock_timeout='2s'");
         const id = event.payload.command.callSessionSeq;
-        const updatingOrder =
-          event.payload.command.operation === 'OrderUpdated';
+        const updatingOrder = ['OrderUpdated', 'OrderSubmitted'].includes(
+          event.payload.command.operation,
+        );
         if (
           updatingOrder &&
           event.payload.command.adminId === null &&
@@ -60,7 +61,9 @@ export class ParcelDraftWriteService {
           throw new ApiException(
             409,
             'INVALID_STATE',
-            '신규 통화의 수정·취소는 배송 초안 API를 사용해 주세요.',
+            event.payload.command.operation === 'OrderSubmitted'
+              ? '신규 통화의 최종 확정은 order-intake/complete API를 사용해 주세요.'
+              : '신규 통화의 수정·취소는 배송 초안 API를 사용해 주세요.',
           );
         let call: DraftCallSnapshot | null = null;
         if (id !== null) {
@@ -73,14 +76,39 @@ export class ParcelDraftWriteService {
                 [id],
               )
             ).rows[0] ?? null;
-          if (!call)
+          if (
+            !call &&
+            !(
+              event.payload.command.operation === 'OrderSubmitted' &&
+              event.payload.command.adminId !== null
+            )
+          )
             throw new ApiException(
               404,
               'NOT_FOUND',
               '통화를 찾을 수 없습니다.',
             );
-          const finalized =
-            await requestWriteReference<IntakeFinalization | null>(
+          if (call) {
+            const finalized =
+              await requestWriteReference<IntakeFinalization | null>(
+                this.config.get('ORDER_URL', { infer: true }) +
+                  '/internal/parcel-draft-write/reference',
+                this.config.get('CUSTOMER_AUTH_TOKEN', { infer: true }),
+                {
+                  eventId: randomUUID(),
+                  source: 'consultation',
+                  eventType: 'ParcelDraftWriteReferenceRequested',
+                  payload: {
+                    operation: 'IntakeFinalizationRead',
+                    input: { id },
+                  },
+                },
+              );
+            if (finalized)
+              await applyIntakeFinalization(client, finalized, this.audit);
+            const pending = await requestWriteReference<
+              OwnerCallWriteReceipt[]
+            >(
               this.config.get('ORDER_URL', { infer: true }) +
                 '/internal/parcel-draft-write/reference',
               this.config.get('CUSTOMER_AUTH_TOKEN', { infer: true }),
@@ -88,28 +116,18 @@ export class ParcelDraftWriteService {
                 eventId: randomUUID(),
                 source: 'consultation',
                 eventType: 'ParcelDraftWriteReferenceRequested',
-                payload: { operation: 'IntakeFinalizationRead', input: { id } },
+                payload: { operation: 'PendingCallWritesRead', input: { id } },
               },
             );
-          if (finalized)
-            await applyIntakeFinalization(client, finalized, this.audit);
-          const pending = await requestWriteReference<OwnerCallWriteReceipt[]>(
-            this.config.get('ORDER_URL', { infer: true }) +
-              '/internal/parcel-draft-write/reference',
-            this.config.get('CUSTOMER_AUTH_TOKEN', { infer: true }),
-            {
-              eventId: randomUUID(),
-              source: 'consultation',
-              eventType: 'ParcelDraftWriteReferenceRequested',
-              payload: { operation: 'PendingCallWritesRead', input: { id } },
-            },
-          );
-          for (const receipt of pending) {
-            if ((await applyDraftCallWrite(client, receipt)) === 'processed') {
-              if ('afterVersion' in receipt.payload)
-                call.intakeVersion = receipt.payload.afterVersion;
-              call.customerSeq =
-                receipt.payload.customerSeq ?? call.customerSeq;
+            for (const receipt of pending) {
+              if (
+                (await applyDraftCallWrite(client, receipt)) === 'processed'
+              ) {
+                if ('afterVersion' in receipt.payload)
+                  call.intakeVersion = receipt.payload.afterVersion;
+                call.customerSeq =
+                  receipt.payload.customerSeq ?? call.customerSeq;
+              }
             }
           }
         }

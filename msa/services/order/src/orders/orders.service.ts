@@ -1,3 +1,6 @@
+import { OrderSubmissionService } from './order-submission.service';
+import { SubmitOrderDto, SubmittedOrderDto } from './dto/submit-order.dto';
+import type { OrderStatus } from './orders.types';
 import { assertOrderUpdate } from './order-update.validation';
 import { UpdateOrderDto } from './dto/update-order.dto';
 import { orderDraft, ORDER_ADDRESS_FIELDS } from './order-draft';
@@ -45,6 +48,7 @@ export class OrdersService {
     private readonly deletionCheck: OrderDeletionCheckClient,
     private readonly shipmentCheck: OrderShipmentCheckClient,
     private readonly writeScope: ParcelDraftWriteScope,
+    private readonly submission: OrderSubmissionService,
   ) {}
 
   intakeResult(id: number, callId: number) {
@@ -718,5 +722,114 @@ export class OrdersService {
       );
       return { version: (await this.repository.currentVersion(client, id)).version };
     });
+  }
+  async submit(
+    adminId: number | null,
+    id: number,
+    input: SubmitOrderDto,
+    requestId: string,
+    header?: string,
+  ): Promise<SubmittedOrderDto> {
+    const callSessionSeq = this.callId(adminId, header);
+    const result = await this.writeScope.request({
+      operation: 'OrderSubmitted',
+      id,
+      adminId,
+      callSessionSeq,
+      input: { ...input },
+      requestId,
+    });
+    const status = result.status as OrderStatus;
+    return status === 'PAID' ? this.submission.submitPaidOrder(id, requestId) : { status };
+  }
+  executeSubmission(event: DraftWriteEvent) {
+    return this.writeScope.run(event, async () => {
+      const command = event.payload.command;
+      const input = (await createValidationPipe().transform(command.input, {
+        type: 'body',
+        metatype: SubmitOrderDto,
+      })) as SubmitOrderDto;
+      const result = await this.submitLocal(
+        command.adminId,
+        command.id!,
+        input,
+        command.requestId,
+        command.callSessionSeq === null ? undefined : String(command.callSessionSeq),
+      );
+      return { status: result.status };
+    });
+  }
+  private async submitLocal(
+    adminId: number | null,
+    id: number,
+    input: SubmitOrderDto,
+    requestId: string,
+    callSessionHeader?: string,
+  ): Promise<SubmittedOrderDto> {
+    const callId = this.callId(adminId, callSessionHeader);
+    const prepared = await this.writeScope.transaction(async (client) => {
+      let customerId: number | null = null;
+      if (adminId === null) {
+        const call = await this.writeScope.call(callId!);
+        if (!call) throw new ApiException(404, 'NOT_FOUND', '통화를 찾을 수 없습니다.');
+        if (call.endedAt !== null && call.orderSeq !== id)
+          throw new ApiException(
+            409,
+            'INVALID_STATE',
+            '종료된 통화는 기존 연결 주문만 사용할 수 있습니다.',
+          );
+        const customer =
+          call.callerPhoneNumber === null
+            ? null
+            : await this.writeScope.customerByPhone(call.callerPhoneNumber);
+        if (!customer)
+          throw new ApiException(
+            403,
+            'FORBIDDEN',
+            '통화 발신번호에 연결된 활성 고객이 필요합니다.',
+          );
+        customerId = customer.customerSeq;
+      }
+      const order = await this.repository.lockOrder(client, id);
+      if (await this.repository.hasMigratedDrafts(client, id))
+        throw new ApiException(
+          409,
+          'INVALID_STATE',
+          '미완료 배송 초안으로 이관된 주문입니다. 배송 초안 API에서 보완해 주세요.',
+        );
+      if (!order || (customerId !== null && order.customerSeq !== customerId))
+        throw new ApiException(404, 'NOT_FOUND', '주문을 찾을 수 없습니다.');
+      if (order.status !== 'COLLECTING') {
+        if (order.status === 'CANCELLED')
+          throw new ApiException(409, 'INVALID_STATE', '취소된 주문입니다.');
+        if (order.status === 'SUBMITTING') {
+          const recovered = await this.submission.recoverStale(client, id, requestId);
+          if (recovered) return { status: recovered };
+        }
+        return { status: order.status };
+      }
+      const call = callId === null ? undefined : await this.writeScope.call(callId);
+      if (call && (call.endedAt !== null || (call.orderSeq !== null && call.orderSeq !== id)))
+        throw new ApiException(409, 'INVALID_STATE', '진행 중인 연결 통화가 필요합니다.');
+      if (order.customerSeq === null)
+        throw new ApiException(403, 'FORBIDDEN', '주문 고객이 필요합니다.');
+      if (order.version !== input.expectedVersion)
+        throw new ApiException(409, 'VERSION_CONFLICT', '최신 주문 내용을 다시 확인해 주세요.');
+      const customer = await this.writeScope.orderCustomer(order.customerSeq);
+      if (!customer) throw new ApiException(404, 'NOT_FOUND', '고객을 찾을 수 없습니다.');
+      if (!customer.active)
+        throw new ApiException(403, 'FORBIDDEN', '주문에는 활성 고객이 필요합니다.');
+      const payload = await this.submission.prepareSubmission(
+        client,
+        id,
+        order.customerSeq,
+        adminId,
+        requestId,
+      );
+      if (call && call.orderSeq === null)
+        await this.writeScope.linkOrder(callId!, id, order.customerSeq);
+      return { status: payload ? ('PAID' as const) : ('notPaid' as const) };
+    });
+    return prepared;
   }
 }
