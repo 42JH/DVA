@@ -54,7 +54,7 @@ function CallBody({ callId }: { callId: number }) {
           {s && (
             <div className="flex shrink-0 flex-wrap items-center gap-x-6 gap-y-2 border-b border-ops-line bg-white px-6 py-3">
               <span className="flex items-baseline gap-2">
-                <span className="text-[17px] font-bold">{s.name || '이름 모름'}</span>
+                <span className="text-[17px] font-bold">{s.name || '미등록 고객'}</span>
                 <span className="text-[14px] text-ops-sub tabular-nums">{s.phone}</span>
               </span>
               <Badge tone={s.state.tone}>{s.state.label}</Badge>
@@ -221,13 +221,22 @@ function Contents({ vm }: { vm: CallView }) {
             <Section id="customer" title="고객">
               <dl className="grid grid-cols-[72px_1fr] gap-y-1.5 text-[13px]">
                 <dt className="text-ops-sub">이름</dt>
-                <dd className="font-medium">{s.name || '모름'}</dd>
+                <dd className="font-medium">{s.name || '미등록 고객'}</dd>
                 <dt className="text-ops-sub">전화번호</dt>
                 <dd className="tabular-nums">{s.phone}</dd>
-                <dt className="text-ops-sub">소속</dt>
-                <dd>{s.member || '모름'}</dd>
-                <dt className="text-ops-sub">구분</dt>
-                <dd>{s.isNew === null ? '모름' : s.isNew ? '신규 고객' : '기존 고객'}</dd>
+                {/* 모르는 값은 '모름' 대신 줄을 뺌 — 미등록 발신자는 소속이 없고, 신규 여부는 분석 뒤에 옴 */}
+                {s.member && (
+                  <>
+                    <dt className="text-ops-sub">소속</dt>
+                    <dd>{s.member}</dd>
+                  </>
+                )}
+                {s.isNew !== null && (
+                  <>
+                    <dt className="text-ops-sub">구분</dt>
+                    <dd>{s.isNew ? '신규 고객' : '기존 고객'}</dd>
+                  </>
+                )}
                 {s.asks.length > 0 && (
                   <>
                     <dt className="text-ops-sub">요청</dt>
