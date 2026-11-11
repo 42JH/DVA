@@ -1,3 +1,4 @@
+const { configureTestCardPayments } = require('./payment-cards.cjs');
 const {
   createTestPool,
   createTestSession,
@@ -63,6 +64,7 @@ module.exports = function ordersFixture() {
       if (index === 0) adminId = result.rows[0].admin_user_seq;
       // 두 인스턴스의 동시성 검증은 유지하고 세 번째 역할은 첫 앱에서 인증한다.
       const app = index < 2 ? legacyOrderIntake(await startTestApp(apps)) : apps[0];
+      configureTestCardPayments(app);
       hosts.push(await app.getUrl());
       cookies.push(await createTestSession(pool, result.rows[0].admin_user_seq));
     }

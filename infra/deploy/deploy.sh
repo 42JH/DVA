@@ -287,6 +287,26 @@ check_parcel_draft_compatibility() {
     }
 }
 
+read_payment_card_schema() {
+    local db_container state
+    db_container="$(database_container)" || return 1
+    state="$("${docker_cmd[@]}" exec "$db_container" sh -c \
+        'exec psql -X -At -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "$1"' sh \
+        "SELECT to_regclass('public.payment_cards') IS NOT NULL" </dev/null)" || return 1
+    [[ "$state" == t || "$state" == f ]] || return 1
+    printf '%s' "$state"
+}
+
+check_payment_card_compatibility() {
+    local directory="$1" state
+    [[ -f "$directory/backend/migrations/$payment_card_migration" ]] && return 0
+    state="$(read_payment_card_schema)" || return 1
+    [[ "$state" == f ]] || {
+        echo 'Deployment/restore blocked: the target app bypasses registered card approval and employee payment permissions. Deploy a compatible app.' >&2
+        return 1
+    }
+}
+
 restore_previous() {
     local state
     if [[ -z "$old_version" || "$old_version" == "$version" ]]; then
@@ -309,6 +329,7 @@ restore_previous() {
     check_company_pin_compatibility "$releases_dir/$old_version" || return 1
     check_recording_retry_compatibility "$releases_dir/$old_version" || return 1
     check_parcel_draft_compatibility "$releases_dir/$old_version" || return 1
+    check_payment_card_compatibility "$releases_dir/$old_version" || return 1
     echo "Restoring previous running release: $old_version" >&2
     if apply_release "$releases_dir/$old_version"; then
         echo 'Previous release restored. Deployment still reports failure.' >&2
@@ -339,6 +360,7 @@ unused_migration=047-remove-unused-schema.sql
 company_pin_migration=053-drop-company-pins.sql
 recording_retry_migration=054-recording-retry-policy.sql
 parcel_draft_migration=055-parcel-draft-intake.sql
+payment_card_migration=064-payment-cards.sql
 backup_required=false
 case "${1:-}" in
     '') ;;
@@ -372,12 +394,14 @@ check_unused_compatibility "$release_dir" || exit 1
 check_company_pin_compatibility "$release_dir" || exit 1
 check_recording_retry_compatibility "$release_dir" || exit 1
 check_parcel_draft_compatibility "$release_dir" || exit 1
+check_payment_card_compatibility "$release_dir" || exit 1
 address_state="$(read_address_schema)" || { echo 'Cannot verify address schema. Deployment stopped.' >&2; exit 1; }
 retention_state="$(read_retention_schema)" || { echo 'Cannot verify retention schema. Deployment stopped.' >&2; exit 1; }
 unused_state="$(read_unused_schema)" || { echo 'Cannot verify removed schema fields. Deployment stopped.' >&2; exit 1; }
 company_pin_state="$(read_company_pin_schema)" || { echo 'Cannot verify company PIN schema. Deployment stopped.' >&2; exit 1; }
 recording_retry_state="$(read_recording_retry_schema)" || { echo 'Cannot verify recording retry schema. Deployment stopped.' >&2; exit 1; }
 parcel_draft_state="$(read_parcel_draft_schema)" || { echo 'Cannot verify parcel draft schema. Deployment stopped.' >&2; exit 1; }
+payment_card_state="$(read_payment_card_schema)" || { echo 'Cannot verify payment card schema. Deployment stopped.' >&2; exit 1; }
 call_analysis_state=f
 if [[ -f "$release_dir/backend/migrations/$call_analysis_migration" ]]; then
     call_analysis_state="$(read_call_analysis_schema)" || { echo 'Cannot verify call analysis schema. Deployment stopped.' >&2; exit 1; }
@@ -400,7 +424,8 @@ if [[ "${1:-}" != --rollback ]]; then
        [[ "$unused_state" == f && -f "$release_dir/backend/migrations/$unused_migration" ]] ||
        [[ "$company_pin_state" == f && -f "$release_dir/backend/migrations/$company_pin_migration" ]] ||
        [[ "$recording_retry_state" == f && -f "$release_dir/backend/migrations/$recording_retry_migration" ]] ||
-       [[ "$parcel_draft_state" == f && -f "$release_dir/backend/migrations/$parcel_draft_migration" ]]; then
+       [[ "$parcel_draft_state" == f && -f "$release_dir/backend/migrations/$parcel_draft_migration" ]] ||
+       [[ "$payment_card_state" == f && -f "$release_dir/backend/migrations/$payment_card_migration" ]]; then
         # Quiesce old writers before the backup and breaking schema conversion.
         compose "$release_dir" stop backend
         backup_required=true

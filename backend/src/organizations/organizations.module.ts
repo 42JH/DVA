@@ -1,3 +1,4 @@
+import { PaymentCardsModule } from '../payments/payment-cards.module';
 import { Module } from '@nestjs/common';
 import { MembersModule } from '../members/members.module';
 import { AuditModule } from '../audit/audit.module';
@@ -15,7 +16,7 @@ import { OrganizationDeletionRepository } from './organization-deletion.reposito
 
 // AppModule's AuthModule provides the global session/CSRF guard for every company route.
 @Module({
-  imports: [DatabaseModule, AuditModule, MembersModule],
+  imports: [DatabaseModule, AuditModule, MembersModule, PaymentCardsModule],
   controllers: [OrganizationsController, DepartmentsController],
   providers: [
     OrganizationDeletionService,

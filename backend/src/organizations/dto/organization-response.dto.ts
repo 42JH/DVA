@@ -7,6 +7,8 @@ export class CreatedOrganizationDto {
 }
 
 export class OrganizationResponseDto extends CreatedOrganizationDto {
+  @ApiProperty({ description: '현재 사용 가능한 기업 카드 등록 여부.' })
+  groupCardRegistered!: boolean;
   @ApiProperty({ description: '기업 전체 월결제 사용 자격.' }) monthlyBillingEnabled!: boolean;
   @ApiProperty()
   name!: string;

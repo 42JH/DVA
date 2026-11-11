@@ -569,7 +569,7 @@ test('customer list and caller context agree on personal and independent company
   }
 });
 
-test('customer list payment methods reflect withdrawal and deleted or missing company links on the next read', async () => {
+test('customer payment methods reflect withdrawal and company links while department changes keep employee card permissions', async () => {
   for (const change of [
     'UPDATE memberships SET deleted_at=clock_timestamp() WHERE customer_seq=$1',
     'UPDATE organizations SET deleted_at=clock_timestamp() WHERE organization_seq=(SELECT organization_seq FROM memberships WHERE customer_seq=$1)',
@@ -592,7 +592,9 @@ test('customer list payment methods reflect withdrawal and deleted or missing co
         ? []
         : change.startsWith('UPDATE organizations')
           ? ['billing']
-          : ['billing', 'credit'];
+          : change.startsWith('UPDATE departments') || change.includes('department_seq=NULL')
+            ? ['billing', 'credit', 'groupBilling']
+            : ['billing', 'credit'];
       await paymentMethods(customer, expected);
     }
   }

@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { PaymentCardsModule } from './payment-cards.module';
 import { DatabaseModule } from '../database/database.module';
 import { OrdersModule } from '../orders/orders.module';
 import { PaymentsRepository } from './payments.repository';
@@ -7,7 +8,7 @@ import { PaymentClient } from './payment.client';
 import { PaymentsWorker } from './payments.worker';
 import { PaymentsController } from './payments.controller';
 @Module({
-  imports: [DatabaseModule, OrdersModule],
+  imports: [DatabaseModule, OrdersModule, PaymentCardsModule],
   controllers: [PaymentsController],
   providers: [PaymentsRepository, PaymentsService, PaymentClient, PaymentsWorker],
 })

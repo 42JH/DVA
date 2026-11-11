@@ -1,3 +1,4 @@
+const { seedTestCard, configureTestCardPayments } = require('./helpers/payment-cards.cjs');
 const customerAddress = require('./helpers/customer-address.cjs');
 require('reflect-metadata');
 const { before, after, test } = require('node:test');
@@ -55,6 +56,7 @@ before(async () => {
     )
   ).rows[0].admin_user_seq;
   app = await NestFactory.create(AppModule, { logger: false });
+  configureTestCardPayments(app);
   const dver = app.get(DverClient);
   dver.ensureConfigured = () => {};
   dver.submit = async () => {
@@ -77,6 +79,7 @@ async function fixture() {
   const company = (
     await request('POST', '/companies', { name: '기록 보존 기업', monthlyBillingEnabled: true })
   ).body.data.organizationSeq;
+  await seedTestCard(pool, 'ORGANIZATION', company);
   const department = (
     await request('POST', `/companies/${company}/departments`, {
       name: '개발팀',
@@ -96,6 +99,7 @@ async function fixture() {
       await request('POST', `/companies/${company}/members`, {
         customerSeq: customer,
         employeeNo: 'EMP-1',
+        groupBillingEnabled: true,
         role: 'MEMBER',
         departmentSeq: department,
       })

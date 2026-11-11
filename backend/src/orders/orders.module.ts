@@ -1,4 +1,6 @@
 import { Module } from '@nestjs/common';
+import { PaymentCardsModule } from '../payments/payment-cards.module';
+import { OrderCardPaymentsService } from './order-card-payments.service';
 import { AuditModule } from '../audit/audit.module';
 import { DatabaseModule } from '../database/database.module';
 import { CustomersModule } from '../customers/customers.module';
@@ -27,6 +29,7 @@ import { AdminParcelDraftsService } from './admin-parcel-drafts.service';
 
 @Module({
   imports: [
+    PaymentCardsModule,
     DatabaseModule,
     AuditModule,
     CustomersModule,
@@ -43,6 +46,7 @@ import { AdminParcelDraftsService } from './admin-parcel-drafts.service';
     AdminParcelDraftsController,
   ],
   providers: [
+    OrderCardPaymentsService,
     OrdersRepository,
     OrdersService,
     OrderSubmissionRepository,
@@ -57,6 +61,11 @@ import { AdminParcelDraftsService } from './admin-parcel-drafts.service';
     OrderIntakeRepository,
     AdminParcelDraftsService,
   ],
-  exports: [OrderPaymentsService, OrdersRepository, ParcelDraftsRepository],
+  exports: [
+    OrderPaymentsService,
+    OrderCardPaymentsService,
+    OrdersRepository,
+    ParcelDraftsRepository,
+  ],
 })
 export class OrdersModule {}

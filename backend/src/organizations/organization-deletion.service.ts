@@ -1,3 +1,4 @@
+import { PaymentCardsService } from '../payments/payment-cards.service';
 import { Injectable } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
 import { AuditService } from '../audit/audit.service';
@@ -10,6 +11,7 @@ export class OrganizationDeletionService {
     private readonly database: DatabaseService,
     private readonly repository: OrganizationDeletionRepository,
     private readonly audit: AuditService,
+    private readonly cards: PaymentCardsService,
   ) {}
 
   async remove(id: number | number[], departmentOnly: boolean, adminId: number, requestId: string) {
@@ -27,6 +29,8 @@ export class OrganizationDeletionService {
         for (const companyId of companyIds) {
           const company = await this.repository.company(client, companyId);
           if (!company) throw new ApiException(404, 'NOT_FOUND', '기업을 찾을 수 없습니다.');
+          if (!departmentOnly)
+            await this.cards.softDelete(client, 'ORGANIZATION', [companyId], adminId, requestId);
           const departments = await this.repository.departments(client, companyId, departmentId);
           if (departmentOnly && !departments.length)
             throw new ApiException(404, 'NOT_FOUND', '부서를 찾을 수 없습니다.');

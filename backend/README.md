@@ -594,3 +594,6 @@ GET /api/admin/orders의 statusGroup=SUBMISSION_FAILED는 SUBMITTING_FAILED와 S
 자동 워커는 기동 시와 10초 주기로 미확정 전송·10분 기한을 확인합니다. 실제 재전송은 PAID와 기한 안의 SUBMITTING_FAILED 중 마지막 시도 후 1분이 지난 주문만 최대 20건 병렬 처리합니다. 최신 시도 시각으로 이전 응답을 차단하며 HTTP 대기 중 DB 트랜잭션을 유지하지 않습니다. 5년 보관 기한이 지난 주문은 이 배치에서 제외합니다. 기존 관리자 POST /api/admin/orders/{id}/retry는 최종 실패 후에도 수동 1회 요청으로 사용할 수 있으며 자동 기한을 새로 열지 않습니다. 결제·청구·수거 시각은 반복 처리하지 않습니다. 외부 디버의 멱등키·접수 조회 계약이 없어 응답 유실 후 재전송으로 생기는 외부 중복 접수는 보장하지 못합니다.
 
 배포 DB 검증은 migration 033 적용 기록과 기업·부서의 `created_at` 타입·NULL 허용·현재 시각 기본값을 함께 확인합니다. Docker DB 회귀 테스트도 체크아웃한 `infra/database/verify.sql` 원문을 사용해 누락된 스키마를 거절하는지 검사하며, 이 SQL은 테스트 컨테이너에만 전달합니다.
+## 기업·직원 결제 권한 및 등록 카드
+
+기업 월결제 기본값·직원별 결제 허용과 개인/기업 등록 카드는 [프론트 연동 명세](docs/company-card-payments-frontend.md), [배포·복구 절차](docs/company-card-payments-operations.md)를 따른다. 063·064 migration과 서버 전용 빌링·암호화 키가 필요하며, 기존 AI/관리자 인증과 카드 없는 billing의 MM 결제 링크는 유지한다.

@@ -1,3 +1,4 @@
+const { configureTestCardPayments } = require('./payment-cards.cjs');
 const { legacyOrderIntake } = require('./legacy-order-intake.cjs');
 const { testMembership } = require('./membership.cjs');
 require('reflect-metadata');
@@ -48,6 +49,7 @@ module.exports = function manualOrders() {
   });
   f.start = async () => {
     const app = legacyOrderIntake(await NestFactory.create(AppModule, { logger: false }));
+    configureTestCardPayments(app);
     f.apps.push(app);
     configureApplication(app, { log: () => {} });
     app.get(ConfigService).set('DVER_API_URL', f.dverUrl);
