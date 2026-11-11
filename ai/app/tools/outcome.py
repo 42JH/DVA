@@ -4,6 +4,7 @@ code는 사유 표시·관측·테스트용. 문장 지시는 넣지 않는다(d
 from dataclasses import dataclass, field
 from typing import Literal
 
+from app.domain.address_book import sender_change_next
 from app.domain.assess import assess
 from app.domain.state import ConversationState, FieldStatus, Items, Place, Source
 from app.policy.model import Policy
@@ -40,6 +41,9 @@ def state_summary(state: ConversationState, policy: Policy) -> dict:
         fields = {n: f.status.value for n, f in state.current.fields.items() if policy.fields[n].kind != "auto"}
     summary = {"stage": a.stage, "fields": fields, "missing": list(a.missing), "can_proceed": a.readback_ready,
                "parcels": len(state.parcels)}
+    if next_sender := sender_change_next(state):
+        summary["sender_change_next"] = next_sender
+        summary["can_proceed"] = False
     if state.current and state.current.box_size_pending:
         fields["items"] = FieldStatus.PENDING_CHOICE.value
         summary["box_size_pending"] = True

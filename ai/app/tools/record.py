@@ -17,7 +17,7 @@ from typing import Literal
 from pydantic import Field, create_model, model_validator
 
 from app.address.parse import detail_text
-from app.domain.address_book import save_offer
+from app.domain.address_book import save_offer, sender_change_next
 from app.domain.assess import area_label, readback_facts
 from app.domain.confirm import issue_parcel_confirmation
 from app.domain.parcel_items import (ItemIssue, contextual_keyword, excluded_evidence, measurements, mentions,
@@ -194,6 +194,13 @@ async def record_fields(ctx: ToolContext, args: RecordArgs, *, expected_box: Box
             prev = s.field_of(name)
             was = prev.value if prev.valid else None
             if s.record(name, value):
+                if name == "sender_name" and s.current.sender_name_for_parcel:
+                    if value == s.customer.name:
+                        s.current.ask_customer_name_save = False
+                        s.current.save_sender_name = False
+                    elif was is not None and was != value and s.current.save_sender_name:
+                        s.current.ask_customer_name_save = True
+                        s.current.save_sender_name = False
                 facts["recorded"].append(name)
                 if was not in (None, ""):
                     facts["changed"].append(name)
@@ -236,8 +243,9 @@ async def record_fields(ctx: ToolContext, args: RecordArgs, *, expected_box: Box
             iso, moved = default_pickup(ctx.now(), rule)
             s.record("pickup_at", iso, Source.SERVER)
         if pending:  # 되읽기 gate 개방: 확인 내용을 이 결과로 준다(N1)
-            facts["readback"] = readback_facts(pending.snapshot)
-            facts["readback_id"] = pending.id
+            if not sender_change_next(s):
+                facts["readback"] = readback_facts(pending.snapshot)
+                facts["readback_id"] = pending.id
             # 고객 정보·주소 저장은 묻지 않고 택배를 담을 때 한다(사용자 결정 2026-11-06). 여기서는 대상만 정해 둔다
             s.address_offer = save_offer(s) or None
         elif any(a in facts["recorded"] for a in ADDRESSES) and all(s.field_of(a).valid for a in ADDRESSES):

@@ -117,6 +117,10 @@ class ParcelDraft:
     box_size_pending: bool = False
     item_addition_turns: dict[str, int] = field(default_factory=dict)
     client_parcel_id: str | None = None   # 같은 통화의 배송 초안과 연결하는 UUID
+    sender_name_for_parcel: bool = False  # 등록 이름과 별도로 이번 택배에만 쓰는 보내는 분 성함
+    ask_customer_name_save: bool = False # 고객의 등록 이름도 바꿀지 아직 정하지 않음
+    save_sender_name: bool = False       # 고객이 이번 택배의 새 이름을 등록 이름에도 쓰겠다고 답함
+    sender_address_change: bool = False  # 접수 시작에서 새 발송 주소를 먼저 받는 중
 
     def __getitem__(self, name: str) -> FieldState:
         return self.fields[name]

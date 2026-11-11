@@ -64,7 +64,8 @@ def render_delegation(policy: Policy, tools: tuple[tuple[str, str], ...] = ()) -
               "- 고객이 말한 수량·전화번호 또는 서버가 요청한 물품 가액이 공통 입력 제한을 명백히 벗어나고 다른 정상 정보는 없을 때. "
               "도구 거절을 기다리지 말고 허용 범위를 설명해 해당 항목만 다시 묻습니다. 애매한 값은 추측하지 않고 확인합니다.",
               f"- 고객이 {', '.join(['예/아니요', '후보 고르기', *_labels(policy, choice)])}처럼 고르는 답을 할 때(서버가 직접 듣고 판단합니다)",
-              "- 첫 인사의 접수 질문에 동의할 때. 서버 결과가 오면 그때 안내를 이어갑니다.",
+              "- 첫 인사에 답하면서 접수에 동의하거나 새 성함·주소를 말하지 않고 보내는 분 성함이나 발송 주소를 바꾸겠다고만 할 때. "
+              "서버 결과가 오면 그때 안내를 이어갑니다. 새 성함·주소 또는 다른 접수 값을 함께 말하면 그 값은 맡깁니다.",
               "- 고객이 상담원 연결이나 통화 종료만 명확하게 요청할 때(서버가 직접 듣고 처리합니다).",
               "- 인사, 맞장구, 대기 요청, 이미 받은 결과로 답할 수 있는 말", "",
               "Do not guess the result while waiting.",
@@ -86,7 +87,8 @@ def render_policy(policy: Policy) -> str:
              " → ".join(f"{i}. {label}" for i, label in enumerate(_labels(policy, order), 1)),
              f"- {', '.join(_labels(policy, auto))}는 서버가 채웁니다. 묻지 않습니다.",
              "- 접수 정보를 수집할 때만 현재 택배의 최신 서버 결과(또는 summary)에 있는 missing의 첫 항목을 하나만 묻습니다. "
-             "fields에서 valid인 항목은 건너뛰고, missing이 비어 있으면 새 수집 질문을 하지 않습니다.",
+             "fields에서 valid인 항목은 건너뛰고, missing이 비어 있으면 새 수집 질문을 하지 않습니다. "
+             "첫 인사 직후 sender_change_next가 있으면 그 항목을 먼저 묻습니다.",
              "- 서버가 needs, 선택 확인, 되읽기를 요청하면 수집 질문보다 먼저 처리합니다. 고객의 정정은 해당 항목을 다룹니다.",
              "- 순서 밖의 값이나 한 번에 말한 값도 함께 맡기고, 결과를 기다리는 동안 같은 값을 다시 묻지 않습니다."]
     lines += [f"- {policy.fields[n].label}: {s.rule}" for s in collect for n in s.required if s.rule]
@@ -127,7 +129,8 @@ def render_backend(policy: Policy) -> str:
 
 def decision_questions(policy: Policy, stage_id: str, *, pending: bool = False,
                        pick_labels: tuple[str, ...] = (),
-                       callback: bool = False, origin: bool = False, cancel_current: bool = False,
+                       callback: bool = False, origin: bool = False, sender_change: bool = False,
+                       sender_name_scope: bool = False, cancel_current: bool = False,
                        box_label: str | None = None) -> list[dict]:
     """발화 끝 Decision 호출에 넣을 질문(SDK `questions` 모양). 선택형 판단이 없으면 빈 목록(호출하지 않음)."""
     stage = next((s for s in policy.stage if s.id == stage_id), None)
@@ -143,6 +146,10 @@ def decision_questions(policy: Policy, stage_id: str, *, pending: bool = False,
         sets.insert(0, "callback")  # 콜백 제안에 답을 기다릴 때만(업무 규칙 e)
     if origin:
         sets.insert(0, "origin")  # 기존 고객에게 출발지를 물었고 답을 기다릴 때만
+    if sender_change:
+        sets.insert(0, "sender_change")
+    if sender_name_scope:
+        sets.insert(0, "sender_name_scope")
     if box_label:
         sets.insert(0, "box")
     out = []
