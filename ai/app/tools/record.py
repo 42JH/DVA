@@ -17,7 +17,7 @@ from typing import Literal
 from pydantic import Field, create_model, model_validator
 
 from app.address.parse import detail_text
-from app.domain.address_book import save_offer, sender_change_next
+from app.domain.address_book import begin_sender_name_change, save_offer, sender_change_available, sender_change_next
 from app.domain.assess import area_label, readback_facts
 from app.domain.confirm import issue_parcel_confirmation
 from app.domain.parcel_items import (ItemIssue, contextual_keyword, excluded_evidence, measurements, mentions,
@@ -193,6 +193,8 @@ async def record_fields(ctx: ToolContext, args: RecordArgs, *, expected_box: Box
         for name, value in values.items():
             prev = s.field_of(name)
             was = prev.value if prev.valid else None
+            if name == "sender_name" and value and value != s.customer.name and sender_change_available(s):
+                begin_sender_name_change(s)
             if s.record(name, value):
                 if name == "sender_name" and s.current.sender_name_for_parcel:
                     if value == s.customer.name:

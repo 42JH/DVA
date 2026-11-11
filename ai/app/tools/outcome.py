@@ -44,6 +44,10 @@ def state_summary(state: ConversationState, policy: Policy) -> dict:
     if next_sender := sender_change_next(state):
         summary["sender_change_next"] = next_sender
         summary["can_proceed"] = False
+        if next_sender == "ask_address_change":
+            summary["sender_change_question"] = "발송 주소도 바꾸시겠어요?"
+        if next_sender == "ask_address_change" or (next_sender == "sender_name" and state.origin_answer is None):
+            summary["missing"] = [name for name in a.missing if name not in ("sender_address", "sender_address_detail")]
     if state.current and state.current.box_size_pending:
         fields["items"] = FieldStatus.PENDING_CHOICE.value
         summary["box_size_pending"] = True

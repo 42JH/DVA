@@ -10,6 +10,40 @@ shortcut: 주소록에서 고른 받는 곳을 고친 경우는 새 PIN으로 �
 from app.domain.state import ConversationState, FieldStatus, Source
 
 
+def sender_change_available(state: ConversationState) -> bool:
+    """첫 인사 뒤 받는 분 정보를 받기 전까지 보내는 분 변경을 처리한다."""
+    draft = state.current
+    return (state.origin_mentioned_in_greeting and state.intent in (None, "order") and not state.parcels
+            and not state.pending and (draft is None or not any(
+                draft[name].valid for name in ("receiver_name", "receiver_phone", "receiver_address"))))
+
+
+def begin_sender_name_change(state: ConversationState) -> None:
+    sender_name = state.field_of("sender_name")
+    draft = state.current
+    if draft.sender_name_for_parcel:
+        return
+    draft.sender_name_for_parcel = True
+    draft.ask_customer_name_save = True
+    if sender_name.source in (Source.CALLER_ID, Source.PROFILE):
+        state.clear("sender_name")
+    if not draft.sender_address_change:
+        # 인사에 동의한 뒤 성함 변경을 따로 말한 경우도 주소 변경 여부를 묻는다.
+        state.origin_answer = None
+        state.origin_applied = False
+
+
+def request_sender_address_change(state: ConversationState) -> None:
+    address = state.field_of("sender_address")
+    state.current.sender_address_change = True
+    state.origin_answer = False
+    state.origin_applied = False
+    if address.source in (Source.PROFILE, Source.HISTORY):
+        state.clear("sender_address")
+        state.clear("sender_address_detail")
+        state.current.sender_geo = None
+
+
 def sender_change_next(state: ConversationState) -> str | None:
     draft = state.current
     if state.intent != "order" or draft is None:
@@ -18,7 +52,9 @@ def sender_change_next(state: ConversationState) -> str | None:
         return "sender_name"
     if draft.sender_address_change and not draft["sender_address"].valid:
         return "sender_address"
-    if draft.sender_name_for_parcel and state.origin_answer is None and not draft["sender_address"].valid:
+    address = draft["sender_address"]
+    if (draft.sender_name_for_parcel and state.origin_answer is None
+            and (not address.valid or address.source in (Source.PROFILE, Source.HISTORY))):
         return "ask_address_change"
     if draft.ask_customer_name_save and draft["sender_name"].value != state.customer.name:
         return "ask_name_save"

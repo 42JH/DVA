@@ -238,7 +238,8 @@ phones_to_read = "고객이 이번 통화에서 직접 불러 주고 서버가 �
 more_parcels = "false면 더 보낼 택배가 없다"
 call_started = "true면 전화가 연결된 것이다. 고객 말을 기다리지 않고 바로 첫 인사를 한다(인사 규칙대로, 한 번만)"
 greeting_confirmation = "confirmed면 첫 인사에 대한 접수 의사를 확인했다. sender_change_next가 있으면 그 질문부터, 그 다음으로 origin_confirm 또는 summary의 첫 누락 항목을 따른다. ask_intent면 어떤 업무를 도와드릴지 한 번 묻는다. 이미 기록된 성함을 다시 확인하지 않는다"
-sender_change_next = "첫 인사 직후 보내는 분 정보 변경의 다음 질문. 일반 missing보다 우선한다. sender_name이면 이번 택배에 쓸 새 성함만, sender_address이면 새 발송 주소만 묻는다. ask_address_change이면 인사에서 말한 주소를 다시 읽지 않고 '발송 주소도 바꾸시겠어요?'라고 묻는다. ask_name_save이면 '다음에도 이 이름으로 보내실 수 있게 등록 이름도 바꿔드릴까요?'라고 묻는다"
+sender_change_next = "첫 인사 뒤 보내는 분 정보 변경의 다음 질문. 일반 missing보다 우선한다. sender_name이면 이번 택배에 쓸 새 성함만, sender_address이면 새 발송 주소만 묻는다. ask_address_change이면 sender_change_question만 말한다. ask_name_save이면 '다음에도 이 이름으로 보내실 수 있게 등록 이름도 바꿔드릴까요?'라고 묻는다"
+sender_change_question = "그대로 말할 보내는 분 정보 변경 질문. 발송 주소나 다른 질문을 덧붙이지 않는다"
 closing = "true면 확정된 주문 결과가 함께 온 경우에만 그 결과를 안내하고 정해진 마무리 인사를 끝까지 말한다. 주문 결과가 pending이면 통화 종료 후 처리 안내를 덧붙이지 않고 마무리 인사를 한다. 전화는 서버가 끊는다"
 unverified = "방금 말한 표현 중 서버가 확인하지 않은 내용. truth에 맞춰 필요한 내용만 바로잡는다. 진행하겠다는 말만 했으면 접수 완료를 안내했다고 말하지 않는다. 확인 결과를 기다리는 중에는 저장이나 접수에 다시 동의할지 묻지 않는다"
 cancel = "취소 결과: done=취소됨, already=이미 취소된 접수, locked=결제가 끝나 전화로 취소 불가, unknown=확인 중(완료라고 말하지 않는다)"
@@ -247,7 +248,7 @@ unavailable = "status가 unavailable이면 시스템 문제다. 고객 탓으로
 confirmation = "확인 대기 상태. ask_again이면 확인을 기다리는 중이므로 저장 결과를 확인 중이라고 말하지 않고, readback 값을 짧게 되읽고 '이대로 접수할까요?'로 한 번 묻는다. 짧은 답은 확인 질문에 답해야 확정되고, 되읽기 도중의 명확한 접수 요청은 서버가 판단한다. cancel_target과 함께 오면 그 접수를 취소할지 다시 묻는다. 처리했다고 말하지 않는다. cancelled_by_customer면 고객이 고친 값을 받아 기록한다"
 pickup = "수거 요청 시각. at = 안내할 시각(한국 시간), today_unavailable이 true면 '금일 수거는 어렵고 익일 수거가 가능합니다'를 먼저 말한다. allowed = 고객이 바꿀 수 있는 범위(거절 사유 PICKUP_TOO_SOON·PICKUP_OUT_OF_HOURS·PICKUP_TOO_FAR일 때 이 범위로 다시 묻는다)"
 origin = "발송 주소. prefilled = 기존 발송 주소를 채웠다(다시 묻지 않고 저장된 상세주소는 읽지 않는다). address_recorded = 발송 주소가 이미 기록됐다. name_only = 등록 발송 주소를 채우지 않았다. 다음 질문은 sender_change_next 또는 missing을 따른다"
-origin_confirm = "기존 발송 주소를 쓸지 '{그 주소}에서 발송하시나요?'라고 한 번 묻는다"
+origin_confirm = "sender_change_next가 없을 때만 기존 발송 주소를 쓸지 한 번 확인한다. registered이면 '등록된 발송 주소로 보내실까요?'라고 묻고 주소는 다시 읽지 않는다. 주소 값이면 '{그 주소}에서 발송하시나요?'라고 묻는다"
 order = "통화 결과(주문) 상태. ACCEPTED만 접수 완료(parcelNo가 있으면 접수번호로 안내). guidance가 있으면 그 내용을 따르고, 없으면 서버 상태에 맞게 안내한다. 접수 완료라고 단정하지 않는다"
 submitted = "order가 submitted면 접수가 이미 넘어가 이 통화에서는 택배를 고치거나 더 담을 수 없다. 바꿨다·담았다고 말하지 않고, 변경은 담당자가 확인 후 연락드린다고 안내한다"
 
@@ -292,7 +293,7 @@ instructions = "기존 발송 주소를 그대로 쓰면 yes, 다른 발송 주�
 name = "sender_change"
 type = "choice"
 choices = ["name", "address", "both", "none"]
-instructions = "발송 주소를 말한 첫 인사에 대한 답에서 이번 택배의 보내는 분 정보를 고치려는 항목을 고른다. 보내는 분 성함만 바꾸거나 다른 사람 이름으로 보낸다=name, 발송 주소만 바꾸거나 다른 곳에서 보낸다=address, 둘 다 바꾼다=both. 받는 분 변경, 단순 접수 동의·거절, 고객 정보만 수정하겠다는 용건은 none."
+instructions = "발송 주소를 안내한 인사에 답하거나 그 뒤에 이어서 말한 고객 발화에서 이번 택배의 보내는 분 정보 변경을 찾는다. 보내는 분 성함만 바꾸거나 다른 사람 이름으로 보낸다=name. 이름 변경 앞에 '아니요'가 붙었다는 이유만으로 주소 변경까지 선택하지 않는다. 발송 주소만 바꾸거나 다른 곳에서 보낸다=address, 고객이 둘 다 바꾸겠다고 밝히면 both. 받는 분 변경, 단순 접수 동의·거절, 고객 정보만 수정하겠다는 용건은 none."
 
 [[decision.sender_name_scope.questions]]
 name = "sender_name_scope"

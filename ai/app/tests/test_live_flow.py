@@ -761,16 +761,21 @@ def test_registered_greeting_answer_preserves_address_scope_without_model(greeti
             assert facts["summary"]["sender_change_next"] == "sender_address"
         assert not cur["sender_address"].valid
         assert ("origin_confirm" in facts) == (expected == "ask_origin")
+        if expected == "ask_origin" and greeting_address:
+            assert facts["origin_confirm"] == "registered"  # 이미 말한 주소는 다시 읽지 않는다.
         assert s.state.origin_answer is (False if expected == "name_only" else None)
 
 
-@pytest.mark.parametrize(("scope", "address_answer", "save_answer", "name_in_greeting"), [
-    ("once", "yes", None, True),
-    ("once", "provided", None, True),
-    ("not_answer", "yes", "save", True),
-    ("not_answer", "no", "once", False),
+@pytest.mark.parametrize(("scope", "address_answer", "save_answer", "name_in_greeting", "greeting_mode"), [
+    ("once", "yes", None, True, "exact"),
+    ("once", "provided", None, True, "exact"),
+    ("not_answer", "yes", "save", True, "unmatched_address"),
+    ("not_answer", "no", "once", False, "exact"),
+    ("not_answer", "yes", "once", True, "split_fallback"),
+    ("not_answer", "no", "once", True, "split_detected"),
 ])
-def test_greeting_sender_name_change_asks_only_for_unanswered_choices(scope, address_answer, save_answer, name_in_greeting):
+def test_greeting_sender_name_change_asks_only_for_unanswered_choices(
+        scope, address_answer, save_answer, name_in_greeting, greeting_mode):
     from app.domain.address_book import save_offer
     from backend_client.order import Geo as BGeo, Place as BPlace
 
@@ -782,10 +787,13 @@ def test_greeting_sender_name_change_asks_only_for_unanswered_choices(scope, add
 
     async def decide(model, input, questions):
         names = {q["name"] for q in questions}
-        if "sender_change" in names:
-            change = "both" if address_answer == "provided" else "name"
-            return SimpleNamespace(answers=[choice("task", "order"), choice("sender_change", change),
-                                            choice("origin", "not_answer"), choice("sender_name_scope", scope)])
+        if "sender_change" in names and "발송 주소도" not in input:
+            change = ("both" if address_answer == "provided" else "none" if greeting_mode == "split_fallback" else "name")
+            answers = [choice("sender_change", change), choice("sender_name_scope", scope),
+                       choice("origin", "no" if greeting_mode == "unmatched_address" else "not_answer")]
+            if "task" in names:
+                answers.append(choice("task", "order"))
+            return SimpleNamespace(answers=answers)
         if "등록 이름도" in input:
             assert "sender_name_scope" in names
             return SimpleNamespace(answers=[choice("sender_name_scope", save_answer)])
@@ -812,18 +820,26 @@ def test_greeting_sender_name_change_asks_only_for_unanswered_choices(scope, add
             conn.push({"type": "response.event", "delegation_id": call_id, "event": {"type": "response.completed"}})
             return json.loads(next(e["item"]["output"] for e in conn.sent if e.get("item", {}).get("call_id") == call_id))
 
-        await ai(conn, "안녕하세요, 김철수님, 서울 강남구 가람구길 이백십이에서 보내시는 택배 접수 도와드릴까요?", 0)
+        address_in_greeting = ("강남구 가람구길 이백십이" if greeting_mode == "unmatched_address"
+                               else "서울 강남구 가람구길 이백십이")
+        await ai(conn, f"안녕하세요, 김철수님, {address_in_greeting}에서 보내시는 택배 접수 도와드릴까요?", 0)
+        name_turn = 1500
+        if greeting_mode.startswith("split_"):
+            await say(conn, "네", 1200)
+            await until(lambda: any('"greeting_confirmation"' in e.get("content", "") for e in conn.sent))
+            assert s.state.current["sender_address"].valid
+            name_turn = 2000
         if name_in_greeting:
             reply = "이번 택배만 박영희 이름으로 보낼게요" if scope == "once" else "박영희 이름으로 보낼게요"
             fields = {"sender_name": "박영희"}
             if address_answer == "provided":
                 reply += " 서울 강남구 테헤란로 212에서 보낼게요"
                 fields["sender_address"] = FULL["sender_address"]
-            customer = asyncio.create_task(say(conn, reply, 1500))
+            customer = asyncio.create_task(say(conn, reply, name_turn))
             await until(lambda: s.rt.cust is not None)
-            out = await record("sender-name", 1500, fields)
+            out = await record("sender-name", name_turn, fields)
             await customer
-            assert not any('"greeting_confirmation"' in e.get("content", "") for e in conn.sent)
+            assert sum('"greeting_confirmation"' in e.get("content", "") for e in conn.sent) == int(name_turn == 2000)
         else:
             await say(conn, "보내는 분 성함을 바꿀게요", 1500)
             await until(lambda: any('"sender_change_next": "sender_name"' in e.get("content", "") for e in conn.sent))
@@ -833,6 +849,9 @@ def test_greeting_sender_name_change_asks_only_for_unanswered_choices(scope, add
             out = await record("sender-name", 3100, {"sender_name": "박영희"})
         expected_next = None if address_answer == "provided" else "ask_address_change"
         assert out.get("sender_change_next") == expected_next
+        if expected_next:
+            assert out["sender_change_question"] == "발송 주소도 바꾸시겠어요?"
+            assert "sender_address" not in out["missing"] and "sender_address_detail" not in out["missing"]
         assert "origin_confirm" not in out and s.state.current["sender_name"].value == "박영희"
         assert s.state.customer.name == "김철수"
 
@@ -844,6 +863,7 @@ def test_greeting_sender_name_change_asks_only_for_unanswered_choices(scope, add
         elif address_answer == "no":
             await until(lambda: any('"sender_change_next": "sender_address"' in e.get("content", "") for e in conn.sent))
             assert not s.state.current["sender_address"].valid
+            assert not s.state.current["sender_address_detail"].valid
             await ai(conn, "어떤 주소에서 보내시나요?", 5300)
             await say(conn, "서울 강남구 테헤란로 212에서 보낼게요", 6200)
             out = await record("sender-address", 6200, {"sender_address": FULL["sender_address"]})
