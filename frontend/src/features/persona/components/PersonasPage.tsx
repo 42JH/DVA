@@ -65,7 +65,9 @@ export function PersonasPage() {
           </section>
           <aside aria-label="오른쪽 패널" className={ASIDE}>
             <PanelTabs vm={vm} />
-            {vm.historyOpen ? <History vm={vm} /> : <Personas vm={vm} />}
+            <div className="min-h-0 flex-1 [scrollbar-width:thin] overflow-y-auto">
+              {vm.historyOpen ? <History vm={vm} /> : <Personas vm={vm} />}
+            </div>
           </aside>
         </div>
       )}
@@ -94,7 +96,7 @@ export function PersonasPage() {
 
 // 오른쪽 패널 틀 — 카드 목록 · 버전 기록이 같은 자리 · 같은 폭
 const ASIDE =
-  'flex w-96 shrink-0 [scrollbar-width:thin] flex-col gap-2 overflow-y-auto border-l border-ops-line bg-white p-4 max-xl:w-80'
+  'flex w-96 shrink-0 flex-col gap-2 overflow-hidden border-l border-ops-line bg-white p-4 max-xl:w-80'
 
 // 오른쪽 위 탭 — 밑줄이 따라다니는 모양 (11/11 사용자 시안). 이 화면에서만 써서 shared/ui엔 안 올림
 function PanelTabs({ vm }: { vm: Vm }) {
