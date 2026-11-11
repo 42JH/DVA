@@ -1143,3 +1143,4 @@
 - 배경: 운영 통화에서 Live `invalid_request_error`가 났지만 `_on_error`가 code·client_event_id만 남겨 사유를 확정할 수 없었다. 송신 순번을 거꾸로 세어 위임 재개 `response.create`였음까지만 확인했다.
 - 변경: `LiveFlow.send`가 최근 64개 송신 이벤트 요약(type·item_type·call_id·content 앞 120자·about, 재개는 위임 id)을 `CallSession.sent`에 event_id로 보관한다. `_on_error`는 오류 원문 전체와 client_event_id가 가리키는 송신 요약을 로그와 "오류" 사건(data)에 남기고, 사건 text를 `code: message`로 한다. 관제(/monitor)는 오류 줄에 message가 보이고 "상세"에서 error·sent를 펼쳐 본다(화면 코드 변경 없음).
 - 테스트: 오류 기록·관제 스냅샷 단언 1개. 전체 AI 833 passed, monitor 5 passed.
+- 추가(같은 날): 처리기 없는 Live 이벤트를 종류별로 세고 처음 1건만 "미처리 이벤트"로, 위임 Backend의 `response.created`를 "Backend 응답 시작"으로, 송신 실패·수신 루프 종료·컨텍스트 경고(≥0.9, 1회)를 사건으로 남긴다(전에는 컨테이너 로그에만 있어 재시작 때 사라졌다). 마지막 컨텍스트 사용률은 stats에. 오류 사건 data에 그 시점 Live 상태(AI 마지막 출력 후 ms, 고객 발화 중, 30초 안 위임의 inflight·outputs·completed·done)를 넣는다. 관제는 "경고"·"수신 루프 종료"도 빨간 줄. 전체 AI 833 passed, monitor 5 passed.

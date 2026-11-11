@@ -33,6 +33,14 @@ _TYPE = re.compile(rb'"type"\s*:\s*"([^"]+)"')
 Handler = Callable[[CallSession, dict], None]
 
 
+def _unhandled(s: CallSession, ev: dict) -> None:
+    """처리기 없는 Live 이벤트: 종류별 횟수, 처음 1건만 사건으로(Live가 실제로 보내는 이벤트 목록을 알기 위해)."""
+    kind = f"미처리 {ev.get('type')}"
+    s.stats[kind] += 1
+    if s.stats[kind] == 1:
+        s.note("미처리 이벤트", str(ev.get("type")), {"event": json.dumps(ev, ensure_ascii=False)[:1000]})
+
+
 @dataclass
 class CallDeps:
     client: object                 # AsyncOpenAI(sessions.accept/reject/hangup, live.sideband.connect)
@@ -61,6 +69,7 @@ class CallService:
                                              "session.output_transcript.delta": self._on_output}
         self.on_finalize: list[Callable[[CallSession], Awaitable[None]]] = []  # S6: 결과 아웃박스
         self.on_change: Callable[[CallSession], None] = lambda s: None         # 관제 알림
+        self.error_context: Callable[[CallSession], dict] = lambda s: {}       # Live 오류 시점 상태(LiveFlow가 채운다)
         self.accepting_new = True
         self.results = None                                                    # S6: app.calls.results.ResultService
         self.intake = None                                                     # 055: app.calls.intake.IntakeService
@@ -239,10 +248,13 @@ class CallService:
                     handler = self.handlers.get(ev.get("type"))
                     if handler:
                         handler(s, ev)  # 동기: 상태 갱신 + 작업 생성만
+                    else:
+                        _unhandled(s, ev)
         except asyncio.CancelledError:
             raise
         except Exception as e:  # 연결 종료·재연결 소진·핸들러 예외
             log.warning("수신 루프 종료 %s %s", s.call_id, type(e).__name__)
+            s.note("수신 루프 종료", type(e).__name__, {"error": str(e)[:300]})
             s.close_reason = s.close_reason or f"connection_{type(e).__name__}"
             if s.phase not in (Phase.CLOSED, Phase.FAILED):
                 await self._quiet(hangup_quietly(self.d.client, s.call_id), "hangup")
@@ -271,12 +283,16 @@ class CallService:
                     err.get("client_event_id"), err.get("type"), err.get("message"), sent)
         # 관제(/monitor)·통화 기록: 오류 원문 전체와 거절된 송신 이벤트(code만으로는 사유를 알 수 없었다)
         text = str(err.get("code")) + (f": {err['message']}" if err.get("message") else "")
-        s.note("오류", text[:300], {"error": err, "sent": sent})
+        s.note("오류", text[:300], {"error": err, "sent": sent, "live": self.error_context(s)})
 
     def _on_usage(self, s: CallSession, ev: dict) -> None:
         ratio = (ev.get("context_window") or {}).get("usage_ratio") or 0
+        s.stats["컨텍스트 사용률"] = round(ratio, 3)  # 마지막 값(통화 길이에 따른 지시 준수 대조용)
         if ratio >= 0.9:
             log.warning("컨텍스트 사용률 %.2f %s", ratio, s.call_id)
+            if not s.stats["컨텍스트 경고"]:
+                s.stats["컨텍스트 경고"] += 1
+                s.note("컨텍스트 경고", f"사용률 {ratio:.2f}", {"context_window": ev.get("context_window")})
 
     def _on_input(self, s: CallSession, ev: dict) -> None:
         s.last_input_t = time.time()
