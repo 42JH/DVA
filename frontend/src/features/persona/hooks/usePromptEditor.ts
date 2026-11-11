@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { ApiError } from '@/shared/api/client'
 import {
   DRAFT_TAG,
@@ -15,7 +15,7 @@ import {
   type PromptKey,
   type VoiceSettings,
 } from '@/features/persona/api/personaApi'
-import { useVoiceOptions } from '@/features/persona/hooks/useVoiceOptions'
+import { useVoiceDraft } from '@/features/persona/hooks/useVoiceDraft'
 import { useLeaveGuard } from '@/features/persona/hooks/useLeaveGuard'
 
 /** 수정 창이 무엇을 고치는지 — 늘 그 페르소나의 최신 버전에서 시작: 초안이 있으면 초안, 없으면 HEAD (11/02 결정) */
@@ -29,29 +29,20 @@ export interface EditTarget {
   saveTo: number // 화면 번호 = HEAD + 1. 몇 번을 저장해도 같은 번호(초안 덮어쓰기)
 }
 
-const SAMPLE = '받는 분 번호 공일공, 이삼사오, 육칠팔구 맞으실까요?' // 미리 듣기 문장 (와이어프레임 그대로)
-// shortcut: 미리 듣기는 브라우저 음성(speechSynthesis)으로 속도만 흉내 — 실제 목소리(marin 등) · 기다리기는 BE TTS 음성 파일로 바꿀 것
-const RATE: Record<VoiceSettings['speed'], number> = { SLOW: 0.85, NORMAL: 1, FAST: 1.2 }
-
 /** 07 프롬프트 수정 · 음성 세부 조절 훅 (와이어프레임 07_페르소나관리_수정 · _음성세부조절, 10/31 · 11/02 실서버)
  * 화면엔 바로 'v5 · 작성 중'. [저장] = PATCH(바뀐 칸만) → 초안 덮어쓰기('v5 저장됨', 통화엔 아직 안 씀). 다시 고쳐 저장해도 v5
  * 음성 세부 조절 창은 저장 버튼 없이 바로 반영(작성 중에) → 수정 화면 [저장]으로 같이 저장
  * 저장 안 한 내용이 있으면 [취소] · 다른 화면 이동 · 탭 닫기를 한 번 막음 */
 export function usePromptEditor(target: EditTarget, onDone: (savedVersion?: number) => void) {
   const qc = useQueryClient()
-  const options = useVoiceOptions()
   const [name, setName] = useState(target.personaName)
   const [prompt, setPrompt] = useState(target.prompt)
-  const [voice, setVoice] = useState(target.voice)
-  const [voiceOpen, setVoiceOpen] = useState(false)
+  const voiceDraft = useVoiceDraft(target.voice)
+  const { voice, voiceChanged } = voiceDraft
   const changedKeys = PROMPT_KEYS.filter((k) => prompt[k] !== target.prompt[k])
   const promptChanged = changedKeys.length > 0
   // 빈 칸은 프롬프트를 고칠 때만 막음 — 음성만 바꾼 저장은 프롬프트를 안 보내니 따로 저장되게 (11/11 사용자, 서버는 빈 칸 허용)
   const emptyNotice = promptChanged ? emptyPromptNotice(prompt) : null
-  const voiceChanged =
-    voice.voice !== target.voice.voice ||
-    voice.speed !== target.voice.speed ||
-    voice.waitTime !== target.voice.waitTime
   const nameChanged = name.trim() !== target.personaName
   const dirty = nameChanged || promptChanged || voiceChanged
 
@@ -68,7 +59,7 @@ export function usePromptEditor(target: EditTarget, onDone: (savedVersion?: numb
           ...(voice.speed !== target.voice.speed && { speed: voice.speed }),
           ...(voice.waitTime !== target.voice.waitTime && { waitTime: voice.waitTime }),
         },
-        rateRange: options.rateRange,
+        rateRange: voiceDraft.rateRange,
       }),
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: personaQueries.all() })
@@ -77,7 +68,6 @@ export function usePromptEditor(target: EditTarget, onDone: (savedVersion?: numb
   })
 
   const guard = useLeaveGuard(dirty, mutation.isPending || mutation.isSuccess, () => onDone())
-  useEffect(() => () => window.speechSynthesis?.cancel(), []) // 화면을 떠나면 미리 듣기 멈춤
 
   return {
     tag: `v${target.saveTo} · ${DRAFT_TAG}`,
@@ -94,34 +84,16 @@ export function usePromptEditor(target: EditTarget, onDone: (savedVersion?: numb
     emptyNotice, // 저장이 막힌 이유 — 고친 게 있을 때만 화면에 보이면 됨
 
     // 음성 세부 조절 창
-    voiceOpen,
-    openVoice: () => setVoiceOpen(true),
-    closeVoice: () => {
-      window.speechSynthesis?.cancel()
-      setVoiceOpen(false)
-    },
+    ...voiceDraft,
     voiceTitle: `v${target.saveTo} ${DRAFT_TAG}`,
-    voiceChanged, // '음성 설정 바뀜' 태그
-    voice,
-    voiceOptions: options.voiceOptions(voice.voice),
-    setVoiceName: (x: string) => setVoice((v) => ({ ...v, voice: x })),
-    speedOptions: options.speedOptions(voice.speed),
-    setSpeed: (speed: VoiceSettings['speed']) => setVoice((v) => ({ ...v, speed })),
-    waitOptions: options.waitOptions(voice.waitTime),
-    setWaitTime: (waitTime: VoiceSettings['waitTime']) => setVoice((v) => ({ ...v, waitTime })),
-    sample: SAMPLE,
-    canPreview: typeof window !== 'undefined' && 'speechSynthesis' in window,
-    preview: () => {
-      window.speechSynthesis.cancel()
-      const u = new SpeechSynthesisUtterance(SAMPLE)
-      u.lang = 'ko-KR'
-      u.rate = RATE[voice.speed]
-      window.speechSynthesis.speak(u)
-    },
 
     saveLabel: mutation.isPending ? '저장 중…' : `저장 → v${target.saveTo}`,
     canSave:
-      dirty && name.trim() !== '' && !emptyNotice && !options.isPending && !mutation.isPending,
+      dirty &&
+      name.trim() !== '' &&
+      !emptyNotice &&
+      !voiceDraft.optionsPending &&
+      !mutation.isPending,
     save: () => mutation.mutate(),
     saveError: !mutation.error
       ? null
