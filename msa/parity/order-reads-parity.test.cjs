@@ -4815,5 +4815,916 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
       );
     },
   );
+
+  await t.test(
+    'order creation preserves original request keys, customers and legacy outcomes',
+    async (creation) => {
+      const started = Date.now(),
+        at = new Date(started).toISOString();
+      const owners = [
+        {
+          ...sides[0],
+          orders: reference,
+          calls: reference,
+          customers: reference,
+          audit: reference,
+        },
+        {
+          ...sides[1],
+          orders: databases.order,
+          calls: databases.consultation,
+          customers: databases.customer,
+          audit: databases.operations,
+        },
+      ];
+      const origin = {
+        name: '발송인',
+        phoneNumber: '01011112222',
+        roadAddress: '출발 도로',
+        jibunAddress: '출발 지번',
+        detailAddress: '',
+        dongName: '출발동',
+        postalCode: '00123',
+      };
+      const destination = {
+        ...origin,
+        name: '주문 생성 수령인',
+        phoneNumber: '01033334444',
+        roadAddress: '수령 도로',
+      };
+      const parcel = {
+        origin,
+        destination,
+        documentCount: 1,
+        itemPrice: 1000,
+        notifiedPrice: 5000,
+      };
+      const complete = {
+        customerSeq: 110001,
+        paymentMethodType: 'billing',
+        totalAmount: 5000,
+        pickupRequestedAt: new Date(started + 3 * 86400000).toISOString(),
+        parcels: [parcel],
+      };
+      const identities = new Map();
+      for (let n = 1; n <= 36; n++)
+        identities.set(110000 + n, {
+          providerCallId: 'creation-call-' + n,
+          callerPhoneNumber:
+            n === 11
+              ? '01092929292'
+              : n === 14
+                ? '01056565656'
+                : n === 15
+                  ? '01057575757'
+                  : n === 22
+                    ? '01061616161'
+                    : '01051515151',
+          incomingAt:
+            n === 4
+              ? '2000-01-01T00:00:00Z'
+              : new Date(started + n * 1000).toISOString(),
+        });
+      for (const side of owners) {
+        for (let n = 1; n <= 4; n++)
+          await side.customers.query(
+            'INSERT INTO customers(customer_seq,name,phone_number,status,monthly_billing_enabled,deleted_at) OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,$4,$5,$6)',
+            [
+              110000 + n,
+              '주문 고객 ' + n,
+              '0105151515' + n,
+              n === 2 ? 'WITHDRAWN' : 'ACTIVE',
+              n === 4,
+              n === 3 ? at : null,
+            ],
+          );
+        await side.customers.query(
+          'INSERT INTO personal_pins(personal_pin_seq,customer_seq,label,address_data) OVERRIDING SYSTEM VALUE VALUES(110501,110001,$1,$2)',
+          ['원본 출발지', origin],
+        );
+        await side.customers.query(
+          "SELECT setval('customers_customer_seq_seq',500000,true)",
+        );
+        await side.customers.query(
+          "SELECT setval('personal_pins_personal_pin_seq_seq',501000,true)",
+        );
+        await side.orders.query(
+          "SELECT setval('orders_order_seq_seq',80000,true)",
+        );
+        await side.orders.query(
+          "SELECT setval('order_parcels_order_parcel_seq_seq',100000,true)",
+        );
+        for (const [id, call] of identities)
+          await side.calls.query(
+            'INSERT INTO call_sessions(call_session_seq,provider_call_id,caller_phone_number,incoming_at,registered_at,order_intake_enabled,ended_at,started_at,customer_seq) OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,$4,$5,$6,$7,$7,$8)',
+            [
+              id,
+              call.providerCallId,
+              id === 110005 ? null : call.callerPhoneNumber,
+              id === 110003 ? null : call.incomingAt,
+              at,
+              id === 110002,
+              id === 110006 ? at : null,
+              id === 110013 ? 7 : null,
+            ],
+          );
+        await side.calls.query(
+          "SELECT setval('call_sessions_call_session_seq_seq',110100,true)",
+        );
+      }
+      const guards = [];
+      creation.after(async () => {
+        for (const client of guards) {
+          await client.query('ROLLBACK');
+          client.release();
+        }
+      });
+      for (const side of owners) {
+        const client = await side.calls.connect();
+        await client.query('BEGIN');
+        await client.query(
+          'SELECT 1 FROM call_sessions WHERE call_session_seq=110004 FOR KEY SHARE',
+        );
+        guards.push(client);
+      }
+      const { schema, envelope } = require('./final-parity.cjs');
+      const specs = [];
+      for (const side of owners)
+        specs.push(
+          await (
+            await fetch(
+              side.base +
+                (side.name === 'monolith' ? '/api' : '/order') +
+                '/docs-json',
+            )
+          ).json(),
+        );
+      assert.deepEqual(
+        schema(specs[1].paths['/api/orders'].post, specs[1]),
+        schema(specs[0].paths['/api/orders'].post, specs[0]),
+      );
+      const uuidMaps = [new Map(), new Map()],
+        requests = [];
+      let pairs = 0;
+      function normalize(value, index, key = '') {
+        if (value === null) return null;
+        if (value instanceof Date) value = value.toISOString();
+        if (['paymentRequestId', 'payment_request_id'].includes(key)) {
+          assert.match(value, /^[0-9a-f-]{36}$/i);
+          const map = uuidMaps[index];
+          if (!map.has(value)) map.set(value, 'payment-' + map.size);
+          return map.get(value);
+        }
+        if (
+          [
+            'paymentDueAt',
+            'payment_due_at',
+            'expiresAt',
+            'expires_at',
+          ].includes(key)
+        ) {
+          assert.ok(
+            Date.parse(value) >= started + 86400000 - 1000 &&
+              Date.parse(value) <= Date.now() + 86400000 + 1000,
+          );
+          return '<24-hour deadline>';
+        }
+        if (
+          [
+            'created_at',
+            'updated_at',
+            'occurred_at',
+            'paid_at',
+            'closed_at',
+            'submission_first_attempt_at',
+            'submission_last_attempt_at',
+            'status_changed_at',
+          ].includes(key) &&
+          typeof value === 'string' &&
+          Date.parse(value) >= started - 1000 &&
+          Date.parse(value) <= Date.now() + 1000
+        )
+          return '<generated ' + key + '>';
+        if (Array.isArray(value))
+          return value.map((item) => normalize(item, index));
+        if (typeof value === 'object')
+          return Object.fromEntries(
+            Object.entries(value).map(([name, item]) => [
+              name,
+              normalize(item, index, name),
+            ]),
+          );
+        return value;
+      }
+      async function send(side, input, status, key, requestId, options = {}) {
+        const response = await fetch(side.base + '/api/orders', {
+          method: 'POST',
+          signal: AbortSignal.timeout(30000),
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Request-Id': requestId,
+            'Idempotency-Key': key,
+            ...(options.ai
+              ? { Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN }
+              : {
+                  Cookie: 'dva_session=' + tokens[(options.admin ?? 1) - 1],
+                  Origin: 'http://localhost:5173',
+                }),
+            ...options.headers,
+          },
+          body: JSON.stringify(input),
+        });
+        const body = await response.json();
+        assert.equal(
+          response.status,
+          status,
+          side.name + ' POST orders ' + JSON.stringify(body),
+        );
+        assert.equal(response.headers.get('cache-control'), 'no-store');
+        return envelope(body, requestId);
+      }
+      async function pair(input, status = 201, options = {}) {
+        const key = options.key ?? randomUUID(),
+          requestId = randomUUID(),
+          bodies = [];
+        requests.push(requestId);
+        for (const [index, side] of owners.entries())
+          bodies.push(
+            normalize(
+              await send(side, input, status, key, requestId, options),
+              index,
+            ),
+          );
+        assert.deepEqual(bodies[1], bodies[0], 'POST orders ' + pairs);
+        pairs++;
+        return { key, data: bodies[0].data };
+      }
+      const legacy = (n) => identities.get(110000 + n);
+      await pair({ customerSeq: 110001 }, 401, {
+        ai: true,
+        headers: { Authorization: '', Origin: 'http://localhost:5173' },
+      });
+      await pair({ customerSeq: 110001 }, 403, { headers: { Origin: '' } });
+      await pair({ customerSeq: 110001 }, 400, { key: 'bad-key' });
+      for (const input of [
+        {},
+        {
+          customerSeq: 110001,
+          customer: { name: '중복', phoneNumber: '01051515151' },
+        },
+        { customer: { name: ' ', phoneNumber: '01051515151' } },
+        {
+          customer: {
+            name: '추가',
+            phoneNumber: '01051515151',
+            monthlyBillingEnabled: true,
+          },
+        },
+        { customerSeq: '110001' },
+        { customerSeq: 110001, call: legacy(1) },
+        { customerSeq: 110001, outcome: 'INCOMPLETE' },
+        { customerSeq: 110001, parcels: null },
+      ])
+        await pair(input, 400);
+      await pair({ customerSeq: 110001 }, 400, { ai: true });
+      await pair({ customerSeq: 110002 }, 403);
+      await pair({ customerSeq: 110003 }, 404);
+      await pair({ customerSeq: 2147483647 }, 404);
+      const initial = await pair({
+        customerSeq: 110001,
+        parcels: [{ clientComment: '부분 저장' }],
+      });
+      assert.ok(initial.data.orderSeq > 80000);
+      assert.deepEqual(
+        (await pair({ customerSeq: 110002 }, 201, { key: initial.key })).data,
+        initial.data,
+      );
+      await pair({ customerSeq: 110001 }, 403, { key: initial.key, admin: 2 });
+      await pair({ customerSeq: 110001 }, 201, {
+        key: '00000000-0000-0000-0000-000000000000',
+      });
+      await pair({
+        customer: { phoneNumber: '01052525252', name: '  신규 고객  ' },
+        parcels: [{}],
+      });
+      await pair({
+        customer: { name: '다른 이름', phoneNumber: '01051515151' },
+      });
+      await pair(
+        {
+          customerSeq: 110001,
+          parcels: [{ originPin: { scope: 'COMPANY', pinSeq: 1 } }],
+        },
+        400,
+      );
+      await pair(
+        {
+          customerSeq: 110001,
+          parcels: [{ originPin: { scope: 'PERSONAL', pinSeq: 2147483647 } }],
+        },
+        403,
+      );
+      await pair({
+        customerSeq: 110001,
+        parcels: [{ originPin: { scope: 'PERSONAL', pinSeq: 110501 } }],
+      });
+      await pair({ customerSeq: 110001 }, 400, {
+        headers: { call_session_seq: 'bad' },
+      });
+      await pair({ customerSeq: 110001 }, 404, {
+        headers: { call_session_seq: '2147483647' },
+      });
+      await pair({ customerSeq: 110001 }, 409, {
+        ai: true,
+        headers: { call_session_seq: '110002' },
+      });
+      await pair({ customerSeq: 110001 }, 404, {
+        headers: { call_session_seq: '110004' },
+      });
+      await pair({ customerSeq: 110001 }, 409, {
+        headers: { call_session_seq: '110006' },
+      });
+      await pair({ customerSeq: 110001 }, 403, {
+        headers: { call_session_seq: '110011' },
+      });
+      const headerOrder = await pair({ customerSeq: 110001 }, 201, {
+        ai: true,
+        headers: { call_session_seq: '110001' },
+      });
+      assert.deepEqual(
+        (
+          await pair({ customerSeq: 110001 }, 201, {
+            key: headerOrder.key,
+            ai: true,
+            headers: { call_session_seq: '110001' },
+          })
+        ).data,
+        headerOrder.data,
+      );
+      await pair({ customerSeq: 110001 }, 409, {
+        ai: true,
+        headers: { call_session_seq: '110001' },
+      });
+      await pair({ customerSeq: 110001 }, 201, {
+        ai: true,
+        headers: { call_session_seq: '110003' },
+      });
+      await pair({ customerSeq: 110001 }, 201, {
+        ai: true,
+        headers: { call_session_seq: '110005' },
+      });
+      await pair(
+        { call: legacy(7), outcome: 'INCOMPLETE', customerSeq: 110001 },
+        409,
+        { ai: true, headers: { call_session_seq: '110008' } },
+      );
+      const empty = await pair(
+        { call: legacy(7), outcome: 'INCOMPLETE' },
+        201,
+        { ai: true },
+      );
+      assert.equal(empty.data.status, 'NO_ORDER');
+      assert.deepEqual(
+        (
+          await pair({ call: legacy(7), outcome: 'CANCELLED' }, 201, {
+            ai: true,
+            key: empty.key,
+          })
+        ).data,
+        empty.data,
+      );
+      await pair({ call: legacy(7), outcome: 'INCOMPLETE' }, 409, { ai: true });
+      await pair({ call: legacy(7), outcome: 'INCOMPLETE' }, 403, {
+        key: empty.key,
+      });
+      await pair(
+        { call: legacy(8), outcome: 'CANCELLED', parcels: [{}] },
+        201,
+        { ai: true },
+      );
+      await pair(
+        {
+          call: legacy(14),
+          outcome: 'INCOMPLETE',
+          customer: { name: '주문 없는 신규 고객', phoneNumber: '01056565656' },
+        },
+        201,
+        { ai: true },
+      );
+      assert.equal(
+        (
+          await pair(
+            {
+              call: legacy(9),
+              outcome: 'INCOMPLETE',
+              parcels: [{ clientComment: '확인 중' }],
+            },
+            201,
+            { ai: true },
+          )
+        ).data.status,
+        'COLLECTING',
+      );
+      const cancelled = await pair(
+        {
+          call: legacy(10),
+          outcome: 'CANCELLED',
+          totalAmount: 6000,
+          parcels: [{ notifiedPrice: 6000 }],
+        },
+        201,
+        { ai: true },
+      );
+      assert.equal(cancelled.data.status, 'CANCELLED');
+      assert.equal(cancelled.data.totalAmount, 0);
+      await pair(
+        {
+          call: legacy(11),
+          outcome: 'INCOMPLETE',
+          parcels: [{ documentCount: 1 }],
+        },
+        201,
+        { ai: true },
+      );
+      const done = await pair(
+        { ...complete, call: legacy(12), outcome: 'COMPLETE' },
+        201,
+        { ai: true },
+      );
+      assert.equal(done.data.status, 'notPaid');
+      await pair(
+        { ...complete, call: legacy(12), outcome: 'INCOMPLETE' },
+        201,
+        { ai: true, key: done.key },
+      );
+      await pair(
+        {
+          ...complete,
+          call: { ...legacy(16), callerPhoneNumber: '+8251515151' },
+          outcome: 'COMPLETE',
+        },
+        409,
+        { ai: true },
+      );
+      await pair(
+        {
+          ...complete,
+          call: { ...legacy(16), callerPhoneNumber: '+821051515151' },
+          outcome: 'COMPLETE',
+        },
+        201,
+        { ai: true },
+      );
+      await pair(
+        { call: legacy(17), outcome: 'COMPLETE', customerSeq: 110001 },
+        422,
+        { ai: true },
+      );
+      await pair(
+        {
+          ...complete,
+          totalAmount: 6000,
+          call: legacy(18),
+          outcome: 'COMPLETE',
+        },
+        422,
+        { ai: true },
+      );
+      await pair(
+        {
+          ...complete,
+          paymentMethodType: 'credit',
+          call: legacy(19),
+          outcome: 'COMPLETE',
+        },
+        403,
+        { ai: true },
+      );
+      for (const [n, phone, customerSeq, method] of [
+        [20, '01051515154', 110004, 'credit'],
+        [21, '01080808083', 98004, 'groupBilling'],
+      ]) {
+        for (const side of owners)
+          await side.calls.query(
+            'UPDATE call_sessions SET caller_phone_number=$2 WHERE call_session_seq=$1',
+            [110000 + n, phone],
+          );
+        identities.set(110000 + n, { ...legacy(n), callerPhoneNumber: phone });
+        assert.equal(
+          (
+            await pair(
+              {
+                ...complete,
+                customerSeq,
+                paymentMethodType: method,
+                call: legacy(n),
+                outcome: 'COMPLETE',
+              },
+              201,
+              { ai: true },
+            )
+          ).data.status,
+          'ACCEPTED',
+        );
+      }
+      await pair(
+        {
+          ...complete,
+          customerSeq: undefined,
+          customer: { phoneNumber: '01057575757', name: '신규 완료' },
+          call: legacy(15),
+          outcome: 'COMPLETE',
+        },
+        201,
+        { ai: true },
+      );
+      const lockKey = randomUUID(),
+        hash = createHash('sha256')
+          .update('orders.create:' + lockKey)
+          .digest(),
+        leases = [];
+      try {
+        for (const side of owners) {
+          const client = await side.orders.connect();
+          leases.push(client);
+          await client.query('BEGIN');
+          await client.query('SELECT pg_advisory_xact_lock($1::int,$2::int)', [
+            hash.readInt32BE(0),
+            hash.readInt32BE(4),
+          ]);
+        }
+        await pair({ customerSeq: 110001 }, 409, { key: lockKey });
+      } finally {
+        for (const client of leases) {
+          await client.query('ROLLBACK');
+          client.release();
+        }
+      }
+      const pending = {
+        recordingId: 'creation-pbx',
+        callFrom: legacy(22).callerPhoneNumber,
+        callTo: '0211112222',
+        startedAt: legacy(22).incomingAt,
+        endedAt: new Date(
+          Date.parse(legacy(22).incomingAt) + 60000,
+        ).toISOString(),
+        durationSeconds: 60,
+        recordingUrl: 'https://recordings.example.test/creation.mp3',
+      };
+      for (const side of owners) {
+        await side.calls.query(
+          'UPDATE call_sessions SET caller_phone_number=$2,incoming_at=$3 WHERE call_session_seq=$1',
+          [
+            110023,
+            pending.callFrom,
+            new Date(Date.parse(pending.startedAt) + 1000).toISOString(),
+          ],
+        );
+        await side.calls.query(
+          'INSERT INTO pbx_webhooks.call_ended_events(recording_id,payload) VALUES($1,$2)',
+          [pending.recordingId, pending],
+        );
+      }
+      await pair(
+        {
+          call: legacy(22),
+          outcome: 'INCOMPLETE',
+          parcels: [{ clientComment: '종료 매칭' }],
+        },
+        201,
+        { ai: true },
+      );
+      for (const side of owners)
+        assert.equal(
+          (
+            await side.calls.query(
+              'SELECT call_session_seq FROM pbx_webhooks.call_ended_events WHERE recording_id=$1',
+              [pending.recordingId],
+            )
+          ).rows[0].call_session_seq,
+          110022,
+        );
+      const stored = async (side) => ({
+        orders: (
+          await side.orders.query(
+            'SELECT to_jsonb(o) AS data FROM orders o WHERE order_seq>80000 ORDER BY order_seq',
+          )
+        ).rows,
+        parcels: (
+          await side.orders.query(
+            'SELECT to_jsonb(p) AS data FROM order_parcels p WHERE order_seq>80000 ORDER BY order_seq,parcel_position',
+          )
+        ).rows,
+        payments: (
+          await side.orders.query(
+            'SELECT to_jsonb(p) AS data FROM order_payment_requests p WHERE order_seq>80000 ORDER BY order_seq',
+          )
+        ).rows,
+        charges: (
+          await side.orders.query(
+            'SELECT order_seq,organization_seq,customer_seq,billing_month::text,payment_method_type,amount,occurred_at FROM order_billing_charges WHERE order_seq>80000 ORDER BY order_seq',
+          )
+        ).rows,
+        empty: (
+          await side.orders.query(
+            'SELECT request_id,call_session_seq,actor_admin_user_seq FROM empty_ai_order_results WHERE call_session_seq BETWEEN 110001 AND 110036 ORDER BY call_session_seq',
+          )
+        ).rows,
+        customers: (
+          await side.customers.query(
+            'SELECT to_jsonb(c) AS data FROM customers c WHERE customer_seq>500000 ORDER BY customer_seq',
+          )
+        ).rows,
+        calls: (
+          await side.calls.query(
+            'SELECT ' +
+              [
+                ...callFields,
+                'order_intake_enabled',
+                'order_intake_version',
+              ].join(',') +
+              ' FROM call_sessions WHERE call_session_seq BETWEEN 110001 AND 110036 ORDER BY call_session_seq',
+          )
+        ).rows,
+      });
+      assert.deepEqual(
+        normalize(await stored(owners[1]), 1),
+        normalize(await stored(owners[0]), 0),
+      );
+      for (const [table, column, owner] of [
+        ['orders', 'order_seq', 'orders'],
+        ['order_parcels', 'order_parcel_seq', 'orders'],
+        ['customers', 'customer_seq', 'customers'],
+        ['call_sessions', 'call_session_seq', 'calls'],
+      ]) {
+        const values = [];
+        for (const side of owners)
+          values.push(
+            (
+              await side[owner].query(
+                'SELECT last_value FROM ' + table + '_' + column + '_seq',
+              )
+            ).rows[0].last_value,
+          );
+        assert.equal(values[1], values[0], table + ' sequence');
+      }
+      const logs = async (db) =>
+        (
+          await db.query(
+            'SELECT actor_type,actor_seq,actor_name,action,result,target_type,target_seq,metadata,request_id FROM audit_logs WHERE request_id=ANY($1::uuid[]) ORDER BY request_id,audit_log_seq',
+            [requests],
+          )
+        ).rows;
+      const original = await logs(reference);
+      for (let n = 0; n < 100; n++) {
+        if ((await logs(databases.operations)).length === original.length)
+          break;
+        await pause(25);
+      }
+      assert.deepEqual(await logs(databases.operations), original);
+
+      const faultKey = randomUUID(),
+        faultRequest = randomUUID();
+      const faultCall = { ...legacy(25), callerPhoneNumber: '01062626262' };
+      const faultInput = {
+        call: faultCall,
+        outcome: 'INCOMPLETE',
+        customer: {
+          name: '주문 없는 고객 복구',
+          phoneNumber: faultCall.callerPhoneNumber,
+        },
+      };
+      for (const side of owners)
+        await side.calls.query(
+          'UPDATE call_sessions SET caller_phone_number=$1 WHERE call_session_seq=110025',
+          [faultCall.callerPhoneNumber],
+        );
+      const originalFault = await send(
+        owners[0],
+        faultInput,
+        201,
+        faultKey,
+        faultRequest,
+        { ai: true },
+      );
+      await databases.customer.query(
+        "CREATE FUNCTION creation_customer_failure() RETURNS trigger LANGUAGE plpgsql AS $creation$ BEGIN IF NEW.event_type='OrderCustomerCreated' AND NEW.payload->'customer'->>'phoneNumber'='01062626262' THEN RAISE EXCEPTION 'test-only customer acknowledgement failure'; END IF; RETURN NEW; END $creation$",
+      );
+      await databases.customer.query(
+        'CREATE TRIGGER creation_customer_failure BEFORE INSERT ON inbox_events FOR EACH ROW EXECUTE FUNCTION creation_customer_failure()',
+      );
+      try {
+        await send(owners[1], faultInput, 500, faultKey, faultRequest, {
+          ai: true,
+        });
+        assert.equal(
+          (
+            await databases.customer.query(
+              "SELECT 1 FROM customers WHERE phone_number='01062626262'",
+            )
+          ).rowCount,
+          0,
+        );
+        assert.equal(
+          (
+            await databases.order.query(
+              'SELECT 1 FROM empty_ai_order_results WHERE request_id=$1',
+              [faultKey],
+            )
+          ).rowCount,
+          1,
+        );
+      } finally {
+        await databases.customer.query(
+          'DROP TRIGGER creation_customer_failure ON inbox_events',
+        );
+        await databases.customer.query(
+          'DROP FUNCTION creation_customer_failure()',
+        );
+      }
+      assert.deepEqual(
+        (await pair(faultInput, 201, { key: faultKey, ai: true })).data,
+        originalFault.data,
+      );
+      const customerEvent = (
+        await databases.order.query(
+          "SELECT o.event_id,o.payload FROM outbox_events o JOIN inbox_events i ON i.event_id=(o.payload->>'writeEventId')::uuid WHERE o.destination='customer' AND o.event_type='OrderCustomerCreated' AND i.payload->>'creationKey'=$1",
+          [faultKey],
+        )
+      ).rows[0];
+      for (let n = 0; n < 2; n++) {
+        const response = await fetch(
+          'http://customer-app:3001/internal/call-read-references/parcel-draft-write/events',
+          {
+            method: 'POST',
+            headers: {
+              Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              eventId: customerEvent.event_id,
+              source: 'order',
+              eventType: 'OrderCustomerCreated',
+              payload: customerEvent.payload,
+            }),
+          },
+        );
+        assert.equal(response.status, 200);
+        assert.equal((await response.json()).status, 'duplicate');
+      }
+      const callKey = randomUUID(),
+        callRequest = randomUUID();
+      const callInput = {
+        call: legacy(24),
+        outcome: 'INCOMPLETE',
+        customerSeq: 110001,
+        parcels: [{ clientComment: '상담 소유자 복구' }],
+      };
+      const recoverPending = {
+        ...pending,
+        recordingId: 'creation-pbx-recovery',
+        callFrom: callInput.call.callerPhoneNumber,
+        startedAt: callInput.call.incomingAt,
+        endedAt: new Date(
+          Date.parse(callInput.call.incomingAt) + 60000,
+        ).toISOString(),
+      };
+      for (const side of owners)
+        await side.calls.query(
+          'INSERT INTO pbx_webhooks.call_ended_events(recording_id,payload) VALUES($1,$2)',
+          [recoverPending.recordingId, recoverPending],
+        );
+      const originalCall = await send(
+        owners[0],
+        callInput,
+        201,
+        callKey,
+        callRequest,
+        { ai: true },
+      );
+      await databases.consultation.query(
+        "CREATE FUNCTION creation_call_failure() RETURNS trigger LANGUAGE plpgsql AS $creation$ BEGIN IF NEW.event_type='LegacyOrderCallWritten' AND (NEW.payload->>'callSessionSeq')::int=110024 THEN RAISE EXCEPTION 'test-only call acknowledgement failure'; END IF; RETURN NEW; END $creation$",
+      );
+      await databases.consultation.query(
+        'CREATE TRIGGER creation_call_failure BEFORE INSERT ON inbox_events FOR EACH ROW EXECUTE FUNCTION creation_call_failure()',
+      );
+      try {
+        await send(owners[1], callInput, 500, callKey, callRequest, {
+          ai: true,
+        });
+        assert.equal(
+          (
+            await databases.consultation.query(
+              'SELECT order_seq FROM call_sessions WHERE call_session_seq=110024',
+            )
+          ).rows[0].order_seq,
+          null,
+        );
+        assert.equal(
+          (
+            await databases.consultation.query(
+              'SELECT call_session_seq FROM pbx_webhooks.call_ended_events WHERE recording_id=$1',
+              [recoverPending.recordingId],
+            )
+          ).rows[0].call_session_seq,
+          null,
+        );
+      } finally {
+        await databases.consultation.query(
+          'DROP TRIGGER creation_call_failure ON inbox_events',
+        );
+        await databases.consultation.query(
+          'DROP FUNCTION creation_call_failure()',
+        );
+      }
+      assert.deepEqual(
+        (await pair(callInput, 201, { key: callKey, ai: true })).data,
+        originalCall.data,
+      );
+      const callEvent = (
+        await databases.order.query(
+          "SELECT event_id,payload FROM outbox_events WHERE event_type='LegacyOrderCallWritten' AND aggregate_seq=110024",
+        )
+      ).rows[0];
+      for (let n = 0; n < 2; n++) {
+        const response = await fetch(
+          'http://consultation-app:3004/internal/parcel-draft-write/events',
+          {
+            method: 'POST',
+            headers: {
+              Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              eventId: callEvent.event_id,
+              source: 'order',
+              eventType: 'LegacyOrderCallWritten',
+              payload: callEvent.payload,
+            }),
+          },
+        );
+        assert.equal(response.status, 200);
+        assert.equal((await response.json()).status, 'duplicate');
+      }
+      assert.deepEqual(
+        normalize(await stored(owners[1]), 1),
+        normalize(await stored(owners[0]), 0),
+      );
+      for (const side of owners)
+        assert.equal(
+          (
+            await side.calls.query(
+              'SELECT call_session_seq FROM pbx_webhooks.call_ended_events WHERE recording_id=$1',
+              [recoverPending.recordingId],
+            )
+          ).rows[0].call_session_seq,
+          110024,
+        );
+      const sequences = [];
+      for (const side of owners)
+        sequences.push(
+          (
+            await side.calls.query(
+              'SELECT last_value FROM call_sessions_call_session_seq_seq',
+            )
+          ).rows[0].last_value,
+        );
+      assert.equal(
+        sequences[1],
+        sequences[0],
+        'recovery preserves original call sequence allocation',
+      );
+      for (const requestId of [faultRequest, callRequest]) {
+        const expected = (
+          await reference.query(
+            "SELECT action,target_seq FROM audit_logs WHERE request_id=$1 AND result='SUCCESS' ORDER BY audit_log_seq",
+            [requestId],
+          )
+        ).rows;
+        let actual;
+        for (let n = 0; n < 100; n++) {
+          actual = (
+            await databases.operations.query(
+              "SELECT action,target_seq FROM audit_logs WHERE request_id=$1 AND result='SUCCESS' ORDER BY audit_log_seq",
+              [requestId],
+            )
+          ).rows;
+          if (actual.length === expected.length) break;
+          await pause(25);
+        }
+        assert.deepEqual(
+          actual,
+          expected,
+          'original successful audit is recovered once',
+        );
+      }
+
+      t.diagnostic(
+        'order creation HTTP pairs: ' +
+          pairs +
+          '; request keys, customer identities, partial/empty/cancelled/complete calls, three payment methods, exact PBX matching and real customer/call owner rollback recovery',
+      );
+    },
+  );
   console.log('Compared HTTP requests: '+compared);
 });

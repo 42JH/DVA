@@ -1,3 +1,6 @@
+import { ConsultationsService } from '../consultations/consultations.service';
+import type { PoolClient } from 'pg';
+import type { DraftWriteCommand } from '@dva/events/parcel-draft-write.cjs';
 import { Injectable, HttpException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
@@ -25,13 +28,14 @@ type DraftCallSnapshot = Pick<
 export class ParcelDraftWriteService {
   readonly activeCalls = new Map<
     string,
-    { id: number | null; requestId: string; operation: string }
+    { id: number | null; command: DraftWriteCommand }
   >();
   constructor(
     private readonly database: DatabaseService,
     private readonly config: ConfigService<Environment, true>,
     private readonly audit: AuditService,
     private readonly scopes: OrderReferenceScopes,
+    private readonly calls: ConsultationsService,
   ) {}
 
   async execute(event: unknown) {
@@ -66,7 +70,8 @@ export class ParcelDraftWriteService {
               : '신규 통화의 수정·취소는 배송 초안 API를 사용해 주세요.',
           );
         let call: DraftCallSnapshot | null = null;
-        if (id !== null) {
+        if (id !== null && event.payload.command.operation !== 'OrderCreated') {
+          await this.recoverCall(client, id);
           call =
             (
               await client.query<DraftCallSnapshot>(
@@ -88,54 +93,12 @@ export class ParcelDraftWriteService {
               'NOT_FOUND',
               '통화를 찾을 수 없습니다.',
             );
-          if (call) {
-            const finalized =
-              await requestWriteReference<IntakeFinalization | null>(
-                this.config.get('ORDER_URL', { infer: true }) +
-                  '/internal/parcel-draft-write/reference',
-                this.config.get('CUSTOMER_AUTH_TOKEN', { infer: true }),
-                {
-                  eventId: randomUUID(),
-                  source: 'consultation',
-                  eventType: 'ParcelDraftWriteReferenceRequested',
-                  payload: {
-                    operation: 'IntakeFinalizationRead',
-                    input: { id },
-                  },
-                },
-              );
-            if (finalized)
-              await applyIntakeFinalization(client, finalized, this.audit);
-            const pending = await requestWriteReference<
-              OwnerCallWriteReceipt[]
-            >(
-              this.config.get('ORDER_URL', { infer: true }) +
-                '/internal/parcel-draft-write/reference',
-              this.config.get('CUSTOMER_AUTH_TOKEN', { infer: true }),
-              {
-                eventId: randomUUID(),
-                source: 'consultation',
-                eventType: 'ParcelDraftWriteReferenceRequested',
-                payload: { operation: 'PendingCallWritesRead', input: { id } },
-              },
-            );
-            for (const receipt of pending) {
-              if (
-                (await applyDraftCallWrite(client, receipt)) === 'processed'
-              ) {
-                if ('afterVersion' in receipt.payload)
-                  call.intakeVersion = receipt.payload.afterVersion;
-                call.customerSeq =
-                  receipt.payload.customerSeq ?? call.customerSeq;
-              }
-            }
-          }
         }
+
         return this.scopes.run(event.eventId, client, async () => {
           this.activeCalls.set(event.eventId, {
             id,
-            requestId: event.payload.command.requestId,
-            operation: event.payload.command.operation,
+            command: event.payload.command,
           });
           try {
             const payload = await requestDraftWrite(
@@ -161,7 +124,12 @@ export class ParcelDraftWriteService {
                 this.audit,
               );
             if (payload.receipt)
-              await applyDraftCallWrite(client, payload.receipt, true);
+              await applyDraftCallWrite(
+                client,
+                payload.receipt,
+                true,
+                this.calls,
+              );
             return { eventId: event.eventId, status: 'processed', payload };
           } finally {
             this.activeCalls.delete(event.eventId);
@@ -171,6 +139,36 @@ export class ParcelDraftWriteService {
     } catch (error) {
       this.failure(error);
     }
+  }
+
+  async recoverCall(client: PoolClient, id: number) {
+    const token = this.config.get('CUSTOMER_AUTH_TOKEN', { infer: true });
+    const url =
+      this.config.get('ORDER_URL', { infer: true }) +
+      '/internal/parcel-draft-write/reference';
+    const pending = await requestWriteReference<OwnerCallWriteReceipt[]>(
+      url,
+      token,
+      {
+        eventId: randomUUID(),
+        source: 'consultation',
+        eventType: 'ParcelDraftWriteReferenceRequested',
+        payload: { operation: 'PendingCallWritesRead', input: { id } },
+      },
+    );
+    for (const receipt of pending)
+      await applyDraftCallWrite(client, receipt, false, this.calls);
+    const finalized = await requestWriteReference<IntakeFinalization | null>(
+      url,
+      token,
+      {
+        eventId: randomUUID(),
+        source: 'consultation',
+        eventType: 'ParcelDraftWriteReferenceRequested',
+        payload: { operation: 'IntakeFinalizationRead', input: { id } },
+      },
+    );
+    if (finalized) await applyIntakeFinalization(client, finalized, this.audit);
   }
 
   private failure(error: unknown): never {

@@ -1,4 +1,5 @@
 import { OrderIntakeService } from '../consultations/order-intake.service';
+import { ConsultationsService } from '../consultations/consultations.service';
 import { randomUUID } from 'node:crypto';
 import {
   Body,
@@ -24,6 +25,7 @@ import {
   validateCallMutation,
   type OwnerCallWriteReceipt,
   validateOrderCallLink,
+  validateLegacyCallWrite,
   type DraftWriteCall,
 } from '@dva/events/parcel-draft-write.cjs';
 import { OrderReadError } from '@dva/events/order-read.cjs';
@@ -45,6 +47,7 @@ export class ParcelDraftWriteController {
     private readonly database: DatabaseService,
     private readonly config: ConfigService<Environment, true>,
     private readonly scopes: OrderReferenceScopes,
+    private readonly calls: ConsultationsService,
   ) {}
 
   @Post()
@@ -73,14 +76,24 @@ export class ParcelDraftWriteController {
           'CallOrderLinked',
           'IntakeCallRead',
           'IntakeCallSealed',
+          'CallEnsured',
+          'CallCreationChecked',
+          'LegacyCallApplied',
         ].includes(event.payload.operation)
       )
         throw new Error('Invalid draft call reference');
     } catch {
       throw new HttpException({ error: 'INVALID_DRAFT_REFERENCE' }, 422);
     }
+    const active = this.executor.activeCalls.get(scopeId);
     const id = event.payload.input.id;
-    if (this.executor.activeCalls.get(scopeId)?.id !== id)
+    const creating = active?.command.operation === 'OrderCreated';
+    if (
+      !active ||
+      (event.payload.operation !== 'CallEnsured' &&
+        event.payload.operation !== 'LegacyCallApplied' &&
+        active.id !== id)
+    )
       throw new ApiException(
         503,
         'DEPENDENCY_UNAVAILABLE',
@@ -88,6 +101,68 @@ export class ParcelDraftWriteController {
       );
     try {
       const payload = await this.scopes.use(scopeId, async (client) => {
+        if (event.payload.operation === 'CallEnsured') {
+          const input = event.payload.input.call as Record<string, unknown>;
+          const expected = active.command.input.call as
+            Record<string, unknown> | undefined;
+          if (
+            !creating ||
+            !expected ||
+            ['providerCallId', 'callerPhoneNumber', 'incomingAt'].some(
+              (key) => input[key] !== expected[key],
+            )
+          )
+            throw new ApiException(
+              403,
+              'FORBIDDEN',
+              '주문 쓰기 범위를 확인해 주세요.',
+            );
+          const callId = await this.calls.ensureCall(
+            client,
+            event.payload.input.call as {
+              providerCallId: string;
+              callerPhoneNumber: string;
+              incomingAt: string;
+            },
+            active.command.adminId,
+            active.command.requestId,
+            event.payload.input.customerSeq as number | null,
+          );
+          active.id = callId;
+          return callId;
+        }
+        if (event.payload.operation === 'LegacyCallApplied') {
+          const receipt = event.payload.input.receipt as OwnerCallWriteReceipt;
+          if (
+            !creating ||
+            !('creationKey' in receipt.payload) ||
+            receipt.payload.creationKey !== active.command.key ||
+            receipt.payload.callSessionSeq !== active.id
+          )
+            throw new ApiException(
+              403,
+              'FORBIDDEN',
+              '주문 쓰기 범위를 확인해 주세요.',
+            );
+          await applyDraftCallWrite(client, receipt, false, this.calls);
+          return true;
+        }
+        if (event.payload.operation === 'CallCreationChecked') {
+          if (!creating)
+            throw new ApiException(
+              403,
+              'FORBIDDEN',
+              '주문 쓰기 범위를 확인해 주세요.',
+            );
+          return !!(
+            await client.query(
+              'SELECT 1 FROM call_sessions WHERE call_session_seq=$1 AND order_seq=$2 AND deleted_at IS NULL',
+              [id, event.payload.input.orderSeq],
+            )
+          ).rowCount;
+        }
+        if (creating && event.payload.operation === 'CallRead')
+          await this.executor.recoverCall(client, Number(id));
         if (
           event.payload.operation === 'IntakeCallRead' ||
           event.payload.operation === 'IntakeCallSealed'
@@ -104,7 +179,7 @@ export class ParcelDraftWriteController {
                 targetId: Number(id),
                 targetType: 'CALL_SESSION',
                 action: 'ORDER_INTAKE_COMPLETED',
-                requestId: this.executor.activeCalls.get(scopeId)!.requestId,
+                requestId: active.command.requestId,
               },
               client,
             );
@@ -118,11 +193,18 @@ export class ParcelDraftWriteController {
               [id],
             )
           ).rows[0].version;
-        if (event.payload.operation === 'CallOrderLinked')
+        if (event.payload.operation === 'CallOrderLinked') {
+          if (event.payload.input.customerSeq === null && !creating)
+            throw new ApiException(
+              403,
+              'FORBIDDEN',
+              '주문 쓰기 범위를 확인해 주세요.',
+            );
           await client.query(
             'UPDATE call_sessions SET order_seq=$2,customer_seq=COALESCE(customer_seq,$3) WHERE call_session_seq=$1',
             [id, event.payload.input.orderSeq, event.payload.input.customerSeq],
           );
+        }
         if (event.payload.operation === 'CallCustomerResolved')
           await client.query(
             'UPDATE call_sessions SET customer_seq=$2 WHERE call_session_seq=$1 AND customer_seq IS NULL',
@@ -133,8 +215,8 @@ export class ParcelDraftWriteController {
           id,
           event.payload.operation === 'CallRead',
           false,
-          ['OrderUpdated', 'OrderSubmitted'].includes(
-            this.executor.activeCalls.get(scopeId)?.operation ?? '',
+          ['OrderCreated', 'OrderUpdated', 'OrderSubmitted'].includes(
+            active.command.operation,
           ),
         );
       });
@@ -162,7 +244,8 @@ export class ParcelDraftWriteController {
               ? legacy
                 ? " AND deleted_at IS NULL AND (incoming_at IS NULL OR incoming_at>clock_timestamp()-interval '5 years')"
                 : " AND deleted_at IS NULL AND incoming_at>statement_timestamp()-interval '5 years'"
-              : ''),
+              : '') +
+            (active ? ' FOR UPDATE' : ''),
           [id],
         )
       ).rows[0] ?? null
@@ -233,10 +316,16 @@ export class ParcelDraftWriteController {
       validateEvent(event);
       if (
         event.source !== 'order' ||
-        !['ParcelDraftCallWritten', 'OrderCallLinked'].includes(event.eventType)
+        ![
+          'ParcelDraftCallWritten',
+          'OrderCallLinked',
+          'LegacyOrderCallWritten',
+        ].includes(event.eventType)
       )
         throw new Error('Invalid draft call write');
-      if (event.eventType === 'OrderCallLinked')
+      if (event.eventType === 'LegacyOrderCallWritten')
+        validateLegacyCallWrite(event.payload);
+      else if (event.eventType === 'OrderCallLinked')
         validateOrderCallLink(event.payload);
       else validateCallMutation(event.payload);
     } catch {
@@ -247,7 +336,7 @@ export class ParcelDraftWriteController {
       payload: event.payload,
     };
     const status = await this.database.transaction((client) =>
-      applyDraftCallWrite(client, receipt),
+      applyDraftCallWrite(client, receipt, false, this.calls),
     );
     return { eventId: event.eventId, status };
   }

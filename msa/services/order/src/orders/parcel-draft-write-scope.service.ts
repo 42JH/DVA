@@ -1,8 +1,14 @@
+import { callerPhone } from '../common/caller-phone';
 import type {
   RecipientAddress,
   RecipientPin,
   RecipientReceipt,
 } from '@dva/events/order-recipient-pins.cjs';
+import {
+  ORDER_CREATION_LOCK,
+  type CustomerCreationReceipt,
+  type CreatedOrderCustomer,
+} from '@dva/events/order-customer-write.cjs';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -18,6 +24,8 @@ import {
   requestWriteReference,
   type OwnerCallWriteReceipt,
   type CallOrderLink,
+  type LegacyCallWrite,
+  type OrderCallIdentity,
   type CustomerReference,
   type DraftWriteCall,
   type DraftWriteCommand,
@@ -45,6 +53,8 @@ type ActiveWrite = {
   customerReceipt: RecipientReceipt | null;
   recipientAddresses: RecipientAddress[] | null;
   recipientOrderSeq: number | null;
+  customerCreationReceipt: CustomerCreationReceipt | null;
+  legacyCall: LegacyCallWrite | null;
 };
 
 @Injectable()
@@ -93,6 +103,8 @@ export class ParcelDraftWriteScope {
       customerReceipt: null,
       recipientAddresses: null,
       recipientOrderSeq: null,
+      customerCreationReceipt: null,
+      legacyCall: null,
     };
     this.writes.set(event.eventId, state);
     return this.local.run(state, async () => {
@@ -107,6 +119,12 @@ export class ParcelDraftWriteScope {
   private result(data: Record<string, unknown>): DraftWriteResult {
     const state = this.active;
     const result = { data, receipt: state.receipt };
+    if (state.event.payload.command.operation === 'OrderCreated')
+      return {
+        ...result,
+        customerReceipt: state.customerReceipt,
+        customerCreationReceipt: state.customerCreationReceipt,
+      };
     return ['OrderSubmitted', 'AdminParcelDraftSubmitted'].includes(
       state.event.payload.command.operation,
     )
@@ -179,7 +197,15 @@ export class ParcelDraftWriteScope {
     const result = await writeOrder(this.database, async (client) => {
       const inserted = await client.query(
         'INSERT INTO inbox_events(event_id,source,event_type,payload) VALUES($1,$2,$3,$4) ON CONFLICT(event_id) DO NOTHING RETURNING event_id',
-        [event.eventId, event.source, event.eventType, { requestHash: hash }],
+        [
+          event.eventId,
+          event.source,
+          event.eventType,
+          {
+            requestHash: hash,
+            ...(command.operation === 'OrderCreated' ? { creationKey: command.key } : {}),
+          },
+        ],
       );
       if (!inserted.rowCount) {
         const existing = (
@@ -204,14 +230,28 @@ export class ParcelDraftWriteScope {
         replay = true;
         state.receipt = existing.payload.result.receipt;
         state.customerReceipt = existing.payload.result.customerReceipt ?? null;
+        state.customerCreationReceipt = existing.payload.result.customerCreationReceipt ?? null;
         return existing.payload.result.data as T;
       }
+      if (command.operation === 'OrderCreated')
+        await client.query('SELECT pg_advisory_xact_lock($1,hashtext($2))', [
+          ORDER_CREATION_LOCK,
+          event.eventId,
+        ]);
       const data = await work(client);
       if (command.operation === 'OrderIntakeFinalized' && data.finalization === null) {
         await client.query('DELETE FROM inbox_events WHERE event_id=$1', [event.eventId]);
         return data;
       }
-      if (state.link) {
+      if (state.legacyCall) {
+        const eventId = await enqueue(client, {
+          destination: 'consultation',
+          eventType: 'LegacyOrderCallWritten',
+          aggregateSeq: state.legacyCall.callSessionSeq,
+          payload: { ...state.legacyCall },
+        });
+        state.receipt = { eventId, payload: state.legacyCall };
+      } else if (state.link) {
         const eventId = await enqueue(client, {
           destination: 'consultation',
           eventType: 'OrderCallLinked',
@@ -286,6 +326,101 @@ export class ParcelDraftWriteScope {
     return this.reference<CustomerReference | null>('customer', 'CustomerPhoneRead', { phone });
   }
 
+  async prepareOrderCustomer(
+    client: PoolClient,
+    input: { customerSeq?: number; customer?: { name: string; phoneNumber: string } },
+  ) {
+    const result = await this.reference<{
+      customer: CustomerReference;
+      created: CreatedOrderCustomer | null;
+    }>(
+      'customer',
+      'CustomerOrderResolved',
+      input.customer === undefined
+        ? { customerSeq: input.customerSeq }
+        : { customer: input.customer },
+    );
+    if (result.created) {
+      const command = this.active.event.payload.command;
+      const eventId = await enqueue(client, {
+        destination: 'customer',
+        eventType: 'OrderCustomerCreated',
+        aggregateSeq: result.created.customerSeq,
+        payload: {
+          customerSeq: result.created.customerSeq,
+          writeEventId: this.active.event.eventId,
+        },
+      });
+      this.active.customerCreationReceipt = {
+        eventId,
+        payload: {
+          writeEventId: this.active.event.eventId,
+          customer: result.created,
+          adminId: command.adminId,
+          requestId: command.requestId,
+        },
+      };
+    }
+    return result.customer;
+  }
+
+  async ensureCall(call: OrderCallIdentity) {
+    const customer = await this.reference<CustomerReference | null>(
+      'customer',
+      'CallCustomerRead',
+      { phone: callerPhone(call.callerPhoneNumber) },
+    );
+    return this.reference<number>('consultation', 'CallEnsured', {
+      call,
+      customerSeq: customer?.customerSeq ?? null,
+    });
+  }
+
+  creationAllowed(id: number, orderSeq: number) {
+    return this.reference<boolean>('consultation', 'CallCreationChecked', { id, orderSeq });
+  }
+
+  async recoverCreation(client: PoolClient, key: string, callId: number | null) {
+    const calls = await client.query<OwnerCallWriteReceipt>(
+      "SELECT event_id AS \"eventId\",payload FROM outbox_events WHERE destination='consultation' AND event_type='LegacyOrderCallWritten' AND delivered_at IS NULL AND payload->>'creationKey'=$1 ORDER BY outbox_seq",
+      [key],
+    );
+    for (const receipt of calls.rows)
+      if (receipt.payload.callSessionSeq === callId)
+        await this.reference<boolean>('consultation', 'LegacyCallApplied', { receipt });
+    const customers = await client.query<{ writeEventId: string }>(
+      "SELECT i.event_id AS \"writeEventId\" FROM outbox_events o JOIN inbox_events i ON i.event_id=(o.payload->>'writeEventId')::uuid WHERE o.destination='customer' AND o.event_type='OrderCustomerCreated' AND o.delivered_at IS NULL AND i.payload->>'creationKey'=$1 ORDER BY o.outbox_seq",
+      [key],
+    );
+    for (const row of customers.rows)
+      await this.reference<boolean>('customer', 'CustomerCreationApplied', row);
+  }
+
+  async linkCreatedOrder(id: number, orderSeq: number | null, customerSeq: number | null) {
+    const before = this.active.call;
+    if (!before || before.callSessionSeq !== id) throw new Error('Creation call is not held');
+    if (customerSeq !== null) await this.resolveCallCustomer(id, customerSeq);
+    if (orderSeq !== null) {
+      this.active.call = await this.reference<DraftWriteCall | null>(
+        'consultation',
+        'CallOrderLinked',
+        { id, orderSeq, customerSeq },
+      );
+    }
+    const call = this.active.call!;
+    const command = this.active.event.payload.command;
+    this.active.legacyCall = {
+      creationKey: command.key!,
+      callSessionSeq: id,
+      beforeCustomerSeq: this.active.before!.customerSeq,
+      customerSeq: call.customerSeq,
+      orderSeq: call.orderSeq,
+      call: (command.input.call as OrderCallIdentity | undefined) ?? null,
+      adminId: command.adminId,
+      requestId: command.requestId,
+    };
+  }
+
   canUsePin(customerSeq: number, pinSeq: number) {
     return this.reference<boolean>('customer', 'PinChecked', { customerSeq, pinSeq });
   }
@@ -325,6 +460,12 @@ export class ParcelDraftWriteScope {
   async call(id: number) {
     const call = await this.reference<DraftWriteCall | null>('consultation', 'CallRead', { id });
     this.active.call = call;
+    if (
+      this.active.event.payload.command.operation === 'OrderCreated' &&
+      !this.active.before &&
+      call
+    )
+      this.active.before = { ...call };
     return call;
   }
 

@@ -1,9 +1,13 @@
+import { CreateOrderDto } from './dto/create-order.dto';
+import { CreatedOrderDto, OrderResultDto } from './dto/order-response.dto';
+import { NoOrderResultDto } from './dto/no-order-result.dto';
+import { callerPhone } from '../common/caller-phone';
 import { OrderSubmissionService } from './order-submission.service';
 import { SubmitOrderDto, SubmittedOrderDto } from './dto/submit-order.dto';
 import type { OrderStatus } from './orders.types';
 import { assertOrderUpdate } from './order-update.validation';
 import { UpdateOrderDto } from './dto/update-order.dto';
-import { orderDraft, ORDER_ADDRESS_FIELDS } from './order-draft';
+import { orderDraft, hasOrderData, ORDER_ADDRESS_FIELDS } from './order-draft';
 import { ParcelDraftWriteScope } from './parcel-draft-write-scope.service';
 import type { DraftWriteEvent } from '@dva/events/parcel-draft-write.cjs';
 import {
@@ -50,6 +54,242 @@ export class OrdersService {
     private readonly writeScope: ParcelDraftWriteScope,
     private readonly submission: OrderSubmissionService,
   ) {}
+
+  async create(
+    adminId: number | null,
+    key: string,
+    input: CreateOrderDto,
+    requestId: string,
+    header?: string,
+  ): Promise<CreatedOrderDto | OrderResultDto | NoOrderResultDto> {
+    const callSessionSeq = this.creationHeader(adminId, input, header);
+    const prepared = (await this.writeScope.request({
+      operation: 'OrderCreated',
+      id: null,
+      key,
+      adminId,
+      callSessionSeq,
+      input: { ...input },
+      requestId,
+    })) as unknown as {
+      result: CreatedOrderDto | OrderResultDto | NoOrderResultDto;
+      submit: boolean;
+    };
+    if (!prepared.submit || prepared.result.orderSeq === null) return prepared.result;
+    await this.submission.submitPaidOrder(prepared.result.orderSeq, requestId);
+    try {
+      return await this.database.transaction((client) =>
+        this.repository.result(
+          client,
+          prepared.result.orderSeq!,
+          (prepared.result as OrderResultDto).callSessionSeq,
+        ),
+      );
+    } catch {
+      return prepared.result;
+    }
+  }
+
+  executeCreation(event: DraftWriteEvent) {
+    return this.writeScope.run(event, async () => {
+      const command = event.payload.command;
+      const input = (await createValidationPipe().transform(command.input, {
+        type: 'body',
+        metatype: CreateOrderDto,
+      })) as CreateOrderDto;
+      const headerId = this.creationHeader(
+        command.adminId,
+        input,
+        command.callSessionSeq === null ? undefined : String(command.callSessionSeq),
+      );
+      const draft = orderDraft(input);
+      const adminId = command.adminId,
+        key = command.key!,
+        requestId = command.requestId;
+      return this.writeScope.transaction(async (client) => {
+        if (!(await this.repository.lockCreation(client, key)))
+          throw new ApiException(
+            409,
+            'REQUEST_IN_PROGRESS',
+            '같은 주문 생성 요청을 처리 중입니다.',
+          );
+        const callId = input.call ? await this.writeScope.ensureCall(input.call) : headerId;
+        if (input.call && headerId !== null && headerId !== callId)
+          throw new ApiException(
+            409,
+            'INVALID_STATE',
+            '본문 세션과 call_session_seq가 일치하지 않습니다.',
+          );
+        await this.writeScope.recoverCreation(client, key, callId);
+        const previous = await this.repository.findCreation(client, key);
+        if (previous) {
+          if (
+            !(adminId === null
+              ? callId !== null &&
+                (await this.writeScope.creationAllowed(callId, previous.orderSeq))
+              : previous.adminId === adminId &&
+                (callId === null ||
+                  (await this.writeScope.creationAllowed(callId, previous.orderSeq))))
+          )
+            throw new ApiException(403, 'FORBIDDEN', '이 요청 키의 주문에 접근할 수 없습니다.');
+          if (previous.deleted)
+            throw new ApiException(
+              409,
+              'INVALID_STATE',
+              '삭제되었거나 보관 기간이 지난 주문의 요청 키입니다.',
+            );
+          if (!input.call)
+            return {
+              result: { orderSeq: previous.orderSeq, version: previous.version },
+              submit: false,
+            };
+          await this.submission.recoverStale(client, previous.orderSeq, requestId);
+          return {
+            result: await this.repository.result(client, previous.orderSeq, callId),
+            submit: false,
+          };
+        }
+        const empty = await this.repository.emptyResult(client, key);
+        if (empty) {
+          if (empty.callSessionSeq !== callId || empty.actorAdminUserSeq !== adminId)
+            throw new ApiException(403, 'FORBIDDEN', '이 요청 키의 통화에 접근할 수 없습니다.');
+          return { result: new NoOrderResultDto(empty.callSessionSeq), submit: false };
+        }
+        const call = callId === null ? undefined : await this.writeScope.call(callId);
+        if (callId !== null && !call)
+          throw new ApiException(404, 'NOT_FOUND', '통화를 찾을 수 없습니다.');
+        if (call?.enabled)
+          throw new ApiException(
+            409,
+            'INVALID_STATE',
+            '신규 통화는 parcel-drafts와 order-intake/complete API를 사용해 주세요.',
+          );
+        if (callId !== null && (await this.repository.hasEmptyResult(client, callId)))
+          throw new ApiException(
+            409,
+            'INVALID_STATE',
+            '이미 주문 없는 통화 결과를 수신했습니다. 같은 요청 키를 사용해 주세요.',
+          );
+        if (call && ((!input.call && call.endedAt !== null) || call.orderSeq !== null))
+          throw new ApiException(
+            409,
+            'INVALID_STATE',
+            '종료되었거나 주문이 연결된 통화입니다. 기존 주문을 사용해 주세요.',
+          );
+        const customer =
+          draft.customerSeq !== undefined || draft.customer !== undefined
+            ? await this.writeScope.prepareOrderCustomer(client, draft)
+            : await this.writeScope.customerByPhone(call!.callerPhoneNumber!);
+        if (
+          call?.callerPhoneNumber &&
+          customer &&
+          callerPhone(call.callerPhoneNumber) !== customer.phone
+        )
+          throw new ApiException(
+            403,
+            'FORBIDDEN',
+            '통화 발신번호와 주문 고객이 일치하지 않습니다.',
+          );
+        const customerId = customer?.customerSeq ?? null;
+        for (const parcel of draft.parcels) {
+          if (parcel.originPin?.scope === 'COMPANY')
+            throw new ApiException(
+              400,
+              'INVALID_REQUEST',
+              '기업 배송지는 PIN 대신 주소로 전달해 주세요.',
+            );
+          if (
+            parcel.originPin &&
+            (customerId === null ||
+              !(await this.writeScope.canUsePin(customerId, parcel.originPin.pinSeq)))
+          )
+            throw new ApiException(403, 'FORBIDDEN', '고객이 사용할 수 없는 출발지 PIN입니다.');
+        }
+        if (input.call && input.outcome !== 'COMPLETE' && !hasOrderData(draft)) {
+          await this.writeScope.linkCreatedOrder(callId!, null, customerId);
+          await this.repository.saveEmptyResult(client, key, callId!, adminId);
+          return { result: new NoOrderResultDto(callId!), submit: false };
+        }
+        const result = await this.repository.insert(
+          client,
+          draft,
+          customerId,
+          key,
+          callId !== null ? 'AI' : 'ADMIN',
+          adminId,
+        );
+        if (callId !== null)
+          await this.writeScope.linkCreatedOrder(callId, result.orderSeq, customerId);
+        await this.audit.recordSuccess(
+          {
+            actorId: adminId,
+            actorType: adminId === null ? 'AI' : 'ADMIN',
+            targetId: result.orderSeq,
+            action: 'ORDER_CREATED',
+            targetType: 'ORDER',
+            requestId,
+          },
+          client,
+        );
+        if (!input.call) return { result, submit: false };
+        if (input.outcome === 'CANCELLED') {
+          await this.repository.cancel(client, result.orderSeq);
+          await this.repository.recalculateAmount(client, result.orderSeq);
+          await this.audit.recordSuccess(
+            {
+              actorId: adminId,
+              actorType: adminId === null ? 'AI' : 'ADMIN',
+              targetId: result.orderSeq,
+              targetType: 'ORDER',
+              action: 'ORDER_CANCELLED',
+              requestId,
+              metadata: { amountBefore: draft.totalAmount, amountAfter: 0 },
+            },
+            client,
+          );
+        }
+        const payload =
+          input.outcome === 'COMPLETE'
+            ? await this.submission.prepareSubmission(
+                client,
+                result.orderSeq,
+                customerId!,
+                adminId,
+                requestId,
+              )
+            : undefined;
+        return {
+          result: await this.repository.result(client, result.orderSeq, callId),
+          submit: payload === true,
+        };
+      });
+    });
+  }
+
+  private creationHeader(
+    adminId: number | null,
+    input: CreateOrderDto,
+    callSessionHeader?: string,
+  ) {
+    const partialResult = input.call && input.outcome !== 'COMPLETE';
+    if ((input.call === undefined) !== (input.outcome === undefined))
+      throw new ApiException(
+        400,
+        'INVALID_REQUEST',
+        'AI 결과에는 call과 outcome을 함께 전달해 주세요.',
+      );
+    if (
+      (input.customerSeq !== undefined && input.customer !== undefined) ||
+      (!partialResult && input.customerSeq === undefined && input.customer === undefined)
+    )
+      throw new ApiException(
+        400,
+        'INVALID_REQUEST',
+        'customerSeq와 customer 중 하나만 전달해 주세요.',
+        [{ field: 'customer', reason: 'exactlyOneCustomerReference' }],
+      );
+    return this.callId(input.call ? 0 : adminId, callSessionHeader);
+  }
 
   intakeResult(id: number, callId: number) {
     return this.repository.result(this.database.pool, id, callId);

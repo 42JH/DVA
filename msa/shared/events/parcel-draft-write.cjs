@@ -1,5 +1,5 @@
 'use strict';
-const {validateCustomerPreparationOutcome}=require('./order-customer-write.cjs');
+const {validateCustomerPreparationOutcome,validateCreatedCustomer,validateCustomerCreationReceipt}=require('./order-customer-write.cjs');
 const { validateCompletion,validateFinalization,validatePolicy } = require('./order-intake-write.cjs');
 const { validateEvent } = require('./index.cjs');
 const { privateAddress } = require('./call-event-reference.cjs');
@@ -13,6 +13,10 @@ const id = value => Number.isInteger(value) && value > 0 && value <= 2147483647;
 const nullableId = value => value === null || id(value);
 const address = value => value === null || privateAddress(value);
 const instant = value => value === null || typeof value === 'string' && Number.isFinite(Date.parse(value));
+const creationKey = value => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value);
+function validateCallIdentity(value) {
+  if(!keys(value,'callerPhoneNumber,incomingAt,providerCallId') || typeof value.providerCallId!=='string' || value.providerCallId.length>200 || !/^[^\s\u0000]+$/.test(value.providerCallId) || typeof value.callerPhoneNumber!=='string' || !/^\+?[0-9]{3,20}$/.test(value.callerPhoneNumber) || typeof value.incomingAt!=='string' || !Number.isFinite(Date.parse(value.incomingAt)))throw new Error('Invalid order call identity');
+}
 
 function validateWriteCall(value) {
   if (value !== null && (
@@ -32,14 +36,15 @@ function validateDraftWrite(event, source) {
     ...(source === 'customer' ? ['customerAddress'] : [])].sort().join(',');
   if (!['order','consultation','customer'].includes(source) || event.source !== source ||
       event.eventType !== 'ParcelDraftWriteRequested' || !keys(p, fields) ||
-      !keys(c,'adminId,callSessionSeq,id,input,operation,requestId') ||
-      !['ParcelDraftCreated','ParcelDraftUpdated','OrderIntakeSealed','OrderIntakeFinalized','OrderUpdated','OrderSubmitted','AdminParcelDraftSubmitted'].includes(c.operation) ||
-      !(c.operation === 'ParcelDraftCreated' ? c.id === null : id(c.id)) ||
-      !nullableId(c.adminId) || !(c.adminId === null ? id(c.callSessionSeq) : ['OrderUpdated','OrderSubmitted'].includes(c.operation) ? nullableId(c.callSessionSeq) : c.callSessionSeq === null) ||
+      !keys(c,c.operation==='OrderCreated'?'adminId,callSessionSeq,id,input,key,operation,requestId':'adminId,callSessionSeq,id,input,operation,requestId') ||
+      !['OrderCreated','ParcelDraftCreated','ParcelDraftUpdated','OrderIntakeSealed','OrderIntakeFinalized','OrderUpdated','OrderSubmitted','AdminParcelDraftSubmitted'].includes(c.operation) ||
+      !(['OrderCreated','ParcelDraftCreated'].includes(c.operation) ? c.id === null : id(c.id)) ||
+      !nullableId(c.adminId) || !(c.operation==='OrderCreated' ? nullableId(c.callSessionSeq) && (c.adminId!==null || c.input?.call!==undefined || c.callSessionSeq!==null) : c.adminId === null ? id(c.callSessionSeq) : ['OrderUpdated','OrderSubmitted'].includes(c.operation) ? nullableId(c.callSessionSeq) : c.callSessionSeq === null) ||
       !object(c.input) || typeof c.requestId !== 'string' || c.requestId.length < 1 || c.requestId.length > 128 ||
       !address(p.orderAddress) || source !== 'order' && !address(p.consultationAddress) ||
       source === 'customer' && !address(p.customerAddress))
     throw new Error('Invalid draft write');
+  if(c.operation==='OrderCreated' && !creationKey(c.key))throw new Error('Invalid creation request key');
   if(c.operation==='AdminParcelDraftSubmitted' && (c.adminId===null || c.callSessionSeq!==null))throw new Error('Invalid administrator draft submission');
   if (c.operation.startsWith('OrderIntake')) {
     if (c.adminId!==null || c.id!==c.callSessionSeq) throw new Error('Invalid intake scope');
@@ -50,7 +55,7 @@ function validateDraftWrite(event, source) {
     if (p.call !== null && (!keys(p.call,'callSessionSeq,customerSeq,intakeVersion') ||
         !id(p.call.callSessionSeq) || !nullableId(p.call.customerSeq) || !id(p.call.intakeVersion)))
       throw new Error('Invalid draft call snapshot');
-    if ((p.call === null) !== (c.callSessionSeq === null) && !(p.call === null && c.operation==='OrderSubmitted' && c.adminId!==null) ||
+    if ((p.call === null) !== (c.callSessionSeq === null) && !(p.call === null && (c.operation==='OrderCreated' || c.operation==='OrderSubmitted' && c.adminId!==null)) ||
         p.call !== null && p.call.callSessionSeq !== c.callSessionSeq) throw new Error('Draft call mismatch');
   }
 }
@@ -71,12 +76,45 @@ function validateOrderCallLink(value) {
 function validateReceipt(value) {
   if (!keys(value,'eventId,payload')) throw new Error('Invalid draft call receipt');
   validateReadScope(value.eventId);
-  if(object(value.payload)&&Object.hasOwn(value.payload,'beforeOrderSeq')) validateOrderCallLink(value.payload);
+  if(object(value.payload)&&Object.hasOwn(value.payload,'creationKey')) validateLegacyCallWrite(value.payload);
+  else if(object(value.payload)&&Object.hasOwn(value.payload,'beforeOrderSeq')) validateOrderCallLink(value.payload);
   else validateCallMutation(value.payload);
 }
 
+function validateLegacyCallWrite(value) {
+  if(!keys(value,'adminId,beforeCustomerSeq,call,callSessionSeq,creationKey,customerSeq,orderSeq,requestId') || !id(value.callSessionSeq) || !nullableId(value.beforeCustomerSeq) || !nullableId(value.customerSeq) || !nullableId(value.orderSeq) || !nullableId(value.adminId) || !creationKey(value.creationKey) || typeof value.requestId!=='string' || value.requestId.length<1 || value.requestId.length>128 || value.beforeCustomerSeq!==null && value.customerSeq!==value.beforeCustomerSeq)throw new Error('Invalid legacy order call write');
+  if(value.call!==null)validateCallIdentity(value.call);
+}
+
 function validateWriteResult(value, command, eventId) {
-  if (!keys(value,['OrderSubmitted','AdminParcelDraftSubmitted'].includes(command.operation)?'customerReceipt,data,receipt':'data,receipt')) throw new Error('Invalid draft write result');
+  if (!keys(value,command.operation==='OrderCreated'?'customerCreationReceipt,customerReceipt,data,receipt':['OrderSubmitted','AdminParcelDraftSubmitted'].includes(command.operation)?'customerReceipt,data,receipt':'data,receipt')) throw new Error('Invalid draft write result');
+  if(command.operation==='OrderCreated') {
+    if(!keys(value.data,'result,submit') || typeof value.data.submit!=='boolean')throw new Error('Invalid creation preparation');
+    const result=value.data.result;
+    if(keys(result,'orderSeq,version')) {
+      if(!id(result.orderSeq)||!id(result.version)||value.data.submit||command.input.call!==undefined)throw new Error('Invalid created order');
+    } else if(result?.status==='NO_ORDER') {
+      if(!keys(result,'callSessionSeq,orderSeq,parcelNo,paymentDueAt,paymentRequest,status,totalAmount,version') || !id(result.callSessionSeq) || !['orderSeq','parcelNo','paymentDueAt','paymentRequest','totalAmount','version'].every(key=>result[key]===null)||value.data.submit)throw new Error('Invalid empty order result');
+    } else if(!id(result?.orderSeq) || !nullableId(result.callSessionSeq) || !orderIntakeResult(result,{orderSeq:result.orderSeq,callSessionSeq:result.callSessionSeq}) || value.data.submit&&result.status!=='PAID')throw new Error('Invalid created order result');
+    if(value.receipt!==null) {
+      validateReceipt(value.receipt);validateLegacyCallWrite(value.receipt.payload);
+      const p=value.receipt.payload;
+      if(p.creationKey!==command.key || p.adminId!==command.adminId || p.requestId!==command.requestId || command.callSessionSeq!==null&&p.callSessionSeq!==command.callSessionSeq || p.orderSeq!==result.orderSeq)throw new Error('Creation call scope mismatch');
+      if((p.call===null)!==(command.input.call===undefined) || p.call!==null && ['providerCallId','callerPhoneNumber','incomingAt'].some(key=>p.call[key]!==command.input.call[key]) || command.input.call===undefined && p.callSessionSeq!==command.callSessionSeq || Object.hasOwn(result,'callSessionSeq') && result.callSessionSeq!==p.callSessionSeq)throw new Error('Creation call identity mismatch');
+    }
+    if(value.customerCreationReceipt!==null) {
+      validateCustomerCreationReceipt(value.customerCreationReceipt);
+      const p=value.customerCreationReceipt.payload;
+      if(p.writeEventId!==eventId || p.adminId!==command.adminId || p.requestId!==command.requestId || !command.input.customer || p.customer.phoneNumber!==command.input.customer.phoneNumber || p.customer.name!==command.input.customer.name)throw new Error('Created customer scope mismatch');
+    }
+    if(value.customerReceipt!==null) {
+      validateRecipientReceipt(value.customerReceipt);
+      const p=value.customerReceipt.payload;
+      if(p.writeEventId!==eventId || p.orderSeq!==result.orderSeq || p.adminId!==command.adminId || p.requestId!==command.requestId)throw new Error('Creation recipient scope mismatch');
+      if(value.customerCreationReceipt!==null && p.customerSeq!==value.customerCreationReceipt.payload.customer.customerSeq)throw new Error('Created customer recipient mismatch');
+    }
+    return;
+  }
   if (command.operation.startsWith('OrderIntake')) {
     if(value.receipt!==null) throw new Error('Invalid intake receipt');
     if(command.operation==='OrderIntakeSealed') {
@@ -139,6 +177,24 @@ function validateWriteReference(event) {
   const v = p.input;
   let valid = false;
   switch (p.operation) {
+    case 'CustomerOrderResolved':
+      valid=event.source==='order' && (keys(v,'customerSeq')&&id(v.customerSeq) || keys(v,'customer')&&keys(v.customer,'name,phoneNumber')&&typeof v.customer.name==='string'&&v.customer.name.trim().length>0&&typeof v.customer.phoneNumber==='string'&&/^[0-9]{11}$/.test(v.customer.phoneNumber));
+      break;
+    case 'CustomerCreationApplied':
+      valid=event.source==='order'&&keys(v,'writeEventId');
+      if(valid)validateReadScope(v.writeEventId);
+      break;
+    case 'CallEnsured':
+      valid=event.source==='order'&&keys(v,'call,customerSeq')&&nullableId(v.customerSeq);
+      if(valid)validateCallIdentity(v.call);
+      break;
+    case 'LegacyCallApplied':
+      valid=event.source==='order'&&keys(v,'receipt');
+      if(valid){validateReceipt(v.receipt);validateLegacyCallWrite(v.receipt.payload);}
+      break;
+    case 'CallCreationChecked':
+      valid=event.source==='order'&&keys(v,'id,orderSeq')&&id(v.id)&&id(v.orderSeq);
+      break;
     case 'CustomerPreparationOutcomeRead':
       valid=event.source==='customer' && keys(v,'writeEventId');
       if(valid)validateReadScope(v.writeEventId);
@@ -158,6 +214,7 @@ function validateWriteReference(event) {
     case 'CustomerRead':
       valid = event.source === 'order' && keys(v,'id') && id(v.id);
       break;
+    case 'CallCustomerRead':
     case 'CustomerPhoneRead':
       valid = event.source === 'order' && keys(v,'phone') && typeof v.phone === 'string';
       break;
@@ -170,7 +227,7 @@ function validateWriteReference(event) {
       valid = event.source === 'order' && keys(v,'id') && id(v.id);
       break;
     case 'CallOrderLinked':
-      valid=event.source==='order'&&keys(v,'customerSeq,id,orderSeq')&&id(v.id)&&id(v.orderSeq)&&id(v.customerSeq);
+      valid=event.source==='order'&&keys(v,'customerSeq,id,orderSeq')&&id(v.id)&&id(v.orderSeq)&&nullableId(v.customerSeq);
       break;
     case 'CallCustomerResolved':
       valid = event.source === 'order' && keys(v,'customerSeq,id') && id(v.id) && id(v.customerSeq);
@@ -189,6 +246,14 @@ function validateWriteReference(event) {
 
 function validateReferenceResult(value, event) {
   const op = event.payload.operation, input = event.payload.input;
+  if(op==='CustomerOrderResolved') {
+    if(!keys(value,'created,customer') || !keys(value.customer,'active,customerSeq,phone') || !id(value.customer.customerSeq)||value.customer.active!==true||typeof value.customer.phone!=='string' || input.customerSeq!==undefined&&input.customerSeq!==value.customer.customerSeq || input.customer!==undefined&&input.customer.phoneNumber!==value.customer.phone)throw new Error('Invalid resolved order customer');
+    if(value.created!==null){validateCreatedCustomer(value.created);if(value.created.customerSeq!==value.customer.customerSeq || value.created.phoneNumber!==value.customer.phone)throw new Error('Created customer mismatch');}
+    return;
+  }
+  if(op==='CustomerCreationApplied'){if(value!==true)throw new Error('Customer creation recovery failed');return;}
+  if(op==='CallEnsured'){if(!id(value))throw new Error('Invalid ensured call');return;}
+  if(op==='LegacyCallApplied'||op==='CallCreationChecked'){if(typeof value!=='boolean')throw new Error('Invalid creation call check');return;}
   if(op==='CustomerPreparationOutcomeRead'){validateCustomerPreparationOutcome(value);if(value.status==='COMMITTED'&&value.customerCreationReceipt.payload.writeEventId!==input.writeEventId)throw new Error('Customer outcome scope mismatch');return;}
   if(op==='RecipientPinsPrepared'){validateRecipientPins(value);return;}
   if(op==='OrderRecipientsRead'){validateRecipientAddresses(value);return;}
@@ -227,7 +292,7 @@ function validateReferenceResult(value, event) {
       value !== null && (!keys(value,'active,customerSeq,phone') || !id(value.customerSeq) ||
         typeof value.active !== 'boolean' || typeof value.phone !== 'string' ||
         ['CustomerRead','OrderCustomerRead'].includes(op) && value.customerSeq !== input.id ||
-        op === 'CustomerPhoneRead' && (value.phone !== input.phone || !value.active)))
+        ['CustomerPhoneRead','CallCustomerRead'].includes(op) && value.phone !== input.phone || op === 'CustomerPhoneRead' && !value.active))
     throw new Error('Invalid draft reference result');
 }
 
@@ -280,4 +345,4 @@ function requestWriteReference(url, token, event, scopeId) {
   return exchange(url,token,event,scopeId,value=>validateReferenceResult(value,event));
 }
 module.exports = { validateDraftWrite, requestDraftWrite, validateWriteReference, requestWriteReference,
-  validateCallMutation, validateOrderCallLink, validateReceipt, validateWriteCall };
+  validateCallMutation, validateOrderCallLink, validateLegacyCallWrite, validateReceipt, validateWriteCall };

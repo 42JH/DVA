@@ -65,6 +65,25 @@ export class ConsultationsService {
     return session.id;
   }
 
+  async recoverOrderCall(
+    client: PoolClient,
+    id: number,
+    input: CallIdentityDto & { callerPhoneNumber: string },
+  ) {
+    await this.endings.lockCaller(client, input.callerPhoneNumber);
+    if ((await this.sessions.existingCall(client, input)) !== id)
+      throw new ApiException(
+        409,
+        'EVENT_PAYLOAD_CONFLICT',
+        '같은 이벤트의 내용을 변경할 수 없습니다.',
+      );
+    await this.endings.matchPending(
+      client,
+      input.callerPhoneNumber,
+      input.incomingAt,
+    );
+  }
+
   attachCustomer(client: PoolClient, callId: number, customerId: number) {
     return this.sessions.attachCustomer(client, callId, customerId);
   }

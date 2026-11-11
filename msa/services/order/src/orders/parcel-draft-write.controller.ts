@@ -56,15 +56,17 @@ export class ParcelDraftWriteController {
     return {
       eventId: event.eventId,
       status: 'processed',
-      payload: await (event.payload.command.operation === 'AdminParcelDraftSubmitted'
-        ? this.adminDrafts.executeSubmit(event)
-        : event.payload.command.operation === 'OrderSubmitted'
-          ? this.orders.executeSubmission(event)
-          : event.payload.command.operation === 'OrderUpdated'
-            ? this.orders.executeUpdate(event)
-            : event.payload.command.operation.startsWith('OrderIntake')
-              ? this.intake.execute(event)
-              : this.drafts.execute(event)),
+      payload: await (event.payload.command.operation === 'OrderCreated'
+        ? this.orders.executeCreation(event)
+        : event.payload.command.operation === 'AdminParcelDraftSubmitted'
+          ? this.adminDrafts.executeSubmit(event)
+          : event.payload.command.operation === 'OrderSubmitted'
+            ? this.orders.executeSubmission(event)
+            : event.payload.command.operation === 'OrderUpdated'
+              ? this.orders.executeUpdate(event)
+              : event.payload.command.operation.startsWith('OrderIntake')
+                ? this.intake.execute(event)
+                : this.drafts.execute(event)),
     };
   }
 
@@ -125,7 +127,7 @@ export class ParcelDraftWriteController {
     }
     const { rows } = await this.database.pool.query<OwnerCallWriteReceipt>(
       `SELECT event_id AS "eventId",payload FROM outbox_events WHERE destination='consultation'
-       AND event_type IN ('ParcelDraftCallWritten','OrderCallLinked') AND aggregate_seq=$1 AND delivered_at IS NULL ORDER BY outbox_seq`,
+       AND event_type IN ('ParcelDraftCallWritten','OrderCallLinked','LegacyOrderCallWritten') AND aggregate_seq=$1 AND delivered_at IS NULL ORDER BY outbox_seq`,
       [event.payload.input.id],
     );
     return { eventId: event.eventId, status: 'processed', payload: rows };

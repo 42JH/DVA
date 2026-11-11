@@ -3,7 +3,8 @@ import type {RecipientReceipt} from './order-recipient-pins.cjs';
 import type { Event } from './index.cjs';
 
 export interface DraftWriteCommand {
-  operation: 'ParcelDraftCreated' | 'ParcelDraftUpdated' | 'OrderIntakeSealed' | 'OrderIntakeFinalized' | 'OrderUpdated' | 'OrderSubmitted' | 'AdminParcelDraftSubmitted';
+  operation: 'OrderCreated' | 'ParcelDraftCreated' | 'ParcelDraftUpdated' | 'OrderIntakeSealed' | 'OrderIntakeFinalized' | 'OrderUpdated' | 'OrderSubmitted' | 'AdminParcelDraftSubmitted';
+  key?: string;
   id: number | null;
   adminId: number | null;
   callSessionSeq: number | null;
@@ -33,7 +34,18 @@ export interface CallOrderLink {
   orderSeq:number;
   customerSeq:number;
 }
-export interface OwnerCallWriteReceipt {eventId:string;payload:CallMutation|CallOrderLink}
+export interface OrderCallIdentity {providerCallId:string;callerPhoneNumber:string;incomingAt:string}
+export interface LegacyCallWrite {
+  creationKey:string;
+  callSessionSeq:number;
+  beforeCustomerSeq:number|null;
+  customerSeq:number|null;
+  orderSeq:number|null;
+  call:OrderCallIdentity|null;
+  adminId:number|null;
+  requestId:string;
+}
+export interface OwnerCallWriteReceipt {eventId:string;payload:CallMutation|CallOrderLink|LegacyCallWrite}
 export interface CallWriteReceipt { eventId: string; payload: CallMutation }
 export interface DraftWriteResult {
   data: Record<string, unknown>;
@@ -57,7 +69,7 @@ export interface WriteReferenceEvent extends Event {
   source: 'order' | 'customer' | 'consultation';
   eventType: 'ParcelDraftWriteReferenceRequested';
   payload: {
-    operation: 'CustomerPreparationOutcomeRead' | 'RecipientPinsPrepared' | 'OrderRecipientsRead' | 'RecipientReceiptRead' | 'OrderCustomerRead' | 'CallOrderLinked' | 'IntakeCallRead' | 'IntakeCallSealed' | 'IntakeFinalizationRead' | 'CustomerPaymentPolicyRead' | 'CustomerRead' | 'CustomerPhoneRead' | 'PinChecked' | 'CallRead' |
+    operation: 'CustomerOrderResolved' | 'CustomerCreationApplied' | 'CallCustomerRead' | 'CallEnsured' | 'LegacyCallApplied' | 'CallCreationChecked' | 'CustomerPreparationOutcomeRead' | 'RecipientPinsPrepared' | 'OrderRecipientsRead' | 'RecipientReceiptRead' | 'OrderCustomerRead' | 'CallOrderLinked' | 'IntakeCallRead' | 'IntakeCallSealed' | 'IntakeFinalizationRead' | 'CustomerPaymentPolicyRead' | 'CustomerRead' | 'CustomerPhoneRead' | 'PinChecked' | 'CallRead' |
       'CallBumped' | 'CallCustomerResolved' | 'PendingCallWritesRead';
     input: Record<string, unknown>;
   };
@@ -71,3 +83,4 @@ export function validateCallMutation(value: unknown): asserts value is CallMutat
 export function validateReceipt(value: unknown): asserts value is OwnerCallWriteReceipt;
 
 export function validateOrderCallLink(value:unknown):asserts value is CallOrderLink;
+export function validateLegacyCallWrite(value:unknown):asserts value is LegacyCallWrite;

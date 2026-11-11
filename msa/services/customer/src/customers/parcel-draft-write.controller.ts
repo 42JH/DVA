@@ -111,6 +111,9 @@ export class ParcelDraftWriteController {
           'RecipientPinsPrepared',
           'CustomerRead',
           'CustomerPhoneRead',
+          'CallCustomerRead',
+          'CustomerOrderResolved',
+          'CustomerCreationApplied',
           'PinChecked',
           'CustomerPaymentPolicyRead',
           'OrderCustomerRead',
@@ -129,10 +132,46 @@ export class ParcelDraftWriteController {
     try {
       const payload = await this.scopes.use(scopeId, async (client) => {
         const input = event.payload.input;
+        if (event.payload.operation === 'CustomerCreationApplied') {
+          if (this.active.get(scopeId)!.command.operation !== 'OrderCreated')
+            throw new ApiException(403, 'FORBIDDEN', '주문 쓰기 범위를 확인해 주세요.');
+          await this.orderCustomers.resolveWrite(client, String(input.writeEventId));
+          return true;
+        }
+        if (event.payload.operation === 'CustomerOrderResolved') {
+          const command = this.active.get(scopeId)!.command;
+          const expected = command.input.customer as
+            { name: string; phoneNumber: string } | undefined;
+          const customer = input.customer as { name: string; phoneNumber: string } | undefined;
+          if (
+            command.operation !== 'OrderCreated' ||
+            (expected
+              ? customer?.name !== expected.name || customer.phoneNumber !== expected.phoneNumber
+              : input.customerSeq !== command.input.customerSeq)
+          )
+            throw new ApiException(403, 'FORBIDDEN', '주문 쓰기 범위를 확인해 주세요.');
+          const result = await this.orderCustomers.prepare(
+            client,
+            input,
+            command.adminId,
+            command.requestId,
+            scopeId,
+          );
+          return {
+            customer: {
+              customerSeq: result.customer.customerSeq,
+              phone: result.customer.phoneNumber,
+              active: true,
+            },
+            created: result.created,
+          };
+        }
         if (event.payload.operation === 'RecipientPinsPrepared') {
           const active = this.active.get(scopeId)!;
           if (
-            !['OrderSubmitted', 'AdminParcelDraftSubmitted'].includes(active.command.operation) ||
+            !['OrderCreated', 'OrderSubmitted', 'AdminParcelDraftSubmitted'].includes(
+              active.command.operation,
+            ) ||
             (active.command.operation === 'OrderSubmitted' && active.command.id !== input.id)
           )
             throw new ApiException(403, 'FORBIDDEN', '주문 쓰기 범위를 확인해 주세요.');
@@ -188,8 +227,10 @@ export class ParcelDraftWriteController {
              FROM customers WHERE ${
                event.payload.operation === 'CustomerRead'
                  ? 'customer_seq=$1'
-                 : "phone_number=$1 AND status='ACTIVE' AND deleted_at IS NULL"
-             } FOR SHARE`,
+                 : event.payload.operation === 'CallCustomerRead'
+                   ? 'phone_number=$1 AND deleted_at IS NULL'
+                   : "phone_number=$1 AND status='ACTIVE' AND deleted_at IS NULL"
+             }${event.payload.operation === 'CallCustomerRead' ? '' : ' FOR SHARE'}`,
               [event.payload.operation === 'CustomerRead' ? input.id : input.phone],
             )
           ).rows[0] ?? null

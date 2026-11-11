@@ -1,3 +1,9 @@
+import { ParseUUIDPipe } from '@nestjs/common';
+import { ApiCreatedResponse } from '@nestjs/swagger';
+import { CreateOrderDto } from './dto/create-order.dto';
+import { CreatedOrderDto, OrderResultDto } from './dto/order-response.dto';
+import { NoOrderResultDto } from './dto/no-order-result.dto';
+import { OrderRequestKey } from './order-request-key';
 import { Res } from '@nestjs/common';
 import { ApiAcceptedResponse, ApiServiceUnavailableResponse } from '@nestjs/swagger';
 import type { Response } from 'express';
@@ -43,6 +49,10 @@ import { OrdersService } from './orders.service';
 
 @ApiTags('Orders')
 @ApiExtraModels(
+  CreateOrderDto,
+  CreatedOrderDto,
+  OrderResultDto,
+  NoOrderResultDto,
   OrderSummaryDto,
   OrderDetailDto,
   RequestMetaDto,
@@ -261,6 +271,178 @@ export class OrdersController {
   ) {
     return this.orders.detail(request.admin?.adminUserSeq ?? null, params.id, callSessionSeq);
   }
+  @Post()
+  @AiOrAdminAccess()
+  @AuditOperation({ action: 'ORDER_CREATED', targetType: 'ORDER', target: 'none' })
+  @ApiOperation({
+    summary: '관리자 부분 주문 생성·이전 AI 계약 호환',
+    security: [{ adminSession: [] }, { bearer: [] }],
+    description:
+      '055 이후 등록된 AI 통화는 409이며 parcel-drafts → order-intake/complete를 사용합니다. 이 경로의 AI 쓰기는 055 이전 등록 통화만 마무리하는 호환 기능입니다.\n\nAI는 call과 outcome을 한 번 전송합니다. COMPLETE는 검증 후 개인 카드 결제를 대기하거나 월·그룹결제 완료 후 디버 접수 결과를 반환하고, INCOMPLETE는 COLLECTING, CANCELLED는 CANCELLED로 저장합니다. ACCEPTED만 접수 성공입니다.\n\n관리자의 기존 부분 저장도 지원합니다. 같은 UUID 재전송은 기존 결과만 반환합니다. AI는 AI_BUSINESS_TOKEN의 Bearer 인증, 관리자는 유효한 세션이 필요합니다.',
+  })
+  @ApiBody({
+    description:
+      '고객은 customerSeq 또는 customer 중 하나. AI 미완료·취소 시 생략할 수 있습니다. 미등록 고객은 이름·전화번호가 있을 때 주문과 함께 생성합니다.',
+    schema: {
+      allOf: [{ $ref: getSchemaPath(CreateOrderDto) }],
+      anyOf: [
+        { required: ['customerSeq'] },
+        { required: ['customer'] },
+        {
+          required: ['call', 'outcome'],
+          properties: { outcome: { enum: ['INCOMPLETE', 'CANCELLED'] } },
+        },
+      ],
+    },
+    examples: {
+      completeCall: {
+        summary: '상담 완료: 디버 접수 결과까지 반환 (수거 시각은 미래로 변경)',
+        value: {
+          outcome: 'COMPLETE',
+          call: {
+            providerCallId: 'sess_complete',
+            callerPhoneNumber: '01012345678',
+            incomingAt: '2026-10-27T01:00:00Z',
+          },
+          customer: { name: '발신 고객', phoneNumber: '01012345678' },
+          paymentMethodType: 'billing',
+          totalAmount: 3500,
+          pickupRequestedAt: '2026-10-28T10:00:00+09:00',
+          parcels: [
+            {
+              origin: {
+                name: '발송인',
+                phoneNumber: '01012345678',
+                roadAddress: '서울시 예시로 1',
+                jibunAddress: '서울시 예시동 1',
+                detailAddress: '101호',
+                dongName: '예시동',
+                postalCode: '01234',
+              },
+              destination: {
+                name: '수령인',
+                phoneNumber: '01087654321',
+                roadAddress: '서울시 배송로 2',
+                jibunAddress: '서울시 배송동 2',
+                detailAddress: '',
+                dongName: '배송동',
+                postalCode: '05678',
+              },
+              notifiedPrice: 3500,
+              smallBoxCount: 1,
+              itemPrice: 10000,
+            },
+          ],
+        },
+      },
+      incompleteCall: {
+        summary: '중도 종료·상담사 연결: 수집한 값만 저장',
+        value: {
+          outcome: 'INCOMPLETE',
+          call: {
+            providerCallId: 'sess_example',
+            callerPhoneNumber: '01012345678',
+            incomingAt: '2026-10-27T01:00:00Z',
+          },
+          parcels: [{ origin: { roadAddress: '서울시 예시로 1' } }],
+        },
+      },
+      cancelledCall: {
+        summary: '디버 접수 전 고객 취소',
+        value: {
+          outcome: 'CANCELLED',
+          call: {
+            providerCallId: 'sess_cancelled',
+            callerPhoneNumber: '01012345678',
+            incomingAt: '2026-10-27T01:00:00Z',
+          },
+        },
+      },
+      existingCustomer: {
+        summary: '기존 고객 번호로 저장',
+        value: { customerSeq: 31, parcels: [] },
+      },
+      customerByPhone: {
+        summary: '전화번호로 고객 연결 또는 신규 등록',
+        value: { customer: { name: '예시 고객', phoneNumber: '01012345678' }, parcels: [] },
+      },
+    },
+  })
+  @ApiHeader({
+    name: 'Idempotency-Key',
+    description:
+      '주문 생성 UUID. 재시도는 같은 키, 새 주문은 새 키를 사용합니다. 같은 키는 본문 재적용 없이 기존 주문·현재 버전을 반환합니다.',
+    required: true,
+    schema: { type: 'string', format: 'uuid' },
+  })
+  @ApiHeader({
+    name: 'call_session_seq',
+    required: false,
+    description:
+      'DB call_sessions.call_session_seq 값. 기존 통화 연결 방식에서만 사용하며 본문 call이 있으면 생략합니다.',
+    schema: { type: 'integer', minimum: 1, maximum: 2147483647 },
+  })
+  @ApiNotFoundResponse({ description: '고객 또는 통화가 없음.', type: ErrorResponseDto })
+  @ApiConflictResponse({
+    description:
+      '같은 키 처리 중, DB 잠금 대기 2초 초과(REQUEST_IN_PROGRESS) 또는 고객·통화 상태 불일치. 소속 변경은 완료 후 이어서 처리합니다.',
+    type: ErrorResponseDto,
+  })
+  @ApiCreatedResponse({
+    description:
+      'AI 결과는 주문·통화 번호와 현재 상태. 주문 정보가 없는 미완료·취소 결과는 NO_ORDER와 orderSeq·version=null이며 통화만 보존합니다. 기존 부분 저장은 주문 번호·버전. HTTP 201만으로 디버 접수 성공을 판단하지 않습니다.',
+    schema: {
+      type: 'object',
+      required: ['data', 'meta'],
+      properties: {
+        data: {
+          anyOf: [
+            { $ref: getSchemaPath(OrderResultDto) },
+            { $ref: getSchemaPath(NoOrderResultDto) },
+            { $ref: getSchemaPath(CreatedOrderDto) },
+          ],
+        },
+        meta: { $ref: getSchemaPath(RequestMetaDto) },
+      },
+    },
+  })
+  @ApiAcceptedResponse({
+    description: 'SUBMITTING: 처리 중 또는 결과 저장 미확정. 같은 생성 키로 재확인합니다.',
+    schema: {
+      type: 'object',
+      properties: {
+        data: { $ref: getSchemaPath(OrderResultDto) },
+        meta: { $ref: getSchemaPath(RequestMetaDto) },
+      },
+    },
+  })
+  @ApiUnprocessableEntityResponse({
+    description:
+      'COMPLETE 주문의 주소·물품·수거 시각이 접수 조건을 충족하지 않음. 저장·디버 호출 없음.',
+    type: ErrorResponseDto,
+  })
+  @ApiServiceUnavailableResponse({
+    description: '월·그룹결제 COMPLETE 요청 시 디버 설정 누락. 저장·디버 호출 없음.',
+    type: ErrorResponseDto,
+  })
+  async create(
+    @Req() request: AuthRequest,
+    @Res({ passthrough: true }) response: Response,
+    @OrderRequestKey(new ParseUUIDPipe()) key: string,
+    @Body() input: CreateOrderDto,
+    @Headers('call_session_seq') callSessionSeq?: string,
+  ) {
+    const result = await this.orders.create(
+      request.admin?.adminUserSeq ?? null,
+      key.toLowerCase(),
+      input,
+      request.requestId,
+      callSessionSeq,
+    );
+    if ('status' in result && result.status === 'SUBMITTING') response.status(202);
+    return result;
+  }
+
   @Patch(':id')
   @AiOrAdminAccess()
   @AuditOperation({ action: 'ORDER_UPDATED', targetType: 'ORDER', target: 'id' })

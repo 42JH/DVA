@@ -1,8 +1,11 @@
-import { Type } from 'class-transformer';
+import { OriginPinDto } from './origin-pin.dto';
+import { Type, Transform, type TransformFnParams } from 'class-transformer';
 import {
+  IsArray,
+  IsNotEmpty,
   IsIn,
-  IsISO8601,
   IsInt,
+  IsISO8601,
   IsObject,
   IsOptional,
   IsString,
@@ -12,10 +15,11 @@ import {
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
-import { ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { MOBILE_PHONE_PATTERN } from '../../common/mobile-phone';
 import { MAX_ORDER_ITEM_PRICE, MIN_ORDER_ITEM_PRICE } from '../orders.types';
-import { OriginPinDto } from './origin-pin.dto';
+import { OrderCallDto } from './order-call.dto';
+
 const present = (_object: unknown, value: unknown) => value !== undefined;
 
 export class OrderAddressPatchDto {
@@ -183,6 +187,24 @@ export class ParcelInputDto {
   itemPrice?: number | null;
 }
 
+const trim = ({ value }: TransformFnParams): unknown =>
+  typeof value === 'string' ? value.trim() : value;
+export class OrderCustomerDto {
+  @ApiProperty({ description: '이름. 앞뒤 공백 제거, 빈 이름 불가.' })
+  @Transform(trim)
+  @IsString()
+  @IsNotEmpty()
+  name!: string;
+
+  @ApiProperty({
+    description: '선행 0을 보존한 휴대전화 번호 11자리 문자열. 하이픈·공백·국가번호 + 불가.',
+    pattern: MOBILE_PHONE_PATTERN.source,
+  })
+  @IsString()
+  @Matches(MOBILE_PHONE_PATTERN)
+  phoneNumber!: string;
+}
+
 export class CreateOrderDto {
   @ApiPropertyOptional({
     description: '취소되지 않은 상세 배송비 합계(원). 최종 확정 시 필수.',
@@ -195,6 +217,52 @@ export class CreateOrderDto {
   @Min(1)
   @Max(2147483647)
   totalAmount?: number | null;
+
+  @ApiPropertyOptional({
+    enum: ['COMPLETE', 'INCOMPLETE', 'CANCELLED'],
+    description:
+      'AI 상담 결과. COMPLETE만 디버 접수, INCOMPLETE는 미완료 저장, CANCELLED는 상담 중 취소 저장. call과 함께 전달합니다.',
+  })
+  @ValidateIf(present)
+  @IsIn(['COMPLETE', 'INCOMPLETE', 'CANCELLED'])
+  outcome?: 'COMPLETE' | 'INCOMPLETE' | 'CANCELLED';
+
+  @ApiPropertyOptional({
+    type: () => OrderCallDto,
+    description: 'AI 결과 필수 통화 정보. 기존 통화 번호 없이 세션을 생성·연결합니다.',
+  })
+  @ValidateIf(present)
+  @IsObject()
+  @ValidateNested()
+  @Type(() => OrderCallDto)
+  call?: OrderCallDto;
+
+  @ApiPropertyOptional({
+    minimum: 1,
+    maximum: 2147483647,
+    description: '기존 고객 번호. customer와 동시 입력 불가. AI 미완료·취소 결과는 고객 생략 가능.',
+  })
+  @ValidateIf(
+    (input: CreateOrderDto, value: unknown) =>
+      value !== undefined ||
+      (input.customer === undefined &&
+        !(input.call && ['INCOMPLETE', 'CANCELLED'].includes(input.outcome ?? ''))),
+  )
+  @IsInt()
+  @Min(1)
+  @Max(2147483647)
+  customerSeq?: number;
+
+  @ApiPropertyOptional({
+    type: () => OrderCustomerDto,
+    description:
+      '고객 번호를 모를 때 이름·전화번호 입력. 기존 번호는 고객을 연결하고, 미등록 번호는 고객을 생성합니다.',
+  })
+  @ValidateIf(present)
+  @IsObject()
+  @ValidateNested()
+  @Type(() => OrderCustomerDto)
+  customer?: OrderCustomerDto;
 
   @ApiPropertyOptional({
     enum: ['billing', 'credit', 'groupBilling'],
@@ -217,4 +285,17 @@ export class CreateOrderDto {
   @IsISO8601({ strict: true, strictSeparator: true })
   @Matches(/T.*(?:Z|[+-]\d{2}:\d{2})$/)
   pickupRequestedAt?: string | null;
+
+  @ApiPropertyOptional({
+    description:
+      '주문 상세(출발지·도착지·물품) 목록. 미완료는 생략·빈 배열 가능하며 최종 접수에는 한 건 이상 필요합니다.',
+    type: () => ParcelInputDto,
+    isArray: true,
+  })
+  @ValidateIf(present)
+  @IsArray()
+  @IsObject({ each: true })
+  @ValidateNested({ each: true })
+  @Type(() => ParcelInputDto)
+  parcels?: ParcelInputDto[];
 }

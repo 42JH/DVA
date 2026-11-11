@@ -93,7 +93,11 @@ describe('Order read API (e2e)', () => {
           '/api/orders/{id}',
         ])
           expect(Object.keys(body.paths[path]).sort()).toEqual(
-            path === '/api/orders/{id}' ? ['delete', 'get', 'patch'] : ['get'],
+            path === '/api/orders/{id}'
+              ? ['delete', 'get', 'patch']
+              : path === '/api/orders'
+                ? ['get', 'post']
+                : ['get'],
           );
       });
   });

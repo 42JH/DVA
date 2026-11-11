@@ -67,3 +67,28 @@ export function orderDraft(input: DraftInput) {
 }
 
 export type OrderDraft = ReturnType<typeof orderDraft>;
+
+export function hasOrderData(draft: OrderDraft): boolean {
+  if (
+    draft.paymentMethodType !== null ||
+    draft.pickupRequestedAt !== null ||
+    draft.totalAmount !== null
+  )
+    return true;
+  return draft.parcels.some(
+    (parcel) =>
+      parcel.originPin !== null ||
+      [parcel.origin, parcel.destination].some((value) =>
+        Object.values(value).some((field) =>
+          typeof field === 'string' ? field.trim() !== '' : field !== null,
+        ),
+      ) ||
+      [parcel.documentCount, parcel.smallBoxCount, parcel.mediumBoxCount, parcel.bigBoxCount].some(
+        (count) => count > 0,
+      ) ||
+      parcel.otherItemDescription.trim() !== '' ||
+      parcel.clientComment.trim() !== '' ||
+      parcel.itemPrice !== null ||
+      parcel.notifiedPrice !== null,
+  );
+}

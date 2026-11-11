@@ -375,6 +375,49 @@ export class OrdersRepository {
     ).rows;
   }
 
+  async emptyResult(client: PoolClient, key: string) {
+    return (
+      await client.query<{ callSessionSeq: number; actorAdminUserSeq: number | null }>(
+        'SELECT call_session_seq AS "callSessionSeq",actor_admin_user_seq AS "actorAdminUserSeq" FROM empty_ai_order_results WHERE request_id=$1::uuid',
+        [key],
+      )
+    ).rows[0];
+  }
+
+  async hasEmptyResult(client: PoolClient, callId: number): Promise<boolean> {
+    return (
+      (
+        await client.query('SELECT 1 FROM empty_ai_order_results WHERE call_session_seq=$1', [
+          callId,
+        ])
+      ).rowCount === 1
+    );
+  }
+
+  async saveEmptyResult(client: PoolClient, key: string, callId: number, adminId: number | null) {
+    await client.query(
+      'INSERT INTO empty_ai_order_results(request_id,call_session_seq,actor_admin_user_seq) VALUES($1::uuid,$2,$3)',
+      [key, callId, adminId],
+    );
+  }
+
+  async findCreation(client: PoolClient, key: string) {
+    return (
+      await client.query<{
+        orderSeq: number;
+        version: number;
+        creationSource: OrderCreationSource;
+        deleted: boolean;
+        adminId: number | null;
+      }>(
+        `SELECT order_seq AS "orderSeq",version,creation_source AS "creationSource",created_by_admin_user_seq AS "adminId",
+      (deleted_at IS NOT NULL OR COALESCE(closed_at,created_at)<=clock_timestamp()-interval '5 years') AS deleted
+      FROM orders WHERE creation_request_id=$1::uuid`,
+        [key],
+      )
+    ).rows[0];
+  }
+
   async insert(
     client: PoolClient,
     draft: OrderDraft,
