@@ -27,7 +27,7 @@ export function OrdersPage() {
           label="주문 검색"
         />
         <Btn kind="primary" onClick={() => setAdding(true)} className="ml-auto">
-          <Icon name="box" />
+          <Icon name="plus" />
           주문 추가
         </Btn>
       </PageHead>

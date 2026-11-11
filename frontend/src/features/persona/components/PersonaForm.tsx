@@ -44,7 +44,7 @@ export function PersonaForm({
         <span className="text-[15px] font-bold">{vm.tag}</span>
         <span className="text-[13px] text-ops-sub">{vm.subtitle}</span>
         {onVoice && (
-          <Btn kind="warning" className="ml-auto" onClick={onVoice}>
+          <Btn kind="editBadge" className="ml-auto" onClick={onVoice}>
             음성 세부 조절
           </Btn>
         )}

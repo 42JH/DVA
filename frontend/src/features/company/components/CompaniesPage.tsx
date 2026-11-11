@@ -39,7 +39,7 @@ export function CompaniesPage() {
           placeholder="기업명으로 검색"
           label="기업 검색"
         />
-        <Btn kind="primaryLime" className="ml-auto" onClick={vm.openCsv}>
+        <Btn kind="line" className="ml-auto" onClick={vm.openCsv}>
           <Icon name="sheet" />
           CSV로 기업 등록
         </Btn>
@@ -118,7 +118,7 @@ export function CompaniesPage() {
                   </td>
                   <td onClick={(e) => e.stopPropagation()}>
                     <span className="flex justify-center gap-1.5">
-                      <Btn kind="warning" onClick={() => setEditing({ id: r.id, name: r.name })}>
+                      <Btn kind="editBadge" onClick={() => setEditing({ id: r.id, name: r.name })}>
                         수정
                       </Btn>
                       <Btn kind="dangerBadge" onClick={() => askRow(r.id, r.name)}>

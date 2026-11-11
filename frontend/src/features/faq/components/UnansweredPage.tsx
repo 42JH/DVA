@@ -199,7 +199,7 @@ function Row({
       <td>
         {
           <span className="flex items-center justify-center gap-1.5">
-            <Btn kind="infoBadge" onClick={onFaq}>
+            <Btn kind="lineBadge" onClick={onFaq}>
               FAQ 등록
             </Btn>
             <Btn kind="dangerBadge" onClick={() => vm.openDelete(r)} aria-label="이 질문 삭제">

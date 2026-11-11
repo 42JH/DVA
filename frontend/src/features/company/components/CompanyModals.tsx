@@ -26,7 +26,7 @@ const FootNote = ({ error, hint }: { error?: string | null; hint?: string | null
   )
 
 const Example = () => (
-  <Btn kind="ghost" onClick={downloadExample} className="self-start">
+  <Btn kind="plain" onClick={downloadExample} className="self-start">
     <Icon name="download" />
     예시 파일 받기
   </Btn>

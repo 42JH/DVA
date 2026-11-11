@@ -125,7 +125,7 @@ function CustomerPanel({ seq, onClose }: { seq: number; onClose: () => void }) {
       <div className="flex h-12 shrink-0 items-center gap-2 border-b border-ops-line px-5">
         <span className="text-[12px] font-medium text-ops-sub">고객 #{seq}</span>
         {v.canEdit && !v.editing && (
-          <Btn kind="warning" className="ml-auto" onClick={v.startEdit}>
+          <Btn kind="editBadge" className="ml-auto" onClick={v.startEdit}>
             수정
           </Btn>
         )}

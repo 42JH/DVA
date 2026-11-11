@@ -10,7 +10,7 @@ import { orderNo, priceBand } from '@/shared/order/labels'
 import { fmtPhone } from '@/shared/lib/format'
 import { useFollowScroll } from '@/features/call/hooks/useFollowScroll'
 import { PageHead } from '@/shared/ui'
-import { Badge, Kinds } from '@/shared/ui'
+import { Badge, Btn, Kinds } from '@/shared/ui'
 import { itemsText, STATUS_LOOK, won } from '@/shared/order/look'
 import { dateTime } from '@/shared/lib/when'
 import { useCallView, type CallView } from '../hooks/useCallView'
@@ -67,30 +67,23 @@ function CallBody({ callId }: { callId: number }) {
                   <Kinds kinds={s.kinds} />
                 </span>
               )}
-              {/* 판정 수 — 오른쪽 아래라 스크롤해야 보여서 위에도 (11/11 검수). 누르면 그 칸으로 */}
+              {/* 판정 수 — 오른쪽 아래라 스크롤해야 보여서 위에도 (11/11 검수). 누르면 그 칸으로
+                  누르는 것이라 상태 칩 모양이 아니라 회색 테두리 버튼 (11/11 버튼 모양) */}
               {[
-                {
-                  id: 'customer-complaints',
-                  n: s.customer.length,
-                  label: '고객 불만',
-                  tone: 'stop' as const,
-                },
-                { id: 'ai-errors', n: s.errors.length, label: 'AI 오류', tone: 'wait' as const },
+                { id: 'customer-complaints', n: s.customer.length, label: '고객 불만' },
+                { id: 'ai-errors', n: s.errors.length, label: 'AI 오류' },
               ].map(
                 (x) =>
                   x.n > 0 && (
-                    <button
+                    <Btn
                       key={x.id}
-                      type="button"
+                      kind="plainBadge"
                       onClick={() =>
                         document.getElementById(`c-${x.id}`)?.scrollIntoView({ behavior: 'smooth' })
                       }
-                      className="rounded outline-none focus-visible:ring-2 focus-visible:ring-ops-route"
                     >
-                      <Badge tone={x.tone}>
-                        {x.label} {x.n}
-                      </Badge>
-                    </button>
+                      {x.label} {x.n}
+                    </Btn>
                   ),
               )}
               <span className="ml-auto">
