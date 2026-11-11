@@ -35,3 +35,4 @@ class ToolContext:
     ops: dict[str, dict] = field(default_factory=dict)       # 쓰기 작업(취소) 상태: 중복 실행 방지
     outputs: dict[str, dict] = field(default_factory=dict)   # call_id → 결과(같은 함수 호출 재수신, F15)
     item_utterance: tuple[int, str] | None = None  # 이 도구 호출과 연결된 고객 발화
+    sender_name_scope: str | None = None          # 같은 발화에서 명시한 새 성함의 적용 범위
