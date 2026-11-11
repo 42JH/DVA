@@ -11,7 +11,7 @@ from pydantic import Field
 
 from app.address.parse import detail_text
 from app.domain.address_book import receiver_questions_deferred
-from app.domain.candidates import apply_pick, offer, reset_receiver_destination
+from app.domain.candidates import apply_pick, offer
 from app.domain.state import DOCUMENT_ITEM_PRICE, CandidateSet, Items, ParcelDraft, Place, Source
 from app.integrations.backend.gateway import BackendFailure
 from app.observability.trace import observe_latency
@@ -128,9 +128,6 @@ async def _new_receiver(ctx: ToolContext, search: tuple[ParcelDraft, int],
         if not _current_search(ctx, search):
             return ToolOutcome("needs_input", "RESULT_SUPERSEDED", summary=state_summary(s, ctx.policy))
         s.candidates = None
-        receiver = s.field_of("receiver_name")
-        if name and receiver.valid and receiver.value != name:
-            reset_receiver_destination(s)
         if name:
             s.record("receiver_name", name, Source.CUSTOMER)
         before = s.field_of("receiver_address")

@@ -6,26 +6,6 @@ from app.domain.store import open_for_edit
 ROLE_FIELDS = ("name", "phone", "address", "address_detail")
 
 
-def reset_receiver_destination(state: ConversationState, *, keep_address: bool = False) -> list[str]:
-    """새 받는 분에게 이전 받는 곳 정보가 붙지 않도록 확인과 연락처를 비운다."""
-    draft = state.current
-    cleared = []
-    fields = ("receiver_phone",) if keep_address else ("receiver_phone", "receiver_address", "receiver_address_detail")
-    for name in fields:
-        version = draft[name].version
-        state.clear(name)
-        if draft[name].version != version:
-            cleared.append(name)
-    if not keep_address:
-        draft.receiver_geo = None
-    if state.candidates and state.candidates.kind == "destination":
-        state.candidates = None
-    if state.pending and state.pending.kind == "parcel":
-        state.pending = None
-        state.address_offer = None
-    return cleared
-
-
 def offer(state: ConversationState, kind: str, labels: tuple[str, ...], items: tuple, *, total: int | None = None) -> None:
     state.candidates = CandidateSet(kind, labels, items, total)
     state.bump()

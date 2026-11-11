@@ -11,15 +11,11 @@ import json
 import logging
 import re
 import time
-from copy import deepcopy
 from dataclasses import dataclass, field, replace
 
 from app.address.matcher import sido_aliases
-from app.address.parse import clean_text, detail_text, parse, split_gil, unlink_gil
-from app.calls import decision_input
-from app.calls.backend_turn import BackendTurn
+from app.address.parse import clean_text, parse, split_gil, unlink_gil
 from app.calls.session import CallSession, Phase
-from app.calls.turn import SHORT_NO, SHORT_YES, TurnInput, TurnPipeline, TurnResult, TurnState, observe_turn
 from app.domain.rules import KST
 from app.domain.address_book import (begin_sender_name_change, origin_confirmation, prefill_sender,
                                      receiver_questions_deferred, request_sender_address_change, save_offer, sender_change_available,
@@ -30,7 +26,7 @@ from app.domain.claims import truth, unverified_claims, unverified_values
 from app.domain.confirm import (ConfirmAnswer, Utterance, asks, asks_parcel_confirmation, check_gate, commit_parcel,
                                 explicitly_requests_parcel, issue_cancel_confirmation, issue_parcel_confirmation,
                                 release, take_cancel)
-from app.domain.state import BOX_SIZE_NAMES, BoxProposal, CandidateSet, ConversationState
+from app.domain.state import BOX_SIZE_NAMES, BoxProposal, ConversationState
 from app.domain.store import hold_unclassified_items, item_issues_pending
 from app.observability.trace import span
 from app.policy.render import decision_questions
@@ -50,15 +46,11 @@ TOOL_LATENCY = {"record_fields": "INFORMATION_INPUT", "find_destination": "ADDRE
 GREETING_ORDER = re.compile(
     r"(?:택배)?접수(?:를)?(?:도와드릴까요|도와드려도될까요|해드릴까요|하시겠어요|하실까요|할까요|하시는건가요)$"
 )
-END_QUESTION = re.compile(r"통화(?:를)?(?:이제)?(?:마칠까요|마무리할까요|종료할까요|끊을까요)$")
+SHORT_YES = re.compile(r"(?:아|어|음)?(?:네|예|응|맞아요|맞습니다|그렇습니다)+")
 GREETING_OTHER_ORIGIN = re.compile(r"(?:네|예|아니요)?(?:오늘은|이번에는)?다른(?:주소|곳)에서"
                                   r"(?:보낼게요|보내려고요|보냅니다|발송할게요|발송하려고요)")
 REGISTERED_ORIGIN_QUESTION = re.compile(
     r"(?:등록된|기존|저장된)발송주소(?:로|에서)(?:그대로)?(?:보내실까요|보내시나요|발송하실까요|발송하시나요)$"
-)
-DESTINATION_QUESTION = re.compile(
-    r"(?P<target>.+?)(?:으?로\s*보내(?:실까요|시나요|시는\s*(?:게|것이)\s*맞(?:으실까요|으신가요|나요))"
-    r"|(?:\s*받는\s*곳)?(?:이|가)\s*맞(?:으실까요|으신가요|나요))$"
 )
 RECEIVER_NAME_QUESTION = re.compile(r"(?:받는|받으시는|받으실)\s*(?:분|사람)|수취인|수령인")
 SENDER_NAME_REFERENCE = re.compile(r"(?:보내는|보내시는|보내실)\s*(?:분|사람|성함|이름)|발송인|송하인|발신자")
@@ -76,24 +68,9 @@ class Spoken:
     readback_id: str | None = None
     sender_name_scope: str | None = None
     scope_decided: asyncio.Event | None = None
-    destination_candidates: CandidateSet | None = None
-    ai_cut: tuple[int, int] | None = None   # 고객 발화가 시작될 때 말하던 AI 발화 (id, 그때까지의 글자 수)
 
     def utterance(self) -> Utterance:
         return Utterance(self.utterance_id, self.start_ms or 0, self.end_ms or 0, self.t_start, self.text, self.readback_id)
-
-
-@dataclass
-class ShadowSample:
-    utterance_id: int
-    ended_t: float
-    before: TurnState
-    task: asyncio.Task | None = None
-    result: TurnResult | None = None
-    status: str = "superseded"
-    shadow_ms: int | None = None
-    spoken_question: str | None = None
-    spoken_ms: int | None = None
 
 
 @dataclass
@@ -111,7 +88,6 @@ class Runtime:
     commit_pid: str | None = None
     ready_notice: str | None = None                    # 다음 AI 발화에 한해 접수를 안내할 수 있는 택배 ID
     readback_id: str | None = None                     # 현재 말할 서버 확인 내용의 pending ID
-    end_check_turn: Spoken | None = None               # 접수 확인과 종료가 동시에 분류된 발화
     n3: int = 0
     sent_hashes: set[str] = field(default_factory=set)
     intent_started: bool = False
@@ -121,9 +97,6 @@ class Runtime:
     confirm_t: float = 0.0                            # 관제: 확인 "네" 발화 끝(→ 담기)
     # 서버 질문(후보·확인·출발지·박스·콜백)에 답하는 발화의 Decision 반영 대기. 같은 턴의 Backend 도구 호출이 기다린다
     deciding: asyncio.Event | None = None
-    shadow_sample: ShadowSample | None = None
-    server_task: asyncio.Task | None = None
-    clarify: tuple[str, int] | None = None            # 선택지를 풀어 다시 물은 열린 질문과 연속 횟수
 
     def cancel(self) -> None:
         for h in (self.endpoint, self.ai_end, self.commit):
@@ -137,19 +110,6 @@ class LiveFlow:
         self.svc = service
         self.cfg = service.d.cfg
         self.policy = service.d.policy
-        self.shadow = None
-        self.server = None
-        self.shadow_tasks: set[asyncio.Task] = set()
-        self.shadow_started = 0
-        if self.cfg.turn_mode == "server":
-            deps = service.d
-            backend = BackendTurn(deps.client, deps.backend_model, deps.backend_effort, deps.policy, server=True)
-            self.server = TurnPipeline(deps.client, backend, deps.policy, self.cfg.decision_budget_sec, self.cfg)
-        elif self.cfg.turn_shadow_enabled:
-            deps = service.d
-            backend = BackendTurn(deps.client, deps.backend_model, deps.backend_effort, deps.policy)
-            self.shadow = TurnPipeline(deps.client, backend, deps.policy, self.cfg.decision_budget_sec, self.cfg)
-            service.on_finalize.append(self._finalize_shadow)
         h = service.handlers
         base_in, base_out = h["session.input_transcript.delta"], h["session.output_transcript.delta"]
         h["session.input_transcript.delta"] = lambda s, ev: (base_in(s, ev), self.on_input(s, ev))
@@ -158,7 +118,6 @@ class LiveFlow:
         h["session.started"] = lambda s, ev: (base_started(s, ev), self.on_started(s))
         h["session.delegation.created"] = self.on_delegation
         h["response.event"] = self.on_response
-        service.error_context = self.error_context
 
     @staticmethod
     def rt(s: CallSession) -> Runtime:
@@ -176,18 +135,10 @@ class LiveFlow:
     def on_input(self, s: CallSession, ev: dict) -> None:
         rt, now = self.rt(s), time.time()
         if rt.cust is None:
-            if rt.server_task and not rt.server_task.done():
-                rt.server_task.cancel()
-            if rt.shadow_sample:
-                try:
-                    self._finish_shadow_sample(s)
-                except Exception as exc:
-                    s.note("Turn shadow", "comparison_error", {"error_type": type(exc).__name__})
             rt.ready_notice = None
             rt.readback_id = None
             rt.seq += 1
-            rt.cust = Spoken(rt.seq, "", ev.get("start_ms") or 0, ev.get("end_ms") or 0, now, now,
-                             ai_cut=(rt.ai[-1].utterance_id, len(rt.ai[-1].text)) if rt.ai else None)
+            rt.cust = Spoken(rt.seq, "", ev.get("start_ms") or 0, ev.get("end_ms") or 0, now, now)
             rt.customer_turns.append(rt.cust)
             del rt.customer_turns[:-12]
         rt.cust.text += ev.get("delta", "")
@@ -213,10 +164,8 @@ class LiveFlow:
             last.end_ms, last.t_last = ev.get("end_ms") or last.end_ms, now
         else:
             rt.seq += 1
-            candidates = s.state.candidates
             rt.ai.append(Spoken(rt.seq, ev.get("delta", ""), ev.get("start_ms") or 0, ev.get("end_ms") or 0,
-                                now, now, ready_parcel_id=rt.ready_notice, readback_id=readback_id,
-                                destination_candidates=candidates if candidates and candidates.kind == "destination" else None))
+                                now, now, ready_parcel_id=rt.ready_notice, readback_id=readback_id))
             rt.ready_notice = None
             del rt.ai[:-20]
             if rt.cust_end_t:  # 새 AI 발화 시작 = 고객 말 끝 뒤 첫 반응
@@ -238,13 +187,9 @@ class LiveFlow:
             rt.cust_end_t = utt.t_last
         if utt and utt.text.strip() and s.phase == Phase.ACTIVE:
             prev = next((a for a in reversed(rt.ai) if a.t_start < utt.t_start), None)
-            if self.server:
-                rt.server_task = s.spawn(self._run_server_turn(s, utt, prev), "server_turn")
-                return
             gate = asyncio.Event() if self._awaiting_answer(s) else None
-            utt.scope_decided = gate
-            if gate is None and s.state.customer.customer_seq and s.state.intent in (None, "order"):
-                utt.scope_decided = asyncio.Event()
+            if s.state.customer.customer_seq and s.state.intent in (None, "order"):
+                utt.scope_decided = gate or asyncio.Event()
             # 위임은 OpenAI 쪽에서 Live가 시작해 서버가 늦출 수 없다. 대신 이 턴의 도구 호출이 반영을 기다린다(최근 발화 기준)
             rt.deciding = gate
             s.spawn(self._judge_customer(s, utt, prev, gate), "decision")
@@ -252,8 +197,7 @@ class LiveFlow:
     def _awaiting_answer(self, s: CallSession) -> bool:
         """서버가 고객 답으로 상태를 바꿀 질문을 열어 두었는가(Decision의 pick·confirm·origin·box·callback)."""
         st = s.state
-        return bool(self.rt(s).end_check_turn or st.candidates or st.pending
-                    or (st.callback_offered and not st.callback_requested)
+        return bool(st.candidates or st.pending or (st.callback_offered and not st.callback_requested)
                     or (st.origin_offered and st.origin_answer is None and not st.origin_applied)
                     or sender_change_available(st) and not (st.current and st.current.sender_name_for_parcel)
                     or (st.current and st.current.ask_customer_name_save)
@@ -275,11 +219,6 @@ class LiveFlow:
     async def _judge_customer(self, s: CallSession, utt: Spoken, prev: Spoken | None,
                               gate: asyncio.Event | None = None) -> None:
         try:
-            if self.shadow:
-                try:
-                    await self._start_shadow(s, utt, prev)
-                except Exception as exc:
-                    s.note("Turn shadow", "snapshot_error", {"error_type": type(exc).__name__})
             await self._judge_customer_inner(s, utt, prev)
         finally:
             if gate is not None:
@@ -307,252 +246,6 @@ class LiveFlow:
         if not judge_first:
             await self.judge(s, utt, prev)
 
-    def _capture_turn(self, s: CallSession, utt: Spoken, prev: Spoken | None, state: ConversationState) -> TurnInput:
-        rt = self.rt(s)
-        # 대답을 기다리는 질문은 AI의 짧은 맞장구로 닫히지 않는다.
-        if prev and SHORT_YES.fullmatch(re.sub(r"[\s,.!?…~]+", "", prev.text)):
-            earlier = next((a for a in reversed(rt.ai) if a.t_start < prev.t_start and a.end_ms <= utt.start_ms
-                            and not SHORT_YES.fullmatch(re.sub(r"[\s,.!?…~]+", "", a.text))), None)
-            preceding_customer = rt.customer_turns[-2] if len(rt.customer_turns) > 1 else None
-            if earlier and (preceding_customer is None or earlier.t_start >= preceding_customer.t_last):
-                prev = earlier
-        heard = bool(prev and utt.start_ms >= prev.end_ms - self.policy.confirm.answer_after_readback_tolerance_ms)
-        greeting = (_greeting_offer(state, prev.text)
-                    if heard and state.intent is None and rt.customer_turns == [utt] else None)
-        spoken_question = _shadow_spoken_question(prev.text) if heard else None
-        origin = bool(heard and (_asked_pending_origin(state, prev.text) or
-                                spoken_question == "ask_address_change" and
-                                sender_change_next(state) == "ask_address_change"))
-        if spoken_question == "box":
-            box = state.current.box_proposal if state.current and not state.pending else None
-            if not box or prev.t_start < box.issued_t or BOX_SIZE_NAMES[box.size] not in prev.text:
-                spoken_question = None
-        candidates = s.state.candidates
-        pick_allowed = bool(heard and candidates and (
-            candidates.kind != "destination" or
-            prev.destination_candidates is candidates and not receiver_questions_deferred(state)))
-        matches = _asked_destinations(candidates, prev.text) if (
-            pick_allowed and candidates.kind == "destination") else []
-        short_yes = SHORT_YES.fullmatch(re.sub(r"[\s,.!?…~]+", "", utt.text))
-        if short_yes and len(matches) > 1:
-            pick_allowed = False
-        draft = state.current
-        expecting_receiver = (state.intent == "order" and draft and draft["sender_name"].valid
-                              and not draft["receiver_name"].valid and not sender_change_next(state)
-                              and not origin_confirmation(state))
-        receiver_name_answer = bool(heard and _asked_receiver_name(prev.text, bool(expecting_receiver))
-                                    and not SENDER_NAME_REFERENCE.search(utt.text))
-        recent, said = self._decision_context(rt, utt)
-        return TurnInput(state, utt.utterance(), prev.utterance() if heard else None, s.tools.now(),
-                         recent_ai=recent, said=said,
-                         greeting=greeting, origin_question=origin,
-                         destination=matches[0] if len(matches) == 1 else None, pick_allowed=pick_allowed,
-                         end_question=bool(heard and _asked_end(rt, prev)), spoken_question=spoken_question,
-                         receiver_name_answer=receiver_name_answer, end_waiting=rt.end_check_turn is not None)
-
-    @staticmethod
-    def _decision_context(rt: Runtime, utt: Spoken) -> tuple[str, str]:
-        """Decision 입력의 (최근 AI 발화, 끊어진 앞 조각을 이어 붙인 고객 발화)."""
-        parts = decision_input.joined(rt.ai, rt.customer_turns, utt, rt.latest_applied)
-        return (decision_input.recent_ai(rt.ai, rt.customer_turns, parts[0], parts[0].ai_cut),
-                " ".join(part.text.strip() for part in parts))
-
-    async def _run_server_turn(self, s: CallSession, utt: Spoken, prev: Spoken | None) -> None:
-        async with s.lock:
-            if not self._current_turn(s, utt):
-                return
-            original = deepcopy(s.state)
-            state = deepcopy(original)
-            tools = replace(s.tools, state=state, lock=asyncio.Lock(), ops={}, outputs={})
-            turn = self._capture_turn(s, utt, prev, state)
-
-        async def before_lookup() -> None:
-            await self.svc.call_session_seq(s)
-            async with s.lock:
-                state.customer = deepcopy(s.state.customer)
-                state.state_version = max(state.state_version, s.state.state_version)
-
-        try:
-            async with asyncio.timeout(self.cfg.server_turn_timeout_sec):
-                result = await self.server.run(replace(turn, tools=tools, before_lookup=before_lookup))
-        except Exception as exc:
-            s.note("Server turn", "failed", {"error_type": type(exc).__name__})
-            await self.notify(s, "N2", {"server_turn_retry": True}, again=True, only_turn=utt)
-            return
-        if d := result.decision:
-            s.stats["Decision 호출"] += 1
-            if "ms" in d:
-                s.decision_ms.append(d["ms"])
-                s.timing("Decision", d["ms"])
-            s.note("Decision", d.get("status") or ", ".join(
-                f"{name}={a['choice']}({a['probabilities'].get(a['choice'], a['confidence']):.2f})"
-                for name, a in d["answers"].items()) + f" {d['ms']}ms", d | {"input_chars": len(d["input"])})
-
-        async with s.lock:
-            if not self._current_turn(s, utt):
-                return
-            # 통화 등록·이력 조회가 갱신한 고객 정보는 유지하고 다른 업무 변경과 충돌한 결과는 버린다.
-            live = s.state
-            stale = replace(live, customer=original.customer, origin_offered=original.origin_offered,
-                            state_version=original.state_version) != original
-            if not stale:
-                state.customer = live.customer
-                state.state_version = max(state.state_version, live.state_version)
-                if state.origin_answer is None and live.origin_offered:
-                    state.origin_offered = True
-                s.tools.state = state
-                self.rt(s).latest_applied = utt.utterance_id  # 뒤에 이어지는 고객 조각을 이 발화에 다시 붙이지 않는다
-                if state.intent:
-                    self._business(s, state.intent)
-                self._sync_intake(s)
-                self._maybe_register(s)
-                if result.state.next_question == "readback" and not state.pending:
-                    self._reissue(s)
-                if result.commit_pending:
-                    self.rt(s).end_check_turn = None
-                    self.rt(s).confirm_t = utt.t_last
-                    self._arm_commit(s, result.commit_pending, only_turn=utt)
-                    return
-        if stale:
-            s.note("Server turn", "stale_state", {"changed": [name for name in vars(original)
-                   if name not in ("customer", "origin_offered", "state_version")
-                   and getattr(live, name) != getattr(original, name)]})
-            await self.notify(s, "N2", {"server_turn_retry": True}, again=True, only_turn=utt)
-            return
-        await self._speak_server_turn(s, utt, result)
-
-    def _current_turn(self, s: CallSession, utt: Spoken) -> bool:
-        turns = self.rt(s).customer_turns
-        return bool(s.phase == Phase.ACTIVE and not s.closed and turns and turns[-1] is utt)
-
-    async def _speak_server_turn(self, s: CallSession, utt: Spoken, result: TurnResult) -> None:
-        if not self._current_turn(s, utt):
-            return
-        question = result.state.next_question
-        rt, state = self.rt(s), s.state
-        if question == "confirm_end":
-            rt.end_check_turn = utt
-            await self.notify(s, "N2", {"end_confirmation": True}, again=True, only_turn=utt)
-            return
-        rt.end_check_turn = None
-        if question in ("end", "agent", "cancel_current"):
-            await self._on_intent(s, question, only_turn=utt)
-            return
-        if question == "closing":
-            await self._finish(s, only_turn=utt)
-            return
-        facts = result.facts.copy()
-        if kind := facts.get("clarify"):
-            count = rt.clarify[1] + 1 if rt.clarify and rt.clarify[0] == kind else 1
-            rt.clarify = (kind, count)
-            s.note("선택지 풀어 다시 묻기", f"{kind} {count}회")
-            if count >= 2:  # 두 번째도 알아듣지 못했다: 상담원 연결을 권한다
-                facts["agent"] = "suggest"
-        else:
-            rt.clarify = None
-        if question in ("edit_parcel", "edit_other_parcel"):
-            async with s.lock:
-                if not self._current_turn(s, utt):
-                    return
-                facts |= self._edit(s, use_lookup=question == "edit_parcel")
-                question = observe_turn(state, self.policy).next_question
-        if result.status in ("response_incomplete", "tool_loop_limit", "tool_unavailable") and not facts:
-            facts["server_turn_retry"] = True
-        if question == "box" and state.current and state.current.box_proposal:
-            box = state.current.box_proposal
-            facts.setdefault("box_proposal", {"label": box.label})
-        pending = state.pending
-        if pending and pending.kind == "parcel" and question == "readback":
-            facts.update(readback=readback_facts(pending.snapshot), readback_id=pending.id,
-                         pickup={"at": state.pickup_at.value})
-        elif pending and pending.kind == "cancel":
-            facts["cancel_target"] = _order_facts(pending.snapshot)
-            question = "cancel_confirmation"
-        if state.candidates and state.candidates.kind == "order":
-            facts["labels"] = list(state.candidates.labels)
-            question = "order_candidates"
-        if any(key in facts for key in ("lookup_order", "context", "needs", "item_review", "current", "found")) \
-                and question not in ("cancel_confirmation", "order_candidates", "destination"):
-            question = "tool_result"
-        s.note("Server turn", result.status, {"utterance_id": utt.utterance_id, "next_question": question,
-                                             "route": result.route, "tool_calls": result.tool_calls})
-        await self.notify(s, "N2", facts | {"summary": state_summary(state, self.policy), "next_question": question},
-                          again=True, only_turn=utt)
-
-    async def _start_shadow(self, s: CallSession, utt: Spoken, prev: Spoken | None) -> None:
-        async with s.lock:
-            rt = self.rt(s)
-            if (s.phase != Phase.ACTIVE or s.closed or s.state.order_submitted or
-                    not rt.customer_turns or rt.customer_turns[-1] is not utt):
-                return
-            if (len(self.shadow_tasks) >= self.cfg.turn_shadow_max_concurrent or
-                    self.shadow_started >= self.cfg.turn_shadow_max_turns):
-                s.stats["Turn shadow 제한"] += 1
-                return
-            turn = self._capture_turn(s, utt, prev, deepcopy(s.state))
-            sample = ShadowSample(utt.utterance_id, utt.t_last, observe_turn(turn.state, self.policy))
-            task = s.spawn(self._run_shadow(turn, sample), "turn_shadow")
-            if task is not None:
-                sample.task = task
-                rt.shadow_sample = sample
-                self.shadow_started += 1
-                self.shadow_tasks.add(task)
-                task.add_done_callback(self.shadow_tasks.discard)
-
-    async def _run_shadow(self, turn: TurnInput, sample: ShadowSample) -> None:
-        try:
-            async with asyncio.timeout(self.cfg.turn_shadow_timeout_sec):
-                sample.result = await self.shadow.run(turn)
-                sample.status = sample.result.status
-        except TimeoutError:
-            sample.status = "timeout"
-        except Exception as exc:
-            sample.status = f"error:{type(exc).__name__}"
-        finally:
-            sample.shadow_ms = max(0, round((time.time() - sample.ended_t) * 1000))
-
-    async def _finalize_shadow(self, s: CallSession) -> None:
-        if s.rt and (sample := s.rt.shadow_sample) and sample.status == "superseded":
-            sample.status = "call_ended"
-        self._finish_shadow_sample(s)
-
-    def _finish_shadow_sample(self, s: CallSession) -> None:
-        rt = self.rt(s)
-        sample, rt.shadow_sample = rt.shadow_sample, None
-        if sample is None:
-            return
-        if sample.task and not sample.task.done():
-            sample.task.cancel()
-        if sample.spoken_question is None:
-            for spoken in rt.ai:
-                if spoken.t_start >= sample.ended_t and (question := _shadow_spoken_question(spoken.text)):
-                    sample.spoken_question = question
-                    sample.spoken_ms = round((spoken.t_start - sample.ended_t) * 1000)
-                    break
-        baseline = observe_turn(s.state, self.policy, "end" if s.close_reason == "customer_end" else None)
-        result = sample.result
-        data = {"utterance_id": sample.utterance_id, "status": sample.status,
-                "legacy_state_question": baseline.next_question, "legacy_spoken_question": sample.spoken_question,
-                "legacy_spoken_ms": sample.spoken_ms, "shadow_ready_ms": sample.shadow_ms}
-        if result is not None:
-            before, after = sample.before.fields, result.state.fields
-            differing = sorted(name for name in baseline.fields.keys() | after.keys()
-                               if baseline.fields.get(name) != after.get(name))
-            data.update(
-                route=result.route, shadow_question=result.state.next_question, tool_calls=result.tool_calls,
-                address_unverified=result.address_unverified,
-                differing_fields=differing,
-                legacy_changed_fields=sorted(name for name in baseline.fields.keys() | before.keys()
-                                             if baseline.fields.get(name) != before.get(name)),
-                shadow_changed_fields=sorted(name for name in after.keys() | before.keys()
-                                             if after.get(name) != before.get(name)),
-                parcel_count_matches=baseline.parcels == result.state.parcels,
-            )
-            if sample.before.candidate_kind == "destination":
-                data["destination_matches"] = (baseline.candidate_kind == result.state.candidate_kind and
-                                               not any(name.startswith("receiver_") for name in differing))
-        s.note("Turn shadow", sample.status, data)
-
     def _ai_done(self, s: CallSession) -> None:
         """AI 발화 끝: 결과 문구 검사(LLM 없음, delegation.md §6.2-5)·말한 번호·호수 대조(기록만)."""
         rt = self.rt(s)
@@ -560,10 +253,6 @@ class LiveFlow:
         if not rt.ai:
             return
         spoken = rt.ai[-1]
-        if (sample := rt.shadow_sample) and sample.spoken_question is None and spoken.t_start >= sample.ended_t:
-            if question := _shadow_spoken_question(spoken.text):
-                sample.spoken_question = question
-                sample.spoken_ms = round((spoken.t_start - sample.ended_t) * 1000)
         if rt.readback_id and spoken.readback_id == rt.readback_id and asks_parcel_confirmation(spoken.text):
             rt.readback_id = None
         if wrong := unverified_values(spoken.text, s.state):  # 측정만: 기억으로 답했거나 잘못 읽은 번호·호수
@@ -584,7 +273,6 @@ class LiveFlow:
             rt = self.rt(s)
             stage = assess(s.state, self.policy).stage
             heard_question = prev and utt.start_ms >= prev.end_ms - self.policy.confirm.answer_after_readback_tolerance_ms
-            end_question = heard_question and _asked_end(rt, prev)
             greeting = (_greeting_offer(s.state, prev.text)
                         if stage == "intent" and heard_question and rt.customer_turns == [utt] else None)
             origin_question = bool(heard_question and _asked_pending_origin(s.state, prev.text))
@@ -594,9 +282,6 @@ class LiveFlow:
             candidates = s.state.candidates
             pick = candidates.labels if candidates and not (
                 candidates.kind == "destination" and receiver_questions_deferred(s.state)) else ()
-            destination_question = bool(heard_question and pick and candidates.kind == "destination"
-                                        and prev.destination_candidates is candidates
-                                        and s.state.intent == "order" and not pending)
             pending_id = pending.id if pending else None
             callback = s.state.callback_offered and not s.state.callback_requested
             current = s.state.current
@@ -608,10 +293,7 @@ class LiveFlow:
                                                                            "item", "readback"))
             box = current.box_proposal if current and s.state.intent == "order" and not pending else None
             cancel_current = s.tools.draft_intake and current is not None and not current.empty()
-        reply = re.sub(r"[\s,.!?…~]+", "", utt.text)
-        if end_question and (SHORT_YES.fullmatch(reply) or SHORT_NO.fullmatch(reply)):
-            await self.apply(s, utt, prev, {"switch": ("end" if SHORT_YES.fullmatch(reply) else "none", 1.0)}, pending_id)
-            return
+        reply = re.sub(r"[\s,.!?…~]+", "", utt.text) if greeting or origin_question else ""
         other_origin = GREETING_OTHER_ORIGIN.fullmatch(reply)
         if greeting and (other_origin or SHORT_YES.fullmatch(reply)):
             answers = {"task": ("order", 1.0)}
@@ -626,18 +308,6 @@ class LiveFlow:
             s.note("Decision", "발송 주소 확인 동의")
             await self.apply(s, utt, prev, {"origin": ("yes", 1.0)}, pending_id)
             return
-        if destination_question and SHORT_YES.fullmatch(reply):
-            matching_labels = _asked_destinations(candidates, prev.text)
-            if len(matching_labels) == 1:
-                s.note("Decision", "받는 곳 후보 확인 동의")
-                await self.apply(s, utt, prev, {"pick": (matching_labels[0], 1.0)}, pending_id,
-                                 expected_candidates=candidates, direct_pick=True)
-                return
-            if len(matching_labels) > 1:
-                pick = ()  # 같은 기본주소의 여러 후보 중에는 짧은 동의로 고를 수 없다.
-        if pick and prev and prev.destination_candidates is not None and prev.destination_candidates is not candidates \
-                and SHORT_YES.fullmatch(reply):
-            pick = ()  # 이미 바뀐 받는 곳 후보에는 예전 질문의 짧은 답을 적용할 수 없다.
         # readback 단계는 확인 대기가 풀려 있어도 confirm을 듣는다(Live가 스스로 확인 질문을 하면 '네'가 갈 곳이 없음, 운영 통화 56c133c8)
         questions = decision_questions(self.policy, stage, pending=pending is not None or stage == "readback",
                                        pick_labels=pick, callback=callback, origin=origin,
@@ -647,10 +317,7 @@ class LiveFlow:
         if not questions:
             return  # 선택형 판단이 없는 단계: 부르지 않는다
         s.stats["Decision 호출"] += 1
-        async with s.lock:
-            text, kind = decision_input.render(s.state, self.policy, *self._decision_context(rt, utt),
-                                               end_waiting=rt.end_check_turn is not None,
-                                               open_line=self.cfg.decision_open_question)
+        text = f"직전 AI 발화: {prev.text.strip() if prev else '(없음)'}\n고객 발화: {utt.text.strip()}"
         started = time.monotonic()
         call = asyncio.ensure_future(self.svc.d.client.decisions.create(
             model="gpt-6-luna", input=text, questions=questions))
@@ -679,19 +346,13 @@ class LiveFlow:
         s.decision_ms.append(ms)
         s.timing("Decision", ms)
         answers = {a.name: _answer(a) for a in d.answers if a.type == "choice"}
-        if not pick:
-            answers.pop("pick", None)
-        if kind == "address_change" and (og := answers.get("origin")) and og[0] in ("yes", "no"):
-            # '발송 주소도 바꿀지'의 예는 등록 주소를 쓰지 않는다는 뜻이다(origin no).
-            answers["origin"] = ("no" if og[0] == "yes" else "yes", *og[1:])
         if greeting in ("order", "origin_mentioned") and answers.get("origin", (None,))[0] == "yes":
             answers.pop("origin")  # 인사에서 등록 주소를 대조하지 못했으면 사용 여부는 별도로 묻는다.
         s.note("Decision", ", ".join(f"{k}={v[0]}({v[1]:.2f})" for k, v in answers.items()) + f" {ms}ms",
-               {"stage": stage, "pending": pending_id, "input": text, "ms": ms, "open_question": kind,
-                "input_chars": len(text), "answers": {k: {"choice": v[0], "confidence": round(v[1], 3), "probabilities": v[2]}
+               {"stage": stage, "pending": pending_id, "input": text, "ms": ms,
+                "answers": {k: {"choice": v[0], "confidence": round(v[1], 3), "probabilities": v[2]}
                             for k, v in answers.items()}})
-        await self.apply(s, utt, prev, answers, pending_id, box=box, greeting=bool(greeting),
-                         expected_candidates=candidates if pick else None)
+        await self.apply(s, utt, prev, answers, pending_id, box=box, greeting=bool(greeting))
 
     async def _clarify_greeting(self, s: CallSession, utt: Spoken) -> None:
         async with s.lock:
@@ -700,8 +361,7 @@ class LiveFlow:
         s.spawn(self.notify(s, "N2", {"greeting_confirmation": "ask_intent"}), "clarify_greeting")
 
     async def apply(self, s: CallSession, utt: Spoken, prev: Spoken | None, answers: dict, pending_id: str | None,
-                    *, box: BoxProposal | None = None, greeting: bool = False,
-                    expected_candidates: CandidateSet | None = None, direct_pick: bool = False):
+                    *, box: BoxProposal | None = None, greeting: bool = False):
         rt, st, th = self.rt(s), s.state, self.cfg.decision_min_confidence
         followups = []
         async with s.lock:
@@ -710,48 +370,8 @@ class LiveFlow:
                 return
             if greeting and (rt.customer_turns != [utt] or st.intent is not None):
                 return
-            if direct_pick and (st.intent != "order" or st.pending
-                                or rt.customer_turns and rt.customer_turns[-1] != utt):
-                return
             rt.latest_applied = utt.utterance_id
             switch = answers.get("switch")
-            confirmation = answers.get("confirm")
-            end_requested = switch and switch[0] == "end" and switch[1] >= th
-            confirmation_yes = (confirmation and confirmation[0] in ("yes", "proceed")
-                                and confirmation[1] >= self.policy.confirm.yes_min)
-            if end_requested and confirmation_yes and pending_id and (not st.pending or st.pending.id != pending_id):
-                return  # 판단을 요청했을 때의 확인 대기가 바뀌었다.
-            parcel_agreed = pending_id and st.pending and st.pending.kind == "parcel" and confirmation_yes
-            if rt.end_check_turn:
-                reply = re.sub(r"[\s,.!?…~]+", "", utt.text)
-                heard_end_question = (prev and _asked_end(rt, prev)
-                                      and utt.start_ms >= prev.end_ms - self.policy.confirm.answer_after_readback_tolerance_ms)
-                if heard_end_question:
-                    rt.end_check_turn = None
-                    if SHORT_YES.fullmatch(reply) or end_requested and not confirmation_yes and not SHORT_NO.fullmatch(reply):
-                        switch = ("end", 1.0)
-                        answers = {"switch": switch}
-                    else:
-                        answers = {key: answer for key, answer in answers.items() if key != "confirm"}
-                        if end_requested:
-                            switch = None
-                            answers.pop("switch")
-                        if st.pending and (not switch or switch[1] < th or switch[0] == "none"):
-                            followups.append(("ask_confirm", st.pending.id))
-                elif SHORT_YES.fullmatch(reply) or (end_requested and parcel_agreed):
-                    return  # 종료 질문을 듣기 전의 동의는 어느 쪽으로도 확정하지 않는다.
-                else:
-                    rt.end_check_turn = None
-            elif end_requested and parcel_agreed:
-                if rt.customer_turns and rt.customer_turns[-1] != utt:
-                    return
-                rt.end_check_turn = utt
-                if rt.commit:
-                    rt.commit.cancel()
-                    rt.commit = rt.commit_pid = None
-                s.note("Decision", "접수 동의와 통화 종료가 겹침")
-                s.spawn(self.notify(s, "N2", {"end_confirmation": True}, again=True), "confirm_end")
-                return
             if switch and switch[1] >= th and switch[0] in ("agent", "end", "cancel_current"):
                 # 연결·종료·현재 택배 취소 요청이 섞인 "네"는 접수 확인으로 처리하지 않는다.
                 answers = {"switch": switch}
@@ -842,7 +462,6 @@ class LiveFlow:
                 st.awaiting_fix = True  # 고친 값이 올 때까지 되읽기를 다시 열지 않는다
             picked_lookup = False
             if ((p := answers.get("pick")) and p[1] >= th
-                    and (expected_candidates is None or st.candidates is expected_candidates)
                     and not (st.candidates and st.candidates.kind == "destination" and receiver_questions_deferred(st))):
                 kind = st.candidates.kind if st.candidates else None
                 if p[0] == "none":
@@ -862,38 +481,16 @@ class LiveFlow:
             if (w := answers.get("switch")) and w[1] >= th and w[0] != "none" and not sender_change \
                     and not (origin_change and w[0] == "edit_parcel") \
                     and not (picked_lookup and w[0] == "lookup"):
-                if w[0] == "edit_other_parcel" and st.parcels:
-                    followups.append(("intent", w[0]))
-                elif w[0] != "edit_other_parcel" and (w[0] != "edit_parcel" or st.selected_order
-                        or st.parcels and (not st.current or st.current.empty())):
-                    followups.append(("intent", w[0]))
+                followups.append(("intent", w[0]))
             if (m := answers.get("more")) and m[1] >= th and m[0] == "no_more" and st.parcels:
                 followups.append(("no_more", None))
             if (cb := answers.get("callback")) and cb[1] >= th and cb[0] in ("yes", "no") and st.callback_offered:
                 st.callback_offered = False
                 st.callback_requested = cb[0] == "yes"
                 followups.append(("callback", cb[0]))
-        after_decision = []
-        for followup in filter(None, followups):
-            what, value = followup
-            if utt.scope_decided and not utt.scope_decided.is_set() and (
-                    what in ("hold", "ask_confirm_after_delegation", "ask_confirm", "lookup_picked",
-                             "box_answer", "callback", "no_more") or followup == ("intent", "end")):
-                after_decision.append(followup)
-            else:
-                await self._follow(s, what, value)
-        if after_decision:
-            s.spawn(self._follow_after_decision(s, utt, after_decision), "decision_followup")
-
-    async def _follow_after_decision(self, s: CallSession, utt: Spoken, followups: list[tuple]) -> None:
-        # 도구가 기다리는 Decision 완료 신호를 먼저 열어야 이 후속 작업에서 같은 도구의 완료를 기다릴 수 있다.
-        await utt.scope_decided.wait()
-        rt = self.rt(s)
-        for what, value in followups:
-            if s.phase != Phase.ACTIVE or rt.latest_applied != utt.utterance_id or (
-                    rt.customer_turns and rt.customer_turns[-1] != utt):
-                return
-            await self._follow(s, what, value)
+        for f in followups:
+            if f:
+                await self._follow(s, *f)
 
     def _on_confirm(self, s: CallSession, utt: Spoken, prev: Spoken | None, ans: tuple, pending_id: str):
         """잠금 안. yes → 관문(G1~G5) → G6(같은 발화 위임 보류) → 확정 지연 / no·change → 즉시 해제."""
@@ -927,7 +524,7 @@ class LiveFlow:
         """잠금 안. readback 단계인데 확인 대기가 없으면(no·change로 푼 뒤 값이 다시 갖춰짐) 현재 값으로 다시 연다.
         고친 값을 기다리는 중(awaiting_fix)이면 열지 않는다(거절 직후 같은 내용을 되읽지 않게)."""
         st = s.state
-        if s.closed or self.rt(s).end_check_turn or st.pending or st.awaiting_fix or not st.pickup_at.valid or sender_change_next(st) \
+        if s.closed or st.pending or st.awaiting_fix or not st.pickup_at.valid or sender_change_next(st) \
                 or st.candidates and st.candidates.kind == "destination" \
                 or assess(st, self.policy).stage != "readback":
             return None
@@ -946,28 +543,22 @@ class LiveFlow:
         if pid:
             await self._follow(s, "ask_confirm", pid)
 
-    def _arm_commit(self, s: CallSession, pending_id: str, *, only_turn: Spoken | None = None) -> None:
+    def _arm_commit(self, s: CallSession, pending_id: str) -> None:
         rt = self.rt(s)
         if rt.commit:
             rt.commit.cancel()
         rt.commit_pid = pending_id
-        def schedule() -> None:
-            if only_turn:
-                s.spawn(self.commit(s, pending_id, only_turn=only_turn), "commit")
-            else:
-                s.spawn(self.commit(s, pending_id), "commit")
+        rt.commit = asyncio.get_running_loop().call_later(
+            self.cfg.commit_delay_ms / 1000, lambda: s.spawn(self.commit(s, pending_id), "commit"))
 
-        rt.commit = asyncio.get_running_loop().call_later(self.cfg.commit_delay_ms / 1000, schedule)
-
-    async def commit(self, s: CallSession, pending_id: str, *, only_turn: Spoken | None = None) -> None:
+    async def commit(self, s: CallSession, pending_id: str) -> None:
         rt = self.rt(s)
         rt.commit = rt.commit_pid = None
         draft_save = None
         draft_cancel = None
         is_draft_cancel = False
         async with s.lock:
-            if (s.closed or only_turn and not self._current_turn(s, only_turn)
-                    or rt.end_check_turn or not s.state.pending or s.state.pending.id != pending_id):
+            if s.closed or not s.state.pending or s.state.pending.id != pending_id:
                 return
             kind = s.state.pending.kind
             if kind == "parcel":
@@ -997,11 +588,7 @@ class LiveFlow:
                 if s.tools.draft_intake:
                     facts["draft_intake"] = self.svc.intake.confirmed_status(s, facts["parcel_added"])
                 s.note("담기", facts["parcel_added"])
-                facts["summary"] = state_summary(s.state, self.policy)
-                if only_turn:
-                    await self.notify(s, "N2", facts, only_turn=only_turn)
-                else:
-                    await self.notify(s, "N2", facts)
+                await self.notify(s, "N2", facts | {"summary": state_summary(s.state, self.policy)})
             return
         if target:  # 취소: 서버 전용 실행, 결과는 N2
             t0 = time.monotonic()
@@ -1103,12 +690,8 @@ class LiveFlow:
             s.note("콜백", value)
             await self.notify(s, "N2", {"agent": "callback_registered" if value == "yes" else "callback_declined"})
         elif what == "no_more":
-            rt = self.rt(s)
-            turn = rt.customer_turns[-1] if rt.customer_turns else None
             await self._wait_delegations(s)
             async with s.lock:
-                if s.phase != Phase.ACTIVE or rt.customer_turns and rt.customer_turns[-1] != turn:
-                    return
                 st.no_more_parcels = True
                 done = assess(st, self.policy).stage == "closing"
             if done:  # 접수 완료 단계 → 결과로 마무리 인사 뒤 끊는다
@@ -1143,22 +726,19 @@ class LiveFlow:
             facts["needs"] = out.needs
         await self.notify(s, "N2", facts)
 
-    async def _on_intent(self, s: CallSession, intent: str, *, greeting_turn: Spoken | None = None,
-                         only_turn: Spoken | None = None) -> None:
+    async def _on_intent(self, s: CallSession, intent: str, *, greeting_turn: Spoken | None = None) -> None:
         st = s.state
         if intent in BUSINESS:
             self._business(s, intent)
         async with s.lock:
-            if only_turn and not self._current_turn(s, only_turn):
-                return
             if intent == "end":
                 if st.parcels and not st.no_more_parcels and assess(st, self.policy).stage == "more_parcels":
                     st.no_more_parcels = True
                     facts = {"more_parcels": False, "closing": True}
                 else:
                     facts = {"closing": True}
-            elif intent in ("edit_parcel", "edit_other_parcel"):
-                facts = self._edit(s, use_lookup=intent == "edit_parcel")
+            elif intent == "edit_parcel":
+                facts = self._edit(s)
             elif intent == "cancel_current" and s.tools.draft_intake:
                 target = self.svc.intake.current_target(s)
                 if target:
@@ -1187,21 +767,15 @@ class LiveFlow:
             # 이 발화의 도구는 Decision 반영을 기다린다. 안내가 도구를 기다리며 서로 막히지 않도록 별도 작업으로 보낸다.
             s.spawn(self.notify(s, "N2", facts, unless_tool_turn=greeting_turn), "greeting_order")
         else:
-            level = "N2" if only_turn or facts.get("closing") or "agent" in facts or "cancel_target" in facts else "N1'"
-            if only_turn:
-                await self.notify(s, level, facts, again=True, only_turn=only_turn)
-            else:
-                await self.notify(s, level, facts)
+            await self.notify(s, "N2" if facts.get("closing") or "agent" in facts or "cancel_target" in facts else "N1'", facts)
         if facts.get("closing"):
-            if only_turn and not self._current_turn(s, only_turn):
-                return
             self.svc.begin_closing(s, "customer_end", after_speech=True,  # 마무리 인사 뒤 끊는다(S6: 결과 전송)
                                    remind=lambda: self.notify(s, "N2", facts, again=True))
 
-    async def _finish(self, s: CallSession, *, only_turn: Spoken | None = None) -> None:
+    async def _finish(self, s: CallSession) -> None:
         """접수 완료 단계(assess closing): 결과를 closing_result_wait_sec까지 기다려 그 상태로 마무리 인사(N2 closing)를
         시키고 끊는다. 고객이 먼저 끝냈거나 이미 끝나는 중이면 하지 않는다."""
-        if s.phase != Phase.ACTIVE or only_turn and not self._current_turn(s, only_turn):
+        if s.phase != Phase.ACTIVE:
             return
         self._maybe_submit(s, force=True)
         results = getattr(self.svc, "results", None)
@@ -1210,16 +784,11 @@ class LiveFlow:
             t0 = time.monotonic()
             await asyncio.wait({task}, timeout=self.cfg.closing_result_wait_sec)  # 실패·초과여도 pending으로 마무리
             s.timing("마무리 결과 대기", (time.monotonic() - t0) * 1000)
-        if s.phase != Phase.ACTIVE or only_turn and not self._current_turn(s, only_turn):
+        if s.phase != Phase.ACTIVE:
             return
         facts = {"more_parcels": False, "closing": True, "order": _order_status(s)}
         s.note("마무리", "접수 완료 단계")
-        if only_turn:
-            await self.notify(s, "N2", facts, only_turn=only_turn)
-        else:
-            await self.notify(s, "N2", facts)
-        if only_turn and not self._current_turn(s, only_turn):
-            return
+        await self.notify(s, "N2", facts)
         self.svc.begin_closing(s, "flow_complete", after_speech=True,
                                remind=lambda: self.notify(s, "N2", facts, again=True))
 
@@ -1382,11 +951,6 @@ class LiveFlow:
     def on_delegation(self, s: CallSession, ev: dict) -> None:
         d = ev.get("delegation") or {}
         s.stats["위임"] += 1
-        if getattr(self, "server", None):
-            if d.get("target") == "client" and d.get("id"):
-                s.spawn(self.send(s, {"type": "session.thinking.append", "delegation_id": d["id"], "content": ""}),
-                        "server_delegation")
-            return
         said = next((r["text"] for r in reversed(s.transcript) if r["speaker"] == "customer"), None)
         s.note("위임 시작", f"{(d.get('id') or '_')[-6:]} offset={ev.get('offset_ms')}",
                {"delegation": d.get("id"), "target": d.get("target"), "response_id": d.get("response_id"),
@@ -1398,24 +962,12 @@ class LiveFlow:
         return self.rt(s).delegations.setdefault(delegation_id or "_", {
             "offset_ms": None, "inflight": 0, "outputs": 0, "completed": False, "done": asyncio.Event(), "t": time.time()})
 
-    def error_context(self, s: CallSession) -> dict:
-        """Live 오류 시점: AI·고객이 말하는 중이었는지, 열린 위임(겹침으로 거절됐는지 판별용)."""
-        now, rt = time.time(), self.rt(s)
-        return {"ai_output_ago_ms": round((now - s.last_output_t) * 1000) if s.last_output_t else None,
-                "customer_speaking": rt.cust is not None,
-                "delegations": [{"id": str(did)[-6:], "inflight": d["inflight"], "outputs": d["outputs"],
-                                 "completed": d["completed"], "done": d["done"].is_set(),
-                                 "age_ms": round((now - d["t"]) * 1000)}
-                                for did, d in rt.delegations.items() if now - d["t"] < 30.0]}
-
     def _open(self, s: CallSession) -> list[dict]:
         """진행 중으로 볼 위임: 끝나지 않았고 15초 안에 시작한 것(완료 이벤트를 못 받은 위임이 대기를 붙잡지 않게)."""
         now = time.time()
         return [d for d in self.rt(s).delegations.values() if not d["done"].is_set() and now - d["t"] < 15.0]
 
     def on_response(self, s: CallSession, ev: dict) -> None:
-        if getattr(self, "server", None):
-            return
         inner = ev.get("event") or {}
         t, did = inner.get("type"), ev.get("delegation_id")
         if t == "response.output_item.done" and (inner.get("item") or {}).get("type") == "function_call":
@@ -1443,7 +995,6 @@ class LiveFlow:
                 s.spawn(self._reopen_readback(s, d), "reopen")
         elif t == "response.created":
             self._dl(s, did)["completed"] = False
-            s.note("Backend 응답 시작", str(did)[-6:], {"delegation": did, "response_id": (inner.get("response") or {}).get("id")})
 
     async def call_tool(self, s: CallSession, did, item: dict) -> None:
         name, call_id = item.get("name"), item.get("call_id")
@@ -1542,7 +1093,7 @@ class LiveFlow:
             self.rt(s).await_speech = ("재개→AI 발화", time.time())
             offer = d.pop("readback_offer", None)
             marked = offer is not None and self._mark_readback(s, *offer)
-            delivered = await self.send(s, {"type": "response.create"}, about=f"재개 {str(did)[-6:]}")
+            delivered = await self.send(s, {"type": "response.create"})
             if marked:
                 if delivered:
                     d["readback_sent_id"] = offer[0]
@@ -1577,21 +1128,15 @@ class LiveFlow:
 
     # ------------------------------------------------------------------ 전달(N1'/N2/N3)
     async def notify(self, s: CallSession, level: str, facts: dict, again: bool = False,
-                     *, unless_tool_turn: Spoken | None = None, only_turn: Spoken | None = None) -> None:
+                     *, unless_tool_turn: Spoken | None = None) -> None:
         """N1' thinking(무음) · N2 commentary(말할 것, AI 발화가 멈춘 뒤·진행 위임 뒤) · N3 instructions(정정, 상한).
         again: 같은 내용이라도 다시 보낸다(마무리 인사 재요청)."""
         rt = self.rt(s)
-        if only_turn and not self._current_turn(s, only_turn):
-            return
         readback_id = facts.get("readback_id")
-        end_check_turn = rt.end_check_turn if facts.get("end_confirmation") else None
         readback_turn = rt.customer_turns[-1].utterance_id if rt.customer_turns else 0
         if readback_id:
             facts = {key: value for key, value in facts.items() if key != "readback_id"}
         content = json.dumps(facts, ensure_ascii=False, sort_keys=True)
-        if only_turn and len(content) > 1700:
-            facts = _compact_server_facts(facts)
-            content = json.dumps(facts, ensure_ascii=False, sort_keys=True)
         h = hashlib.sha256(f"{level}:{readback_id}:{content}".encode()).hexdigest()
         if h in rt.sent_hashes and not again:
             return  # 같은 내용 중복 송신 안 함(§6.3)
@@ -1606,11 +1151,6 @@ class LiveFlow:
             receipt_pid = facts.get("parcel_added") if facts.get("draft_intake") == "ready" else None
             t0 = time.monotonic()
             await self._wait_quiet(s, min_quiet_ms=self.cfg.utterance_gap_ms if receipt_pid else 0)
-            if only_turn and not self._current_turn(s, only_turn):
-                return
-            if facts.get("end_confirmation") and (
-                    end_check_turn is None or rt.end_check_turn is not end_check_turn or s.phase != Phase.ACTIVE):
-                return
             if unless_tool_turn:
                 turn = unless_tool_turn
                 if not rt.customer_turns or rt.customer_turns[-1] != turn or s.state.intent != "order":
@@ -1666,35 +1206,15 @@ class LiveFlow:
         while self.rt(s).cust is not None and time.monotonic() < deadline:
             await asyncio.sleep(0.05)
 
-    async def send(self, s: CallSession, event: dict, about: str | None = None) -> bool:
+    async def send(self, s: CallSession, event: dict) -> bool:
         if s.sideband is None or s.phase in (Phase.CLOSED, Phase.FAILED, Phase.FINALIZING, Phase.DONE):
             return False
-        event_id = s.next_event_id()
-        s.sent[event_id] = _sent_summary(event, about)
-        while len(s.sent) > SENT_KEPT:
-            del s.sent[next(iter(s.sent))]
         try:
-            await s.sideband.send(event | {"event_id": event_id})
+            await s.sideband.send(event | {"event_id": s.next_event_id()})
         except Exception as e:
             log.warning("송신 실패 %s %s %s", s.call_id, event.get("type"), type(e).__name__)
-            s.note("송신 실패", f"{event.get('type')} {type(e).__name__}", {"event_id": event_id, "sent": s.sent.get(event_id)})
             return False
         return True
-
-
-SENT_KEPT = 64
-
-
-def _sent_summary(event: dict, about: str | None) -> dict:
-    """Live 오류가 가리키는 이벤트를 알아볼 만큼만(본문 전체는 통화 기록의 전달·도구 사건에 이미 있다)."""
-    summary = {"type": event.get("type"), "at": time.time()}
-    if item := event.get("item"):
-        summary |= {"item_type": item.get("type"), "call_id": item.get("call_id")}
-    if content := event.get("content"):
-        summary["content"] = content[:120]
-    if about:
-        summary["about"] = about
-    return summary
 
 
 def _transcript(s: CallSession, speaker: str, u: Spoken) -> None:
@@ -1739,90 +1259,13 @@ def _last_question(text: str) -> str:
     return re.split(r"[.!?…]", text.rstrip(" .!?…"))[-1]
 
 
-def _compact_server_facts(facts: dict) -> dict:
-    compact = dict(facts)
-    if "summary" in compact:
-        compact["summary"] = {key: value for key, value in compact["summary"].items() if key != "fields"}
-    if isinstance(context := compact.get("context"), dict):
-        evidence = context.get("evidence") or []
-        compact["context"] = {"status": context.get("status"), "evidence": []}
-        for row in evidence:
-            compact["context"]["evidence"].append(row)
-            if len(json.dumps(compact, ensure_ascii=False)) > 1700:
-                compact["context"]["evidence"].pop()
-                break
-        if not compact["context"]["evidence"]:
-            compact["answerable"] = False
-    if len(json.dumps(compact, ensure_ascii=False)) > 1700:
-        return {"server_turn_retry": True}
-    return compact
-
-
-def _shadow_spoken_question(text: str) -> str | None:
-    """비교용 질문 종류. 판별할 수 없는 발화는 전사 원문 대신 None을 남긴다."""
-    if not asks(text):
-        return None
-    question = _last_question(text).strip()
-    compact = "".join(question.split())
-    if END_QUESTION.search(compact):
-        return "confirm_end"
-    if re.search(r"(?:더|추가로)\s*보낼|더\s*보내실", question):
-        return "more_parcels"
-    if "콜백" in question or ("연락" in question and "담당자" in question):
-        return "callback"
-    if "박스" in question and any(size in question for size in BOX_SIZE_NAMES.values()):
-        return "box"
-    if re.search(r"어떤\s*(?:물품|물건)|무엇을\s*보내", question):
-        return "items"
-    if RECEIVER_NAME_QUESTION.search(question):
-        if re.search(r"성함|이름", question):
-            return "receiver_name"
-        if re.search(r"전화|연락처", question):
-            return "receiver_phone"
-        if "주소" in question:
-            return "receiver_address_detail" if "상세" in question else "receiver_address"
-    if re.search(r"발송|보내는\s*곳", question) and re.search(r"보내실까요|보내시나요|발송하실까요|발송하시나요", question):
-        return "origin"
-    if "발송주소" in compact and re.search(r"바꾸시겠어요|변경하시겠어요", compact):
-        return "ask_address_change"
-    if "접수" in compact and asks_parcel_confirmation(compact):
-        return "readback"
-    if DESTINATION_QUESTION.search(question):
-        return "destination"
-    return None
-
-
-def _asked_end(rt: Runtime, prev: Spoken) -> bool:
-    return bool(rt.end_check_turn and prev.t_start >= rt.end_check_turn.t_last
-                and END_QUESTION.search("".join(_last_question(prev.text).split())))
-
-
 def _asked_pending_origin(state: ConversationState, text: str) -> bool:
     origin = origin_confirmation(state)
     if not origin or not asks(text):
         return False
-    if REGISTERED_ORIGIN_QUESTION.search("".join(_last_question(text).split())):
+    if origin == "registered" and REGISTERED_ORIGIN_QUESTION.search("".join(_last_question(text).split())):
         return True
     return _greeting_offer(state, text) == "registered_origin"
-
-
-def _asked_destinations(candidates: CandidateSet, text: str) -> list[str]:
-    """들은 질문이 가리킬 수 있는 현재 후보의 이름표."""
-    if not asks(text) or not (question := DESTINATION_QUESTION.search(_last_question(text).strip())):
-        return []
-    target = re.sub(r"\s*받는\s*곳$", "", question["target"]).strip()
-    label = "".join(detail_text(target).split())
-    # 번호를 읽는 전사에서 '구 길'처럼 쪼개지는 길 번호를 기존 주소 파서에 맞춘다.
-    address = clean_text(re.sub(r"(?<=[가-힣])\s+(?=길\b)", "", target))
-    heard = [part for form in (address, split_gil(address), unlink_gil(address)) if form for part in parse(form)]
-    matches = []
-    for name, place in zip(candidates.labels, candidates.items):
-        if label == "".join(detail_text(name).split()) or any(
-                number and number == spoken_number and branch == spoken_branch and head[-len(spoken):] == spoken
-                for head, branch, number in parse(clean_text(place.address))
-                for spoken, spoken_branch, spoken_number in heard if spoken):
-            matches.append(name)
-    return matches
 
 
 def _asked_receiver_name(text: str, expecting_name: bool) -> bool:

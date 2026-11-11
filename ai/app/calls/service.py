@@ -33,14 +33,6 @@ _TYPE = re.compile(rb'"type"\s*:\s*"([^"]+)"')
 Handler = Callable[[CallSession, dict], None]
 
 
-def _unhandled(s: CallSession, ev: dict) -> None:
-    """처리기 없는 Live 이벤트: 종류별 횟수, 처음 1건만 사건으로(Live가 실제로 보내는 이벤트 목록을 알기 위해)."""
-    kind = f"미처리 {ev.get('type')}"
-    s.stats[kind] += 1
-    if s.stats[kind] == 1:
-        s.note("미처리 이벤트", str(ev.get("type")), {"event": json.dumps(ev, ensure_ascii=False)[:1000]})
-
-
 @dataclass
 class CallDeps:
     client: object                 # AsyncOpenAI(sessions.accept/reject/hangup, live.sideband.connect)
@@ -69,7 +61,6 @@ class CallService:
                                              "session.output_transcript.delta": self._on_output}
         self.on_finalize: list[Callable[[CallSession], Awaitable[None]]] = []  # S6: 결과 아웃박스
         self.on_change: Callable[[CallSession], None] = lambda s: None         # 관제 알림
-        self.error_context: Callable[[CallSession], dict] = lambda s: {}       # Live 오류 시점 상태(LiveFlow가 채운다)
         self.accepting_new = True
         self.results = None                                                    # S6: app.calls.results.ResultService
         self.intake = None                                                     # 055: app.calls.intake.IntakeService
@@ -154,14 +145,6 @@ class CallService:
                     "service_tier": "priority"}}}
         if persona and persona.voice:  # 원본 live_session.build_session과 같은 자리
             config["audio"] = {"output": {"voice": persona.voice}}
-        if self.d.cfg.turn_mode == "server":
-            config["delegation"] = {"type": "client"}
-            config["instructions"] += (
-                "\n[서버 주도 통화] 아래 규칙이 발화 절차보다 우선합니다. 첫 인사는 서버의 call_started에만 합니다. "
-                "고객이 말한 뒤에는 다음 서버 결과를 기다립니다. 스스로 질문·업무 선택·기록 완료 안내를 만들지 않습니다. "
-                "서버 결과의 next_question 또는 지정 안내 하나만 전달하고 기다립니다. "
-                "고객이 끼어들면 듣습니다. 위임 신호 자체에는 말하지 않습니다."
-            )
         return config
 
     # --- 고객 확인 2단계(be-api.md §1, call-lifecycle.md §2.2) ---
@@ -256,13 +239,10 @@ class CallService:
                     handler = self.handlers.get(ev.get("type"))
                     if handler:
                         handler(s, ev)  # 동기: 상태 갱신 + 작업 생성만
-                    else:
-                        _unhandled(s, ev)
         except asyncio.CancelledError:
             raise
         except Exception as e:  # 연결 종료·재연결 소진·핸들러 예외
             log.warning("수신 루프 종료 %s %s", s.call_id, type(e).__name__)
-            s.note("수신 루프 종료", type(e).__name__, {"error": str(e)[:300]})
             s.close_reason = s.close_reason or f"connection_{type(e).__name__}"
             if s.phase not in (Phase.CLOSED, Phase.FAILED):
                 await self._quiet(hangup_quietly(self.d.client, s.call_id), "hangup")
@@ -286,21 +266,13 @@ class CallService:
 
     def _on_error(self, s: CallSession, ev: dict) -> None:
         err = ev.get("error") or {}
-        sent = s.sent.get(err.get("client_event_id") or "")
-        log.warning("Live 오류 %s %s client_event_id=%s type=%s message=%s sent=%s", s.call_id, err.get("code"),
-                    err.get("client_event_id"), err.get("type"), err.get("message"), sent)
-        # 관제(/monitor)·통화 기록: 오류 원문 전체와 거절된 송신 이벤트(code만으로는 사유를 알 수 없었다)
-        text = str(err.get("code")) + (f": {err['message']}" if err.get("message") else "")
-        s.note("오류", text[:300], {"error": err, "sent": sent, "live": self.error_context(s)})
+        log.warning("Live 오류 %s %s client_event_id=%s", s.call_id, err.get("code"), err.get("client_event_id"))
+        s.note("오류", str(err.get("code")))
 
     def _on_usage(self, s: CallSession, ev: dict) -> None:
         ratio = (ev.get("context_window") or {}).get("usage_ratio") or 0
-        s.stats["컨텍스트 사용률"] = round(ratio, 3)  # 마지막 값(통화 길이에 따른 지시 준수 대조용)
         if ratio >= 0.9:
             log.warning("컨텍스트 사용률 %.2f %s", ratio, s.call_id)
-            if not s.stats["컨텍스트 경고"]:
-                s.stats["컨텍스트 경고"] += 1
-                s.note("컨텍스트 경고", f"사용률 {ratio:.2f}", {"context_window": ev.get("context_window")})
 
     def _on_input(self, s: CallSession, ev: dict) -> None:
         s.last_input_t = time.time()

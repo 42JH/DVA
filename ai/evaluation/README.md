@@ -2,7 +2,6 @@
 
 - `datasets/faq_retrieval_v1.json`: 사람이 검토한 검색 평가95문항.
 - `datasets/faq_v1/cases.json`: 질문·기준 답변·필수 사실·정답 근거·청크 ID를 연결한 고정 사본95문항. manifest로 원문/문항 해시를 확인한다.
-- `datasets/decision_v1.json`: 통화 기록의 Decision 발화 208개에 표시한 정답(통화 기록 앞 8자리#전사 번호 → 질문별 정답, 후보 선택은 순번). `scripts/replay_decisions.py`로 기존·새 입력을 비교한다(`docs/architecture/decision-input-plan.md` §8). 구현자가 표시했고 사람 검수 전이다.
 - `results/baseline_summary.json`: 기존 텍스트/Live 전체 실험 집계와 원본 파일 해시. 새 통합 코드의 측정 결과가 아니다.
 - `results/live_baseline_cases.json`: 실제 기존 Live 전사95개, 질문·기준 답변·공개 근거와 각 점수. 비밀·원시 오디오·전송 이벤트는 제외했다.
 - `results/analysis.md`: 결과 해석·설계 결정·남은 검증.

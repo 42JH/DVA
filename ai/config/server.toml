@@ -88,8 +88,6 @@ agent_transfer_uri = ""
 agent_open = "09:00"
 agent_close = "18:00"
 agent_days = [0, 1, 2, 3, 4]   # 월~금
-turn_shadow_enabled = true
-turn_mode = "server"
 
 [unanswered_review]
 # S15P31D109-159. 모델은 기존 BACKEND_MODEL 사용. 통화 중 추가 호출 없음.

@@ -62,7 +62,7 @@ const opened = new Set();       // 펼친 상세(<details data-key>) — 0.15초
 const pretty = (v) => typeof v === "string" ? v : JSON.stringify(v, null, 1);
 const more = (key, label, v) => v == null ? "" :
   `<details data-key="${esc(key)}"${opened.has(key) ? " open" : ""}><summary>${esc(label)}</summary><pre>${esc(pretty(v))}</pre></details>`;
-const kindClass = (k) => /오류|실패|경고|수신 루프 종료|TIMEOUT|UNAVAILABLE/.test(k) ? "err" : k.startsWith("Decision") || k === "확인 관문" ? "decision"
+const kindClass = (k) => /오류|실패|TIMEOUT|UNAVAILABLE/.test(k) ? "err" : k.startsWith("Decision") || k === "확인 관문" ? "decision"
   : /위임|Backend|함수 호출|재개/.test(k) ? "backend" : k.startsWith("전달") ? "deliver" : "";
 const toolCard = (t, cls) => `<div class="${cls}"><span class="muted">${time(t.at)}</span> <span class="kind">도구 ${esc(t.name)}</span>
   · ${esc(t.status)}${t.elapsed_ms != null ? ` · ${t.elapsed_ms}ms` : ""}${t.delegation ? ` <span class=muted>위임 ${esc(String(t.delegation).slice(-6))}</span>` : ""}

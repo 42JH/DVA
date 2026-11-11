@@ -52,11 +52,11 @@ class FakeDecisions:
         return SimpleNamespace(answers=answers)
 
 
-def flow(tmp_path=None, **cfg):
+def flow(tmp_path=None):
     client = FakeClient()
     client.decisions = FakeDecisions()
-    svc = service(client, **{"utterance_gap_ms": 40, "commit_delay_ms": 30, "notify_quiet_ms": 30,
-                             "response_fallback_sec": 0.2, "closing_quiet_ms": 1000, "closing_max_sec": 3.0} | cfg)
+    svc = service(client, utterance_gap_ms=40, commit_delay_ms=30, notify_quiet_ms=30, response_fallback_sec=0.2,
+                  closing_quiet_ms=1000, closing_max_sec=3.0)
     LiveFlow(svc)
     if tmp_path is not None:  # S6: 결과·인사이트까지
         from app.calls.results import ResultService
@@ -71,8 +71,7 @@ async def say(conn, text, start_ms):
     for i, part in enumerate(text.split(" ")):
         conn.push({"type": "session.input_transcript.delta", "delta": part + " ", "start_ms": start_ms + i * 100,
                    "end_ms": start_ms + i * 100 + 90})
-    # 낱말 사이에 쉬지 않고 한꺼번에 넣는다. 사이에 쉬면 느린 CI에서 이벤트 루프가 gap(40ms)보다 오래 멈춰
-    # 한 발화가 둘로 쪼개지고, 시나리오가 의도하지 않은 경로로 간다(Jenkins 156에서 4건 실패).
+        await asyncio.sleep(0.005)
     await asyncio.sleep(0.12)  # 발화 끝(gap) + Decision
 
 
@@ -435,8 +434,7 @@ def test_no_answer_waits_for_fix_without_rereading_then_fix_reopens(tmp_path):
         conn.push({"type": "session.delegation.created", "delegation": {"id": "d3"}, "offset_ms": 8000})
         conn.push({"type": "response.event", "delegation_id": "d3", "event": {
             "type": "response.output_item.done", "item": {"type": "function_call", "call_id": "call_3", "name": "record_fields",
-                                                         "arguments": json.dumps({"receiver_name": "박영희",
-                                                                                  "keep_receiver_destination": True})}}})
+                                                         "arguments": json.dumps({"receiver_name": "박영희"})}}})
         conn.push({"type": "response.event", "delegation_id": "d3", "event": {"type": "response.completed"}})
         await until(lambda: s.state.pending)
         conn.push({"type": "session.closed", "reason": "remote_hangup"})
@@ -539,49 +537,9 @@ def test_agent_greets_first_on_session_start():
     assert len(greets) == 1 and greets[0]["type"] == "session.commentary.append"
 
 
-def test_live_error_keeps_message_and_the_rejected_sent_event():
-    """Live 오류는 code만으로 사유를 알 수 없었다: 원문(message)과 client_event_id가 가리키는 송신 이벤트를 기록·관제에 남긴다."""
-    svc, client = flow()
-
-    async def scenario():
-        task = asyncio.create_task(svc.on_incoming(incoming()))
-        await until(lambda: client.conns)
-        conn = client.conns[0]
-        conn.push(started())
-        await until(lambda: conn.sent)
-        greet = conn.sent[0]
-        for _ in range(2):  # 처리기 없는 이벤트: 횟수는 다, 사건은 처음 1건만
-            conn.push({"type": "session.something.new", "x": 1})
-        conn.push({"type": "session.usage.updated", "context_window": {"usage_ratio": 0.93}})
-        conn.push({"type": "response.event", "delegation_id": "item_abcdef", "event": {"type": "response.created"}})
-        conn.push({"type": "error", "error": {"type": "invalid_request_error", "code": "invalid_request_error",
-                                              "message": "거절 사유", "client_event_id": greet["event_id"]}})
-        s = svc.registry.calls["live_1"]
-        await until(lambda: any(e["kind"] == "오류" for e in s.events))
-        snap = s.snapshot()
-        conn.push({"type": "session.closed", "reason": "remote_hangup"})
-        await task
-        return greet, s, snap
-
-    greet, s, snap = run(scenario())
-    err = next(e for e in s.events if e["kind"] == "오류")
-    assert err["text"] == "invalid_request_error: 거절 사유"
-    assert err["data"]["error"]["message"] == "거절 사유"
-    assert err["data"]["sent"]["type"] == greet["type"] == "session.commentary.append"
-    assert "call_started" in err["data"]["sent"]["content"]
-    assert snap["errors"][0]["message"] == "invalid_request_error: 거절 사유"  # 관제(/monitor) 오류 줄
-    live = err["data"]["live"]  # 오류 시점 상태(겹침 판별)
-    assert live["customer_speaking"] is False
-    assert [(d["id"], d["completed"], d["done"]) for d in live["delegations"]] == [("abcdef", False, False)]
-    assert [e["text"] for e in s.events if e["kind"] == "Backend 응답 시작"] == ["abcdef"]
-    assert s.stats["미처리 session.something.new"] == 2
-    assert [e["text"] for e in s.events if e["kind"] == "미처리 이벤트"] == ["session.something.new"]
-    assert s.stats["컨텍스트 사용률"] == 0.93 and [e["kind"] for e in s.events].count("컨텍스트 경고") == 1
-
 def test_late_result_and_n2_wait_while_customer_is_speaking():
     """끼어들기: 고객이 말하는 동안 앞선 위임 결과로 재개(response.create)하거나 N2를 보내지 않는다. 말이 끝나면 보낸다."""
-    # 고객이 시간을 두고 계속 말해야 하는 시나리오라 낱말 사이에 쉰다. 느린 CI의 멈춤을 견디도록 gap을 넉넉히 둔다
-    svc, client = flow(utterance_gap_ms=300)
+    svc, client = flow()
 
     async def scenario():
         task = asyncio.create_task(svc.on_incoming(incoming()))
@@ -631,10 +589,8 @@ def test_three_unanswered_manual_searches_suggest_agent_then_reset():
     assert out["facts"]["agent"] == "suggest" and s.rt.unanswered == 0
 
 
-@pytest.mark.parametrize(("customer_request", "intent"), [
-    ("네, 그런데 상담원 연결해 주세요", "agent"), ("끊어 주세요", "end"),
-])
-def test_readback_handoff_or_clear_end_does_not_commit(customer_request, intent):
+@pytest.mark.parametrize(("customer_request", "intent"), [("상담원 연결해 주세요", "agent"), ("끊어 주세요", "end")])
+def test_readback_handoff_or_end_takes_priority_over_yes(customer_request, intent):
     from app.calls.live import Spoken
     from app.calls.session import CallSession
     from app.domain.confirm import issue_parcel_confirmation
@@ -651,111 +607,13 @@ def test_readback_handoff_or_clear_end_does_not_commit(customer_request, intent)
     pending = issue_parcel_confirmation(state, policy, 1.0)
     session = CallSession("live_1", "t", CALLER, INCOMING_AT, ToolContext("live_1", state, policy, None))
     previous = Spoken(1, "이대로 접수할까요?", 1000, 1800, 2.0, 2.8)
-    utterance = Spoken(2, customer_request, 2000, 2800, 3.0, 3.8)
+    utterance = Spoken(2, f"네, 그런데 {customer_request}", 2000, 2800, 3.0, 3.8)
 
     run(lf.judge(session, utterance, previous))
 
     assert client.decisions.calls[0][1] == ["confirm", "switch", "sender_name_scope"]
     lf._follow.assert_awaited_once_with(session, "intent", intent)
     assert state.pending is pending and not state.parcels and lf.rt(session).commit is None
-
-
-@pytest.mark.parametrize("end_call", [True, False])
-def test_conflicting_parcel_yes_and_end_asks_before_acting(end_call):
-    svc, client = flow()
-
-    async def scenario():
-        task = asyncio.create_task(svc.on_incoming(incoming()))
-        await until(lambda: client.conns)
-        conn = client.conns[0]
-        conn.push(started())
-        await until(lambda: svc.registry.calls["live_1"].phase == Phase.ACTIVE)
-        s = svc.registry.calls["live_1"]
-        await _collect_full(conn, s)
-        pending = s.state.pending
-        await ai(conn, "받는 분 이영희님, 이대로 접수할까요?", 5000)
-        decisions = client.decisions
-        client.decisions = SimpleNamespace(create=AsyncMock(return_value=SimpleNamespace(
-            answers=[choice("confirm", "yes", 0.85), choice("switch", "end", 0.80)])))
-        await say(conn, "네", 6500)
-        await until(lambda: any("end_confirmation" in e.get("content", "") for e in conn.sent))
-        assert s.phase == Phase.ACTIVE and s.state.pending is pending and not s.state.parcels
-        await say(conn, "네", 8000)  # 종료 질문을 듣기 전에는 같은 오분류가 와도 반영하지 않는다.
-        assert s.phase == Phase.ACTIVE and s.state.pending is pending and not s.state.parcels
-        await ai(conn, "통화를 마칠까요?", 9000)
-        await say(conn, "네" if end_call else "아니요", 10000)
-        if end_call:
-            await until(lambda: s.phase == Phase.CLOSING)
-            assert s.state.pending is pending and not s.state.parcels
-        else:
-            await until(lambda: _asks(conn))
-            assert s.phase == Phase.ACTIVE and s.state.pending is pending and not s.state.parcels
-            client.decisions = decisions
-            await ai(conn, "받는 분 이영희님, 이대로 접수할까요?", 11000)
-            await say(conn, "네", 12000)
-            await until(lambda: len(s.state.parcels) == 1)
-        conn.push({"type": "session.closed", "reason": "remote_hangup"})
-        await task
-
-    run(scenario())
-
-
-def test_same_turn_tool_can_finish_before_confirm_followup():
-    svc, client = flow()
-
-    async def scenario():
-        task = asyncio.create_task(svc.on_incoming(incoming()))
-        await until(lambda: client.conns)
-        conn = client.conns[0]
-        conn.push(started())
-        await until(lambda: svc.registry.calls["live_1"].phase == Phase.ACTIVE)
-        s = svc.registry.calls["live_1"]
-        await _collect_full(conn, s)
-        await ai(conn, "받는 분 이영희님, 이대로 접수할까요?", 5000)
-        resumes = sent_types(conn).count("response.create")
-        conn.push({"type": "session.delegation.created", "delegation": {"id": "confirm"}, "offset_ms": 6500})
-        await say(conn, "네", 6500)
-        assert s.rt.deciding.is_set() and not s.state.parcels
-        conn.push({"type": "response.event", "delegation_id": "confirm", "event": {
-            "type": "response.output_item.done", "item": {"type": "function_call", "call_id": "check-state",
-                                                         "name": "get_state", "arguments": "{}"}}})
-        conn.push({"type": "response.event", "delegation_id": "confirm", "event": {"type": "response.completed"}})
-        await until(lambda: any(t["name"] == "get_state" and t["output"] for t in s.tool_calls))
-        assert s.tool_calls[-1]["output"]["status"] == "ok", s.tool_calls[-1]
-        await until(lambda: sent_types(conn).count("response.create") > resumes)
-        conn.push({"type": "response.event", "delegation_id": "confirm", "event": {"type": "response.completed"}})
-        await until(lambda: s.state.parcels)
-        conn.push({"type": "session.closed", "reason": "remote_hangup"})
-        await task
-
-    run(scenario())
-
-
-def test_current_address_correction_keeps_the_draft_unless_another_parcel_is_identified():
-    from app.calls.live import Spoken
-    from app.calls.session import CallSession
-    from app.domain.state import copy_draft
-    from app.tests.test_calls import INCOMING_AT
-    from app.tests.test_domain import confirm_once, filled
-    from app.tools.context import ToolContext
-
-    svc, _ = flow()
-    lf = LiveFlow(svc)
-    state, policy = filled(), svc.d.policy
-    current = copy_draft(state.current)
-    parcel_id = confirm_once(state)
-    state.current = current
-    session = CallSession("live_1", "t", CALLER, INCOMING_AT, ToolContext("live_1", state, policy, None))
-
-    async def scenario():
-        correction = Spoken(1, "받는 주소 다시 말할게요", 1000, 1800, 2.0, 2.8)
-        await lf.apply(session, correction, None, {"switch": ("edit_parcel", 0.97)}, None)
-        assert state.current is current and state.editing is None and len(state.parcels) == 1
-        other = Spoken(2, "아까 담은 첫 번째 택배 주소를 고칠게요", 2000, 2800, 3.0, 3.8)
-        await lf.apply(session, other, None, {"switch": ("edit_other_parcel", 0.97)}, None)
-        assert state.current is not current and state.editing == parcel_id and len(state.parcels) == 2
-
-    run(scenario())
 
 
 def _agent_flow(uri="", now=None):
@@ -912,8 +770,7 @@ def test_registered_greeting_answer_preserves_address_scope_without_model(greeti
 
 
 @pytest.mark.parametrize("explicit_origin_question", [True, False])
-@pytest.mark.parametrize("address_in_greeting", [True, False])
-def test_short_yes_only_applies_after_the_pending_origin_question(explicit_origin_question, address_in_greeting):
+def test_short_yes_only_applies_after_the_pending_origin_question(explicit_origin_question):
     from backend_client.order import Place as BPlace
 
     svc, client = flow()
@@ -927,11 +784,9 @@ def test_short_yes_only_applies_after_the_pending_origin_question(explicit_origi
         conn.push(started())
         await until(lambda: svc.registry.calls["live_1"].phase == Phase.ACTIVE)
         s = svc.registry.calls["live_1"]
-        address = "서울 강남구 가람구길 이백십이에서 보내시는 " if address_in_greeting else ""
-        await ai(conn, f"안녕하세요, 김철수님, {address}택배 접수 도와드릴까요?", 0)
+        await ai(conn, "안녕하세요, 김철수님, 서울 강남구 가람구길 이백십이에서 보내시는 택배 접수 도와드릴까요?", 0)
         await say(conn, "택배를 새로 보낼게요", 1500)
-        expected_origin = "registered" if address_in_greeting else "서울특별시 강남구 가람9길 212"
-        await until(lambda: any(f'"origin_confirm": "{expected_origin}"' in e.get("content", "") for e in conn.sent))
+        await until(lambda: any('"origin_confirm": "registered"' in e.get("content", "") for e in conn.sent))
         client.decisions.create = AsyncMock(return_value=SimpleNamespace(
             answers=[choice("origin", "yes", 0.30), choice("switch", "none")]))
         question = "등록된 발송 주소로 보내실까요?" if explicit_origin_question else "받는 분 연락처를 알려주시겠어요?"
@@ -1064,9 +919,7 @@ def test_greeting_sender_name_change_asks_only_for_unanswered_choices(
         if "등록 이름도" in input:
             assert "sender_name_scope" in names
             return SimpleNamespace(answers=[choice("sender_name_scope", f"confirm_{save_answer}")])
-        # 열린 질문 '발송 주소도 바꿀지'의 yes는 주소를 바꾼다는 뜻이다(address_answer는 등록 주소를 쓰는지).
-        origin = ({"yes": "no", "no": "yes"}[address_answer]
-                  if "열린 질문: 발송 주소도" in input and address_answer in ("yes", "no") else "not_answer")
+        origin = address_answer if "발송 주소도" in input and address_answer in ("yes", "no") else "not_answer"
         return SimpleNamespace(answers=[choice("origin", origin)])
 
     client.decisions.create = decide
@@ -1106,10 +959,8 @@ def test_greeting_sender_name_change_asks_only_for_unanswered_choices(
                 reply += " 서울 강남구 테헤란로 212 3층에서 보낼게요"
                 fields["sender_address"] = FULL["sender_address"]
                 fields["sender_address_detail"] = "3층"
-            turns = len(s.rt.customer_turns)
             customer = asyncio.create_task(say(conn, reply, name_turn))
-            # 말하는 중(rt.cust)은 gap 동안만 참이라 느린 CI에서 폴링이 놓친다. 발화가 생겼는지로 기다린다
-            await until(lambda: len(s.rt.customer_turns) > turns)
+            await until(lambda: s.rt.cust is not None)
             out = await record("sender-name", name_turn, fields)
             await customer
             assert sum('"greeting_confirmation"' in e.get("content", "") for e in conn.sent) == int(name_turn == 2000)
@@ -1197,9 +1048,8 @@ def test_late_sender_name_uses_scope_from_the_correct_turn(scope_case):
             await ai(conn, "보내는 분 성함을 알려주시겠어요?", 3200)
         offset = 4200 if scope_first else 1500
         text = "이번 택배만 보내는 분은 박영희로 할게요" if scope_case == "once" else "보내는 분은 박영희로 할게요"
-        turns = len(s.rt.customer_turns) if s.rt else 0
         customer = asyncio.create_task(say(conn, text, offset))
-        await until(lambda: s.rt and len(s.rt.customer_turns) > turns)  # 말하는 중(rt.cust)은 gap 동안만 참이다
+        await until(lambda: s.rt.cust is not None)
         conn.push({"type": "session.delegation.created", "delegation": {"id": "late-name"}, "offset_ms": offset})
         conn.push({"type": "response.event", "delegation_id": "late-name", "event": {
             "type": "response.output_item.done", "item": {"type": "function_call", "call_id": "late-name",
@@ -1505,60 +1355,3 @@ def test_tool_call_on_answer_to_candidates_waits_for_pick():
     conn = run(scenario())
     out = json.loads(next(e for e in conn.sent if e["type"] == "response.item.create")["item"]["output"])
     assert out["fields"]["receiver_phone"] == "valid" and "receiver_phone" not in out["missing"]
-
-
-@pytest.mark.parametrize(("question", "reply", "answer_at", "replace_candidates", "selected"), [
-    ("구미시 가람구 길 이십으로 보내시는 게 맞으실까요?", "네, 맞습니다", 2000, False, 2),
-    ("이영희 구미시 인의동 받는 곳으로 보내시는 게 맞으실까요?", "예", 2000, False, 2),
-    ("구미시 가람구길 이십이 다시 일로 보내시는 게 맞으실까요?", "네", 2000, False, None),
-    ("가람구길 이십이 다시 일, 가람구길 이십 중에 어느 곳으로 보내실까요?", "네", 2000, False, None),
-    ("구미시 가람구길 이십으로 보내시는 게 맞으실까요?", "네, 다른 주소로 바꿀게요", 2000, False, None),
-    ("구미시 가람구길 이십으로 보내시는 게 맞으실까요?", "네", 1200, False, None),
-    ("구미시 가람구길 이십으로 보내시는 게 맞으실까요?", "네", 2000, True, None),
-])
-def test_short_yes_selects_only_the_destination_named_in_the_heard_question(
-        question, reply, answer_at, replace_candidates, selected):
-    from app.domain.candidates import offer
-    from app.domain.state import Place
-
-    svc, client = flow()
-    labels = ("이영희 구미시 인의동 501호", "이영희 구미시 인의동 502호", "이영희 구미시 인의동")
-    ambiguous_address = question.startswith("구미시 가람구길 이십이 다시 일로")
-    ignore_pick = replace_candidates or ambiguous_address
-    client.decisions.create = AsyncMock(return_value=SimpleNamespace(
-        answers=[choice("pick", labels[2] if ignore_pick else "not_answer")]))
-    places = (
-        Place("이영희", "01011111111", "경상북도 구미시 가람9길 22-1", "501호"),
-        Place("이영희", "01022222222", "경상북도 구미시 가람9길 22-1", "502호"),
-        Place("이영희", "01033333333", "경상북도 구미시 가람9길 20", ""),
-    )
-
-    async def scenario():
-        task = asyncio.create_task(svc.on_incoming(incoming()))
-        await until(lambda: client.conns)
-        conn = client.conns[0]
-        conn.push(started())
-        s = svc.registry.calls["live_1"]
-        await until(lambda: s.phase == Phase.ACTIVE)
-        async with s.lock:
-            s.state.intent = "order"
-            offer(s.state, "destination", labels, places)
-        await ai(conn, question, 1000)
-        if replace_candidates:
-            async with s.lock:
-                offer(s.state, "destination", labels, places)
-        await say(conn, reply, answer_at)
-        if selected is None:
-            client.decisions.create.assert_awaited_once()
-            assert s.state.candidates and not s.state.field_of("receiver_address").valid
-            if ignore_pick:
-                assert all(q["name"] != "pick" for q in client.decisions.create.call_args.kwargs["questions"])
-        else:
-            client.decisions.create.assert_not_awaited()
-            assert s.state.candidates is None
-            assert s.state.field_of("receiver_address").value == places[selected].address
-            assert s.state.field_of("receiver_phone").value == places[selected].phone
-        conn.push({"type": "session.closed", "reason": "remote_hangup"})
-        await task
-
-    run(scenario())

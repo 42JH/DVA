@@ -29,28 +29,6 @@ NOW = datetime(2026, 11, 3, 10, 0, tzinfo=KST)
 TOMORROW = (NOW + timedelta(days=1)).isoformat()
 
 
-@pytest.mark.parametrize(("extra", "valid"), [
-    ({}, (False, False, False)),
-    ({"keep_receiver_address": True}, (False, True, True)),
-    ({"keep_receiver_destination": True}, (True, True, True)),
-    ({"receiver_phone": "01033334444", "receiver_address": "서울 가람9길 20"}, (True, True, False)),
-])
-def test_receiver_name_change_does_not_reuse_previous_destination_without_confirmation(extra, valid):
-    c = ctx()
-    st = c.state
-    st.record("receiver_name", "이영희")
-    st.record("receiver_phone", "01011112222")
-    st.record("receiver_address", "서울 가람9길 20")
-    st.record("receiver_address_detail", "501호")
-    out = call(c, "record_fields", {"receiver_name": "박철수", **extra})
-
-    assert out["status"] == "ok" and st.current["receiver_name"].value == "박철수"
-    assert tuple(st.current[key].valid for key in
-                 ("receiver_phone", "receiver_address", "receiver_address_detail")) == valid
-    if "receiver_phone" in extra:
-        assert st.current["receiver_phone"].value == extra["receiver_phone"]
-
-
 def ctx(backend=None, address=None, **kw) -> ToolContext:
     customer = kw.pop("customer", Customer(customer_seq=12, name="김철수", caller_phone=CALLER))
     return ToolContext("live_test", ConversationState(customer=customer, intent="order"), P,

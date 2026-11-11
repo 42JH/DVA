@@ -115,18 +115,6 @@ class CallConfig(_Strict):
     utterance_gap_ms: int = Field(800, gt=0)         # 마지막 입력 delta 뒤 무 delta → 발화 끝(S0c·S0d)
     decision_budget_sec: float = Field(1.0, gt=0)    # S0d API p95 943ms — 넘으면 판단 없음
     decision_min_confidence: float = Field(0.6, gt=0, le=1)  # task·switch·pick·pay 적용 하한
-    # Decision 입력·하한(decision-input-plan.md §3). 하한은 선택지 확률 기준이고 서버 주도 통화에 쓴다
-    decision_open_question: bool = True              # 입력에 서버가 기다리는 질문(열린 질문)을 넣는다
-    decision_open_min_p: float = Field(0.7, gt=0, le=1)      # 열린 질문의 답: 최상위 확률
-    decision_open_margin: float = Field(0.3, ge=0, le=1)     # 열린 질문의 답: 둘째와의 차이
-    decision_switch_min_p: float = Field(0.75, gt=0, le=1)   # switch의 조회·문의·수정
-    decision_exit_min_p: float = Field(0.9, gt=0, le=1)      # 종료·상담원·취소(종료는 이 아래 switch_min_p까지 확인 질문)
-    turn_mode: Literal["legacy", "server"] = "legacy"
-    server_turn_timeout_sec: float = Field(10.0, gt=0, le=30)
-    turn_shadow_enabled: bool = False
-    turn_shadow_timeout_sec: float = Field(7.0, gt=0, le=30)
-    turn_shadow_max_concurrent: int = Field(2, ge=1, le=10)
-    turn_shadow_max_turns: int = Field(300, ge=1, le=5000)  # 프로세스 재시작 전까지 비교할 발화 상한
     unanswered_agent_after: int = Field(3, gt=0)     # 매뉴얼 검색 연속 미답변 → 상담원 권유(업무 규칙 h)
     # 상담원 연결(업무 규칙 e). 전환 대상 SIP URI가 비면 전환하지 않는다(미준비). 근무 시간 밖이면 콜백 제안
     agent_transfer_uri: str = ""
