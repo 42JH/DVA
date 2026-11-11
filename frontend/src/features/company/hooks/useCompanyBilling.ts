@@ -32,14 +32,10 @@ export function useCompanyBilling(id: number) {
       : `그룹 카드 부서 ${deptCount}곳 중 ${groupOn}곳`
 
   return {
-    // '개인 카드 사용 · 그룹 카드 부서 3곳 중 1곳 · 월결제 미사용' — 둘 다 받기 전엔 null
+    // '그룹 카드 부서 3곳 중 1곳 · 월결제 미사용' — 둘 다 받기 전엔 null
     summary:
       company.data && depts.data
-        ? [
-            '개인 카드 사용',
-            group,
-            `월결제 ${BILLING_LABEL(company.data.monthlyBillingEnabled)}`,
-          ].join(' · ')
+        ? [group, `월결제 ${BILLING_LABEL(company.data.monthlyBillingEnabled)}`].join(' · ')
         : null,
 
     monthLabel: `${month.slice(0, 4)}년 ${Number(month.slice(5))}월`,
