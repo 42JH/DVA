@@ -1290,7 +1290,6 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
   });
   await t.test('dashboard home preserves previews, current-day counts, performance and read-only owner snapshots', async () => {
     const homeSides=[sides[0],{...sides[1],base:'http://consultation-app:3004'}];
-    const qualityTypes=['INFORMATION_RECOGNITION_ERROR','INTENT_RECOGNITION_ERROR','SLOW_RESPONSE','INTERRUPTION','DISSATISFACTION_EXPRESSION'];
     let pairs=0;
     const home=async(extra={},expected=200)=>{
       const requestId=randomUUID(),start=Date.now();
@@ -1303,22 +1302,6 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
         }
         return body;
       }));
-      // MR !476's approved quality rule also applies to the home card.
-      if(expected===200){
-        const stats=results[0].data.aiPerformance.complaintCalls,counts=new Map(qualityTypes.map(type=>[type,0]));
-        const rows=(await reference.query("SELECT a.has_complaint,a.complaints FROM call_sessions c LEFT JOIN call_analyses a USING(call_session_seq) "+
-          "WHERE c.deleted_at IS NULL AND(c.incoming_at IS NULL OR c.incoming_at>transaction_timestamp()-interval '5 years') "+
-          "AND COALESCE(c.ended_at,a.ai_ended_at) IS NOT NULL")).rows;
-        let complained=0;
-        for(const row of rows){
-          const found=new Set((row.has_complaint===true?row.complaints:[]).filter(item=>
-            counts.has(item.type)&&(item.type!=='DISSATISFACTION_EXPRESSION'||item.target==='ai_service')).map(item=>item.type));
-          if(found.size)complained++;for(const type of found)counts.set(type,counts.get(type)+1);
-        }
-        const total=[...counts.values()].reduce((sum,value)=>sum+value,0);
-        Object.assign(stats,{complaintCallCount:complained,complaintRatePercent:stats.assessedCallCount?complained*100/stats.assessedCallCount:null,
-          typeTotalCount:total,types:qualityTypes.map(type=>({type,callCount:counts.get(type),sharePercent:total?counts.get(type)*100/total:null}))});
-      }
       assert.deepEqual(results[1],results[0]);pairs++;return results[1].data;
     };
     await home({Cookie:''},401);await home({Cookie:'dva_session=invalid'},401);
@@ -1371,17 +1354,7 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
     const visit=(value,seen=new Set())=>{
       for(const match of JSON.stringify(value).matchAll(/"\$ref":"#\/components\/schemas\/([^"]+)"/g)){
         const name=match[1];if(seen.has(name))continue;seen.add(name);
-        const expected=structuredClone(docs[0].components.schemas[name]);
-        if(name==='CallComplaintDto')Object.assign(expected.properties,{
-          target:{type:'string',enum:['ai_service','price_policy','delivery_other'],nullable:true,description:'고객 불만 책임 대상. 다른 유형은 null.'},
-          level:{type:'string',enum:['explicit','mild'],nullable:true,description:'고객 불만 강도. 다른 유형은 null.'},
-        });
-        if(name==='ComplaintTypeSummaryDto')expected.properties.type.enum=qualityTypes;
-        if(name==='ComplaintCallsDto'){
-          expected.properties.typeTotalCount.description='AI 응대 오류 4유형과 ai_service 고객 불만의 통화 수 합계. 한 통화의 여러 유형은 각각 포함.';
-          expected.properties.legacyTypeCallCount.description='표준 분류 전의 기존 유형이 있는 통화 수. 운영 참고이며 AI 품질 비율에서 제외.';
-        }
-        assert.deepEqual(docs[1].components.schemas[name],expected,name);
+        assert.deepEqual(docs[1].components.schemas[name],docs[0].components.schemas[name],name);
         visit(docs[0].components.schemas[name],seen);
       }
     };

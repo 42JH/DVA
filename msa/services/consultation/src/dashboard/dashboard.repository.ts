@@ -142,22 +142,25 @@ export class DashboardRepository {
     return `WITH calls AS (
       ${shared ? 'SELECT call_session_seq,is_new_customer,has_complaint,complaints FROM dashboard_calls' : `SELECT c.call_session_seq,a.is_new_customer,a.has_complaint,a.complaints ${FROM_CALLS} ${CALL_FILTER}`}
      ), call_types AS (
-      SELECT DISTINCT c.call_session_seq,item->>'type' AS type,item->>'target' AS target
+      SELECT DISTINCT c.call_session_seq,item->>'type' AS type,
+       (item->>'type' IN ('INFORMATION_RECOGNITION_ERROR','INTENT_RECOGNITION_ERROR','INTERRUPTION','SLOW_RESPONSE')
+        OR (item->>'type'='DISSATISFACTION_EXPRESSION' AND item->>'target'='ai_service')) AS quality
       FROM calls c CROSS JOIN LATERAL jsonb_array_elements(c.complaints) item WHERE c.has_complaint IS TRUE
-     ), quality_types AS (
-      SELECT DISTINCT call_session_seq,type FROM call_types WHERE type=ANY(${types}::text[])
-       AND(type<>'DISSATISFACTION_EXPRESSION' OR target='ai_service')
-     ), summary AS (
-      SELECT count(*) AS total,count(*) FILTER(WHERE is_new_customer IS NULL) AS unknown_customer,
-       count(has_complaint) AS assessed,(SELECT count(DISTINCT call_session_seq) FROM quality_types) AS complained FROM calls
+     ), quality_types AS (SELECT DISTINCT call_session_seq,type FROM call_types WHERE quality),
+     quality_calls AS (SELECT DISTINCT call_session_seq FROM quality_types),
+     summary AS (
+      SELECT count(*) AS total,count(*) FILTER(WHERE c.is_new_customer IS NULL) AS unknown_customer,
+       count(c.has_complaint) AS assessed,count(q.call_session_seq) AS complained
+      FROM calls c LEFT JOIN quality_calls q USING(call_session_seq)
      ), types AS (SELECT type,count(*) AS n FROM quality_types GROUP BY type),
      type_total AS (SELECT COALESCE(sum(n),0) AS n FROM types)
      SELECT jsonb_build_object('customerType',$1::text,'endedCallCount',s.total,'unclassifiedCustomerCallCount',s.unknown_customer,
       'assessedCallCount',s.assessed,'unassessedCallCount',s.total-s.assessed,'complaintCallCount',s.complained,
       'complaintRatePercent',s.complained*100.0/NULLIF(s.assessed,0),'typeTotalCount',t.n,
-      'legacyTypeCallCount',(SELECT count(DISTINCT call_session_seq) FROM call_types WHERE type IS NULL OR NOT(type=ANY(array_append(${types}::text[],'UNSUPPORTED_ANSWER')))),
+      'legacyTypeCallCount',(SELECT count(DISTINCT call_session_seq) FROM call_types WHERE type IS NULL OR NOT(type=ANY(${types}::text[]))),
       'types',(SELECT jsonb_agg(jsonb_build_object('type',code,'callCount',COALESCE(types.n,0),
-       'sharePercent',COALESCE(types.n,0)*100.0/NULLIF(t.n,0)) ORDER BY position)
+       'referenceOnly',code='UNSUPPORTED_ANSWER',
+       'sharePercent',CASE WHEN code='UNSUPPORTED_ANSWER' THEN NULL ELSE COALESCE(types.n,0)*100.0/NULLIF(t.n,0) END) ORDER BY position)
        FROM unnest(${types}::text[]) WITH ORDINALITY AS keys(code,position) LEFT JOIN types ON types.type=code)) AS data
      FROM summary s CROSS JOIN type_total t`;
   }

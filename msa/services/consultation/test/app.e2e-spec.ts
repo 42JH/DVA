@@ -76,22 +76,17 @@ describe('Consultation PBX and active calls (e2e)', () => {
       offsetSeconds: 0,
       utteranceOrders: [1],
     };
+    await expect(
+      validation.transform(complaint, {
+        type: 'body',
+        metatype: CallComplaintDto,
+      }),
+    ).resolves.toMatchObject(complaint);
     for (const fields of [
-      {},
       { target: null, level: null },
       { target: 'ai_service', level: 'mild' },
       { target: 'price_policy', level: 'explicit' },
       { target: 'delivery_other', level: 'mild' },
-    ]) {
-      const input = { ...complaint, ...fields };
-      await expect(
-        validation.transform(input, {
-          type: 'body',
-          metatype: CallComplaintDto,
-        }),
-      ).resolves.toMatchObject(input);
-    }
-    for (const fields of [
       { target: 'external' },
       { level: 'severe' },
       { target: 1 },
