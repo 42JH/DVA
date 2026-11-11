@@ -1247,5 +1247,46 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
     }
     t.diagnostic('draft write HTTP pairs: '+writes+'; call/customer/PIN locks, stored versions and order-commit response loss recovered');
   });
+  await t.test('metrics preserve the plain scrape contract and bounded database failures', async () => {
+    for(const client of retention.splice(0)){await client.query('ROLLBACK');client.release();}
+    const samples=text=>Object.fromEntries(text.split('\n').filter(line=>line&&!line.startsWith('#')).map(line=>{
+      const at=line.lastIndexOf(' ');return [line.slice(0,at),Number(line.slice(at+1))];
+    }));
+    const scrape=async side=>{
+      const response=await fetch(side.base+'/internal/metrics',{headers:{Cookie:'dva_session=invalid',Authorization:'invalid'}});
+      assert.equal(response.status,200);assert.equal(response.headers.get('cache-control'),'no-store');
+      const text=await response.text();
+      assert.match(response.headers.get('content-type'),/^text\/plain;.*version=0\.0\.4/);
+      assert.ok(text.endsWith('\n'));assert.ok(!text.includes('"meta"'));
+      const values=samples(text);
+      for(const [name,value] of Object.entries(values))assert.ok(Number.isFinite(value)&&value>=0,name);
+      return {text,values};
+    };
+    const healthy=await Promise.all(sides.map(scrape));
+    const attention=values=>Object.fromEntries(Object.entries(values).filter(([key])=>
+      key.startsWith('dva_orders_attention{')||key==='dva_orders_stale_submitting'));
+    assert.deepEqual(attention(healthy[1].values),attention(healthy[0].values));
+    for(const result of healthy){
+      assert.equal(result.values.dva_database_up,1);assert.equal(result.values.dva_order_metrics_success,1);
+      assert.equal(Object.keys(attention(result.values)).length,6);
+    }
+    const locks=[];
+    try {
+      for(const db of [reference,databases.order]){
+        const client=await db.connect();locks.push(client);await client.query('BEGIN');
+        await client.query("SET LOCAL lock_timeout='1s'");
+        await client.query('LOCK TABLE orders IN ACCESS EXCLUSIVE MODE');
+      }
+      const start=Date.now(),blocked=await Promise.all(sides.map(scrape));
+      assert.ok(Date.now()-start<5000,'metrics statement timeout did not bound the scrape');
+      for(const result of blocked){
+        assert.equal(result.values.dva_database_up,1);assert.equal(result.values.dva_order_metrics_success,0);
+        assert.deepEqual(attention(result.values),{});
+        assert.ok(!result.text.includes('SELECT status'));
+      }
+    } finally{for(const client of locks){await client.query('ROLLBACK');client.release();}}
+    for(const result of await Promise.all(sides.map(scrape)))assert.equal(result.values.dva_order_metrics_success,1);
+    t.diagnostic('metrics HTTP pairs: 3; plain text, attention counts, real database timeout and recovery');
+  });
   console.log('Compared HTTP requests: '+compared);
 });

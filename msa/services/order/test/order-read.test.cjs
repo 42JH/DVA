@@ -8,6 +8,48 @@ const { validateEnvironment } = require('../dist/config/environment');
 const { OrdersService } = require('../dist/orders/orders.service');
 const token = 'order-read-test-only-'.padEnd(48, 't');
 
+test('metrics coalesce scrapes, preserve attention gauges and report database failures', async () => {
+  const {ObservabilityService}=require('../dist/observability/observability.service');
+  const queries=[],statistics={count:3,failures:1,seconds:0.4,maxSeconds:0.2,connectionWaitSeconds:0.01};
+  let probes=0,transactions=0,release;
+  const gate=new Promise(resolve=>release=resolve);
+  const client={query:async sql=>{
+    queries.push(sql);
+    return {rows:sql.startsWith('SELECT status')?[{status:'notPaid',count:'2'}]:
+      sql.startsWith('SELECT count')?[{count:'1'}]:[]};
+  }};
+  const database={
+    pool:{totalCount:2,idleCount:1,waitingCount:0,query:async()=>{probes++;await gate;}},
+    transactionStatistics:statistics,
+    transaction:async work=>{transactions++;return work(client);},
+  };
+  const service=new ObservabilityService(database);
+  const pending=service.snapshot();
+  assert.equal(service.snapshot(),pending);release();
+  const text=await pending;
+  assert.equal(probes,1);assert.equal(transactions,1);
+  assert.deepEqual(queries.slice(0,2),[
+    'SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY',"SET LOCAL statement_timeout = '2s'",
+  ]);
+  assert.match(text,/^dva_database_up 1$/m);
+  assert.match(text,/^dva_order_metrics_success 1$/m);
+  assert.match(text,/^dva_orders_attention\{status="notPaid"\} 2$/m);
+  assert.match(text,/^dva_orders_attention\{status="PAID"\} 0$/m);
+  assert.match(text,/^dva_orders_stale_submitting 1$/m);
+  assert.match(text,/^dva_database_transactions_total 3$/m);
+  database.pool.query=async()=>{throw new Error('private connection details');};
+  const down=await service.snapshot();
+  assert.match(down,/^dva_database_up 0$/m);
+  assert.match(down,/^dva_order_metrics_success 0$/m);
+  assert.doesNotMatch(down,/dva_orders_attention|dva_orders_stale_submitting|private connection/);
+  database.pool.query=async()=>{};
+  database.transaction=async()=>{throw new Error('private SQL');};
+  const unavailable=await service.snapshot();
+  assert.match(unavailable,/^dva_database_up 1$/m);
+  assert.match(unavailable,/^dva_order_metrics_success 0$/m);
+  assert.doesNotMatch(unavailable,/dva_orders_attention|dva_orders_stale_submitting|private SQL/);
+});
+
 test('draft write scopes bind owners, calls, reply versions and authenticated reference queries', async () => {
   const {validateDraftWrite,validateWriteReference,validateCallMutation,requestWriteReference}=require('@dva/events/parcel-draft-write.cjs');
   const input={eventId:randomUUID(),source:'order',eventType:'ParcelDraftWriteRequested',payload:{

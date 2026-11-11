@@ -419,7 +419,7 @@
       {
         "method": "GET",
         "path": "/internal/metrics",
-        "service": "operations",
+        "service": "order",
         "stream": false,
         "file": "backend/src/observability/observability.controller.ts"
       },

@@ -4,7 +4,7 @@ const { createHash } = require('node:crypto');
 
 const owners = {
   'ai-settings': 'operations', audit: 'operations', auth: 'operations', faqs: 'operations',
-  health: 'operations', observability: 'operations', customers: 'customer', members: 'customer',
+  health: 'operations', observability: 'order', customers: 'customer', members: 'customer',
   organizations: 'customer', pins: 'customer', orders: 'order', payments: 'order',
   consultations: 'consultation', 'call-insights': 'consultation', dashboard: 'consultation',
   'unanswered-questions': 'consultation', webhooks: 'consultation',

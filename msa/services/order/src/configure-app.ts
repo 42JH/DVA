@@ -49,6 +49,7 @@ export function configureApp(app: INestApplication, logger = new Logger('Http'))
   });
   app.setGlobalPrefix(API_PREFIX, {
     exclude: [
+      { path: 'internal/metrics', method: RequestMethod.ALL },
       { path: 'order/health', method: RequestMethod.ALL },
       { path: 'order/health/ready', method: RequestMethod.ALL },
       { path: 'internal/parcel-draft-write', method: RequestMethod.ALL },

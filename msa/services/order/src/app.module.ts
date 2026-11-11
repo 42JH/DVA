@@ -7,6 +7,7 @@ import { DatabaseModule } from './database/database.module';
 import { AuthModule } from './auth/auth.module';
 import { AuditModule } from './audit/audit.module';
 import { OrdersModule } from './orders/orders.module';
+import { ObservabilityModule } from './observability/observability.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { OrdersModule } from './orders/orders.module';
     AuthModule,
     OrdersModule,
     PaymentsModule,
+    ObservabilityModule,
   ],
   controllers: [AppController],
 })
