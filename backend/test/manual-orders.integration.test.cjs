@@ -3,6 +3,34 @@ const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
 const f = require('./helpers/manual-orders.cjs')();
 
+test('manual recipient landlines survive persistence, Dver submission and personal PIN registration while sender landlines never submit', async () => {
+  for (const phone of ['0212345678', '03212345678']) {
+    const input = f.body();
+    input.parcels[0].destination = { ...input.parcels[0].destination, phoneNumber: phone };
+    const response = await f.send(input, randomUUID());
+    assert.equal(response.status, 201, await response.clone().text());
+    const { data } = await response.json();
+    assert.equal(data.status, 'ACCEPTED');
+    assert.equal(f.requests.at(-1).body.outboundParcels[0].destination.phoneNumber, phone);
+    const saved = (await (await f.get(`/api/orders/${data.orderSeq}`)).json()).data;
+    assert.equal(saved.parcels[0].destination.phoneNumber, phone);
+    assert.equal(
+      (
+        await f.pool.query(
+          "SELECT 1 FROM personal_pins WHERE customer_seq=$1 AND deleted_at IS NULL AND address_data->>'phoneNumber'=$2",
+          [f.customerId, phone],
+        )
+      ).rowCount,
+      1,
+    );
+    const count = f.requests.length;
+    input.parcels[0].origin = { ...input.parcels[0].origin, phoneNumber: phone };
+    const rejected = await f.send(input, randomUUID());
+    assert.equal(rejected.status, 400);
+    assert.equal(f.requests.length, count);
+  }
+});
+
 test('69: each active admin role submits a complete manual order without a call', async () => {
   for (let actor = 0; actor < 3; actor++) {
     const before = await f.counts();

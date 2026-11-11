@@ -22,7 +22,7 @@ module.exports = function registerAiSettingsPublishing(suite) {
     const second = await data(
       await saveVersion(first.aiPersonaSeq, { expectedVersion: 1, name: '현재 HEAD' }),
     );
-    for (const actor of [1])
+    for (const actor of [99])
       await error(
         await call(
           'POST',
@@ -33,8 +33,8 @@ module.exports = function registerAiSettingsPublishing(suite) {
           },
           actor,
         ),
-        403,
-        'FORBIDDEN',
+        401,
+        'UNAUTHORIZED',
       );
     await error(
       await serviceCall('POST', '/api/personas/' + first.aiPersonaSeq + '/activate', {
@@ -109,7 +109,7 @@ module.exports = function registerAiSettingsPublishing(suite) {
 
   require('./ai-settings-migrations.cjs').personaHead(suite);
 
-  test('SUPERVISOR developers create, edit and publish with their own identity and active sessions', async () => {
+  test('OPERATOR administrators create, edit and publish with their own identity and active sessions', async () => {
     assert.deepEqual(await data(await call('GET', '/api/ai/options', undefined, 2)), options);
     const first = await data(await call('POST', '/api/personas', input(), 2), 201);
     assert.equal(first.createdByAdminUserSeq, actorIds[2]);

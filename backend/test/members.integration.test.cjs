@@ -109,7 +109,16 @@ function patch(id, input, session = cookie) {
   );
 }
 function remove(id, session = cookie) {
-  return request('/members/' + id, { method: 'DELETE' }, base, session);
+  return request(
+    '/members',
+    {
+      method: 'DELETE',
+      body: JSON.stringify({ membershipSeqs: [id] }),
+      headers: { 'Content-Type': 'application/json' },
+    },
+    base,
+    session,
+  );
 }
 async function company(status = 'ACTIVE') {
   const id = (
@@ -156,7 +165,8 @@ async function error(response, status, code) {
 
 test('every active admin role can manage members and representative labels create no admin account', async () => {
   const before = (await pool.query('SELECT count(*) FROM admin_users')).rows[0].count;
-  for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN']) {
+  const roles = ['OPERATOR', 'SYSTEM_ADMIN'];
+  for (const role of roles) {
     const admin = await account(role);
     const co = await company();
     const cu = await customer();
@@ -186,7 +196,7 @@ test('every active admin role can manage members and representative labels creat
   }
   assert.equal(
     Number((await pool.query('SELECT count(*) FROM admin_users')).rows[0].count),
-    Number(before) + 3,
+    Number(before) + roles.length,
   );
 });
 

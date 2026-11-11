@@ -303,7 +303,7 @@ module.exports = function registerAiSettingsDrafts(suite) {
       ['PATCH', `/api/personas/${head.aiPersonaSeq}`, draftInput(draft, { name: '권한 검사' })],
       ['POST', `/api/personas/${head.aiPersonaSeq}/versions`, draftInput(draft)],
     ]) {
-      await error(await call(method, path, body, 1), 403, 'FORBIDDEN');
+      await error(await call(method, path, body, 99, { Cookie: undefined }), 401, 'UNAUTHORIZED');
       await error(
         await call(method, path, body, 0, { Origin: 'https://foreign.invalid' }),
         403,

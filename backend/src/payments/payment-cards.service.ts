@@ -267,14 +267,15 @@ export class PaymentCardsService {
 
   async remove(
     kind: CardOwner,
-    id: number,
+    id: number | number[],
     actor: number | null,
     requestId: string,
     header?: string,
   ) {
+    const ids = (Array.isArray(id) ? [...id] : [id]).sort((a, b) => a - b);
     await this.database.transaction(async (client) => {
-      await this.access(client, kind, id, actor, header);
-      await this.softDelete(client, kind, [id], actor, requestId);
+      for (const id of ids) await this.access(client, kind, id, actor, header);
+      await this.softDelete(client, kind, ids, actor, requestId);
     });
   }
 

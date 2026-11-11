@@ -172,7 +172,7 @@ test('list requires an active administrator session, accepts all three roles and
     { Cookie: cookie + '; ' + cookie },
   ])
     await error(await get({}, headers), 401, 'UNAUTHORIZED');
-  for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN']) {
+  for (const role of ['OPERATOR', 'SYSTEM_ADMIN']) {
     const actor = await administrator(role);
     await list({ unansweredQuestionSeq: '2147483647' }, { Cookie: actor.cookie });
   }

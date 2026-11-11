@@ -51,11 +51,7 @@ export class AiSettingsGuard implements CanActivate {
 
   private checkAccess(context: ExecutionContext): boolean {
     const request = context.switchToHttp().getRequest<AuthRequest>();
-    if (
-      this.reflector.get<boolean>(ADMIN_READ, context.getHandler()) &&
-      request.admin?.role === 'SYSTEM_ADMIN'
-    )
-      return true;
+    if (this.reflector.get<boolean>(ADMIN_READ, context.getHandler()) && request.admin) return true;
     request.securityAuthType = 'ai_persona';
     const expected = this.config.get('AI_PERSONA_TOKEN', { infer: true });
     if (!expected)

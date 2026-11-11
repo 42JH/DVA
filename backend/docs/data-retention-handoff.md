@@ -1,19 +1,21 @@
 # Soft delete API·AI 전달 사항
 
-045·046과 새 백엔드를 함께 배포한다. 기존 삭제 API의 URL·본문·204 응답·역할은 유지한다. 이 문서는 기존 외부 API 문서의 ‘실제 삭제’ 설명보다 우선한다. 접수 중간 실패·최종 실패는 [10초·10분 재시도 계약](order-submission-retry.md)을 따른다.
+DELETE의 최신 URL·배열 body·권한은 [전체 DELETE 통합 명세](delete-array-contracts.md)를 우선합니다. 기존 단건 DELETE URL은 제거합니다.
+
+045·046과 새 백엔드를 함께 배포한다. 아래 삭제·보존 정책은 유지하며 DELETE URL·배열 본문은 최신 통합 명세로 전환한다. 이 문서는 기존 외부 API 문서의 ‘실제 삭제’ 설명보다 우선한다. 접수 중간 실패·최종 실패는 [10초·10분 재시도 계약](order-submission-retry.md)을 따른다.
 
 | 호출 | 동작 |
 |---|---|
-| DELETE /api/admins/{id} | SYSTEM_ADMIN 전용. OPERATOR/SUPERVISOR 계정 soft delete + 모든 세션 즉시 폐기. SYSTEM_ADMIN 삭제 금지 유지 |
-| DELETE /api/companies/{id} | 모든 활성 관리자. 기업·부서·소속·기업 PIN을 같은 트랜잭션에서 soft delete |
-| DELETE /api/departments/{id} | 해당 부서·소속·기업 PIN만 soft delete |
-| DELETE /api/members/{id} | 소속만 soft delete. 고객은 보존 |
+| `DELETE /api/admins` + `{ adminUserSeqs: [id] }` | SYSTEM_ADMIN 전용. OPERATOR/SUPERVISOR 계정 soft delete + 모든 세션 즉시 폐기. SYSTEM_ADMIN 삭제 금지 유지 |
+| `DELETE /api/companies` + `{ organizationSeqs: [id] }` | 모든 활성 관리자. 기업·부서·소속·기업 PIN을 같은 트랜잭션에서 soft delete |
+| `DELETE /api/departments` + `{ departmentSeqs: [id] }` | 해당 부서·소속·기업 PIN만 soft delete |
+| `DELETE /api/members` + `{ membershipSeqs: [id] }` | 소속만 soft delete. 고객은 보존 |
 | DELETE /api/faqs | 기존 faqEntrySeqs 배열 유지. FAQ 본문 보관 + AI DELETE 알림 유지. 052 고객 질문 사례는 같은 트랜잭션에서 물리 삭제 |
-| DELETE /api/unanswered-questions/{id} | 기존 정책대로 OPEN만 삭제, DELETED 재호출 204, REGISTERED 409. 원문은 DB에 보관하고 조회·처리 결과에서는 숨김 |
-| **DELETE /api/orders/{id}** | 신규. 모든 활성 관리자. 주문과 자식 이력을 일반 조회에서 숨김. 결제 취소 API가 아니며 금액·청구 총액은 변경하지 않음 |
-| **DELETE /api/calls/{id}** | 신규. 모든 활성 관리자. 통화·분석·STT·AI 이벤트·미답변·녹취를 일반 조회에서 숨김. 연결된 주문은 보존 |
+| `DELETE /api/unanswered-questions` + `{ unansweredQuestionSeqs: [id] }` | 기존 정책대로 OPEN만 삭제, DELETED 재호출 204, REGISTERED 409. 원문은 DB에 보관하고 조회·처리 결과에서는 숨김 |
+| `DELETE /api/orders` + `{ orderSeqs: [id] }` | 신규. 모든 활성 관리자. 주문과 자식 이력을 일반 조회에서 숨김. 결제 취소 API가 아니며 금액·청구 총액은 변경하지 않음 |
+| `DELETE /api/calls` + `{ callSessionSeqs: [id] }` | 신규. 모든 활성 관리자. 통화·분석·STT·AI 이벤트·미답변·녹취를 일반 조회에서 숨김. 연결된 주문은 보존 |
 
-신규 DELETE는 관리자 쿠키와 CORS_ORIGINS의 Origin이 필요하다. 본문은 없다. 정상 204, 대상 없음/삭제/만료 404, 진행 중 409 INVALID_STATE, 잠금 대기 초과 409 REQUEST_IN_PROGRESS다. OPERATOR·SUPERVISOR·SYSTEM_ADMIN 모두 사용할 수 있다.
+신규 DELETE는 관리자 쿠키와 CORS_ORIGINS의 Origin이 필요하다. 요청 본문은 위 ID 배열이며 성공 응답 본문은 없다. 정상 204, 대상 없음/삭제/만료 404, 진행 중 409 INVALID_STATE, 잠금 대기 초과 409 REQUEST_IN_PROGRESS다. OPERATOR·SUPERVISOR·SYSTEM_ADMIN 모두 사용할 수 있다.
 
 주문은 COLLECTING/CANCELLED/ACCEPTED이고 진행 중인 연결 통화·승인·안내 발송이 없을 때 삭제한다. notPaid는 기존 취소 API로 먼저 정리하고, PAID/SUBMITTING/SUBMITTING_FAILED/SUBMISSION_FAILED는 결제·접수 결과부터 확인한다. 최종 접수 실패도 결제 취소를 뜻하지 않는다. 통화는 PBX 종료가 확인되고 연결된 모든 녹취 수신의 저장이 완료되어야 삭제한다. RECEIVED·FAILED 또는 활성 업로드 lease가 있으면 409이며 저장을 마친 뒤 재호출한다. 종료 누락을 임의 시간 초과로 판단하지 않는다.
 

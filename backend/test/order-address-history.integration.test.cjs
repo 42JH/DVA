@@ -308,7 +308,7 @@ test('same address remains separate per order/parcel and stable pagination handl
 test('active administrator roles can choose a customer and inspect retained withdrawn-customer history', async () => {
   const f = await fixture('WITHDRAWN');
   const o = await order(f);
-  for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN']) {
+  for (const role of ['OPERATOR', 'SYSTEM_ADMIN']) {
     const headers = await account(role);
     assert.equal(
       (await result(await request(f.customer, undefined, headers))).data[0].orderSeq,

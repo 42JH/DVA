@@ -27,7 +27,7 @@ const phone = '01064000001';
 before(async () => {
   app = await startTestApp(apps);
   base = (await app.getUrl()) + '/api';
-  for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN']) {
+  for (const role of ['OPERATOR', 'SYSTEM_ADMIN']) {
     const loginId = 'cancel' + role.replaceAll('_', '');
     const admin = await pool.query(
       "INSERT INTO admin_users(login_id,name,password_hash,role,status) VALUES($1,'취소 검증',$2,$3,'ACTIVE') RETURNING admin_user_seq",

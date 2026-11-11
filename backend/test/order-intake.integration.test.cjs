@@ -199,7 +199,19 @@ test('PBX first waits for AI, then READY alone becomes a card-pending order with
 test('AI first freezes inputs and creates no order, payment or Dver POST until the PBX arrives', async () => {
   dverRequests = [];
   const c = await call();
-  const saved = await draft(c);
+  const saved = await draft(c, { parcel: { ...parcel(c), destination: address('0212345678') } });
+  await data(
+    await f.write(
+      'POST',
+      `/api/customers/${c.customer}/pins`,
+      {
+        addressData: address('0212345678'),
+      },
+      0,
+      aiHeaders(c),
+    ),
+    201,
+  );
   const input = completeInput(saved, 'credit');
   const before = await orderCount();
   const waiting = await data(await seal(c, input));
@@ -224,6 +236,16 @@ test('AI first freezes inputs and creates no order, payment or Dver POST until t
   assert.equal(result.order.status, 'ACCEPTED');
   assert.equal(dverRequests.length, 1);
   assert.equal(dverRequests[0].outboundParcels.length, 1);
+  assert.equal(dverRequests[0].outboundParcels[0].destination.phoneNumber, '0212345678');
+  assert.equal(
+    (
+      await f.pool.query(
+        "SELECT 1 FROM personal_pins WHERE customer_seq=$1 AND deleted_at IS NULL AND address_data->>'phoneNumber'='0212345678'",
+        [c.customer],
+      )
+    ).rowCount,
+    1,
+  );
   await f.app.get(OrderMaintenanceWorker).run();
   assert.equal(dverRequests.length, 1);
 });

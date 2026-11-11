@@ -44,7 +44,7 @@ import { OrderSubmissionService } from './order-submission.service';
 
 @ApiTags('Admin Orders')
 @ApiCookieAuth('adminSession')
-@Roles('OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN')
+@Roles('OPERATOR', 'SYSTEM_ADMIN')
 @ApiExtraModels(CreateManualOrderDto, ManualOrderResultDto, RequestMetaDto)
 @Controller('admin/orders')
 export class AdminOrdersController {

@@ -1,12 +1,16 @@
 # 모놀리식 백엔드 공통 기반
 
+관리자 역할 이분화와 DELETE 배열 전환은 [프론트 통합 명세](docs/frontend-delete-admin-roles.md)를 따릅니다. 새 앱 전 migration 066을 적용하여 기존 SUPERVISOR 계정을 상태·세션을 보존한 OPERATOR로 이관하고 개인정보 없는 SYSTEM 감사 기록을 남깁니다. 계정 관리 4개만 SYSTEM_ADMIN 전용이며 ai/config·페르소나 관리·감사 조회를 포함한 나머지 관리자 업무는 OPERATOR도 허용합니다. AI 전용 인증은 유지합니다.
+
+모든 모놀리식 DELETE는 [배열 통합 명세](docs/delete-array-contracts.md)를 따릅니다. 기존 배열형은 유지하고 단건 전용 경로는 교체하며, 프론트 호출 전환 후 함께 배포합니다. 기존 권한·soft delete·감사·보관 정책과 SYSTEM_ADMIN/ACTIVE 페르소나 보호는 유지합니다.
+
 최종 홈 화면의 오늘 주문·통화 건수와 최대 11개 미리보기는 [프론트 QA 연동 명세](docs/frontend-qa-api.md)를 따른다. 주문 전체는 실제 주문과 유효한 미완료 배송 단건 초안을 함께 반환한다. 미완료의 24시간·최신 확정 통화 조건은 [만료 명세](docs/incomplete-expiry-latest-call.md)를 따른다. 미답변 질문의 정확한 발화 연결은 현행 보장 범위에 포함하지 않는다. [후속 작업·검증 기록](docs/final-wireframe-follow-up.md)을 함께 확인한다.
 
 관리자 주문 목록은 [6개 상태 그룹](docs/order-status-groups.md)을 따른다. PAID는 PAID·SUBMITTING·SUBMITTING_FAILED, ACCEPTED는 접수 완료, SUBMISSION_FAILED는 최종 실패만 조회한다. 응답에 statusCounts.accepted를 추가하며 홈의 접수 실패 건수도 최종 실패 기준이다. 실제 주문 상태 8개와 결제·디버 전송은 유지한다.
 
 API 성능 개선은 [계획·동일 결과 검증·측정 기록](docs/api-performance-optimization.md)을 따른다. 응답·기능·오류·권한·보관 기준을 유지하며, 관리자 주문 목록의 배송상세 JSON과 통화 목록의 recordedAt은 페이지 선택 후 해당 행만 계산한다. 홈의 AI 통계 4개는 대상 통화 조회를 공유하며 개별 통계 API와 같은 값을 반환한다. 페르소나 목록·상세는 기존 버전·초안·프롬프트를 유지하면서 현재 페이지의 상세만 구성한다. 추가 migration·환경변수는 없다.
 
-프론트 QA 반영 작업은 [API 계약·검증 기록](docs/frontend-qa-api.md)을 따른다. 관리자 주문 목록은 기존 목록 필드에 같은 검색·기간·기업 조건의 statusCounts를 추가하며 미완료는 INCOMPLETE 배송 초안 목록으로 연결한다. GET /api/dashboard/home은 처리할 일·최대 5개 미리보기·기존 AI 통계 4개를 하나의 조회 스냅샷으로 제공한다. DELETE /api/companies는 organizationSeqs 배열 1~100개를 전체 성공·실패 단위로 처리하고 기존 단건 URL도 유지한다. 추가 migration은 없다.
+프론트 QA 반영 작업은 [API 계약·검증 기록](docs/frontend-qa-api.md)을 따른다. 관리자 주문 목록은 기존 목록 필드에 같은 검색·기간·기업 조건의 statusCounts를 추가하며 미완료는 INCOMPLETE 배송 초안 목록으로 연결한다. GET /api/dashboard/home은 처리할 일·최대 5개 미리보기·기존 AI 통계 4개를 하나의 조회 스냅샷으로 제공한다. DELETE /api/companies는 단건·다건 모두 organizationSeqs 배열 1~100개를 전체 성공·실패 단위로 처리한다. 기존 단건 URL은 제거하며 [프론트 전환 명세](docs/company-delete-array-only.md)를 따른다. 추가 migration은 없다.
 
 관리자 목록 GET /api/admins는 선택 q로 이름·로그인 아이디를 대소문자 구분 없이 부분 검색한다. 앞뒤 공백 제거 후 최대 100자이며 빈 검색어는 기존 목록, %, _는 일반 문자다. 기존 권한·상태 필터와 함께 페이지 적용 전 전체 계정에 검색하고 SYSTEM_ADMIN 전용 세션·삭제 계정 제외·공개 응답 정제를 유지한다. 실제 로그인 규칙과 DB는 변경하지 않으며 [작업·검증 기록](docs/admin-list-search-plan.md)을 따른다. 전달 명세는 후속 작업과 누적한다.
 
@@ -38,7 +42,7 @@ S05 결제 복구는 [실패 판정·연동 영향·운영 절차](docs/payment-
 
 고객 확인·등록·상세·수정과 공용 주문·주소·PIN·AI FAQ의 AI 호출은 `Authorization: Bearer <AI_BUSINESS_TOKEN>`을 요구한다. 미설정 시 해당 AI 호출은 503, 누락·오류 토큰은 401이다. 관리자는 기존 세션과 쓰기 Origin을 사용하며 AI 키가 필요 없다. 기존 통화·고객 범위 검사도 유지한다. [S01 설정·전환·검증](docs/ai-business-auth.md), [공용 API 12개 인증·AI/프론트 전달 명세](docs/shared-api-auth-handoff.md)를 따른다.
 
-업무 전화번호는 [휴대전화 번호 입력 계약](docs/mobile-phone-integration.md)에 따라 정확히 11자리 숫자 문자열로 받는다. 고객·고객 확인·직원·PIN·주문 입력 및 저장 주문의 최종 접수 검증에 적용한다. 수집 중 생략·null, 기존 저장 데이터 조회, PBX 원문 국제 표기 수신은 유지한다. 프론트·AI 전달 범위도 해당 문서에 정리했다.
+[전화번호 입력 계약](docs/mobile-phone-integration.md)에 따라 고객 식별은 기존 11자리를 유지하고 배송 발송인은 휴대전화 11자리, 수령인과 PIN은 지역번호·070 번호도 허용한다. 입력과 저장 주문의 최종 접수·디버 전송 검증에 동일하게 적용한다. 수집 중 생략·null, 기존 저장 데이터 조회, PBX 원문 국제 표기 수신은 유지한다. 프론트·AI 전달 범위도 해당 문서에 정리했다.
 
 미확정 결제의 5년 보관 만료는 [결제 보관·입력 검증 작업 계획](docs/payment-retention-and-mobile-plan.md)과 [보관 계약](docs/data-retention.md)을 따른다. 만료 건은 승인·복구 큐에서 제외하고 실제 승인·안내·디버 요청의 기존 점유 시간만 보호한 뒤 FK 순서대로 폐기한다. 오래된 결제 상태만으로 무기한 보존하지 않으며 기한 안의 미확정 결제 보호와 기존 결제·취소 API 계약은 유지한다. 이 변경의 추가 migration은 없다.
 
@@ -74,7 +78,7 @@ AI 고객 기본 주소 PATCH는 `call_session_seq`로 진행 중 본인 통화�
 
 통화 고객 번호는 nullable 논리 참조로 저장한다. 고객이 없어도 통화를 보존하며 전화번호 변경 후에도 통화·미답변의 고객 연결을 유지한다. 새 앱 전에 migration 040이 필요하다. 기존 데이터 보완과 연동 범위는 [통화 고객 연결](docs/call-customer-reference.md)을 따른다.
 
-페르소나 목록·상세·버전 이력은 모든 ACTIVE 관리자에게 조회를 허용한다. 생성·수정·publish와 AI 지원 옵션은 ACTIVE인 SUPERVISOR(개발자)·SYSTEM_ADMIN에게 허용한다. 주문 결제수단을 생략하면 미정(null)으로 저장·조회하며 최종 접수 전에는 선택해야 한다. 새 앱 전에 migration 039·040을 모두 적용한다. 주문 정보가 전혀 없는 AI 미완료·취소 결과는 통화와 재전송 식별자만 보존하고 NO_ORDER를 반환한다. 기존 결제수단과 주문은 유지하며 실제 서버 DB 적용은 별도다. 프론트의 권한·null 표시 연결은 [전달 사항](docs/persona-read-payment-null-handoff.md), AI의 주문 미생성 응답은 [빈 통화 계약](docs/empty-ai-order-results.md)을 따른다.
+페르소나 목록·상세·버전 이력은 모든 ACTIVE 관리자에게 조회를 허용한다. 생성·수정·publish와 AI 지원 옵션은 ACTIVE인 OPERATOR·SYSTEM_ADMIN에게 허용한다. 주문 결제수단을 생략하면 미정(null)으로 저장·조회하며 최종 접수 전에는 선택해야 한다. 새 앱 전에 migration 039·040을 모두 적용한다. 주문 정보가 전혀 없는 AI 미완료·취소 결과는 통화와 재전송 식별자만 보존하고 NO_ORDER를 반환한다. 기존 결제수단과 주문은 유지하며 실제 서버 DB 적용은 별도다. 프론트의 권한·null 표시 연결은 [전달 사항](docs/persona-read-payment-null-handoff.md), AI의 주문 미생성 응답은 [빈 통화 계약](docs/empty-ai-order-results.md)을 따른다.
 
 백엔드 최적화 브랜치는 새 앱 실행 전에 `032-list-read-indexes.sql`까지 적용한다. 031은 녹취 처리의 수신 건별 lease, 032는 검증된 조회 인덱스 두 개를 추가하며 API 형식은 바꾸지 않는다. 구버전 앱으로 복구할 때 추가 컬럼·인덱스는 보존해도 된다. 단계별 검증·보류 사항은 [최적화 기록](docs/backend-optimization.md)에 정리한다.
 
@@ -502,7 +506,7 @@ await fetch('/api/auth/login', {
 ```
 
 역할·계정 상태는 매 요청 DB에서 재검사한다. 신규 Controller는 전역 AuthGuard로 기본 보호되며,
-`@Roles('SUPERVISOR', 'SYSTEM_ADMIN')`처럼 허용 역할을 명시한다. 역할 계층을 자동 추론하지 않는다.
+`@Roles('OPERATOR', 'SYSTEM_ADMIN')`처럼 허용 역할을 명시한다. 역할 계층을 자동 추론하지 않는다.
 업무 조회는 모든 활성 관리자, AI 설정 편집 등 제한 기능은 해당 명세의 역할을 선언해야 한다.
 기존 health/PBX는 전용 경로와 기존 인증을 유지한다. 새 서비스 토큰 API에는 별도 인증 계약이 필요하다.
 `@PublicAuth()`는 로그인·가입·로그아웃에만 사용하며 다른 업무에 임의로 붙이지 않는다.
@@ -512,17 +516,17 @@ AuthModule은 인증과 권한 변경의 HTTP 흐름을 소유한다. AdminAcces
 비밀번호 변경은 대상 계정의 모든 세션 삭제·해시 갱신·감사 기록을 동일 트랜잭션으로 처리한다.
 로그인도 같은 계정 잠금을 사용해 이전 비밀번호로 검증 중인 로그인이 변경 후 살아남지 않게 한다.
 동시 변경은 잠금 순서에 따라 처리하며 오래된 세션의 후속 변경은 401이 될 수 있다.
-이미 인증을 마친 실행 중 요청은 소급 취소하지 않는다. 두 권한 변경 경로 모두 OPERATOR ↔ SUPERVISOR만 허용한다.
+이미 인증을 마친 실행 중 요청은 소급 취소하지 않는다. 관리자 계정 PATCH의 role 입력은 OPERATOR만 허용한다.
 SYSTEM_ADMIN을 대상으로 권한을 변경하면 403이고 SYSTEM_ADMIN으로 승격하는 입력은 400이다.
 `PATCH /admins/:id`에 `role`만 전달하면 계정 상태를 유지한다. 변경된 권한은 기존 세션의 다음 요청부터 반영한다.
 PENDING은 가입 대기 전용이고 ACTIVE→PENDING 변경은 허용하지 않는다.
-기존 PATCH /api/admins/:id의 status로 OPERATOR·SUPERVISOR의 ACTIVE ↔ INACTIVE를 전환한다.
+기존 PATCH /api/admins/:id의 status로 OPERATOR의 ACTIVE ↔ INACTIVE를 전환한다.
 SYSTEM_ADMIN 본인·타인의 ACTIVE ↔ INACTIVE 전환은 403이며 기존 권한 변경·삭제 보호도 유지한다.
 PENDING → ACTIVE 가입 승인은 유지하고 같은 상태 지정·PENDING → INACTIVE·PENDING으로 되돌리기는 409다.
 비활성화는 계정 상태 변경·대상의 모든 세션 삭제·성공 감사 기록을 동일 트랜잭션에서 처리한다.
 재활성화해도 이전 세션은 복구하지 않으므로 다시 로그인해야 한다. 이미 인증한 실행 중 요청은 소급 취소하지 않는다.
 
-DELETE /api/admins/:id는 SYSTEM_ADMIN만 사용하며 OPERATOR·SUPERVISOR를 상태와 관계없이 soft delete한다.
+DELETE /api/admins의 adminUserSeqs 배열은 SYSTEM_ADMIN만 사용하며 OPERATOR를 상태와 관계없이 soft delete한다.
 SYSTEM_ADMIN은 본인·타인 모두 삭제할 수 없다. 성공 응답은 본문 없는 204이며 없는 계정은 404다.
 계정에 deleted_at을 기록하고 모든 세션을 즉시 삭제해 목록·로그인에서 제외한다. 계정은 삭제 후 5년 보관하고 폐기한다. 이미 인증한 요청은 소급 취소하지 않지만 후속 인증은 실패한다.
 업무 기록의 관리자 번호는 논리 참조로 보존하며 감사 로그의 actorName·targetAdminName으로 당시 이름을 확인한다.

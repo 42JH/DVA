@@ -111,13 +111,21 @@ export class MembersService {
     });
   }
 
-  async remove(id: number, adminId: number, requestId: string): Promise<void> {
+  async remove(id: number | number[], adminId: number, requestId: string): Promise<void> {
+    const ids = (Array.isArray(id) ? [...id] : [id]).sort((a, b) => a - b);
     await this.write(async (client) => {
-      const member = await this.repository.member(id, client);
-      if (!member) throw new ApiException(404, 'NOT_FOUND', '구성원을 찾을 수 없습니다.');
-      await this.repository.customer(member.customerSeq, client);
-      await this.repository.remove(id, client);
-      await this.record('MEMBERSHIP_REMOVED', 'MEMBERSHIP', id, adminId, requestId, client);
+      const rows = [];
+      for (const id of ids) rows.push(await this.repository.member(id, client));
+      if (rows.some((row) => !row))
+        throw new ApiException(404, 'NOT_FOUND', '구성원을 찾을 수 없습니다.');
+      await this.repository.lockCustomers(
+        rows.map((row) => row!.customerSeq).sort((a, b) => a - b),
+        client,
+      );
+      for (const id of ids) {
+        await this.repository.remove(id, client);
+        await this.record('MEMBERSHIP_REMOVED', 'MEMBERSHIP', id, adminId, requestId, client);
+      }
     });
   }
 

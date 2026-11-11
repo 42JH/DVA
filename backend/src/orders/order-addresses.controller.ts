@@ -15,7 +15,7 @@ import { OrdersService } from './orders.service';
 @ApiResponse({ status: 403, type: ErrorResponseDto })
 @ApiResponse({ status: 404, type: ErrorResponseDto })
 @ApiResponse({ status: 409, type: ErrorResponseDto })
-@Roles('OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN')
+@Roles('OPERATOR', 'SYSTEM_ADMIN')
 @Controller('customers')
 export class OrderAddressesController {
   constructor(private readonly orders: OrdersService) {}

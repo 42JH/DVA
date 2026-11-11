@@ -106,7 +106,7 @@ test('call list requires a real administrator session, including AI/header calle
     { Cookie: 'dva_session=' + '0'.repeat(64) },
   ])
     await error(await list({}, headers), 401, 'UNAUTHORIZED');
-  for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN']) {
+  for (const role of ['OPERATOR', 'SYSTEM_ADMIN']) {
     const admin = role === 'OPERATOR' ? operator : await account(role);
     assert.deepEqual(
       await result(await list({ callerPhoneNumber: phoneNumber() }, admin.headers)),

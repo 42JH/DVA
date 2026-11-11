@@ -29,7 +29,7 @@ module.exports = function personaDeletion(suite) {
 
   test('persona deletion keeps existing write roles, session and Origin checks with a strict array body', async () => {
     const p = await create();
-    await error(await remove([p.aiPersonaSeq], 1), 403, 'FORBIDDEN');
+    await error(await remove([], 1), 400, 'INVALID_REQUEST');
     await error(await remove([p.aiPersonaSeq], 99, { Cookie: undefined }), 401, 'UNAUTHORIZED');
     await error(
       await remove([p.aiPersonaSeq], 0, { Origin: 'https://foreign.invalid' }),
@@ -52,7 +52,7 @@ module.exports = function personaDeletion(suite) {
     ])
       await error(await remove(ids), 400, 'INVALID_REQUEST');
     await error(await call('DELETE', '/api/personas', {}), 400, 'INVALID_REQUEST');
-    assert.equal((await remove([p.aiPersonaSeq], 2)).status, 204);
+    assert.equal((await remove([p.aiPersonaSeq], 1)).status, 204);
   });
 
   test('one array API soft deletes a type and every version/draft together while retaining immutable contents and list counts', async () => {

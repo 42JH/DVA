@@ -1,3 +1,4 @@
+import { DeleteMembersDto } from '../common/dto/delete-request.dto';
 import {
   Body,
   Controller,
@@ -141,16 +142,21 @@ export class MembersController {
     );
   }
 
-  @Delete('members/:id')
+  @Delete('members')
   @HttpCode(204)
-  @AuditOperation({ action: 'MEMBERSHIP_REMOVED', targetType: 'MEMBERSHIP', target: 'id' })
+  @AuditOperation({
+    action: 'MEMBERSHIP_REMOVED',
+    targetType: 'MEMBERSHIP',
+    target: 'ids',
+    idsField: 'membershipSeqs',
+  })
   @ApiOperation({
     summary: '기업 소속 해제',
     description:
       '소속 연결 행만 삭제. 고객·개인 PIN·주문은 보존하며 이후 다른 기업 등록을 허용합니다.',
   })
   @ApiNoContentResponse()
-  remove(@Param() params: MemberIdParamsDto, @Req() request: AuthRequest) {
-    return this.members.remove(params.id, request.admin.adminUserSeq, request.requestId);
+  remove(@Body() input: DeleteMembersDto, @Req() request: AuthRequest) {
+    return this.members.remove(input.membershipSeqs, request.admin.adminUserSeq, request.requestId);
   }
 }

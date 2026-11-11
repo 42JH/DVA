@@ -8,7 +8,7 @@
 | GET /api/companies/{id}/members | status, limit, offset | 200, `{data, hasNext, total_count}` |
 | POST /api/companies/{id}/members | 직원 단건 객체 또는 `{items:[직원,...]}` | 204, 본문 없음 |
 | PATCH /api/members/{id} | role, status, departmentSeq 중 하나 이상 | 204 |
-| DELETE /api/members/{id} | 본문 없음 | 204 |
+| DELETE /api/members | `{ "membershipSeqs": [1] }` | 204 |
 
 ## 등록 입력
 
