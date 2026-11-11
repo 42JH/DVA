@@ -1,16 +1,17 @@
-// 기업 창 셋 — 사원 추가 · 수정, CSV로 사원 추가, CSV로 기업 등록. 규칙 · 요청은 기존 훅 그대로
+// 기업 창 — 사원 추가 · 수정, CSV로 사원 추가, CSV로 기업 등록, 이름 하나 입력(기업명 · 부서명). 규칙 · 요청은 기존 훅 그대로
 // 파일 칸 규칙은 긴 설명 대신 [예시 파일 받기]로 (예시 파일에 칸 이름 · 형식이 다 들어 있음)
 import type { Member } from '@/features/company/api/companyApi'
-import { downloadExample, type CsvMember } from '@/features/company/csvMembers'
+import { downloadExample, type CsvKind, type CsvMember } from '@/features/company/csvMembers'
 import { fmtPhone } from '@/shared/lib/format'
 import { MEMBER_ROLE } from '@/features/company/labels'
 import { useCompanyCsv } from '@/features/company/hooks/useCompanyCsv'
 import { useMemberCsv } from '@/features/company/hooks/useMemberCsv'
 import { useMemberForm } from '@/features/company/hooks/useMemberForm'
-import { Btn, Icon } from '@/shared/ui'
+import { Btn, Icon, SelectField } from '@/shared/ui'
 import { AddressPicker } from '@/shared/ui/AddressPicker'
 import { AddressButton, Choice, FileDrop, TextInput } from '@/shared/ui/Field'
 import { Modal } from '@/shared/ui/Modal'
+import { useState } from 'react'
 
 const ROLES = (['MEMBER', 'ORG_ADMIN'] as const).map((r) => ({ value: r, label: MEMBER_ROLE[r] }))
 const note = 'min-w-0 flex-1 text-[12px]'
@@ -25,8 +26,8 @@ const FootNote = ({ error, hint }: { error?: string | null; hint?: string | null
     <p className={`${note} text-ops-sub`}>{hint}</p>
   )
 
-const Example = () => (
-  <Btn kind="plain" onClick={downloadExample} className="self-start">
+const Example = ({ kind = 'members' }: { kind?: CsvKind }) => (
+  <Btn kind="plain" onClick={() => downloadExample(kind)} className="self-start">
     <Icon name="download" />
     예시 파일 받기
   </Btn>
@@ -37,13 +38,17 @@ export function MemberFormModal({
   companyName,
   member,
   onClose,
+  onCsv,
+  initialDept = null,
 }: {
   companyId: number
   companyName: string
   member: Member | null // null = 추가
   onClose: () => void
+  initialDept?: number | null
+  onCsv?: () => void // 추가 창에서 CSV로 여러 명 등록 창으로 바꿈 (11/11: 화면의 CSV 버튼을 이 창 안으로)
 }) {
-  const vm = useMemberForm(companyId, member, onClose)
+  const vm = useMemberForm(companyId, member, onClose, initialDept)
   return (
     <Modal
       title={vm.editing ? '사원 수정' : '사원 추가'}
@@ -82,6 +87,12 @@ export function MemberFormModal({
             if (vm.canSubmit) vm.submit()
           }}
         >
+          {!vm.editing && onCsv && (
+            <Btn onClick={onCsv} className="self-start">
+              <Icon name="sheet" />
+              CSV 파일로 여러 명 등록
+            </Btn>
+          )}
           <div className="grid grid-cols-2 gap-3">
             {/* 사번은 사원을 찾는 키 — 수정에선 잠금 */}
             <TextInput
@@ -100,7 +111,21 @@ export function MemberFormModal({
               onChange={vm.setPhone}
               error={vm.errors.phone}
             />
-            <Choice label="역할" value={vm.form.role} options={ROLES} onChange={vm.setRole} />
+            <div className="flex flex-col gap-1">
+              <Choice label="구분" value={vm.form.role} options={ROLES} onChange={vm.setRole} />
+              {vm.errors.role && (
+                <p role="alert" className="text-[12px] text-ops-stop">
+                  {vm.errors.role}
+                </p>
+              )}
+            </div>
+            <SelectField
+              label="부서"
+              value={vm.form.dept}
+              onChange={vm.setDept}
+              options={vm.deptOptions}
+              compact
+            />
           </div>
           <AddressButton value={vm.road} onClick={vm.openSearch} />
           <TextInput
@@ -189,6 +214,7 @@ export function MemberCsvModal({
 function CsvTable({ rows }: { rows: (CsvMember & { mark?: string })[] }) {
   if (!rows.length) return null
   const marked = rows.some((r) => r.mark)
+  const withCompany = rows.some((r) => r.company)
   return (
     <section aria-label="읽은 사원" className="flex flex-col gap-1.5">
       <p className="text-[12px] text-ops-sub">읽은 사원 {rows.length}명</p>
@@ -197,10 +223,11 @@ function CsvTable({ rows }: { rows: (CsvMember & { mark?: string })[] }) {
           <thead className="sticky top-0 bg-[#e8eff8] text-[12px] font-semibold">
             <tr className="[&>th]:h-8 [&>th]:px-3 [&>th]:text-left">
               {marked && <th className="w-16">구분</th>}
+              {withCompany && <th className="w-24">기업</th>}
               <th className="w-20">사번</th>
               <th>이름</th>
               <th className="w-32">전화번호</th>
-              <th className="w-16">대표자</th>
+              <th className="w-16">담당자</th>
               <th>부서</th>
             </tr>
           </thead>
@@ -215,10 +242,11 @@ function CsvTable({ rows }: { rows: (CsvMember & { mark?: string })[] }) {
                     {r.mark}
                   </td>
                 )}
+                {withCompany && <td className="font-semibold">{r.company}</td>}
                 <td>{r.employeeNo}</td>
                 <td>{r.name}</td>
                 <td>{fmtPhone(r.phoneNumber)}</td>
-                <td>{r.leader ? '대표자' : ''}</td>
+                <td>{r.leader ? '담당자' : ''}</td>
                 <td className="text-ops-sub">{r.department ?? ''}</td>
               </tr>
             ))}
@@ -238,10 +266,7 @@ export function CompanyCsvModal({ onClose }: { onClose: () => void }) {
       onClose={onClose}
       footer={
         <>
-          <FootNote
-            error={vm.errorMessage}
-            hint={vm.count > 0 ? `사원 ${vm.count}명을 함께 등록합니다.` : null}
-          />
+          <FootNote error={vm.errorMessage} hint={vm.summary} />
           <Btn onClick={onClose}>취소</Btn>
           <Btn kind="primary" disabled={!vm.canSubmit} onClick={vm.submit}>
             {vm.isSubmitting ? '등록 중…' : '등록'}
@@ -250,7 +275,6 @@ export function CompanyCsvModal({ onClose }: { onClose: () => void }) {
       }
     >
       <div className="flex flex-col gap-3">
-        <TextInput label="기업명" value={vm.name} onChange={vm.setName} />
         <FileDrop
           file={vm.file}
           accept=".xlsx,.csv"
@@ -258,9 +282,60 @@ export function CompanyCsvModal({ onClose }: { onClose: () => void }) {
           onPick={(f) => void vm.pick(f)}
           onRemove={vm.removeFile}
         />
-        <Example />
+        <Example kind="companies" />
         <CsvTable rows={vm.members} />
       </div>
+    </Modal>
+  )
+}
+
+/** 이름 하나 입력 창 — 기업명 수정 · 부서 추가 · 부서 이름 변경 공용. 비었거나 그대로면 저장 꺼짐 */
+export function NameModal({
+  title,
+  label,
+  initial = '',
+  ok = '저장',
+  busy,
+  error,
+  onSave,
+  onClose,
+}: {
+  title: string
+  label: string
+  initial?: string
+  ok?: string
+  busy: boolean
+  error: string | null
+  onSave: (name: string) => void
+  onClose: () => void
+}) {
+  const [value, setValue] = useState(initial)
+  const next = value.trim()
+  const canSave = !busy && next !== '' && next !== initial
+  return (
+    <Modal
+      title={title}
+      width={440}
+      onClose={onClose}
+      footer={
+        <>
+          <FootNote error={error} />
+          <Btn onClick={onClose}>취소</Btn>
+          <Btn kind="primary" type="submit" form="name-modal" disabled={!canSave}>
+            {busy ? `${ok} 중…` : ok}
+          </Btn>
+        </>
+      }
+    >
+      <form
+        id="name-modal"
+        onSubmit={(e) => {
+          e.preventDefault()
+          if (canSave) onSave(next)
+        }}
+      >
+        <TextInput label={label} value={value} onChange={setValue} />
+      </form>
     </Modal>
   )
 }

@@ -211,7 +211,7 @@ assert.deepEqual(
 assert.deepEqual(
   pv.changed.map((c) => [c.row.employeeNo, c.fields, c.before.department]),
   [
-    ['00134', ['전화번호', '대표자'], null],
+    ['00134', ['전화번호', '담당자'], null],
     ['00180', ['부서', '주소'], '개발팀'],
   ],
 )
@@ -246,7 +246,7 @@ assert.equal(
 assert.match(errorText({ status: 422, details: [] }, '등록'), /등록 조건에 맞지 않아/)
 
 // 부서 · 주소 열 (11/01): 주소 4칸 필수, 부서 · 상세주소는 빈칸 가능, 상세주소 열은 생략 가능
-const FULL = '사번,사원명,전화번호,대표자,부서,도로명 주소,지번 주소,동,우편번호,상세주소'
+const FULL = '사번,사원명,전화번호,담당자,부서,도로명 주소,지번 주소,동,우편번호,상세주소'
 const withAddr = ok(
   [
     FULL,
@@ -298,6 +298,52 @@ assert.deepEqual(
     ['002', '01000000002', '04524'],
     ['003', '01000000003', '04524'],
   ],
+)
+
+// 기업 CSV (11/11): 첫 칸 기업명 · 한 파일 = 한 기업 · 담당자 1명 이상
+const coText = exampleCsv('companies')
+assert.ok(coText.startsWith('﻿기업명,사번,'))
+const co = readMembersCsv(coText, 'companies')
+assert.ok(co.ok)
+assert.deepEqual([...new Set(co.members.map((m) => m.company))], ['예시상사'])
+assert.deepEqual([...new Set(co.members.map((m) => m.department))], ['경영지원팀', '개발팀']) // 부서 2곳
+assert.equal(co.members.filter((m) => m.leader).length, 1)
+assert.equal(co.members[0]!.employeeNo, '001') // 사원 칸이 한 칸씩 밀려 읽히지 않음
+assert.equal(co.members[0]!.address.postalCode, '04524')
+const CO_HEAD = '기업명,사번,사원명,전화번호,담당자,부서,도로명 주소,지번 주소,동,우편번호'
+const coRow = (c: string) => `${c},${ADDR}`
+const coErr = (t: string) => {
+  const r = readMembersCsv(t, 'companies')
+  assert.ok(!r.ok)
+  return r.errors
+}
+assert.match(
+  coErr(`${CO_HEAD}
+${coRow('가사,1,가,01011112222,,')}`)[0]!,
+  /담당자를 1명 이상/,
+)
+assert.match(
+  coErr(`${CO_HEAD}
+${coRow(',1,가,01011112222,Y,')}`)[0]!,
+  /기업명이 비어/,
+)
+assert.match(
+  coErr(`${HEAD}
+${row('1,가,01011112222,Y')}`)[0]!,
+  /첫 줄은 '기업명/,
+)
+// 기업명이 둘이면 막음 (한 파일 = 한 기업)
+assert.match(
+  coErr(`${CO_HEAD}
+${coRow('가사,1,가,01011112222,Y,')}
+${coRow('나사,2,나,01011113333,Y,')}`)[0]!,
+  /한 파일에는 한 기업만/,
+)
+assert.match(
+  coErr(`${CO_HEAD}
+${coRow('가사,1,가,01011112222,Y,')}
+${coRow('가사,1,나,01011113333,,')}`)[0]!,
+  /사번이 2행과 겹칩니다/,
 )
 
 console.log('csvMembers OK')

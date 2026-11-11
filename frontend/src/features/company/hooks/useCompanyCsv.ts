@@ -15,25 +15,27 @@ type Picked =
   | { kind: 'ok'; file: File; members: CsvMember[] }
   | { kind: 'bad'; file: File; errors: string[]; more: number }
 
-/** 08 CSV로 기업 등록 훅 — 기업명 + 파일 → 기업 · 부서 · 사원(대표자 · 부서 포함)을 요청 한 번으로 (11/01 백엔드 확장)
- * 하나의 트랜잭션이라 전부 되거나 전부 안 됨 → 예전의 '기업은 만들었지만…' · 대표자 따로 지정이 없어짐
- * 주소만 아직 등록 API에 칸이 없어 등록 뒤 사원마다 저장(saveMemberAddresses, shortcut) */
+/** 08 CSV로 기업 등록 훅 (11/11) — 파일 첫 칸이 기업명, 한 파일 = 한 기업(검사는 csvMembers)
+ * POST /companies 한 번(기업 · 부서 · 사원이 한 트랜잭션이라 전부 되거나 전부 안 됨)
+ * 주소는 아직 등록 API에 칸이 없어 등록 뒤 사원마다 저장(saveMemberAddresses, shortcut) */
 export function useCompanyCsv(onDone: () => void) {
   const qc = useQueryClient()
-  const [name, setName] = useState('')
   const [picked, setPicked] = useState<Picked>({ kind: 'none' })
 
   const pick = async (file: File) => {
-    const r = await readMembersFile(file)
+    const r = await readMembersFile(file, 'companies')
     setPicked(r.ok ? { kind: 'ok', file, members: r.members } : { kind: 'bad', file, ...r })
     reg.reset()
   }
 
+  const members = picked.kind === 'ok' ? picked.members : []
+  const companyName = members[0]?.company ?? ''
+  const departments = [...new Set(members.flatMap((m) => (m.department ? [m.department] : [])))]
+
   const reg = useMutation({
-    mutationFn: async (members: CsvMember[]) => {
-      const departments = [...new Set(members.flatMap((m) => (m.department ? [m.department] : [])))]
+    mutationFn: async () => {
       const id = await createCompany(
-        name.trim(),
+        companyName,
         departments,
         members.map((m) => ({
           employeeNo: m.employeeNo,
@@ -57,15 +59,10 @@ export function useCompanyCsv(onDone: () => void) {
   })
 
   const err = reg.error
-  // 서버 오류 경로는 members.N.field (등록 본문의 사원 배열) → 파일의 행으로
-  const rowErrors =
-    err instanceof ApiError && picked.kind === 'ok'
-      ? serverRowErrors(err.details, picked.members)
-      : []
+  // 서버 오류 경로는 members.N.field (등록 본문의 사원 배열) → 파일의 행
+  const rowErrors = err instanceof ApiError ? serverRowErrors(err.details, members) : []
 
   return {
-    name,
-    setName,
     file: picked.kind === 'none' ? null : picked.file,
     fileError:
       picked.kind === 'bad'
@@ -73,8 +70,15 @@ export function useCompanyCsv(onDone: () => void) {
         : rowErrors.length
           ? rowErrors.slice(0, 3).join('\n')
           : undefined,
-    count: picked.kind === 'ok' ? picked.members.length : 0, // '사원 24명'
-    members: picked.kind === 'ok' ? picked.members : [], // 읽은 사원 — 등록 전에 표로 보여 줌
+    // '예시상사, 부서 2곳, 사원 4명을 등록합니다.'
+    summary: members.length
+      ? [
+          companyName,
+          ...(departments.length ? [`부서 ${departments.length}곳`] : []),
+          `사원 ${members.length}명을 등록합니다.`,
+        ].join(', ')
+      : null,
+    members, // 읽은 사원 — 등록 전에 표로 보여 줌
     pick,
     removeFile: () => {
       setPicked({ kind: 'none' })
@@ -87,8 +91,8 @@ export function useCompanyCsv(onDone: () => void) {
       : reg.data
         ? `기업과 사원은 등록했지만 ${reg.data}명의 주소를 저장하지 못했습니다. 기업 상세의 [수정]에서 넣어 주세요.`
         : null,
-    canSubmit: name.trim() !== '' && picked.kind === 'ok' && !reg.isPending && !reg.data,
+    canSubmit: picked.kind === 'ok' && !reg.isPending && !reg.data,
     isSubmitting: reg.isPending,
-    submit: () => picked.kind === 'ok' && reg.mutate(picked.members),
+    submit: () => picked.kind === 'ok' && reg.mutate(),
   }
 }

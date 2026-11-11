@@ -9,6 +9,7 @@ import { PageHead } from '@/shared/ui'
 import { Badge, Btn, Icon, SortTh } from '@/shared/ui'
 import { SearchBox } from '@/shared/ui/ListFrame'
 import { useScrollable } from '@/shared/lib/useScrollable'
+import { useKeepScroll } from '@/shared/lib/keepScroll'
 import { Confirm } from '@/shared/ui/Modal'
 import { UnansweredCall } from './UnansweredCall'
 import { dateTime } from '@/shared/lib/when'
@@ -33,6 +34,7 @@ export function UnansweredPage() {
   const rows = all.slice((page - 1) * size, page * size)
   const box = useRef<HTMLDivElement>(null)
   const scrollable = useScrollable(box, [rows])
+  useKeepScroll(box, 'list')
   const [open, setOpen] = useState<(UnansweredRow & { day: string }) | null>(null)
   const toFaq = (r: UnansweredRow) =>
     navigate('/faqs', { state: { from: r, back: pathname + search } })

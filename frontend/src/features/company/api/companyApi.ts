@@ -1,5 +1,5 @@
 // 08 기업관리 — API-36~40 기업 · API-45~48 구성원 (API 연동 상세명세 7장). React를 모르는 데이터 · API 층
-// 부서는 CSV의 부서 이름 ↔ 번호에만 씀(화면 없음) · 기업 공유 주소록은 안 씀 (11/01 결정) · 월 사용액은 11/11부터 씀
+// 11/11 재설계: 기업은 월결제로 고정(기업 간 배송) · 그룹 카드는 개인 카드와 같은 결제가 되어 화면에서 뺌 · 담당자(ORG_ADMIN) 1명 이상
 import { queryOptions } from '@tanstack/react-query'
 import { api, type ApiItem } from '@/shared/api/client'
 import { fetchAll } from '@/shared/api/paging'
@@ -11,9 +11,12 @@ interface Company {
   organizationSeq: number
   name: string
   status: ActiveStatus
-  monthlyBillingEnabled: boolean // 기업 월결제 자격 → 목록 '월결제' 열 (11/01 디자인 추가 b)
-  memberCount: number // 현재 ACTIVE 구성원 수 (부서 없는 사원 · 대표자 포함)
+  memberCount: number // 현재 ACTIVE 구성원 수 (부서 없는 사원 · 담당자 포함)
   createdAt: string | null // 등록 시각 — 예전 기업은 이력이 없어 null
+  // 아래 셋은 목록 화면용으로 백엔드에 요청한 칸 (11/11). 오기 전엔 undefined → 빈칸
+  departmentCount?: number
+  managerNames?: string[] // 담당자(ORG_ADMIN) 이름 — 사번 순
+  monthlyAmount?: number // 이번 달(한국 시각) 청구액, 원
 }
 
 /** CustomerAddress — 사원 주소는 고객 정보에 있음 (서버 CustomerAddressDto — 좌표 칸은 043에서 빠짐) */
@@ -33,7 +36,7 @@ export interface Member {
     organizationSeq: number
     departmentSeq: number | null
     employeeNo: string // 사번 — 앞자리 0 보존(문자열)
-    role: 'MEMBER' | 'ORG_ADMIN' // ORG_ADMIN = 대표자 표시, 권한 없음 · 여러 명 가능
+    role: 'MEMBER' | 'ORG_ADMIN' // ORG_ADMIN = 담당자 표시(연락 창구), 권한 없음 · 여러 명 · 기업마다 1명 이상
     status: ActiveStatus
   }
   customer: {
@@ -65,11 +68,11 @@ export interface MemberItem extends MemberInput {
   departmentSeq?: number | null
 }
 
-/** 부서 — 이름은 기업 안에서 고유 */
-interface Department {
+/** 부서 — 이름은 기업 안에서 고유. 사원을 거르는 데만 씀 */
+export interface Department {
   departmentSeq: number
   name: string
-  groupBillingEnabled: boolean // 그룹 카드 — 이 부서 사원만 쓸 수 있음 (부서 없는 사원은 못 씀)
+  memberCount: number // 이 부서의 ACTIVE 사원 수 (담당자 포함)
 }
 
 /** BillingMonth — 금액 단위 원. 기업 삭제 뒤에도 그 달 기업명은 남아 있음 */
@@ -78,7 +81,18 @@ interface BillingMonth {
   organizationName: string | null
   month: string
   monthlyAmount: number // 월결제 사용액
-  groupBillingAmount: number // 부서 그룹결제 사용액 합계
+  groupBillingAmount: number // 부서 그룹결제 사용액 — 그룹결제가 없어지기 전까지 청구액에 더함
+}
+
+/** 청구 내역 한 건 — GET /companies/{id}/billing/charges (11/11 백엔드에 요청한 계약)
+ * 기업 간 배송의 월결제 원장 한 줄. 금액은 결제 확정 때 값(뒤에 주문 금액이 바뀌어도 그대로) */
+export interface Charge {
+  orderSeq: number
+  paidAt: string // 결제 확정 시각 ISO
+  amount: number
+  sender: { name: string; phoneNumber: string; departmentName: string | null; address: string }
+  recipient: { organizationName: string; name: string; phoneNumber: string; address: string }
+  items: { label: string; amount: number }[] // '중박스 1개' · 6000
 }
 
 const MAX_LIMIT = 100 // 목록 limit 최대
@@ -114,7 +128,7 @@ export const companyQueries = {
       queryFn: ({ signal }) =>
         api.get<Page<Member>>(`/companies/${id}/members`, { query: q, signal }),
     }),
-  // 대표자 이름(상세 제목 줄) · CSV 대표자 지정(사번 → membershipSeq)에 전체가 필요 → 100건씩 끝까지
+  // 담당자 수(상세 제목 줄) · CSV 담당자 지정(사번 → membershipSeq)에 전체가 필요 → 100건씩 끝까지
   departments: (id: number) =>
     queryOptions({
       queryKey: [...companyQueries.all(), id, 'departments'],
@@ -131,6 +145,16 @@ export const companyQueries = {
             signal,
           })
         ).data,
+    }),
+  // 청구 내역 — 그 달 · 검색(보낸 사원 · 받는 기업 · 받는 분 · 주문 번호) · 쪽
+  charges: (id: number, q: { month: string; q?: string; limit: number; offset: number }) =>
+    queryOptions({
+      queryKey: [...companyQueries.all(), id, 'charges', q],
+      queryFn: ({ signal }) =>
+        api.get<Page<Charge> & { total_amount: number }>(`/companies/${id}/billing/charges`, {
+          query: q,
+          signal,
+        }),
     }),
   allMembers: (id: number) =>
     queryOptions({
@@ -169,24 +193,12 @@ export const createCompany = async (
     })
   ).data.organizationSeq
 
-/** 기업 월결제 사용 여부 변경 — PATCH /companies/{id} 204. 이름 · 상태는 안 보내면 그대로 */
-export const setMonthlyBilling = (id: number, enabled: boolean): Promise<void> =>
-  api.patch(`/companies/${id}`, { body: { monthlyBillingEnabled: enabled } })
-
-/** 부서 그룹 카드 사용 여부 변경 — PATCH /departments/{id} 204. 이름은 안 보내면 그대로 */
-export const setGroupBilling = (departmentSeq: number, enabled: boolean): Promise<void> =>
-  api.patch(`/departments/${departmentSeq}`, { body: { groupBillingEnabled: enabled } })
-
 /** 기업 삭제 — 소속 · 부서 · 기업 PIN 삭제, 고객 · 주문 · 통화 이력은 보존 */
 /** 기업명 바꾸기 — 서버가 앞뒤 공백을 지움, 빈 이름은 400 */
 export const renameCompany = (id: number, name: string): Promise<void> =>
   api.patch(`/companies/${id}`, { body: { name } })
 
 export const deleteCompany = (id: number): Promise<void> => api.delete(`/companies/${id}`)
-
-/** 기업 여러 곳 삭제 — 1~100곳 한 번에, 한 곳이라도 실패하면 전체 되돌림(404 · 409). 204 */
-export const deleteCompanies = (ids: number[]): Promise<void> =>
-  api.delete('/companies', { body: { organizationSeqs: ids } })
 
 /** 사원 등록 — 1~1000건 · 전체 트랜잭션 · 204. 같은 사번이면 고객 정보 갱신(= 수정) */
 export const addMembers = (id: number, items: MemberItem[]): Promise<void> =>
@@ -200,7 +212,15 @@ export const createDepartment = async (id: number, name: string): Promise<number
     })
   ).data.departmentSeq
 
-/** 대표자 표시 바꾸기 */
+/** 부서 이름 바꾸기 — 204. 같은 이름이 이미 있으면 409 */
+export const renameDepartment = (departmentSeq: number, name: string): Promise<void> =>
+  api.patch(`/departments/${departmentSeq}`, { body: { name } })
+
+/** 부서 삭제 — 204. 그 부서 사원의 기업 소속도 해제됨(고객 · 주문 기록은 남음, company-deletion.md) */
+export const deleteDepartment = (departmentSeq: number): Promise<void> =>
+  api.delete(`/departments/${departmentSeq}`)
+
+/** 담당자 표시 바꾸기 */
 export const setMemberRole = (
   membershipSeq: number,
   role: Member['membership']['role'],
@@ -210,8 +230,8 @@ export const setMemberRole = (
 export const removeMember = (membershipSeq: number): Promise<void> =>
   api.delete(`/members/${membershipSeq}`)
 
-/** 사번들을 대표자로 지정 — 등록 응답에 번호가 없어 전체를 다시 받아 사번으로 찾음 (backend-todo 10: role을 등록에 실어 주면 없어짐)
- * 이미 대표자면 건너뜀. 못 찾았거나 실패한 수를 돌려줌 (CSV 기업 등록 · CSV 사원 추가 · 사원 추가 창 공용) */
+/** 사번들을 담당자로 지정 — 등록 응답에 번호가 없어 전체를 다시 받아 사번으로 찾음 (backend-todo 10: role을 등록에 실어 주면 없어짐)
+ * 이미 담당자면 건너뜀. 못 찾았거나 실패한 수를 돌려줌 (CSV 기업 등록 · CSV 사원 추가 · 사원 추가 창 공용) */
 export async function assignLeaders(id: number, employeeNos: string[]): Promise<number> {
   if (employeeNos.length === 0) return 0
   const byNo = new Map((await fetchAllMembers(id)).map((m) => [m.membership.employeeNo, m]))

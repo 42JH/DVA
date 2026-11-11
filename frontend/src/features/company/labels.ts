@@ -1,14 +1,11 @@
 // 08 기업관리 — 코드 → 화면 문구
 import type { Member } from '@/features/company/api/companyApi'
 
-// ORG_ADMIN = 기업 대표자 표시(권한 없음 · 여러 명). 디자인의 '기업 관리자' → '대표자' (11/01 결정 a: 로그인 '관리자 계정'과 혼동 방지)
+// ORG_ADMIN = 기업의 연락 창구 '담당자'(권한 없음 · 여러 명 · 1명 이상). '관리자'는 콘솔 로그인 계정과 섞여서 안 씀 (11/11 사용자)
 export const MEMBER_ROLE: Record<Member['membership']['role'], string> = {
-  MEMBER: '일반 구성원',
-  ORG_ADMIN: '대표자',
+  MEMBER: '사원',
+  ORG_ADMIN: '담당자',
 }
-
-/** 기업 월결제 자격 → 목록 '월결제' 열 (11/01 디자인 추가 b) */
-export const BILLING_LABEL = (enabled: boolean) => (enabled ? '사용' : '미사용')
 
 /** 사원 등록 오류 reason → 문장 (백엔드 답 11/01). CSV 줄 안내 · 창 한 줄 공용 */
 export const MEMBER_REASON: Record<string, string> = {
