@@ -36,7 +36,7 @@ export function CompanyPage() {
             <Icon name="gear" />
             결제 설정
           </Btn>
-          <Btn kind="line" onClick={vm.openCsv}>
+          <Btn kind="primary" onClick={vm.openCsv}>
             <Icon name="sheet" />
             CSV로 사원 등록
           </Btn>
