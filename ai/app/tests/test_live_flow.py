@@ -1620,7 +1620,8 @@ def test_tool_call_on_answer_to_candidates_waits_for_pick(with_tool):
     from app.domain.candidates import offer
     from app.domain.state import Geo, Place, Source
 
-    svc, client = flow()
+    # 가짜 Decision이 늦게(0.3초) 답하는 시나리오다. 느린 CI에서 실제 판단 예산(1초)을 넘겨 판단이 버려지지 않게 넉넉히 둔다
+    svc, client = flow(decision_budget_sec=3.0)
     label = "현수민 서구 서대신동3가"
 
     async def slow_pick(model, input, questions):
@@ -1691,7 +1692,8 @@ def test_destination_partial_change_keeps_only_confirmed_fields(change, mode):
     from app.integrations.address import AddressResult
     from app.tools import run_tool
 
-    svc, client = flow()
+    # 가짜 Decision이 늦게(0.3초) 답하는 시나리오다. 느린 CI에서 실제 판단 예산(1초)을 넘겨 판단이 버려지지 않게 넉넉히 둔다
+    svc, client = flow(decision_budget_sec=3.0)
     pin = Place("이영희", "01055556666", "부산광역시 서구 대신공원로 1", "201호",
                 Geo("x", "y", "00000"), Source.PIN)
     label = "이영희 서구 서대신동"
@@ -1757,7 +1759,7 @@ def test_destination_partial_change_keeps_only_confirmed_fields(change, mode):
             text = f"네 {new_address}로요"
             if mode == "direct":
                 await say(conn, "어 네, 근데 그 같은 사람인데 이번에는 다른 주소로 보내고 싶어요", 1200)
-                await until(lambda: s.state.current.destination_partial_change == "address")
+                await until(lambda: s.state.current.destination_partial_change == "address", timeout=5.0)
                 assert s.state.current["receiver_phone"].value == pin.phone
                 result = await run_tool(s.tools, "record_fields", '{"receiver_address":"이번에는 다른 주소"}', "intent-only")
                 assert result["code"] == "RECEIVER_ADDRESS_VALUE_REQUIRED" and result["missing"][0] == "receiver_address"
