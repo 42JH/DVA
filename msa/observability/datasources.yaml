@@ -1,0 +1,15 @@
+apiVersion: 1
+datasources:
+  - name: MSA Prometheus
+    uid: msa-prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus.dva-observability.svc:9090
+    isDefault: true
+    editable: false
+  - name: MSA Loki
+    uid: msa-loki
+    type: loki
+    access: proxy
+    url: http://loki.dva-observability.svc:3100
+    editable: false

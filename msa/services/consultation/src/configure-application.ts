@@ -6,6 +6,9 @@ import {
   RequestMethod,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { metricsHandler } from '@dva/events/observability.cjs';
+import { DatabaseService } from './database/database.service';
+import { httpMetrics } from './observability/http-metrics';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import {
   ErrorResponseDto,
@@ -23,6 +26,9 @@ export function configureApplication(
   logger = new Logger('Http'),
 ): void {
   const config = app.get<ConfigService<Environment, true>>(ConfigService);
+  const { pool } = app.get(DatabaseService);
+  const metrics = metricsHandler(pool, httpMetrics);
+  app.getHttpAdapter().get('/internal/metrics', metrics);
   // Preserve the monolith Nginx PBX prefix rewrite on direct MSA ingress traffic.
   app.use((request: Request, _response: Response, next: NextFunction) => {
     if (request.path.replace(/\/$/, '') === '/api/webhooks/pbx/call-ended')

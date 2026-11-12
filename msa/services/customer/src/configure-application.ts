@@ -1,6 +1,9 @@
 import { json, type Request, type Response, type NextFunction } from 'express';
 import { ForbiddenException, INestApplication, Logger, RequestMethod } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { metricsHandler } from '@dva/events/observability.cjs';
+import { DatabaseService } from './database/database.service';
+import { httpMetrics } from './observability/http-metrics';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ErrorResponseDto, RequestMetaDto } from './common/dto/api-response.dto';
 import { ApiExceptionFilter } from './common/http/api-exception.filter';
@@ -11,6 +14,9 @@ import { type Environment } from './config/environment';
 
 export function configureApplication(app: INestApplication, logger = new Logger('Http')): void {
   const config = app.get<ConfigService<Environment, true>>(ConfigService);
+  const { pool } = app.get(DatabaseService);
+  const metrics = metricsHandler(pool, httpMetrics);
+  app.getHttpAdapter().get('/internal/metrics', metrics);
   app.use(
     requestContext(logger, {
       key: config.get('SECURITY_LOG_HMAC_KEY', { infer: true }),

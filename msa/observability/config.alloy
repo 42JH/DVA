@@ -1,0 +1,94 @@
+discovery.kubernetes "apps" {
+  role = "pod"
+  namespaces {
+    names = ["dva"]
+  }
+}
+
+discovery.relabel "app_logs" {
+  targets = discovery.kubernetes.apps.targets
+
+  rule {
+    source_labels = ["__meta_kubernetes_pod_label_app", "__meta_kubernetes_pod_container_port_name"]
+    regex = "dva-(operations|customer|consultation|delivery|order);http"
+    action = "keep"
+  }
+
+  rule {
+    source_labels = ["__meta_kubernetes_pod_label_app"]
+    regex = "dva-(.+)"
+    target_label = "service"
+    replacement = "$1"
+  }
+
+  rule {
+    target_label = "environment"
+    replacement = sys.env("MSA_OBSERVABILITY_ENVIRONMENT")
+  }
+}
+
+loki.source.kubernetes "app_logs" {
+  targets = discovery.relabel.app_logs.output
+  forward_to = [loki.process.sanitized.receiver]
+}
+
+loki.process "sanitized" {
+  forward_to = [loki.write.msa.receiver]
+
+  stage.json {
+    drop_malformed = true
+    expressions = {
+      kind = "event",
+      request_id = "requestId",
+      event_id = "eventId",
+      outcome = "outcome",
+      method = "method",
+      status = "statusCode",
+      duration = "durationMs",
+    }
+  }
+
+  stage.template {
+    source = "safe_line"
+    template = `
+      {{- $uuid := "(?i)^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$" -}}
+      {{- $id := toString .request_id -}}
+      {{- if and (eq (toString .kind) "http_request") (regexMatch $uuid $id) (regexMatch "^(GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS|CONNECT|TRACE)$" (toString .method)) (regexMatch "^[1-5][0-9]{2}$" (toString .status)) (regexMatch "^[0-9]{1,9}$" (toString .duration)) -}}
+        {{- dict "event" "http_request" "requestId" $id "method" .method "statusCode" .status "durationMs" .duration | toJson -}}
+      {{- else if and (eq (toString .kind) "outbox_delivery") (regexMatch $uuid $id) (regexMatch $uuid (toString .event_id)) (regexMatch "^(delivered|retry)$" (toString .outcome)) -}}
+        {{- dict "event" "outbox_delivery" "requestId" $id "eventId" .event_id "outcome" .outcome | toJson -}}
+      {{- else -}}
+        discard
+      {{- end -}}
+    `
+  }
+
+  stage.regex {
+    source = "safe_line"
+    expression = "\"(?P<approved>event)\":\"(http_request|outbox_delivery)\""
+  }
+
+  stage.labels {
+    values = { sanitized = "approved" }
+  }
+
+  stage.match {
+    selector = "{service=~\".+\",sanitized!=\"event\"}"
+    action = "drop"
+    drop_counter_reason = "msa_unapproved_fields"
+  }
+
+  stage.output {
+    source = "safe_line"
+  }
+
+  stage.label_keep {
+    values = ["service", "environment"]
+  }
+}
+
+loki.write "msa" {
+  endpoint {
+    url = "http://loki.dva-observability.svc:3100/loki/api/v1/push"
+  }
+}

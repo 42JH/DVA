@@ -1,8 +1,18 @@
 import { json, type Request, type Response, type NextFunction } from 'express';
 import { INestApplication, RequestMethod } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import {
+  createHttpTelemetry,
+  metricsHandler,
+} from '@dva/events/observability.cjs';
+import { DatabaseService } from './database.service';
 
 export function configureApp(app: INestApplication) {
+  const telemetry = createHttpTelemetry();
+  app.use(telemetry.observe);
+  const { pool } = app.get(DatabaseService);
+  const metrics = metricsHandler(pool, telemetry.metrics);
+  app.getHttpAdapter().get('/internal/metrics', metrics);
   // The internal envelope adds fields to the unchanged 100KiB public body.
   const scopeParser = json({ limit: '256kb' });
   // Nest detects parsers by function name; keep its default public JSON parser.
