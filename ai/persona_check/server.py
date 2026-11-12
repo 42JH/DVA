@@ -14,7 +14,7 @@
 MONITOR_USER · MONITOR_PASSWORD를 주면 운영 관제 화면(/monitor)도 띄운다 — 개발 중 눈으로 확인하는 용도.
 
     # ai/ 폴더에서
-    PYTHONPATH=.pydeps PERSONA_CHECK_TOKEN=... CALL_ANALYSIS_OPENAI_API_KEY=... python -m persona_check.server
+    PYTHONPATH=.pydeps PERSONA_CHECK_TOKEN=... PERSONA_CHECK_OPENAI_API_KEY=... python -m persona_check.server
 """
 
 import asyncio
