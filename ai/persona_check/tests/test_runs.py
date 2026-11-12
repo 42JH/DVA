@@ -184,6 +184,28 @@ def test_runs_carry_a_tag_and_are_listed_newest_first_by_it(tmp_path, monkeypatc
     assert server.Runs(run_one=None, root=tmp_path / "아직없는폴더").recent() == []
 
 
+def test_a_tag_that_is_still_running_is_refused_and_an_empty_list_is_not_everything(tmp_path, monkeypatch):
+    monkeypatch.delenv("QDRANT_URL", raising=False)
+    monkeypatch.setenv("PERSONA_CHECK_TOKEN", TOKEN)
+
+    async def go():
+        runs, seen = fake_runs(tmp_path, seconds=0.3)
+        transport = httpx.ASGITransport(app=server.create_app(runs))
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as http:
+            post = lambda body: http.post("/runs", json=body, headers=AUTH)
+            assert (await post({"scenarios": [], "tag": "1:7"})).status_code == 422   # 빈 목록을 전체로 받지 않는다
+            assert (await post({"scenarios": ["A1"], "tag": "1:7"})).status_code == 202
+            assert (await post({"scenarios": ["B3"], "tag": "1:7"})).status_code == 409  # 같은 버전이 도는 중 = 두 번 누름
+            assert (await post({"scenarios": ["B3"], "tag": "1:8"})).status_code == 202  # 다른 버전은 받는다
+            assert (await post({"scenarios": ["B3"]})).status_code == 202                # 표시 없는 묶음은 막지 않는다
+            await finish(runs)
+            assert (await post({"scenarios": ["B3"], "tag": "1:7"})).status_code == 202  # 끝나면 다시 받는다
+            await finish(runs)
+        assert len(seen["personas"]) == 4
+
+    asyncio.run(go())
+
+
 def test_a_scenario_shows_its_script_and_the_answers_the_judge_will_use(tmp_path, monkeypatch):
     monkeypatch.delenv("QDRANT_URL", raising=False)
     monkeypatch.setenv("PERSONA_CHECK_TOKEN", TOKEN)
