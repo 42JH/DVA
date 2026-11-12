@@ -49,6 +49,7 @@ pem 키는 서버 담당에게 따로 받습니다. git에 올리지 않습니�
 - 인증서: 서버 certbot의 `dva-duckdns`. 다른 인증서와 같은 갱신 타이머(`dva-certbot-renew`)가 자동으로 갱신합니다.
 - nginx: `/etc/nginx/sites-available/dva-ip`에 도메인용 80(https로 넘김) · 443 서버 블록이 있고, 경로는 IP 서버 블록과 함께 `/etc/nginx/snippets/dva-routes.conf` 한 파일을 씁니다. 경로를 바꿀 땐 그 파일만 고칩니다.
 - 백엔드 `CORS_ORIGINS`에 `https://dva-d109.duckdns.org`가 들어 있어야 로그인됩니다.
+- 관리자 웹 블록(`dva-routes.conf` 맨 아래)의 사본은 `nginx-admin-web.conf`입니다. 배포 스크립트는 nginx를 바꾸지 않으니, 서버에서 고치면 이 사본도 맞춥니다. 11/12에 JS · CSS 압축 3줄을 넣었습니다(`docs/fe-gzip-results.md`).
 
 ## 확인
 
