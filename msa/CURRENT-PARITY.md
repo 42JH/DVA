@@ -953,3 +953,10 @@ MSA #55는 operations 실패 뒤의 실제 신규 이미지 전달·DB 전달·�
 - 같은 공개 관리자 API와 Idempotency-Key로 원본/MSA를 호출했다. 보관 중 재시도는 같은 주문을 반환하고, 만료됐지만 물리 삭제 전인 키는 원본 코드·실행과 같이 409 INVALID_STATE다. 실제 보관 SQL이 주문을 지운 뒤에는 같은 키로 새 주문을 만들며 다시 재시도해도 새 주문 하나만 남는다. 생성 시퀀스·상태·버전과 각 소유 DB의 제거를 함께 확인했다.
 - 실제 order 워커의 배송 목적지를 503으로 만들었다. 업무 삭제가 커밋되어도 outbox는 같은 eventId와 attempt_count=1로 남고 수신 inbox는 생기지 않았다. 워커 인스턴스를 종료한 뒤 새 인스턴스가 실제 delivery에 같은 이벤트를 전달해 ACK와 inbox 한 건을 확정했다. 원본은 없어진 상세의 배송 INSERT를 FK로 거절했고 MSA도 뒤늦은 생성 이벤트를 받아 업무 배송을 재생성하지 않았다.
 - 기존 주문 보관 사례 안에서 검증했으며 테스트 파일은 69개 그대로다. 마지막 집중 드라이버와 별도 실제 production 주문 타이머가 통과했다. 근거는 order-retention-replay-order-native-focus/verification.json과 실행 로그다. 주문·배송 다섯 단위의 대조를 마쳤으며 다음은 같은 커밋의 전체 서비스 CI·패키징 검증이다. 새 Jenkins 실행·운영 배포는 아직 확인하지 않았다.
+
+### 97. 최종 CI의 FAQ 읽기 fixture와 production GC 경합 분리
+
+- 최신 원격 53c38b10을 연결했다. 새 변경은 고객·기업 사원 목록 조회 최적화 두 파일이며 API·DDL 변경이 없어 사용자 지시대로 MSA에 이식하지 않았다. 고정 원본 fa0e4a2f/업무 코드 ce88b8e3는 유지한다. MR의 작성 변경은 msa 안에만 있다.
+- b6eca4cf의 실제 CI 진입점에서 깨끗한 원본 snapshot·계약 11건·11개 이미지·공통 이벤트 37+16건, 변경 없는 DB 236단계/배포 130건의 입력 검증과 재사용이 통과했다. 이어 1 CPU·3GB 격리 환경의 operations에서 만료 읽기 검증용 2001년 FAQ 샘플 13개가 production GC에 지워져 원본과 물리 snapshot 비교가 실패했다. 원본 API 실패나 스키마 변경은 아니었다.
+- 기존 FAQ 검증 파일에서 읽기 비교 동안만 양쪽 DB의 원래 보관 advisory lock을 유지한다. production 모드와 워커를 유지하며 물리 만료·재시도·실제 주기 검사는 기존 별도 사례에서 그대로 실행한다. 같은 1 CPU·3GB/동일 이미지 조건으로 operations 전체 198단계가 통과했다. 검사를 생략하거나 기대값·기한을 완화하지 않았고 테스트 파일은 69개 그대로다.
+- 실패 근거는 retention-final-cli/operations.log와 해당 faqs-run.log, 수정 후 근거는 operations-retention-fixture-native/verification.json이다. 이 변경을 커밋한 뒤 최종 전체 CI와 패키징을 다시 확인한다. 실제 Jenkins 설정·슬롯·Job에는 접근하지 않았다.

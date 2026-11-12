@@ -15,7 +15,13 @@ test('FAQ production APIs preserve HTTP, snapshots, audits and durable notificat
     name, base: `http://${name}-app:3005`, db: new Pool({ host: name+'-db' }), cookies: [],
   }));
   const consultation = new Pool({ host: 'consultation-db' });
-  t.after(async () => { await Promise.all([...sides.map((s) => s.db.end()), consultation.end()]); });
+  const guards=[];
+  t.after(async () => {
+    try{for(const guard of guards){await guard.query('ROLLBACK');guard.release();}}
+    finally{await Promise.all([...sides.map((s) => s.db.end()), consultation.end()]);}
+  });
+  // Expired read fixtures stay in place; separate retention cases verify their physical removal.
+  for(const side of sides){const guard=await side.db.connect();guards.push(guard);await guard.query('BEGIN');await guard.query('SELECT pg_advisory_xact_lock(20261103,157)');}
   const hash = await hashPassword('faq-parity-password');
   for (const side of sides) {
     await side.db.query(`DELETE FROM faq_entries; DELETE FROM faq_change_notifications;
