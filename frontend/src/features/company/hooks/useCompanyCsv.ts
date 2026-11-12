@@ -70,7 +70,7 @@ export function useCompanyCsv(onDone: () => void) {
         : rowErrors.length
           ? rowErrors.slice(0, 3).join('\n')
           : undefined,
-    // '예시상사, 부서 2곳, 사원 4명을 등록합니다.'
+    // '샘플상사, 부서 2곳, 사원 4명을 등록합니다.'
     summary: members.length
       ? [
           companyName,
