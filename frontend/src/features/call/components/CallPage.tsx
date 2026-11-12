@@ -331,8 +331,13 @@ function Contents({ vm }: { vm: CallView }) {
               ) : (
                 <ul className="flex flex-col gap-1.5 text-[13px]">
                   {s.customer.map((c, i) => (
-                    <Judged key={i} tone="stop" head={c.label} time={c.time} go={c.go}>
-                      {c.level && <p className="text-[12px] text-ops-stop">{c.level}</p>}
+                    <Judged
+                      key={i}
+                      tone="stop"
+                      head={c.level ? `${c.label} (${c.level})` : c.label}
+                      time={c.time}
+                      go={c.go}
+                    >
                       <p className="text-ops-ink/80">“{c.quote}”</p>
                     </Judged>
                   ))}
