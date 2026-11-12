@@ -28,8 +28,8 @@ class Utterance:
 
 QUESTION_END = re.compile(r"(\?|까요|나요|세요|시죠|죠|습니까|십니까|가요|래요|을까|맞아요|맞으세요|맞습니까)[\s.?!…~]*$")
 PARCEL_CONFIRM_QUESTION = re.compile(
-    r"(?:접수(?:를)?(?:해드릴까요|할까요|하시겠어요|하면될까요|진행할까요)|"
-    r"맞(?:나요|으세요|으신가요|습니까|을까요)|맞아요\?)[.?!…~]*$")
+    r"접수(?:를)?(?:해드릴까요|할까요|하시겠어요|하면될까요|해도될까요|진행할까요)[.?!…~]*$")
+READBACK_CHECK_QUESTION = re.compile(r"(?:맞(?:나요|으세요|으신가요|습니까|을까요)|맞아요\?)[.?!…~]*$")
 PARCEL_REQUEST = re.compile(
     r"(?:접수(?:를)?(?:진행)?|(?:이대로|그대로|그렇게)(?:진행)?)"
     r"(?:해(?:줘(?:요)?|주(?:세요|십시오|시겠어요|실래요|시면됩니다|시면돼요|길바랍니다))|부탁(?:해요|드려요|드립니다|드릴게요))"
@@ -43,6 +43,11 @@ def asks(text: str) -> bool:
 
 def asks_parcel_confirmation(text: str) -> bool:
     return bool(PARCEL_CONFIRM_QUESTION.search("".join(text.split())))
+
+
+def ends_parcel_readback(text: str) -> bool:
+    """일반 확인 질문도 되읽기 발화를 끝내지만, 그 답으로 접수를 확정하지는 않는다."""
+    return asks_parcel_confirmation(text) or bool(READBACK_CHECK_QUESTION.search("".join(text.split())))
 
 
 def cancel_question(target: dict) -> str:
@@ -138,17 +143,14 @@ def check_gate(state: ConversationState, policy: Policy, pending_id: str, answer
     if prev_ai is None or prev_ai.t_start < p.issued_t or prev_ai.readback_id not in (None, p.id):
         return GateResult(False, "CONFIRM_BEFORE_READBACK_END")                       # G3
     heard_to_end = customer.start_ms >= prev_ai.end_ms - policy.confirm.answer_after_readback_tolerance_ms
-    explicit_during_readback = (p.kind == "parcel" and prev_ai.readback_id == p.id and bool(prev_ai.text.strip())
-                                and (answer.choice == "proceed" or explicitly_requests_parcel(customer.text)))
     if p.kind == "cancel":
         question = "".join(prev_ai.text.split()).rstrip(".?!…~")
         expected = "".join(cancel_question(p.snapshot).split()).rstrip("?")
         valid = heard_to_end and question.endswith(expected)
-    elif answer.choice == "proceed":
-        valid = p.kind == "parcel" and (explicit_during_readback
-                                       or heard_to_end and asks_parcel_confirmation(prev_ai.text))
     else:
-        valid = explicit_during_readback or heard_to_end and (not prev_ai.text or asks(prev_ai.text))
+        explicit_during_readback = (prev_ai.readback_id == p.id and bool(prev_ai.text.strip())
+                                    and explicitly_requests_parcel(customer.text))
+        valid = explicit_during_readback or (heard_to_end and asks_parcel_confirmation(prev_ai.text))
     if not valid:
         return GateResult(False, "CONFIRM_BEFORE_READBACK_END")
     if not _same_snapshot(state, policy, p):
