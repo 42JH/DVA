@@ -14,7 +14,9 @@ pipeline {
     }
 
     environment {
-        DEPLOY_HOST = '13.209.59.180'  // 백엔드와 같은 Lightsail. 호스트 키는 ai/deploy/known_hosts에 고정
+        // 각 Jenkins가 자기 서버에 배포한다. AI 전용 서버 Jenkins는 전역 환경변수 AI_DEPLOY_HOST=3.37.162.168, 없으면 백엔드 서버
+        // 호스트 키는 ai/deploy/known_hosts에 고정
+        DEPLOY_HOST = "${env.AI_DEPLOY_HOST ?: '13.209.59.180'}"
     }
 
     stages {
