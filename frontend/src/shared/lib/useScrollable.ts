@@ -7,7 +7,7 @@ export function useScrollable(ref: RefObject<HTMLElement | null>, deps: unknown[
     const el = ref.current
     if (!el) return
     const update = () => setScrollable(el.scrollHeight > el.clientHeight + 1)
-    update()
+    // 첫 판정도 ResizeObserver에 맡김(관찰을 시작하면 한 번 불림) — 그리자마자 scrollHeight를 읽어 레이아웃을 강제로 다시 계산하지 않게 (11/12 Lighthouse 강제 리플로우)
     const ro = new ResizeObserver(update)
     ro.observe(el)
     return () => ro.disconnect()

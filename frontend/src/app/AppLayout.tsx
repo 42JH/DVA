@@ -1,6 +1,6 @@
 // 화면 틀 — 왼쪽 글자 메뉴(처리할 건수 같이) + 오른쪽 화면. 화면 위 줄(제목 · 상태)은 화면이 PageHead로 그림
 import { Link, NavLink, Outlet, useLocation, useNavigation } from 'react-router'
-import logo from '@/shared/assets/logo-dva.png'
+import logo from '@/shared/assets/logo-dva.webp'
 import { Icon, type IconName } from '@/shared/ui'
 import { ShellContext } from '@/shared/lib/shell'
 import { useTrackHistory } from '@/shared/lib/keepScroll'
@@ -71,10 +71,12 @@ export function AppLayout() {
           {/* 로고를 누르면 홈 */}
           <Link
             to="/"
-            aria-label="홈으로"
+            // 읽기용 이름에 보이는 글자(DVA 운영 콘솔)가 들어가야 음성 명령으로도 누름 (11/12 Lighthouse 접근성)
+            aria-label="DVA 운영 콘솔 홈"
             className="flex h-14 items-center gap-2 px-5 outline-none focus-visible:ring-2 focus-visible:ring-ops-route focus-visible:ring-inset"
           >
-            <img src={logo} alt="DVA" className="w-9" />
+            {/* 크기를 적어 두면 그림이 늦게 와도 옆 글자가 밀리지 않음. 파일은 표시 폭의 2배(72px) */}
+            <img src={logo} alt="DVA" width={36} height={14} className="w-9" />
             <span className="text-[13px] font-semibold text-ops-sub">운영 콘솔</span>
           </Link>
           <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-3 pt-2 pb-4">

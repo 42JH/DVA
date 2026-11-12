@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
-import box from '@/features/auth/assets/illust-box.png'
-import phone from '@/features/auth/assets/illust-phone.png'
-import truck from '@/features/auth/assets/illust-truck.png'
+import box from '@/features/auth/assets/illust-box.webp'
+import phone from '@/features/auth/assets/illust-phone.webp'
+import truck from '@/features/auth/assets/illust-truck.webp'
 import logo from '@/features/auth/assets/logo.svg'
 
 // 00 네 화면 공통 틀 (디자인/목업 '00_로그인' 10/30) — 왼쪽 576 그림 판 + 오른쪽 가운데 440 칸(아이콘 · 제목 · 설명 · 내용)
@@ -28,7 +28,12 @@ export function AuthLayout({
           <i className={`${BLOB} top-[163px] left-[194px] size-[120px]`} />
           <i className={`${BLOB} top-[641px] left-[458px] size-[100px]`} />
           <i className={`${BLOB} top-[909px] left-[309px] size-[254px]`} />
-          <img src={truck} alt="" className="absolute top-[89px] left-[296px] w-[252px]" />
+          <img
+            src={truck}
+            alt=""
+            fetchPriority="high"
+            className="absolute top-[89px] left-[296px] w-[252px]"
+          />
           <img src={box} alt="" className="absolute top-[623px] left-[408px] w-[124px]" />
           <img src={phone} alt="" className="absolute top-[689px] left-[52px] w-[192px]" />
           <div className="absolute top-[405px] left-[52px]">
