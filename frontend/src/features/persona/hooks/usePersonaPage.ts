@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
-import { fmtVersionTime } from '@/shared/lib/format'
+import { useEffect, useState } from 'react'
+import { useLocation } from 'react-router'
+import { fmtMonthDay, fmtVersionTime } from '@/shared/lib/format'
+import { ymd } from '@/shared/lib/dateRange'
 import { ApiError } from '@/shared/api/client'
 import { useSession } from '@/shared/auth/useSession'
 import type { Tone } from '@/shared/ui'
@@ -14,6 +16,8 @@ import type { TestCallTarget } from '@/features/persona/hooks/useTestCall'
 import type { EditTarget } from '@/features/persona/hooks/usePromptEditor'
 import { inlineDiff, type Part } from '@/features/persona/hooks/lineDiff'
 import { useVoiceOptions } from '@/features/persona/hooks/useVoiceOptions'
+import { useTestGate } from '@/features/persona/hooks/useScenarioTest'
+import { SCENARIO_TEST } from '@/features/persona/api/scenarioTestApi'
 import {
   ConfirmError,
   deletePersona,
@@ -34,8 +38,8 @@ export interface PersonaItem {
   inUse: boolean // '통화에 사용 중' 태그
   applying: string | null // '적용 대기' — 통화에 쓰려고 AI 확인을 기다리는 중
   voice: string // 'marin' — 음성 이름만
-  note: string | null // '통화엔 이전 버전 사용 중' — 사용 중인 상담가에 더 새 버전이 있을 때
   useLabel: string | null // [통화에 사용하기] · [새 버전 통화에 사용하기] 문구. null = 버튼 없음
+  useDisabled: boolean // 전체 시나리오 시험이 끝나기 전 (가짜 모드에서만)
   deletable: boolean // [삭제] 버튼 — 관리 권한 + 통화에 사용 중도 적용 대기도 아닐 때만
 }
 
@@ -77,6 +81,34 @@ type Confirming =
   | { kind: 'delete'; personaSeq: number }
   | null
 
+// 시나리오 상세에 다녀오거나 새로고침해도 보던 상담가 · 버전 · 탭 그대로 — 기록(location.key)마다 세션 저장소에 기억
+// (메모리에만 두면 새로고침 때 프롬프트 탭으로 돌아감, 11/12 사용자). 사이드바로 새로 들어오면 새 기록이라 처음 화면
+type Tab = 'prompt' | 'test'
+type Kept = { personaSeq: number | null; historyOpen: boolean; version: number | null; tab: Tab }
+const KEEP = 'personas:view:'
+const kept = (key: string): Kept | null => {
+  try {
+    return JSON.parse(sessionStorage.getItem(KEEP + key) ?? 'null') as Kept | null
+  } catch {
+    return null // 저장소를 못 쓰는 환경 · 깨진 값이면 처음 화면
+  }
+}
+const keep = (key: string, v: Kept) => {
+  try {
+    sessionStorage.setItem(KEEP + key, JSON.stringify(v))
+  } catch {
+    // 못 쓰면 기억하지 않을 뿐
+  }
+}
+/** 시나리오 상세의 ‹ 가 넘겨 준 상담가 (새로고침 뒤라 뒤로가기가 아닌 링크로 왔을 때) → 그 상담가의 시험 탭 */
+const fromDetail = (state: unknown): Kept | null => {
+  const seq = (state as { testOf?: number } | null)?.testOf
+  return typeof seq === 'number'
+    ? { personaSeq: seq, historyOpen: false, version: null, tab: 'test' }
+    : null
+}
+const monthDay = (iso: string) => fmtMonthDay(ymd(new Date(iso)))
+
 const POLL_MS = 2000 // 적용 대기 중일 때만 다시 받는 간격 (AI 확인으로 서버 상태가 바뀌므로)
 // '친절 안내형을' · '빠른 접수형을' — 이름 끝 글자의 받침으로 을/를
 const hasBatchim = (name: string) => {
@@ -93,9 +125,16 @@ const conflictText =
  * 지난 버전: 현재 버전 기준 차이 표시 · [이 버전 다시 쓰기](그 내용을 새 버전으로 저장)
  * 통화 상담가 바꾸기 · 새 버전 반영은 [통화에 사용하기]로만. 시험 통화는 따로 (안 해도 사용 가능, 11/11 사용자) */
 export function usePersonaPage() {
-  const [personaSeq, setPersonaSeq] = useState<number | null>(null) // null = 통화에 사용 중인 상담가
-  const [historyOpen, setHistoryOpen] = useState(false) // 오른쪽 = 버전 기록
-  const [version, setVersion] = useState<number | null>(null) // 기록에서 고른 버전 (null = 현재 버전)
+  const { key, state } = useLocation()
+  const [back] = useState(() => (SCENARIO_TEST ? (kept(key) ?? fromDetail(state)) : null))
+  const [personaSeq, setPersonaSeq] = useState<number | null>(back?.personaSeq ?? null) // null = 통화에 사용 중인 상담가
+  const [historyOpen, setHistoryOpen] = useState(back?.historyOpen ?? false) // 오른쪽 = 버전 기록
+  const [version, setVersion] = useState<number | null>(back?.version ?? null) // 기록에서 고른 버전 (null = 현재 버전)
+  const [tab, setTab] = useState<Tab>(back?.tab ?? 'prompt') // 가운데 카드 [프롬프트 | 시나리오 시험]
+  useEffect(() => {
+    if (SCENARIO_TEST) keep(key, { personaSeq, historyOpen, version, tab })
+  }, [key, personaSeq, historyOpen, version, tab])
+  const gate = useTestGate() // 전체 시나리오 시험이 끝나야 [통화에 사용하기] (가짜 모드에서만, 아니면 null)
   const [editing, setEditing] = useState(false) // 수정 화면
   const [testing, setTesting] = useState<number | null>(null) // 시험 통화 중인 버전
   const [confirming, setConfirming] = useState<Confirming>(null)
@@ -245,6 +284,7 @@ export function usePersonaPage() {
     title: string
     note: string
     okLabel: string
+    changes?: { fail: number; pass: number } | null // 통화에 사용 중인 버전과 달라진 시나리오 수 (사용하기 확인 창)
     danger?: boolean // 확인 버튼을 빨간색으로
   } | null => {
     if (confirming?.kind === 'delete') {
@@ -269,6 +309,9 @@ export function usePersonaPage() {
         title: p.inUse ? '새 버전을 통화에 쓸까요?' : `${nameEul(p.name)} 통화에 쓸까요?`,
         note: `진행 중인 통화가 끝나면(AI 확인 후) ${p.name}의 현재 버전으로 응대합니다.${until}`,
         okLabel: '사용하기',
+        changes: ((g) => g && { fail: g.newFail, pass: g.newPass })(
+          gate?.(p.personaSeq, p.head.version),
+        ),
       }
     }
     if (confirming?.kind === 'reuse') {
@@ -379,6 +422,18 @@ export function usePersonaPage() {
       setHistoryOpen(false)
     },
 
+    // 가운데 카드 탭 — 가짜 모드가 아니면 null (탭 없이 프롬프트만)
+    tab: SCENARIO_TEST ? tab : null,
+    setTab,
+    testTarget:
+      persona && viewing
+        ? { personaSeq: persona.personaSeq, version: viewing.version, isHead: viewing === head }
+        : null,
+    versionDate: (v: number) => {
+      const x = all.find((y) => y.version === v)
+      return x ? monthDay(x.savedAt) : ''
+    },
+
     testCall,
     // [시험 통화] — 가운데에서 보고 있는 버전으로 (지난 버전도 가능). 통화에 사용하기와는 별개 (11/11)
     startTestCall: () => viewing && setTesting(viewing.version),
@@ -398,6 +453,16 @@ export function usePersonaPage() {
       .sort((a, b) => Number(b.inUse) - Number(a.inUse))
       .map((p): PersonaItem => {
         const newer = p.inUse && !p.applyingVersion && p.head.version !== p.appliedVersion
+        const useLabel =
+          !canManage || p.applyingVersion
+            ? null
+            : !p.inUse
+              ? '통화에 사용하기'
+              : newer
+                ? '새 버전 통화에 사용하기'
+                : null
+        // 통화에 쓸 버전(최신)이 전체 시험을 끝내야 버튼이 켜짐. 꺼진 이유를 카드에 적지 않음 (11/12 사용자: 안내 문구 없이)
+        const untested = !!useLabel && !!gate && gate(p.personaSeq, p.head.version).state !== 'done'
         return {
           personaSeq: p.personaSeq,
           name: p.name,
@@ -408,15 +473,8 @@ export function usePersonaPage() {
             : null,
           voice: voiceName(p.voice.voice),
           deletable: canManage && !p.inUse && !p.applyingVersion,
-          note: newer ? '통화엔 이전 버전 사용 중' : null,
-          useLabel:
-            !canManage || p.applyingVersion
-              ? null
-              : !p.inUse
-                ? '통화에 사용하기'
-                : newer
-                  ? '새 버전 통화에 사용하기'
-                  : null,
+          useLabel,
+          useDisabled: untested,
         }
       }),
     selectPersona: (seq: number) => {

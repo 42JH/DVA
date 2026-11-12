@@ -1,0 +1,130 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useState } from 'react'
+import { fmtVersionTime } from '@/shared/lib/format'
+import { personaQueries } from '@/features/persona/api/personaApi'
+import {
+  SCENARIO_TEST,
+  scenarioTestQueries,
+  startTest,
+} from '@/features/persona/api/scenarioTestApi'
+import { rowsOf, testOf } from './scenarioTest'
+
+export { SCENARIO_TEST } // 화면(components)은 api를 직접 부르지 않아 여기서 내보냄
+
+type Me = { personaSeq: number; version: number; isHead: boolean }
+
+/** 시나리오 · 버전별 결과 · 통화에 사용 중인 버전 — 표와 [통화에 사용하기] 관문이 같이 씀 (요청은 한 번, 캐시 공유) */
+function useTestData() {
+  const scenarios = useQuery({ ...scenarioTestQueries.scenarios(), enabled: SCENARIO_TEST })
+  const tests = useQuery({ ...scenarioTestQueries.tests(), enabled: SCENARIO_TEST })
+  const inUse = useQuery(personaQueries.list()).data?.find((p) => p.inUse)
+  const active = inUse ? { personaSeq: inUse.personaSeq, version: inUse.appliedVersion } : null
+  const all = tests.data ?? []
+  const base =
+    all.find((t) => t.personaSeq === active?.personaSeq && t.version === active.version) ?? null
+  return {
+    ready: !!scenarios.data && !!tests.data,
+    failed: scenarios.isError || tests.isError,
+    active,
+    read: (me: Me) => {
+      const { state, shown } = testOf(all, scenarios.data ?? [], me, active)
+      const rows = rowsOf(scenarios.data ?? [], base, shown)
+      return {
+        state,
+        shown,
+        rows,
+        newFail: rows.filter((r) => r.change === '새로 실패').length,
+        newPass: rows.filter((r) => r.change === '새로 통과').length,
+      }
+    },
+  }
+}
+
+/** [통화에 사용하기] 관문 — 그 상담가의 최신 버전이 전체 시험을 끝냈는가, 새로 실패 · 새로 통과는 몇 개인가
+ *  가짜 모드가 아니면 null (관문 없음, 지금 화면 그대로) */
+export function useTestGate() {
+  const d = useTestData()
+  if (!SCENARIO_TEST) return null
+  return (personaSeq: number, version: number) => {
+    const r = d.read({ personaSeq, version, isHead: true })
+    return { state: d.ready ? r.state : 'none', newFail: r.newFail, newPass: r.newPass }
+  }
+}
+
+/** [시나리오 시험] 탭 — 가운데에서 보고 있는 버전의 결과 표. dateOf = 이 상담가의 버전 번호 → '10월 29일' */
+export function useScenarioTest(me: Me, dateOf: (version: number) => string) {
+  const d = useTestData()
+  const qc = useQueryClient()
+  // 시험은 실제 통화라 요금이 듦 → 누르면 한 번 묻고 시작 (11/12 사용자: 실수로 눌러도 바로 걸리면 안 됨)
+  const [asking, setAsking] = useState<{ title: string; scenarios?: string[] } | null>(null)
+  const start = useMutation({
+    mutationFn: startTest,
+    onSuccess: () => {
+      setAsking(null)
+      return qc.invalidateQueries({ queryKey: scenarioTestQueries.tests().queryKey })
+    },
+  })
+  const r = d.read(me)
+  const items = r.shown?.items ?? []
+  const ended = items.filter((i) => i.status === 'done' || i.status === 'error').length
+  const errors = r.rows.filter((x) => x.now === 'error').map((x) => x.id)
+  const tested = r.state === 'done' || r.state === 'partial' || r.state === 'stale'
+  const ask = (what: NonNullable<typeof asking>) => {
+    start.reset() // 지난번 실패 문구가 새 창에 먼저 뜨지 않게
+    setAsking(what)
+  }
+  const shownVersion = r.shown?.version ?? me.version
+
+  return {
+    note: d.failed ? '불러오지 못했습니다. 다시 시도해 주세요.' : d.ready ? null : '불러오는 중…',
+    state: r.state,
+    progress:
+      r.state === 'running' && r.shown
+        ? {
+            text: `${items.length}개 중 ${ended}개 끝남`,
+            started: `${fmtVersionTime(r.shown.startedAt)} 시작`,
+            value: ended,
+            max: items.length,
+          }
+        : null,
+    summary: tested
+      ? [
+          { label: '전체', value: r.rows.filter((x) => x.now !== 'none').length, tone: '' },
+          { label: '새로 실패', value: r.newFail, tone: 'text-ops-stop' },
+          { label: '새로 통과', value: r.newPass, tone: 'text-ops-done' },
+          { label: '이 버전 실패', value: r.rows.filter((x) => x.now === 'fail').length, tone: '' },
+        ]
+      : null,
+    finished: tested && r.shown?.finishedAt ? `${fmtVersionTime(r.shown.finishedAt)} 끝남` : '',
+    // 표 머리 날짜 — 통화에 사용 중인 버전이 다른 상담가 것이면 날짜를 모름
+    baseDate: d.active?.personaSeq === me.personaSeq ? dateOf(d.active.version) : '',
+    nowDate: dateOf(shownVersion),
+    rows: r.rows.map((x, i) => ({
+      ...x,
+      firstOfGroup: r.rows[i - 1]?.group !== x.group,
+      // 누르면 상세 — 통화가 없어도 시나리오 내용(대본 · 정답)은 볼 수 있음
+      to: `/personas/${me.personaSeq}/tests/${shownVersion}/${x.id}`,
+    })),
+    // 버튼 — 도는 동안은 숨김. 연결 실패 다시 시험은 이 버전의 결과일 때만 (고치기 전 결과에는 없음)
+    canRun: r.state !== 'running',
+    allLabel: `전체 ${r.rows.length}개 시험`,
+    retryLabel:
+      errors.length && r.state !== 'stale' ? `연결 실패 ${errors.length}개 다시 시험` : null,
+    runAll: () => ask({ title: `시나리오 ${r.rows.length}개를 시험할까요?` }),
+    retry: () =>
+      ask({ title: `연결 실패 ${errors.length}개를 다시 시험할까요?`, scenarios: errors }),
+    // 확인 창 — [시험 시작]을 눌러야 통화가 걸림
+    confirm: asking && {
+      title: asking.title,
+      busy: start.isPending,
+      error: start.isError ? '시험을 시작하지 못했습니다. 다시 시도해 주세요.' : null,
+      ok: () =>
+        start.mutate({
+          personaSeq: me.personaSeq,
+          version: me.version,
+          scenarios: asking.scenarios,
+        }),
+      close: () => setAsking(null),
+    },
+  }
+}

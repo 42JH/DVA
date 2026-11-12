@@ -5,6 +5,7 @@ import { useLocation } from 'react-router'
 import { usePersonaPage, type PersonaItem } from '@/features/persona/hooks/usePersonaPage'
 import { AddPersona } from './AddPersona'
 import { PromptEditor } from './PromptEditor'
+import { ScenarioTest } from './ScenarioTest'
 import { TestCallModal } from './TestCallModal'
 import { PageHead } from '@/shared/ui'
 import { Badge, Btn, Icon } from '@/shared/ui'
@@ -88,6 +89,13 @@ function PersonasView() {
           onOk={vm.confirmOk}
           onClose={vm.confirmCancel}
         >
+          {/* 통화에 사용 중인 버전과 달라진 수만 (11/12 사용자: 이름을 다 띄우지 않음 — 이름은 뒤의 표에) */}
+          {vm.confirm.changes && vm.confirm.changes.fail + vm.confirm.changes.pass > 0 && (
+            <p className="mb-2 font-bold">
+              <span className="text-ops-stop">새로 실패 {vm.confirm.changes.fail}개</span>,{' '}
+              <span className="text-ops-done">새로 통과 {vm.confirm.changes.pass}개</span>
+            </p>
+          )}
           {vm.confirm.note}
         </Confirm>
       )}
@@ -106,17 +114,35 @@ function PersonasView() {
 const ASIDE =
   'flex w-96 shrink-0 flex-col gap-2 overflow-hidden border-l border-ops-line bg-white p-4 max-xl:w-80'
 
-// 오른쪽 위 탭 — 밑줄이 따라다니는 모양 (11/11 사용자 시안). 이 화면에서만 써서 shared/ui엔 안 올림
+// 오른쪽 위 탭
 function PanelTabs({ vm }: { vm: Vm }) {
-  const tabs = [
-    { label: 'AI 상담가 유형', on: !vm.historyOpen, pick: vm.closeHistory },
-    { label: '버전 히스토리', on: vm.historyOpen, pick: vm.openHistory },
-  ]
+  return (
+    <LineTabs
+      label="오른쪽 패널"
+      className="px-1"
+      tabs={[
+        { label: 'AI 상담가 유형', on: !vm.historyOpen, pick: vm.closeHistory },
+        { label: '버전 히스토리', on: vm.historyOpen, pick: vm.openHistory },
+      ]}
+    />
+  )
+}
+
+// 밑줄이 따라다니는 탭 (11/11 사용자 시안) — 오른쪽 패널 · 가운데 카드. 이 화면에서만 써서 shared/ui엔 안 올림
+function LineTabs({
+  label,
+  tabs,
+  className,
+}: {
+  label: string
+  tabs: { label: string; on: boolean; pick: () => void }[]
+  className: string
+}) {
   return (
     <div
       role="tablist"
-      aria-label="오른쪽 패널"
-      className="flex gap-5 border-b border-ops-line px-1"
+      aria-label={label}
+      className={`flex shrink-0 gap-5 border-b border-ops-line ${className}`}
     >
       {tabs.map((t) => (
         <button
@@ -144,7 +170,7 @@ function Personas({ vm }: { vm: Vm }) {
   )
 }
 
-// 이름 · 태그 → 음성 → (사용 중인데 새 버전이 있으면) 안내 → [통화에 사용하기] · [삭제](빨강, 사용 중 · 적용 대기가 아닐 때)
+// 이름 · 태그 → 음성 → [통화에 사용하기] · [삭제](빨강, 사용 중 · 적용 대기가 아닐 때)
 function PersonaCard({ p, vm }: { p: PersonaItem; vm: Vm }) {
   return (
     <div
@@ -163,12 +189,11 @@ function PersonaCard({ p, vm }: { p: PersonaItem; vm: Vm }) {
           {p.applying && <Badge tone="wait">{p.applying}</Badge>}
         </span>
         <span className="mt-1 block text-[13px] text-ops-sub">{p.voice}</span>
-        {p.note && <span className="mt-1 block text-[13px] text-ops-wait">{p.note}</span>}
       </button>
       {(p.useLabel || p.deletable) && (
         <div className="mt-3 flex gap-2">
           {p.useLabel && (
-            <Btn kind="lineBadge" onClick={() => vm.askUse(p.personaSeq)}>
+            <Btn kind="lineBadge" disabled={p.useDisabled} onClick={() => vm.askUse(p.personaSeq)}>
               {p.useLabel}
             </Btn>
           )}
@@ -253,46 +278,66 @@ function Prompt({ vm }: { vm: Vm }) {
           </Btn>
         </span>
       </header>
-      {/* 칸 제목은 고정 글, 본문만 마크다운 (11/10) */}
-      <div className="min-h-0 flex-1 [scrollbar-width:thin] overflow-y-auto px-8 py-6">
-        {p.sections.map((s) => (
-          <section key={s.key} className="mb-7 last:mb-0">
-            {s.group && <h3 className="mb-4 text-[18px] font-bold">{s.group}</h3>}
-            {/* 제목 단계도 서버 글과 같게: 발화 스타일 아래 톤 · 속도만 한 단계 아래 (화면 읽기 프로그램) */}
-            {s.sub ? (
-              <h4 className="mb-2 text-[15px] font-bold">{s.title}</h4>
-            ) : (
-              <h3 className="mb-2 text-[18px] font-bold">{s.title}</h3>
-            )}
-            {s.rows ? (
-              // 현재 버전 기준: 빠진 말 = 파란 취소선, 더해진 말 = 파란 강조. 같은 문단에 이어 붙임 (줄 단위라 마크다운은 풀지 않음)
-              <div className="pl-4 text-[14px] leading-6">
-                {s.rows.map((r) => (
-                  <p key={r.key} className="whitespace-pre-wrap">
-                    {r.parts.map((x, i) =>
-                      x.kind === 'del' ? (
-                        <del key={i} className="decoration-ops-route">
-                          <span className="sr-only">빠진 말: </span>
-                          {x.text}
-                        </del>
-                      ) : x.kind === 'add' ? (
-                        <ins key={i} className="bg-ops-route-soft text-ops-route no-underline">
-                          <span className="sr-only">더한 말: </span>
-                          {x.text}
-                        </ins>
-                      ) : (
-                        x.text || ' '
-                      ),
-                    )}
-                  </p>
-                ))}
-              </div>
-            ) : (
-              <Markdown text={s.text} className="pl-4 text-[14px] leading-6" />
-            )}
-          </section>
-        ))}
-      </div>
+      {vm.tab && (
+        <LineTabs
+          label="버전 내용"
+          className="px-5 pt-2"
+          tabs={[
+            { label: '프롬프트', on: vm.tab === 'prompt', pick: () => vm.setTab('prompt') },
+            { label: '시나리오 시험', on: vm.tab === 'test', pick: () => vm.setTab('test') },
+          ]}
+        />
+      )}
+      {vm.tab === 'test' && vm.testTarget ? (
+        <ScenarioTest me={vm.testTarget} dateOf={vm.versionDate} />
+      ) : (
+        <PromptBody p={p} />
+      )}
     </article>
+  )
+}
+
+// 칸 제목은 고정 글, 본문만 마크다운 (11/10)
+function PromptBody({ p }: { p: NonNullable<Vm['prompt']> }) {
+  return (
+    <div className="min-h-0 flex-1 [scrollbar-width:thin] overflow-y-auto px-8 py-6">
+      {p.sections.map((s) => (
+        <section key={s.key} className="mb-7 last:mb-0">
+          {s.group && <h3 className="mb-4 text-[18px] font-bold">{s.group}</h3>}
+          {/* 제목 단계도 서버 글과 같게: 발화 스타일 아래 톤 · 속도만 한 단계 아래 (화면 읽기 프로그램) */}
+          {s.sub ? (
+            <h4 className="mb-2 text-[15px] font-bold">{s.title}</h4>
+          ) : (
+            <h3 className="mb-2 text-[18px] font-bold">{s.title}</h3>
+          )}
+          {s.rows ? (
+            // 현재 버전 기준: 빠진 말 = 파란 취소선, 더해진 말 = 파란 강조. 같은 문단에 이어 붙임 (줄 단위라 마크다운은 풀지 않음)
+            <div className="pl-4 text-[14px] leading-6">
+              {s.rows.map((r) => (
+                <p key={r.key} className="whitespace-pre-wrap">
+                  {r.parts.map((x, i) =>
+                    x.kind === 'del' ? (
+                      <del key={i} className="decoration-ops-route">
+                        <span className="sr-only">빠진 말: </span>
+                        {x.text}
+                      </del>
+                    ) : x.kind === 'add' ? (
+                      <ins key={i} className="bg-ops-route-soft text-ops-route no-underline">
+                        <span className="sr-only">더한 말: </span>
+                        {x.text}
+                      </ins>
+                    ) : (
+                      x.text || ' '
+                    ),
+                  )}
+                </p>
+              ))}
+            </div>
+          ) : (
+            <Markdown text={s.text} className="pl-4 text-[14px] leading-6" />
+          )}
+        </section>
+      ))}
+    </div>
   )
 }

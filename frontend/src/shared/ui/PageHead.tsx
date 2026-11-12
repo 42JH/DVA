@@ -13,7 +13,7 @@ export function PageHead({
   children,
 }: {
   title: string
-  back?: { to: string; label: string } // label = 화면 낭독용 '통화 목록으로'
+  back?: { to: string; label: string; state?: unknown } // label = 화면 낭독용 '통화 목록으로', state = 링크로 갈 때 넘길 것
   children?: ReactNode
 }) {
   const s = useShell()
@@ -24,6 +24,7 @@ export function PageHead({
         {back && (
           <Link
             to={back.to}
+            state={back.state}
             // 바로 전이 그 목록이면 뒤로가기 — 보던 필터 · 쪽 · 스크롤 그대로 (링크로 가면 새 기록이라 맨 위)
             onClick={(e) => {
               if (e.button || e.ctrlKey || e.metaKey || e.shiftKey || !prevIs(back.to)) return

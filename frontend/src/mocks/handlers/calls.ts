@@ -790,7 +790,7 @@ const unavailable = () =>
   )
 const silentWavs = new Map<number, string>()
 /** 무음 WAV(8kHz 8bit, 통화 길이만큼) — 가짜 서버엔 녹취 파일이 없어 재생 · 위치 복원을 이걸로 봄 */
-const silentWavUrl = (seconds = 30) => {
+export const silentWavUrl = (seconds = 30) => {
   if (typeof URL === 'undefined' || !URL.createObjectURL) return null
   const made = silentWavs.get(seconds)
   if (made) return made
