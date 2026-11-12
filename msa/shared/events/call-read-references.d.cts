@@ -18,6 +18,11 @@ export interface RetainedCustomersQuery extends Event {
 export function validateRetainedCustomersQuery(value:unknown):asserts value is RetainedCustomersQuery;
 export function validateRetainedCustomers(value:unknown,ids:number[]):asserts value is number[];
 export function requestRetainedCustomers(url:string,token:string,ids:number[]):Promise<number[]>;
+export interface RetainedOrdersQuery extends Event {
+  source:'order';eventType:'OrderRetentionReferencesReadRequested';payload:{ids:number[]};
+}
+export function validateRetainedOrdersQuery(value:unknown):asserts value is RetainedOrdersQuery;
+export function requestRetainedOrders(url:string,token:string,ids:number[]):Promise<number[]>;
 export interface PurgedCardsEvent extends Event {
   source:'customer';eventType:'CustomerPaymentCardsPurged';payload:{ids:number[]};
 }

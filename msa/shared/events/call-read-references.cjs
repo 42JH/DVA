@@ -30,6 +30,11 @@ function validateRetainedCustomersQuery(value) {
   if(value.source!=='customer'||value.eventType!=='CustomerOrderReferencesReadRequested'||
      !keys(value.payload,'ids')||!retentionIds(value.payload.ids))throw new Error('Invalid customer order references');
 }
+function validateRetainedOrdersQuery(value) {
+  validateEvent(value);
+  if(value.source!=='order'||value.eventType!=='OrderRetentionReferencesReadRequested'||
+     !keys(value.payload,'ids')||!retentionIds(value.payload.ids))throw new Error('Invalid order call references');
+}
 function validateRetainedCustomers(value,ids) {
   if(!Array.isArray(value)||value.length>ids.length||!value.every((item,index)=>id(item)&&ids.includes(item)&&
      (index===0||item>value[index-1])))throw new Error('Invalid retained customers');
@@ -39,6 +44,12 @@ async function requestRetainedCustomers(url,token,ids) {
   const requested=[...ids];
   return requestSnapshot(url,token,'CustomerOrderReferencesReadRequested',
     value=>validateRetainedCustomers(value,requested),'customer',{ids:requested});
+}
+async function requestRetainedOrders(url,token,ids) {
+  if(!retentionIds(ids))throw new Error('Invalid order call references');
+  const requested=[...ids];
+  return requestSnapshot(url,token,'OrderRetentionReferencesReadRequested',
+    value=>validateRetainedCustomers(value,requested),'order',{ids:requested});
 }
 const shapes={
   order:row=>keys(row,'customer_seq,order_seq,status,total_amount')&&id(row.order_seq)&&nullable(row.customer_seq,id)&&
@@ -142,4 +153,4 @@ function requestHomeOrders(url,token,observedAt,consultationAddress,readScopeId)
   return requestSnapshot(url,token,'HomeOrdersReadRequested',validateHomeOrdersResult,'consultation',
     {observedAt,consultationAddress},readScopeId);
 }
-module.exports={validateReferenceQuery,validateReferenceRows,requestReferences,validatePersonaComparisonQuery,validatePersonaComparisonRows,requestPersonaComparison,validateComplaintFaqQuery,validateComplaintFaqRows,requestComplaintFaqs,validateOrderOrganizationQuery,validateOrderOrganizationRows,requestOrderOrganization,validateHomeOrdersQuery,validateHomeOrdersResult,requestHomeOrders,validateRetainedCustomersQuery,validateRetainedCustomers,requestRetainedCustomers,validatePurgedCardsEvent,validatePurgedCallsEvent};
+module.exports={validateReferenceQuery,validateReferenceRows,requestReferences,validatePersonaComparisonQuery,validatePersonaComparisonRows,requestPersonaComparison,validateComplaintFaqQuery,validateComplaintFaqRows,requestComplaintFaqs,validateOrderOrganizationQuery,validateOrderOrganizationRows,requestOrderOrganization,validateHomeOrdersQuery,validateHomeOrdersResult,requestHomeOrders,validateRetainedCustomersQuery,validateRetainedCustomers,requestRetainedCustomers,validatePurgedCardsEvent,validatePurgedCallsEvent,validateRetainedOrdersQuery,requestRetainedOrders};

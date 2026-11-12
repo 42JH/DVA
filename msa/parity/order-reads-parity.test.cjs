@@ -893,6 +893,29 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
       try{for(const db of [reference,databases.order])await db.query('DELETE FROM empty_ai_order_results WHERE call_session_seq=$1',[id]);for(const db of [reference,databases.consultation])await db.query('DELETE FROM call_sessions WHERE call_session_seq=$1',[id]);}finally{if(locked)await guard.query("SELECT pg_advisory_unlock(hashtextextended('call-end:'||$1,0))",[phone]);retention.splice(retention.indexOf(guard),1);guard.release();}
     }
   });
+  await t.test('order retention preserves every linked call including deleted, expired and legacy calls without writes',async()=>{
+    const {requestRetainedOrders}=require('@dva/events/call-read-references.cjs');
+    const ids=[29913,29912,29911,2147483647],url='http://consultation-app:3004/internal/order-deletion-check',token=process.env.CUSTOMER_AUTH_TOKEN;
+    const guard=await databases.consultation.connect();retention.push(guard);const phone='01098889998';await guard.query("SELECT pg_advisory_lock(hashtextextended('call-end:'||$1,0))",[phone]);
+    try{
+      for(const db of [reference,databases.order])for(const id of ids.slice(0,3))await db.query("INSERT INTO orders(order_seq,creation_source,created_at,updated_at) OVERRIDING SYSTEM VALUE VALUES($1,'ADMIN','2030-01-01Z','2030-01-01Z')",[id]);
+      for(const db of [reference,databases.consultation])await db.query(`INSERT INTO call_sessions(call_session_seq,provider_call_id,caller_phone_number,order_seq,incoming_at,started_at,ended_at,deleted_at)
+        OVERRIDING SYSTEM VALUE VALUES(29901,'retention-linked-deleted',$1,29911,'1980-01-01Z','1980-01-01Z','1980-01-02Z','1980-01-03Z'),
+        (29902,'retention-linked-expired',$1,29912,'1980-01-01Z','1980-01-01Z','1980-01-02Z',NULL),
+        (29903,'retention-linked-legacy',$1,29911,NULL,'1980-01-01Z','1980-01-02Z',NULL)`,[phone]);
+      const stored=await snapshot(databases.consultation,['call_sessions','inbox_events','outbox_events']);
+      const expected=(await reference.query('SELECT DISTINCT order_seq FROM call_sessions WHERE order_seq=ANY($1::int[]) ORDER BY order_seq',[ids])).rows.map(row=>row.order_seq);assert.deepEqual(expected,[29911,29912]);
+      assert.deepEqual(await requestRetainedOrders(url,token,ids),expected);assert.deepEqual(await requestRetainedOrders(url,token,[29913]),[]);
+      const event={eventId:randomUUID(),source:'order',eventType:'OrderRetentionReferencesReadRequested',payload:{ids}};
+      const post=async(body,credential=token)=>{const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+credential},body:JSON.stringify(body),signal:AbortSignal.timeout(5000)});return{status:response.status,body:await response.json()};};
+      assert.equal((await post(event,'invalid')).status,403);assert.equal((await post({...event,source:'customer'})).status,422);assert.equal((await post({...event,payload:{ids:[29911,29911]}})).status,422);
+      assert.deepEqual((await post(event)).body,{eventId:event.eventId,status:'processed',payload:expected});
+      const ordinary=await post({...event,eventType:'OrderDeletionCheckRequested',payload:{orderSeq:29911}});assert.equal(ordinary.status,200);assert.deepEqual(ordinary.body.payload,{blocked:false});
+      assert.deepEqual(await snapshot(databases.consultation,['call_sessions','inbox_events','outbox_events']),stored);
+    }finally{
+      try{for(const db of [reference,databases.consultation])await db.query('DELETE FROM call_sessions WHERE call_session_seq BETWEEN 29901 AND 29903');for(const db of [reference,databases.order])await db.query('DELETE FROM orders WHERE order_seq BETWEEN 29911 AND 29913');}finally{await guard.query("SELECT pg_advisory_unlock(hashtextextended('call-end:'||$1,0))",[phone]);retention.splice(retention.indexOf(guard),1);guard.release();}
+    }
+  });
   await t.test('private queries reject forged tokens/sources and replay reads current state without writes',async()=> {
     const command={operation:'OrdersListed',id:null,callSessionSeq:1011,query:{limit:20,offset:0}};
     const event={eventId:randomUUID(),source:'order',eventType:'OrderReadRequested',payload:{command}};

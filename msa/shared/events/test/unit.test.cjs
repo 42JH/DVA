@@ -15,6 +15,9 @@ test('retention order references reject forged queries and invalid customer subs
   for(const changed of [{...calls,source:'customer'},{...calls,eventType:purge.eventType},...[[0],[1,1],['1'],[],Array.from({length:101},(_,n)=>n+1)].map(ids=>({...calls,payload:{ids}})),{...calls,payload:{ids:[1],extra:true}}])assert.throws(()=>validatePurgedCallsEvent(changed));
   for(const changed of [{...purge,source:'order'},{...purge,eventType:'CustomerOrderReferencesReadRequested'},...[[0],[1,1],['1'],[],Array.from({length:101},(_,n)=>n+1)].map(ids=>({...purge,payload:{ids}})),{...purge,payload:{ids:[1],extra:true}}])assert.throws(()=>validatePurgedCardsEvent(changed));
   const query={eventId:randomUUID(),source:'customer',eventType:'CustomerOrderReferencesReadRequested',payload:{ids:[2,7,11]}};
+  const {validateRetainedOrdersQuery,requestRetainedOrders}=require('../call-read-references.cjs');
+  const orderQuery={...query,source:'order',eventType:'OrderRetentionReferencesReadRequested'};validateRetainedOrdersQuery(orderQuery);
+  for(const changed of [{...orderQuery,source:'customer'},...[[0],[1,1],[],['2'],Array.from({length:1001},(_,n)=>n+1)].map(ids=>({...orderQuery,payload:{ids}})),{...orderQuery,payload:{ids:[1],extra:true}}])assert.throws(()=>validateRetainedOrdersQuery(changed));
   validateRetainedCustomersQuery(query);validateRetainedCustomers([],query.payload.ids);validateRetainedCustomers([2,7],query.payload.ids);
   validateRetainedCustomersQuery({...query,payload:{ids:Array.from({length:1000},(_,n)=>n+1)}});
   for(const ids of [[],[0],[-1],[1.5],['2'],[2,2],[2147483648],Array.from({length:1001},(_,n)=>n+1)])assert.throws(()=>validateRetainedCustomersQuery({...query,payload:{ids}}));
@@ -26,6 +29,11 @@ test('retention order references reject forged queries and invalid customer subs
   global.fetch=async(url,options)=>{seen++;assert.equal(url,'http://order/internal/call-read-references');assert.equal(options.headers.Authorization,'Bearer '+token);const packet=JSON.parse(options.body);assert.equal(packet.source,'customer');assert.equal(packet.eventType,query.eventType);assert.deepEqual(packet.payload,query.payload);return new Response(JSON.stringify({eventId:mode==='id'?randomUUID():packet.eventId,status:'processed',payload:mode==='outside'?[999]:[2,7]}),{status:mode==='status'?503:200,headers:{'Content-Type':'application/json'}});};
   try{
     assert.deepEqual(await requestRetainedCustomers('http://order/internal/call-read-references',token,query.payload.ids),[2,7]);
+    const customerFetch=global.fetch;
+    global.fetch=async(url,options)=>{assert.equal(url,'http://consultation/internal/order-deletion-check');const packet=JSON.parse(options.body);assert.equal(packet.source,'order');assert.equal(packet.eventType,orderQuery.eventType);return Response.json({eventId:packet.eventId,status:'processed',payload:[2,7]});};
+    assert.deepEqual(await requestRetainedOrders('http://consultation/internal/order-deletion-check',token,query.payload.ids),[2,7]);
+    global.fetch=async()=>Response.json({eventId:randomUUID(),status:'processed',payload:[2,7]});await assert.rejects(requestRetainedOrders('http://consultation/internal/order-deletion-check',token,query.payload.ids));
+    global.fetch=customerFetch;
     for(mode of ['id','outside','status'])await assert.rejects(requestRetainedCustomers('http://order/internal/call-read-references',token,query.payload.ids));
     const before=seen;await assert.rejects(requestRetainedCustomers('http://user:pass@order/private',token,query.payload.ids));assert.equal(seen,before);
   }finally{global.fetch=oldFetch;}
