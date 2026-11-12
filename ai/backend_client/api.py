@@ -13,6 +13,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 
 import httpx2
@@ -181,6 +182,18 @@ def parcel_lookup_details(parcel: dict) -> dict:
     return {key: value for key, value in (values | {"items": items or None}).items() if value is not None}
 
 
+_KST = timezone(timedelta(hours=9))
+
+
+def _kst(iso: str) -> str:
+    """BE 시각(DB 연결 시간대인 UTC로 표기됨) → 한국 시간 ISO. 모델이 시간대를 직접 계산하다 틀리지 않게 한다."""
+    try:
+        at = datetime.fromisoformat(iso)
+    except ValueError:
+        return iso
+    return at.astimezone(_KST).isoformat(timespec="seconds") if at.tzinfo else iso
+
+
 def _parcels(detail: dict) -> list[dict]:
     """주문 상세 → 조회·취소(C 흐름)가 쓰는 택배 단위. status는 취소한 상세면 CANCELLED, 아니면 주문 상태."""
     out = []
@@ -189,7 +202,7 @@ def _parcels(detail: dict) -> list[dict]:
         status = "CANCELLED" if p.get("status") == "CANCELLED" else detail.get("status")
         facts = parcel_lookup_details(p)
         if detail.get("pickupRequestedAt"):
-            facts["pickup_requested_at"] = detail["pickupRequestedAt"]
+            facts["pickup_requested_at"] = _kst(detail["pickupRequestedAt"])
         if status == "ACCEPTED" and detail.get("parcelNo"):
             facts["receipt_number"] = detail["parcelNo"]
         out.append({"order_seq": detail["orderSeq"], "order_parcel_seq": p["orderParcelSeq"],
