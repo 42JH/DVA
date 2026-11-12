@@ -155,9 +155,9 @@ thead th {
      쓰는 곳: app/AppLayout(animate-page-in) · shared/ui/Modal(animate-dim-in · animate-pop-in). 늘 motion-safe: 와 같이 (움직임 줄이기 설정이면 안 움직임) */
   --animate-page-in: page-in 0.25s ease-out backwards;
   --animate-dim-in: dim-in 0.2s ease-out backwards;
-  /* 02 통계 그래프가 뜰 때 (11/05 사용자): 막대는 바닥에서 자라고, 도넛은 조각마다 시계 방향으로 채워지고, 값 글자는 그 뒤에 나타남 */
+  /* 02 통계 그래프가 뜰 때 (11/05 사용자): 막대는 바닥에서 자라고, 도넛은 12시부터 한 바퀴 한 번에 채워지고(11/13), 값 글자는 그 뒤에 나타남 */
   --animate-bar-grow: bar-grow 0.6s cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
-  --animate-donut-in: donut-in 0.7s ease-out backwards;
+  --animate-donut-in: donut-in 0.9s cubic-bezier(0.4, 0, 0.2, 1) backwards;
   --animate-label-in: dim-in 0.3s ease-out 0.45s backwards;
   @keyframes bar-grow {
     from {
