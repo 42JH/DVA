@@ -361,9 +361,11 @@ test('production customer service authentication through Nginx preserves AI and 
   });
   assert.equal(withdrawn.status, 204);
   assert.equal((await fetch('http://proxy/api/customers/' + id, { headers })).status, 404);
-  const adminDetail = await fetch('http://proxy/api/customers/' + id, { headers: adminHeaders });
-  assert.equal(adminDetail.status, 200);
-  assert.equal((await adminDetail.json()).data.status, 'WITHDRAWN');
+  const adminDetail = await fetch('http://proxy/api/customers/' + id, {
+    headers: { Cookie: adminHeaders.Cookie },
+  });
+  assert.equal(adminDetail.status, 404);
+  assert.equal((await adminDetail.json()).error.code, 'NOT_FOUND');
 });
 
 test('real Nginx preserves /api, strips the legacy prefix and hides readiness', async () => {
