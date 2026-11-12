@@ -777,6 +777,84 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
       assert.deepEqual(await snapshot(databases[owner],['outbox_events','inbox_events']),messageCounts[owner],owner+' query messages not persisted');
     }
   });
+  await t.test('customer retention keeps references from deleted and expired orders without storing query events',async()=> {
+    const {requestRetainedCustomers}=require('@dva/events/call-read-references.cjs');
+    const ids=[7,6,4,3,2,1],url=sides[1].base+'/internal/call-read-references',token=process.env.CUSTOMER_AUTH_TOKEN;
+    for(const db of [reference,databases.order]){
+      const client=await db.connect();
+      try{
+        await client.query('BEGIN');
+        await client.query("SET LOCAL session_replication_role='replica'");
+        await client.query(`INSERT INTO orders(order_seq,customer_seq,status,payment_method_type,total_amount,creation_source,created_at,updated_at,closed_at,deleted_at)
+          OVERRIDING SYSTEM VALUE VALUES(29501,4,'CANCELLED','cat',0,'ADMIN','2010-01-01Z','2010-01-01Z','2010-01-01Z','2010-01-02Z'),
+          (29502,6,'CANCELLED','cat',0,'ADMIN','2010-01-01Z','2010-01-01Z','2010-01-01Z',NULL)`);
+        await client.query('COMMIT');
+      }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
+    }
+    try{
+      const stored=await snapshot(databases.order,[...orderTables,'outbox_events','inbox_events']);
+      const expected=(await reference.query('SELECT DISTINCT customer_seq FROM orders WHERE customer_seq=ANY($1::int[]) ORDER BY customer_seq',[ids])).rows.map(row=>row.customer_seq);
+      assert.ok(expected.includes(4),'soft-deleted order retains its customer');
+      assert.ok(expected.includes(6),'expired closed order retains its customer');
+      assert.ok(!expected.includes(7),'customer without an order is not retained');
+      assert.deepEqual(await requestRetainedCustomers(url,token,ids),expected);
+      assert.deepEqual(await requestRetainedCustomers(url,token,[7]),[]);
+      const event={eventId:randomUUID(),source:'customer',eventType:'CustomerOrderReferencesReadRequested',payload:{ids}};
+      async function post(body,credential){const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+credential},body:JSON.stringify(body),signal:AbortSignal.timeout(5000)});return{status:response.status,body:await response.json()};}
+      assert.equal((await post(event,'invalid')).status,403);
+      assert.equal((await post({...event,source:'consultation'},token)).status,422);
+      assert.equal((await post({...event,payload:{ids:[4,4]}},token)).status,422);
+      assert.deepEqual((await post(event,token)).body,{eventId:event.eventId,status:'processed',payload:expected});
+      assert.deepEqual(await snapshot(databases.order,[...orderTables,'outbox_events','inbox_events']),stored);
+    }finally{
+      for(const db of [reference,databases.order])await db.query('DELETE FROM orders WHERE order_seq IN (29501,29502)');
+    }
+  });
+  await t.test('customer card retention reproduces the original foreign-key nulling and recovers failed event delivery',async()=>{
+    const {RetentionRepository}=require('./customer-runtime/retention/retention.repository');
+    const {createRelay}=require('@dva/events');
+    const cards=[29601,29602,29603],requests=[1,2,3,4,7].map(n=>'00000000-0000-4000-8000-'+String(n).padStart(12,'0'));
+    const url=sides[1].base+'/internal/call-read-references/events',token=process.env.CUSTOMER_AUTH_TOKEN;
+    const links=async db=>(await db.query('SELECT to_jsonb(r) AS row FROM order_payment_requests r WHERE payment_request_id=ANY($1::uuid[]) ORDER BY payment_request_id',[requests])).rows;
+    const original=await links(reference);
+    const keeper=await databases.customer.connect();await keeper.query('SELECT pg_advisory_lock(20261103,157)');retention.push(keeper);
+    for(const db of [reference,databases.customer])for(const id of cards)await db.query(`INSERT INTO payment_cards(payment_card_seq,customer_seq,registration_key,request_hash,provider_customer_key,provider_environment,expiration_year,expiration_month,status,created_at,updated_at,deleted_at)
+      OVERRIDING SYSTEM VALUE VALUES($1,1,$2,'retention-fixture',$2,'test',2099,12,'FAILED','2010-01-01Z','2010-01-01Z',$3)`,[id,'00000000-0000-4000-8000-'+String(id).padStart(12,'0'),id===29603?'2026-01-01Z':'2010-01-01Z']);
+    for(const db of [reference,databases.order]){
+      const client=await db.connect();try{await client.query('BEGIN');await client.query("SET LOCAL session_replication_role='replica'");
+        for(const [n,id]of requests.entries())await client.query('UPDATE order_payment_requests SET payment_card_seq=$2 WHERE payment_request_id=$1',[id,n===4?29603:n%2?29602:29601]);
+        await client.query('COMMIT');
+      }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
+    }
+    const transaction=async work=>{try{await keeper.query('BEGIN');const result=await work(keeper);await keeper.query('COMMIT');return result;}catch(error){await keeper.query('ROLLBACK');throw error;}};
+    try{
+      await reference.query('DELETE FROM payment_cards WHERE payment_card_seq=ANY($1::int[])',[[29601,29602]]);
+      await new RetentionRepository({transaction}).purgeDatabase();
+      const event=(await databases.customer.query("SELECT event_id,event_type,payload FROM outbox_events WHERE event_type='CustomerPaymentCardsPurged' AND payload->'ids'=$1::jsonb",[JSON.stringify([29601,29602])])).rows;
+      assert.equal(event.length,1);const row=event[0],packet={eventId:row.event_id,source:'customer',eventType:row.event_type,payload:row.payload};
+      const post=async(body,credential=token)=>{const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+credential},body:JSON.stringify(body),signal:AbortSignal.timeout(5000)});return{status:response.status,body:await response.json()};};
+      assert.equal((await post(packet,'invalid')).status,403);
+      assert.equal((await post({...packet,source:'order'})).status,422);
+      assert.equal((await post({...packet,payload:{ids:[29601,29601]}})).status,422);
+      const waiting=await links(databases.order);
+      const relay=createRelay({pool:databases.customer,source:'customer',eventTypes:['CustomerPaymentCardsPurged'],destinations:{order:{url,token}}});
+      await databases.order.query("CREATE FUNCTION retention_card_fault() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'controlled card reference failure'; END $$; CREATE TRIGGER retention_card_fault BEFORE UPDATE OF payment_card_seq ON order_payment_requests FOR EACH ROW EXECUTE FUNCTION retention_card_fault()");
+      try{assert.equal(await relay(),true);assert.deepEqual(await links(databases.order),waiting);assert.equal((await databases.order.query('SELECT 1 FROM inbox_events WHERE event_id=$1',[packet.eventId])).rowCount,0);}finally{await databases.order.query('DROP TRIGGER retention_card_fault ON order_payment_requests; DROP FUNCTION retention_card_fault()');}
+      const retry=(await databases.customer.query('SELECT delivered_at,attempt_count FROM outbox_events WHERE event_id=$1',[packet.eventId])).rows[0];assert.equal(retry.delivered_at,null);assert.equal(retry.attempt_count,1);
+      await databases.customer.query("UPDATE outbox_events SET next_attempt_at=clock_timestamp()-interval '1 second' WHERE event_id=$1",[packet.eventId]);
+      assert.equal(await relay(),true);assert.deepEqual(await links(databases.order),await links(reference));
+      assert.deepEqual((await links(reference)).map(row=>row.row.payment_card_seq),[null,null,null,null,29603]);
+      assert.deepEqual(await post(packet),{status:200,body:{eventId:packet.eventId,status:'duplicate'}});
+      assert.equal((await post({...packet,payload:{ids:[29603]}})).status,409);
+      assert.deepEqual(await links(databases.order),await links(reference));
+      assert.equal((await databases.order.query('SELECT 1 FROM inbox_events WHERE event_id=$1',[packet.eventId])).rowCount,1);
+    }finally{
+      try{
+        for(const db of [reference,databases.order])for(const {row}of original)await db.query('UPDATE order_payment_requests SET payment_card_seq=$2 WHERE payment_request_id=$1',[row.payment_request_id,row.payment_card_seq]);
+        for(const db of [reference,databases.customer])await db.query('DELETE FROM payment_cards WHERE payment_card_seq=ANY($1::int[])',[cards]);
+      }finally{await keeper.query('SELECT pg_advisory_unlock(20261103,157)');retention.splice(retention.indexOf(keeper),1);keeper.release();}
+    }
+  });
   await t.test('private queries reject forged tokens/sources and replay reads current state without writes',async()=> {
     const command={operation:'OrdersListed',id:null,callSessionSeq:1011,query:{limit:20,offset:0}};
     const event={eventId:randomUUID(),source:'order',eventType:'OrderReadRequested',payload:{command}};
