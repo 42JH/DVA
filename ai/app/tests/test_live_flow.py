@@ -1437,6 +1437,73 @@ def test_parcel_consent_does_not_commit_before_same_turn_correction():
     run(scenario())
 
 
+@pytest.mark.parametrize(("intent", "switch"), [("order", "lookup"), ("lookup", "lookup"), ("lookup", "none")])
+def test_order_pick_keeps_details_when_switching_to_lookup_and_allows_new_search(intent, switch):
+    from app.tests.test_tools import registered
+    from app.tools import run_tool
+
+    svc, client = flow()
+    db = svc.d.backend.api
+    customer = registered(db)
+    db.add_order(CALLER, "CANCELLED", [("이영희", "취소된 주소")])
+    selected_seq = db.add_order(CALLER, "notPaid", [("이영희", "부산 해운대구 센텀로 10")])
+    db.add_order(CALLER, "notPaid", [("박민수", "서울 중구 세종대로 110")])
+
+    async def scenario():
+        task = asyncio.create_task(svc.on_incoming(incoming()))
+        await until(lambda: client.conns)
+        conn = client.conns[0]
+        conn.push(started())
+        s = svc.registry.calls["live_1"]
+        await until(lambda: s.phase == Phase.ACTIVE)
+        s.state.intent = intent
+        s.state.customer.call_session_seq = customer.call_session_seq
+        s.rt.intent_started = True
+        await run_tool(s.tools, "lookup_orders", '{}', "initial-search")
+        candidates = s.state.candidates
+        label = next(label for label, order in zip(candidates.labels, candidates.items)
+                     if order.get("order_seq") == selected_seq)
+
+        async def decide(model, input, questions):
+            await asyncio.sleep(0.2)  # 같은 발화의 도구가 먼저 도착해도 선택과 업무 전환을 기다려야 한다.
+            pick = "not_answer" if "다른 택배" in input.split("고객 발화: ")[-1] else label
+            return SimpleNamespace(answers=[choice("pick", pick), choice("switch", switch)])
+
+        client.decisions.create = decide
+
+        def delegate(did, offset, receiver):
+            conn.push({"type": "session.delegation.created", "delegation": {"id": did}, "offset_ms": offset})
+            conn.push({"type": "response.event", "delegation_id": did, "event": {
+                "type": "response.output_item.done", "item": {"type": "function_call", "call_id": did,
+                    "name": "lookup_orders", "arguments": json.dumps({"receiver_name": receiver, "scope": None})}}})
+            conn.push({"type": "response.event", "delegation_id": did, "event": {"type": "response.completed"}})
+
+        await ai(conn, "어느 택배를 조회할까요?", 0)
+        await say(conn, "제일 최근 거", 1500)
+        delegate("selected", 1600, "이영희")
+        await until(lambda: s.tool_calls and s.tool_calls[-1]["done_at"])
+        assert s.state.intent == "lookup"
+        assert s.rt.customer_turns[-1].lookup_selection is s.state.selected_order
+        assert s.state.selected_order["order_seq"] == selected_seq
+        out = s.tool_calls[-1]["output"]
+        assert out["status"] == "ok" and out["facts"]["found"] == 1
+        assert out["facts"]["lookup_order"]["receiver_address"] == "부산 해운대구 센텀로 10"
+        assert s.state.selected_order["order_seq"] == selected_seq
+
+        await say(conn, "박민수에게 보낸 다른 택배 찾아줘", 3500)
+        delegate("new-search", 3600, "박민수")
+        await until(lambda: len(s.tool_calls) == 2 and s.tool_calls[-1]["done_at"])
+        assert s.rt.customer_turns[-1].lookup_selection is None
+        out = s.tool_calls[-1]["output"]
+        assert out["status"] == "ok"
+        assert out["facts"]["lookup_order"]["receiver_name"] == "박민수"
+        assert s.state.selected_order["order_seq"] != selected_seq
+        conn.push({"type": "session.closed", "reason": "remote_hangup"})
+        await task
+
+    run(scenario())
+
+
 def test_cancel_target_carries_status_meaning():
     from app.tools.lookup import cancel_target_facts
     facts = cancel_target_facts({"receiver_name": "홍길동", "status": "COLLECTING", "receiver_address": "부산"})

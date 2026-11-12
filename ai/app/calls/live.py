@@ -548,7 +548,9 @@ class LiveFlow:
                 elif p[0] != "not_answer" and apply_pick(st, p[0]):
                     self._sync_intake(s)
                     picked_cancel = kind == "order" and switch and switch[1] >= th and switch[0] == "cancel"
-                    picked_lookup = (kind == "order" and st.intent == "lookup"
+                    entering_lookup = (st.intent in (None, "order") and switch and switch[1] >= th
+                                       and switch[0] == "lookup" and not sender_change)
+                    picked_lookup = (kind == "order" and (st.intent == "lookup" or entering_lookup)
                                      and (not switch or switch[1] < th or switch[0] in ("none", "lookup")))
                     if picked_lookup:
                         utt.lookup_selection = st.selected_order
@@ -570,7 +572,7 @@ class LiveFlow:
                 followups.append(("clarify_greeting", utt))
             switching = ((w := answers.get("switch")) and w[1] >= th and w[0] != "none" and not sender_change
                          and not ((origin_change or destination_reply is not None) and w[0] == "edit_parcel")
-                         and not (picked_lookup and w[0] == "lookup"))
+                         and not (picked_lookup and st.intent == "lookup" and w[0] == "lookup"))
             if switching:
                 intent = w[0]
                 if intent == "cancel" and (picked_cancel or st.intent == "lookup" and st.selected_order
