@@ -960,3 +960,9 @@ MSA #55는 operations 실패 뒤의 실제 신규 이미지 전달·DB 전달·�
 - b6eca4cf의 실제 CI 진입점에서 깨끗한 원본 snapshot·계약 11건·11개 이미지·공통 이벤트 37+16건, 변경 없는 DB 236단계/배포 130건의 입력 검증과 재사용이 통과했다. 이어 1 CPU·3GB 격리 환경의 operations에서 만료 읽기 검증용 2001년 FAQ 샘플 13개가 production GC에 지워져 원본과 물리 snapshot 비교가 실패했다. 원본 API 실패나 스키마 변경은 아니었다.
 - 기존 FAQ 검증 파일에서 읽기 비교 동안만 양쪽 DB의 원래 보관 advisory lock을 유지한다. production 모드와 워커를 유지하며 물리 만료·재시도·실제 주기 검사는 기존 별도 사례에서 그대로 실행한다. 같은 1 CPU·3GB/동일 이미지 조건으로 operations 전체 198단계가 통과했다. 검사를 생략하거나 기대값·기한을 완화하지 않았고 테스트 파일은 69개 그대로다.
 - 실패 근거는 retention-final-cli/operations.log와 해당 faqs-run.log, 수정 후 근거는 operations-retention-fixture-native/verification.json이다. 이 변경을 커밋한 뒤 최종 전체 CI와 패키징을 다시 확인한다. 실제 Jenkins 설정·슬롯·Job에는 접근하지 않았다.
+
+### 98. 카드 읽기 불변성 검사와 다른 사례의 통화 GC 분리
+
+- 670be47b의 CI에서 operations 198·고객 78·상담 172단계가 통과했다. 주문에서는 카드 승인 참조의 전역 메시지 불변성 비교 중 앞선 생성 사례의 만료 통화 110004가 실제로 정리되면서 ConsultationCallsPurged 수신 한 건이 추가됐다. 카드 승인 코드가 자격 증명이나 감사를 기록한 오류는 아니었다.
+- 해당 통화의 기존 FOR KEY SHARE fixture 잠금을 생성 사례 종료 시 해제하지 않고 전체 읽기 비교가 끝난 뒤 해제한다. 이벤트 종류를 비교에서 빼거나 기대값·시간 제한을 완화하지 않았다. production GC와 다른 통화의 실제 만료 검사는 유지한다. 같은 CI 이미지와 1 CPU·3GB 환경에서 주문 전체 243단계·주 비교 47건·실제 production 주기 검사가 통과했다.
+- 근거는 retention-final-verified-cli/order.log의 최초 실패와 order-retention-read-fixture-native/verification.json·validated-inputs.json이다. 테스트 파일은 같은 69개이며 runtime·DDL·의존성은 바꾸지 않았다. 마지막에는 기존 선택 정책과 입력/이미지 실행 내용의 일치 검증으로 변경 없는 성공 검사를 재사용하고 다섯 앱·DB 패키징을 확인한다.

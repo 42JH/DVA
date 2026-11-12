@@ -5406,20 +5406,14 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
           "SELECT setval('call_sessions_call_session_seq_seq',110100,true)",
         );
       }
-      const guards = [];
-      creation.after(async () => {
-        for (const client of guards) {
-          await client.query('ROLLBACK');
-          client.release();
-        }
-      });
+      // Later read-only checks also compare the complete event history while production GC runs.
       for (const side of owners) {
         const client = await side.calls.connect();
         await client.query('BEGIN');
         await client.query(
           'SELECT 1 FROM call_sessions WHERE call_session_seq=110004 FOR KEY SHARE',
         );
-        guards.push(client);
+        retention.push(client);
       }
       const { schema, envelope } = require('./final-parity.cjs');
       const specs = [];
