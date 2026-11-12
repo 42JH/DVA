@@ -160,7 +160,7 @@ export const readMembersCsv = (text: string, kind: CsvKind = 'members'): CsvResu
   readMembersRows(parseCsv(text), kind)
 
 /** 기업 CSV 사원 → 기업별 묶음 (파일에 나온 순서) */
-export function groupByCompany(members: CsvMember[]): { name: string; members: CsvMember[] }[] {
+function groupByCompany(members: CsvMember[]): { name: string; members: CsvMember[] }[] {
   const by = new Map<string, CsvMember[]>()
   for (const m of members) by.set(m.company ?? '', [...(by.get(m.company ?? '') ?? []), m])
   return [...by].map(([name, ms]) => ({ name, members: ms }))
