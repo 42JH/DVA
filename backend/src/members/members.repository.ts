@@ -55,6 +55,22 @@ export class MembersRepository {
   }
 
   async list(companyId: number, query: ListMembersQueryDto): Promise<PageRows<MemberViewDto>> {
+    // 검색의 원시 키 정렬은 미일치 행의 반복 조인을 늘릴 수 있어 기존 계획을 유지한다.
+    if (!query.q && query.status === undefined)
+      return readPage<MemberViewDto>(
+        this.database.pool,
+        `SELECT m.membership_seq,m.customer_seq,m.organization_seq,m.department_seq,m.employee_no,m.role,m.status AS membership_status,m.monthly_billing_enabled AS member_monthly_billing_enabled,m.group_billing_enabled,
+          c.name,c.phone_number,c.status AS customer_status,c.monthly_billing_enabled,c.address_data
+         FROM memberships m JOIN customers c ON c.customer_seq=m.customer_seq
+         WHERE m.organization_seq=$1 AND m.deleted_at IS NULL AND c.deleted_at IS NULL`,
+        [companyId],
+        query,
+        'membership_seq DESC',
+        `page.__page_ordinal,jsonb_build_object('membershipSeq',page.membership_seq,'customerSeq',page.customer_seq,
+          'organizationSeq',page.organization_seq,'departmentSeq',page.department_seq,'employeeNo',page.employee_no,'role',page.role,'status',page.membership_status,'monthlyBillingEnabled',page.member_monthly_billing_enabled,'groupBillingEnabled',page.group_billing_enabled) AS membership,
+         jsonb_build_object('customerSeq',page.customer_seq,'name',page.name,'phoneNumber',page.phone_number,'status',page.customer_status,
+           'monthlyBillingEnabled',page.monthly_billing_enabled,'address',page.address_data) AS customer`,
+      );
     const result = await readPage<MemberViewDto>(
       this.database.pool,
       `SELECT jsonb_build_object('membershipSeq',m.membership_seq,'customerSeq',m.customer_seq,
