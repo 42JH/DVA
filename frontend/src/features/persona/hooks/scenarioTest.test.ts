@@ -93,4 +93,9 @@ assert.equal(
   failLine({ name: '대본 진행', status: 'pass', expected: '', actual: '' }, talk, script),
   null,
 )
+// 대화 기록보다 판정이 먼저 온 때 — 줄이 없으니 위치도 없음 (실제 창구에 붙였을 때 화면이 깨졌던 경우, 11/12)
+const noLines = (name: string, actual: unknown, at?: number) =>
+  failLine({ name, status: 'fail', expected: '', actual, at }, [], script)
+assert.equal(noLines('대본 진행', '말하지 못한 발화: [3]'), null)
+assert.equal(noLines('기존 주문 상태', {}, 7), null)
 console.log('scenarioTest ok')

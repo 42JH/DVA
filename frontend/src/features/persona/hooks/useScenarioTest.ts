@@ -13,6 +13,8 @@ import { rowsOf, testOf } from './scenarioTest'
 export { SCENARIO_TEST } // 화면(components)은 api를 직접 부르지 않아 여기서 내보냄
 
 type Me = { personaSeq: number; version: number; isHead: boolean }
+/** 시험할 버전 — 시작할 때 그 버전의 합친 글과 음성을 창구에 보냄 (voiceId null = AI 기본 음성) */
+export type TestTarget = Me & { promptText: string; voiceId: string | null }
 
 /** 시나리오 · 버전별 결과 · 통화에 사용 중인 버전 — 표와 [통화에 사용하기] 관문이 같이 씀 (요청은 한 번, 캐시 공유) */
 function useTestData() {
@@ -42,7 +44,7 @@ function useTestData() {
 }
 
 /** [통화에 사용하기] 관문 — 그 상담가의 최신 버전이 전체 시험을 끝냈는가, 새로 실패 · 새로 통과는 몇 개인가
- *  가짜 모드가 아니면 null (관문 없음, 지금 화면 그대로) */
+ *  시나리오 시험이 꺼진 환경(SCENARIO_TEST false)이면 null (관문 없음, 지금 화면 그대로) */
 export function useTestGate() {
   const d = useTestData()
   if (!SCENARIO_TEST) return null
@@ -67,7 +69,15 @@ export function useScenarioTestPage(personaSeq: number, version: number) {
       label: 'AI 상담가로',
       state: { testOf: personaSeq, ...(v && !v.isHead && { version }) },
     },
-    me: v ? { personaSeq, version, isHead: v.isHead } : null,
+    me: v
+      ? ({
+          personaSeq,
+          version,
+          isHead: v.isHead,
+          promptText: v.promptText,
+          voiceId: v.voice.voice || null,
+        } satisfies TestTarget)
+      : null,
     dateOf: (n: number) => {
       const x = all.find((y) => y.version === n)
       return x ? fmtMonthDay(ymd(new Date(x.savedAt))) : ''
@@ -82,7 +92,7 @@ export function useScenarioTestPage(personaSeq: number, version: number) {
 }
 
 /** 시나리오 시험 화면의 결과 표 — 주소에서 고른 버전. dateOf = 이 상담가의 버전 번호 → '10월 29일' */
-export function useScenarioTest(me: Me, dateOf: (version: number) => string) {
+export function useScenarioTest(me: TestTarget, dateOf: (version: number) => string) {
   const d = useTestData()
   const qc = useQueryClient()
   // 시험은 실제 통화라 요금이 듦 → 누르면 한 번 묻고 시작 (11/12 사용자: 실수로 눌러도 바로 걸리면 안 됨)
@@ -154,6 +164,8 @@ export function useScenarioTest(me: Me, dateOf: (version: number) => string) {
         start.mutate({
           personaSeq: me.personaSeq,
           version: me.version,
+          promptText: me.promptText,
+          voiceId: me.voiceId,
           scenarios: asking.scenarios,
         }),
       close: () => setAsking(null),

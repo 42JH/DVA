@@ -74,7 +74,8 @@ type Line = [number, 'AI' | '고객', string]
  *  3) 대본 진행 '말하지 못한 발화: [4, 5]' → 고객이 마지막으로 한 대본 문장(3번) = 통화가 더 나아가지 못한 곳
  *  ponytail: 2 · 3은 판정기의 문구를 읽는 것이라 문구가 바뀌면 못 찾음(null). 판정기가 at을 주면 1만 남기면 됨 */
 export function failLine(c: Check, lines: Line[], script: string[]): number | null {
-  if (c.status !== 'fail') return null
+  // 대화 기록이 아직 안 왔으면(판정이 먼저 도착) 찾을 줄이 없음 — 없는 줄 번호를 돌려주면 화면이 깨짐
+  if (c.status !== 'fail' || lines.length === 0) return null
   if (typeof c.at === 'number') {
     const at = c.at
     return Math.max(

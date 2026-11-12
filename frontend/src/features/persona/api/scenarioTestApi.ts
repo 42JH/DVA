@@ -1,47 +1,33 @@
 // 시나리오 시험 (11/12) — 페르소나 글을 통화에 쓰기 전에, 정해진 고객 대본으로 AI에게 전화를 걸어 보는 시험
-// 데이터 모양은 시험 도구(ai/persona_check)의 창구를 따름 (FE_HANDOFF 6장). 백엔드 API가 아직 없어 주소는 임시이고
-// 가짜 서버(mocks/handlers/scenarioTests.ts)만 답함 → 화면은 가짜 모드에서만 보임 (SCENARIO_TEST)
-// 도구에 없는 것(백엔드가 맡을 것): 어느 버전의 결과인지, 버전마다 시나리오별 최신 결과를 합쳐 주기, 녹음 주소(audioUrl)
-// 도구에 없는 것(도구가 더 줘야 할 것): 시나리오 한 개의 내용 — GET /scenarios/{id} (대본 · 정답 · 행동 확인)
+// 주소와 모양은 시험 창구(ai/persona_check)의 것 그대로. 백엔드는 관리자 확인 뒤 /api/persona-check/* 를 창구로 넘기기만 함(저장 · 가공 없음)
+// 창구는 결과를 자기 쪽 폴더에 보관. '어느 버전의 시험인지'는 화면이 시작할 때 붙인 tag로 남고, 버전별로 모으는 일은 화면이 함 (scenarioTestMap.ts)
+// 시험 통화는 창구 안의 가짜 백엔드를 써서 통화 내역 · 주문 · 고객 · 통계에 남지 않음
 import { queryOptions } from '@tanstack/react-query'
-import { api, type ApiItem } from '@/shared/api/client'
+import { api, API_BASE_URL } from '@/shared/api/client'
+import { runsToTests, tagOf, type RunDto, type TestItem, type VersionTest } from './scenarioTestMap'
 
-/** 가짜 모드(개발 서버 + VITE_USE_MOCK)에서만 켜짐 — 배포 화면은 그대로 */
-export const SCENARIO_TEST = import.meta.env.DEV && import.meta.env.VITE_USE_MOCK === 'true'
+export type { TestItem, VersionTest }
+
+/** 화면을 켜는 스위치. 가짜 모드(개발 서버 + VITE_USE_MOCK)에서는 늘 켜지고,
+ *  실제 창구에 붙일 때는 VITE_SCENARIO_TEST=true (백엔드 중계가 생긴 환경에서만 켬 — 없으면 요청이 404) */
+export const SCENARIO_TEST =
+  import.meta.env.VITE_SCENARIO_TEST === 'true' ||
+  (import.meta.env.DEV && import.meta.env.VITE_USE_MOCK === 'true')
 
 export interface Scenario {
   id: string // 'A1' — AI 파트 문서의 번호
   name: string
   group: string // 업무 (접수 · 조회 · 취소 …)
-  core: boolean // 핵심 묶음 — 빨리 돌려 보는 몇 개
+  core: boolean // 창구의 핵심 묶음 표시 — 화면에서는 안 씀
+  available?: boolean // false = 이 환경에서 돌릴 수 없음(FAQ 검색 서버 미연결). 목록에서 뺌
 }
 
-/** 시나리오 내용 (보기 전용 — 시나리오는 AI 파트가 시험 도구의 파일로 관리, 화면에서 고치지 않음) */
+/** 시나리오 내용 (보기 전용 — 시나리오는 AI 파트가 시험 창구의 파일로 관리, 화면에서 고치지 않음) */
 export interface ScenarioScript extends Scenario {
   caller: string // 전화한 사람 ('등록 고객 김민수' · '신규 고객')
   lines: { text: string; optional: boolean }[] // 고객 대본. optional = 상황에 따라 안 할 수 있는 말
-  expected: { name: string; value: string }[] // 정답 (판정의 코드 검사와 같은 이름)
+  expected: { name: string; value: unknown }[] // 정답 — 판정 결과표의 코드 검사와 같은 이름 · 값(숫자 · 묶음일 수 있음)
   checks: string[] // 행동 확인 문장
-}
-
-/** 시나리오 한 개의 결과. error = 통화가 연결되지 않음(시나리오 실패가 아님, passed null) */
-export interface TestItem {
-  scenario: string
-  runId: string // 이 결과가 나온 묶음 — 판정 · 대화 기록을 받을 때
-  status: 'queued' | 'running' | 'done' | 'error'
-  passed: boolean | null
-  error: string | null
-  liveSeconds: number | null
-}
-
-/** 한 버전의 시험 결과 — 시나리오마다 가장 최근 것 */
-export interface VersionTest {
-  personaSeq: number
-  version: number
-  status: 'running' | 'done' | 'interrupted'
-  startedAt: string
-  finishedAt: string | null
-  items: TestItem[]
 }
 
 /** 판정 한 줄 — 코드 검사(정답 값 / 실제 값)와 행동 확인(문장 · '지킴' / '어김: …')이 같은 모양으로 섞여 옴 */
@@ -51,7 +37,7 @@ export interface Check {
   expected: unknown
   actual: unknown
   note?: string
-  at?: number // 실패가 난 통화 안 시각(초) — 도구가 아직 안 줌. 주면 대화의 그 말로 바로 감
+  at?: number // 실패가 난 통화 안 시각(초) — 창구가 아직 안 줌. 주면 대화의 그 말로 바로 감
 }
 export interface Verdict {
   passed: boolean
@@ -62,52 +48,81 @@ export interface Verdict {
 export interface TestRecord {
   customer: { lines: [number, 'AI' | '고객', string][] }
   liveSeconds: number
-  audioUrl: string | null
+  audioUrl: string | null // 녹음 주소 — 창구의 …/audio (쿠키로 인증되는 같은 주소라 재생기에 바로 넣음)
 }
 
-const get =
-  <T>(path: string) =>
-  async ({ signal }: { signal?: AbortSignal }) =>
-    (await api.get<ApiItem<T>>(path, { signal })).data
+// 백엔드가 창구 응답을 그대로 넘기든 팀 규칙대로 { data }로 감싸 넘기든 받음 (어느 쪽으로 할지 백엔드가 정함)
+const bare = <T>(x: unknown): T =>
+  x && typeof x === 'object' && !Array.isArray(x) && 'data' in x && Object.keys(x).length === 1
+    ? (x as { data: T }).data
+    : (x as T)
+const get = async <T>(path: string, signal?: AbortSignal) =>
+  bare<T>(await api.get<unknown>(`/persona-check${path}`, { signal }))
 
 export const scenarioTestQueries = {
   all: () => ['personaTests'] as const,
   scenarios: () =>
     queryOptions({
       queryKey: [...scenarioTestQueries.all(), 'scenarios'],
-      queryFn: get<Scenario[]>('/persona-check/scenarios'),
+      // 돌릴 수 없는 시나리오는 뺌 — 남겨 두면 '전체 시험'이 영영 끝나지 않은 것으로 보임
+      queryFn: async ({ signal }) =>
+        (await get<Scenario[]>('/scenarios', signal)).filter((s) => s.available !== false),
       staleTime: Infinity,
     }),
   script: (id: string) =>
     queryOptions({
       queryKey: [...scenarioTestQueries.all(), 'scenarios', id],
-      queryFn: get<ScenarioScript>(`/persona-check/scenarios/${id}`),
+      queryFn: ({ signal }) => get<ScenarioScript>(`/scenarios/${id}`, signal),
       staleTime: Infinity,
     }),
   tests: () =>
     queryOptions({
       queryKey: [...scenarioTestQueries.all(), 'tests'],
-      queryFn: get<VersionTest[]>('/persona-check/tests'),
+      queryFn: async ({ signal }) => runsToTests(await get<RunDto[]>('/runs', signal)),
       // 시험이 도는 동안만 2초마다 다시 받음 — 표 · 카드 · 상세가 같은 규칙
       refetchInterval: (q) => (q.state.data?.some((t) => t.status === 'running') ? 2000 : false),
     }),
   verdict: (runId: string, scenario: string) =>
     queryOptions({
       queryKey: [...scenarioTestQueries.all(), runId, scenario, 'verdict'],
-      queryFn: get<Verdict>(`/persona-check/runs/${runId}/${scenario}/verdict`),
+      queryFn: ({ signal }) => get<Verdict>(`/runs/${runId}/${scenario}/verdict`, signal),
       staleTime: Infinity, // 끝난 통화의 판정은 안 바뀜
     }),
   record: (runId: string, scenario: string) =>
     queryOptions({
       queryKey: [...scenarioTestQueries.all(), runId, scenario, 'record'],
-      queryFn: get<TestRecord>(`/persona-check/runs/${runId}/${scenario}/record`),
+      queryFn: async ({ signal }): Promise<TestRecord> => {
+        const rec = await get<Omit<TestRecord, 'audioUrl'> & { audioUrl?: string | null }>(
+          `/runs/${runId}/${scenario}/record`,
+          signal,
+        )
+        // 가짜 서버는 녹음 주소를 기록에 넣어 줌(브라우저 안에서 만든 무음). 실제 창구는 따로 요청하는 주소
+        return {
+          ...rec,
+          audioUrl: rec.audioUrl ?? `${API_BASE_URL}/persona-check/runs/${runId}/${scenario}/audio`,
+        }
+      },
       staleTime: Infinity,
     }),
 }
 
-/** 시험 시작 — scenarios를 주면 그것만(연결 실패 다시 시험), 없으면 전체. 도구의 핵심 묶음(core)은 화면에서 안 씀 */
-export const startTest = (body: {
+const CONCURRENCY = 2 // 동시에 거는 통화 수 — 창구가 자기 상한(PERSONA_CHECK_MAX_CONCURRENCY)까지로 줄임
+
+/** 시험 시작 — 그 버전의 페르소나 글로 통화를 걺. scenarios를 주면 그것만(연결 실패 다시 시험), 없으면 전체
+ *  voiceId null = AI 기본 음성. 묶음에 '상담가 번호:버전' 표시를 붙여 나중에 버전별로 모음 */
+export const startTest = (input: {
   personaSeq: number
   version: number
+  promptText: string
+  voiceId: string | null
   scenarios?: string[]
-}): Promise<void> => api.post('/persona-check/tests', { body })
+}): Promise<void> =>
+  api.post('/persona-check/runs', {
+    body: {
+      scenarios: input.scenarios,
+      promptText: input.promptText,
+      voiceId: input.voiceId ?? undefined,
+      tag: tagOf(input.personaSeq, input.version),
+      concurrency: CONCURRENCY,
+    },
+  })
