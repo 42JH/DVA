@@ -730,6 +730,9 @@ def test_order_intent_notice_carries_missing_so_first_question_follows_order():
     ("서울 강남구 가람구길 이백십이에서 보내시는 ", "아 네", "prefilled", False),
     ("서울 강남구 가람구길 이백십이에서 보내시는 ", "네, 다른 주소에서 보낼게요", "name_only", False),
     ("서울 강남구 가람구길 이백십삼에서 보내시는 ", "예", "ask_origin", False),
+    ("강남구 가람구길에서 보내시는 ", "네", "prefilled", False),
+    ("강남구 가람구길에서 보내시는 ", "네, 다른 주소에서 보낼게요", "name_only", False),
+    ("강남구 가람팔길에서 보내시는 ", "네", "ask_origin", False),
     ("", "예", "ask_origin", False),
     (("서울 강남구 가람구길", "이백십이에서 보내시는 "), "네", "prefilled", False),
     (("서울 강남구 가람구길", "이백십삼에서 보내시는 "), "네", "ask_origin", False),
@@ -798,6 +801,27 @@ def test_registered_greeting_answer_preserves_address_scope_without_model(greeti
         if expected == "ask_origin" and greeting_address:
             assert facts["origin_confirm"] == "registered"  # 이미 말한 주소는 다시 읽지 않는다.
         assert s.state.origin_answer is (False if expected == "name_only" else None)
+
+
+@pytest.mark.parametrize(("spoken", "expected"), [
+    ("서구 구덕로", "registered_origin"),
+    ("부산광역시 서구 구덕로", "registered_origin"),
+    ("서구 구덕로 삼백이십일번길", "registered_origin"),
+    ("동구 구덕로", "origin_mentioned"),
+    ("대구광역시 서구 구덕로", "origin_mentioned"),
+    ("서구 구덕로 삼백이십이번길", "origin_mentioned"),
+    ("서구 구덕로 삼백이십일번길 이십오", "origin_mentioned"),
+    ("구덕로", "origin_mentioned"),
+])
+def test_short_greeting_address_must_match_spoken_parts(spoken, expected):
+    from app.calls.live import _greeting_offer
+    from app.domain.state import ConversationState, Customer, Place
+
+    place = Place("김철수", CALLER, "부산광역시 서구 구덕로321번길 24", "")
+    state = ConversationState(customer=Customer(origin_place=place), origin_offered=True)
+    question = f"안녕하세요, 김철수님, {spoken}에서 발송하시는 택배 접수 도와드릴까요?"
+    assert _greeting_offer(state, question, allow_short_address=True) == expected
+    assert _greeting_offer(state, question) == "origin_mentioned"
 
 
 @pytest.mark.parametrize("explicit_origin_question", [True, False])
