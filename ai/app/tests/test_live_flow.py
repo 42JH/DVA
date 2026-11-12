@@ -725,18 +725,28 @@ def test_order_intent_notice_carries_missing_so_first_question_follows_order():
 
 
 
-@pytest.mark.parametrize(("greeting_address", "reply", "expected"), [
-    ("서울 강남구 가람구길 이백십이에서 보내시는 ", "네", "prefilled"),
-    ("서울 강남구 가람구길 이백십이에서 보내시는 ", "아 네", "prefilled"),
-    ("서울 강남구 가람구길 이백십이에서 보내시는 ", "네, 다른 주소에서 보낼게요", "name_only"),
-    ("서울 강남구 가람구길 이백십삼에서 보내시는 ", "예", "ask_origin"),
-    ("", "예", "ask_origin"),
+@pytest.mark.parametrize(("greeting_address", "reply", "expected", "interrupted"), [
+    ("서울 강남구 가람구길 이백십이에서 보내시는 ", "네", "prefilled", False),
+    ("서울 강남구 가람구길 이백십이에서 보내시는 ", "아 네", "prefilled", False),
+    ("서울 강남구 가람구길 이백십이에서 보내시는 ", "네, 다른 주소에서 보낼게요", "name_only", False),
+    ("서울 강남구 가람구길 이백십삼에서 보내시는 ", "예", "ask_origin", False),
+    ("", "예", "ask_origin", False),
+    (("서울 강남구 가람구길", "이백십이에서 보내시는 "), "네", "prefilled", False),
+    (("서울 강남구 가람구길", "이백십삼에서 보내시는 "), "네", "ask_origin", False),
+    (("서울 강남구 가람구길", "이백십이에서 보내시는 "), "네, 다른 주소에서 보낼게요", "name_only", False),
+    (("서울 강남구 가람구길", "이백십이에서 보내시는 "), "네", "ask_origin", True),
 ])
-def test_registered_greeting_answer_preserves_address_scope_without_model(greeting_address, reply, expected):
+def test_registered_greeting_answer_preserves_address_scope_without_model(greeting_address, reply, expected, interrupted):
     from app.domain.state import Source
     from backend_client.order import Geo as BGeo, Place as BPlace
     svc, client = flow()
-    client.decisions.create = AsyncMock(side_effect=AssertionError("명확한 첫 인사 답변은 모델 호출이 필요 없다"))
+    split_greeting = isinstance(greeting_address, tuple)
+
+    async def opening_noise_only(**kwargs):
+        assert kwargs["input"].endswith(("고객 발화: 인터넷에", "고객 발화: 잠깐만요"))
+        return SimpleNamespace(answers=[])
+
+    client.decisions.create = AsyncMock(side_effect=opening_noise_only)
     db = svc.d.backend.api
     db.add_customer(CALLER, "김철수", default_origin=BPlace(name="김철수", phone=CALLER, address="서울특별시 강남구 가람9길 212",
                                                         address_detail="1201호", geo=BGeo(jibun_address="서울 강남구 역삼동 737",
@@ -749,15 +759,24 @@ def test_registered_greeting_answer_preserves_address_scope_without_model(greeti
         conn.push(started())
         await until(lambda: svc.registry.calls["live_1"].phase == Phase.ACTIVE)
         s = svc.registry.calls["live_1"]
-        await ai(conn, f"안녕하세요, 김철수님, {greeting_address}택배 접수 도와드릴까요?", 0)
-        await say(conn, reply, 1500)
+        if split_greeting:
+            await say(conn, "인터넷에", 0)
+            first, last = greeting_address
+            await ai(conn, f"안녕하세요, 김철수님, {first}", 1000)
+            if interrupted:
+                await say(conn, "잠깐만요", 2000)
+            await ai(conn, f"{last}택배 접수 도와드릴까요?", 3000)
+            await say(conn, reply, 4500)
+        else:
+            await ai(conn, f"안녕하세요, 김철수님, {greeting_address}택배 접수 도와드릴까요?", 0)
+            await say(conn, reply, 1500)
         await until(lambda: any('"greeting_confirmation"' in e.get("content", "") for e in conn.sent))
         conn.push({"type": "session.closed", "reason": "remote_hangup"})
         await task
         return s, conn
 
     s, conn = run(scenario())
-    client.decisions.create.assert_not_awaited()
+    assert client.decisions.create.await_count == int(split_greeting) + int(interrupted)
     event = next(e for e in conn.sent if '"greeting_confirmation"' in e.get("content", ""))
     assert event["type"] == "session.commentary.append"
     facts = json.loads(event["content"].split("[서버 결과] ", 1)[1])
