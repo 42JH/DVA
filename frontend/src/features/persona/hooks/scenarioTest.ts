@@ -70,20 +70,21 @@ export function rowsOf(scenarios: Scenario[], base: VersionTest | null, now: Ver
 
 type Line = [number, 'AI' | '고객', string]
 
+/** [남은 N개 시험]에 보낼 시나리오 — 연결 실패 + 결과 없음(AI 배포 등으로 중간에 끊긴 묶음).
+ *  일부만 시험한 이 버전의 결과일 때만: 시험 전이면 [전체 시험]과 같고, 고치기 전 결과(stale)에는 없음. 끝난 것은 다시 걸지 않음(요금) */
+export function restOf(state: TestState, rows: { id: string; now: Cell }[]): string[] {
+  return state === 'partial'
+    ? rows.filter((x) => x.now === 'error' || x.now === 'none').map((x) => x.id)
+    : []
+}
+
 /** 실패한 판정이 통화의 어느 말에서 났는지 — 대화 줄 번호, 알 수 없으면 null (값만 틀린 코드 검사는 위치가 없음)
- *  1) 판정이 시각(at)을 주면 그때 하던 말  2) 행동 확인 '어김: <AI가 한 말>' → 그 말
- *  3) 대본 진행 '말하지 못한 발화: [4, 5]' → 고객이 마지막으로 한 대본 문장(3번) = 통화가 더 나아가지 못한 곳
- *  ponytail: 2 · 3은 판정기의 문구를 읽는 것이라 문구가 바뀌면 못 찾음(null). 판정기가 at을 주면 1만 남기면 됨 */
+ *  1) 행동 확인 '어김: <AI가 한 말>' → 그 말
+ *  2) 대본 진행 '말하지 못한 발화: [4, 5]' → 고객이 마지막으로 한 대본 문장(3번) = 통화가 더 나아가지 못한 곳
+ *  ponytail: 판정기의 문구를 읽는 것이라 문구가 바뀌면 못 찾음(null). 판정기가 실패 시각을 주게 되면 그 시각으로 찾기 */
 export function failLine(c: Check, lines: Line[], script: string[]): number | null {
   // 대화 기록이 아직 안 왔으면(판정이 먼저 도착) 찾을 줄이 없음 — 없는 줄 번호를 돌려주면 화면이 깨짐
   if (c.status !== 'fail' || lines.length === 0) return null
-  if (typeof c.at === 'number') {
-    const at = c.at
-    return Math.max(
-      lines.findLastIndex(([sec]) => sec <= at),
-      0,
-    )
-  }
   const actual = typeof c.actual === 'string' ? c.actual : ''
   if (actual.startsWith('어김:')) {
     const said = actual.slice(3).trim()

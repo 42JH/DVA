@@ -42,7 +42,6 @@ export interface Check {
   expected: unknown
   actual: unknown
   note?: string
-  at?: number // 실패가 난 통화 안 시각(초) — 창구가 아직 안 줌. 주면 대화의 그 말로 바로 감
 }
 export interface Verdict {
   passed: boolean
@@ -108,7 +107,7 @@ export const scenarioTestQueries = {
 
 const CONCURRENCY = 2 // 동시에 거는 통화 수 — 창구가 자기 상한(PERSONA_CHECK_MAX_CONCURRENCY)까지로 줄임
 
-/** 시험 시작 — 그 버전의 페르소나 글로 통화를 걺. scenarios를 주면 그것만(연결 실패 다시 시험), 없으면 전체
+/** 시험 시작 — 그 버전의 페르소나 글로 통화를 걺. scenarios를 주면 그것만(남은 것 시험), 없으면 전체
  *  voiceId null = AI 기본 음성. 묶음에 '상담가 번호:버전' 표시를 붙여 나중에 버전별로 모음
  *  요금이 드는 요청: 글이 비었거나 scenarios가 빈 배열이면 보내지 않고 실패(runBody). 실패해도 자동으로 다시 보내지 않음 */
 export const startTest = async (input: {
