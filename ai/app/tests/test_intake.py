@@ -70,6 +70,16 @@ def test_live_confirmation_saves_and_lookup_combines_both_sources(tmp_path):
         return first
 
     first = run(scenario())
+    s.state.intent = "lookup"
+    recent = call(s.tools, "lookup_orders", {"scope": "current_call"})
+    assert recent["status"] == "ok" and "orders" not in recent["facts"]
+    selected = recent["facts"]["lookup_order"]
+    assert selected["source"] == "draft" and selected["receiver_address_detail"] == "503호"
+    assert selected["items"] == {"document_count": 10, "small_box_count": 1}
+    assert call(s.tools, "lookup_orders", {"scope": "selected"})["facts"]["lookup_order"] == selected
+    prior = call(s.tools, "lookup_orders", {"scope": "previous_call"})
+    assert prior["facts"]["lookup_order"]["source"] == "order"
+    assert prior["facts"]["lookup_order"]["receiver_address"] == "이전 주소"
     out = call(s.tools, "lookup_orders", {"receiver_name": "이영희"})
     assert out["status"] == "needs_choice"
     assert [row["source"] for row in out["facts"]["orders"]] == ["order", "draft"]

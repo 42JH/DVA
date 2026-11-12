@@ -79,6 +79,7 @@ class Spoken:
     scope_decided: asyncio.Event | None = None
     buffered_destination_address: bool = False
     parcel_confirmation_id: str | None = None
+    lookup_selection: dict | None = None
 
     def utterance(self) -> Utterance:
         return Utterance(self.utterance_id, self.start_ms or 0, self.end_ms or 0, self.t_start, self.text, self.readback_id)
@@ -488,17 +489,21 @@ class LiveFlow:
                     picked_lookup = (kind == "order" and st.intent == "lookup"
                                      and (not switch or switch[1] < th or switch[0] in ("none", "lookup")))
                     if picked_lookup:
-                        followups.append(("lookup_picked", lookup_order_facts(st.selected_order)))
+                        utt.lookup_selection = st.selected_order
+                        followups.append(("lookup_picked", utt))
                     elif kind == "destination":
                         draft = st.current
-                        followups.append(("picked", {"destination_selected": {
+                        facts = {"destination_selected": {
                             "receiver_name": draft["receiver_name"].value,
                             "receiver_area": area_label(draft["receiver_address"].value, draft.receiver_geo),
-                        }}))
+                        }}
+                        if pid := self._reissue(s):
+                            facts |= {"readback": readback_facts(st.pending.snapshot), "readback_id": pid}
+                        followups.append(("order_question", (utt, facts)))
                     else:
                         followups.append(("picked", {"picked": p[0]}))
             if task and task[1] >= th and task[0] in BUSINESS + ("end",):
-                followups.append(("greeting_order", utt) if greeting and task[0] == "order" else ("intent", task[0]))
+                followups.append(("start_order", (utt, greeting)) if task[0] == "order" else ("intent", task[0]))
             elif greeting:
                 followups.append(("clarify_greeting", utt))
             switching = ((w := answers.get("switch")) and w[1] >= th and w[0] != "none" and not sender_change
@@ -731,14 +736,23 @@ class LiveFlow:
                                          "summary": state_summary(st, self.policy)})
         elif what == "intent":
             await self._on_intent(s, value)
-        elif what == "greeting_order":
-            await self._on_intent(s, "order", greeting_turn=value)
+        elif what == "start_order":
+            turn, greeting = value
+            await self._on_intent(s, "order", order_turn=turn, greeting=greeting)
+        elif what == "order_question":
+            turn, facts = value
+            await self.notify(s, "N1'", {"destination_selected": facts["destination_selected"]})
+            self._queue_order_question(s, turn, facts)
         elif what == "clarify_greeting":
             await self._clarify_greeting(s, value)
         elif what == "box_answer":
             await self._answer_box(s, *value)
         elif what == "lookup_picked":
-            await self.notify(s, "N2", {"lookup_order": value})
+            facts = {"lookup_order": lookup_order_facts(value.lookup_selection)}
+            if self.rt(s).customer_turns:
+                s.spawn(self.notify(s, "N2", facts, again=True, unless_tool_turn=value), "lookup_picked")
+            else:
+                await self.notify(s, "N2", facts)
         elif what == "destination_change":
             utterance, draft, buffered = value
             facts = {}
@@ -756,8 +770,7 @@ class LiveFlow:
                         facts["needs"] = out.needs
                     async with s.lock:
                         self._sync_intake(s)
-            facts["summary"] = state_summary(st, self.policy)
-            s.spawn(self.notify(s, "N2", facts, again=True, unless_tool_turn=utterance), "destination_change")
+            self._queue_order_question(s, utterance, facts)
         elif what == "picked":
             async with s.lock:
                 issued = issue_cancel_confirmation(st, s.tools.clock()) if st.intent == "cancel" else None
@@ -770,7 +783,6 @@ class LiveFlow:
                 destination = resume_destination(st)
                 if destination:
                     facts.update(destination.facts)
-                facts["summary"] = state_summary(st, self.policy)
                 sender_change = destination is not None or what == "sender_name_scope" or st.current and (
                     st.current.sender_name_for_parcel or st.current.sender_address_change)
                 if (sender_change and not sender_change_next(st) and not st.candidates
@@ -778,7 +790,7 @@ class LiveFlow:
                     facts["readback"] = readback_facts(st.pending.snapshot)
                     facts["readback_id"] = st.pending.id
             if sender_change or what == "sender_change" or facts.get("origin"):
-                s.spawn(self.notify(s, "N2", facts, unless_tool_turn=value), "sender_change")
+                self._queue_order_question(s, value, facts)
         elif what == "callback":  # 콜백 동의(yes) → 분석 hasCallbackRequest, 안내는 "담당자가 연락"
             s.note("콜백", value)
             await self.notify(s, "N2", {"agent": "callback_registered" if value == "yes" else "callback_declined"})
@@ -828,7 +840,12 @@ class LiveFlow:
             facts["needs"] = out.needs
         await self.notify(s, "N2", facts)
 
-    async def _on_intent(self, s: CallSession, intent: str, *, greeting_turn: Spoken | None = None) -> None:
+    def _queue_order_question(self, s: CallSession, turn: Spoken, facts: dict) -> None:
+        # 같은 발화의 도구가 먼저 질문을 전달할 수 있도록 Decision 작업 밖에서 보낸다.
+        s.spawn(self.notify(s, "N2", facts, again=True, unless_tool_turn=turn), "order_question")
+
+    async def _on_intent(self, s: CallSession, intent: str, *, order_turn: Spoken | None = None,
+                         greeting: bool = False) -> None:
         st = s.state
         if intent in BUSINESS:
             self._business(s, intent)
@@ -858,15 +875,15 @@ class LiveFlow:
                 facts = {"intent": st.intent}
                 if st.intent == "order":
                     facts |= self._origin_step(st)  # 다음 질문의 기준(missing 첫 항목)을 같이 준다 — 없으면 Live가 순서 밖 질문을 지어냄(운영 통화 3a0b9c7f)
-                    facts["summary"] = state_summary(st, self.policy)
-                    if greeting_turn:
+                    if greeting:
                         facts["greeting_confirmation"] = "confirmed"
+                    if not order_turn:
+                        facts["summary"] = state_summary(st, self.policy)
         if facts.get("closing"):
             await self._wait_delegations(s)
             self._maybe_submit(s, force=True)
-        if greeting_turn:
-            # 이 발화의 도구는 Decision 반영을 기다린다. 안내가 도구를 기다리며 서로 막히지 않도록 별도 작업으로 보낸다.
-            s.spawn(self.notify(s, "N2", facts, unless_tool_turn=greeting_turn), "greeting_order")
+        if order_turn:
+            self._queue_order_question(s, order_turn, facts)
         else:
             await self.notify(s, "N2" if facts.get("closing") or "agent" in facts or "cancel_target" in facts else "N1'", facts)
         if facts.get("closing"):
@@ -1117,6 +1134,11 @@ class LiveFlow:
                           and u.start_ms <= offset <= u.end_ms + self.cfg.utterance_gap_ms), None)
         if not utterance and offset is None and len(turns) == 1:
             utterance = turns[0]
+        tool_arguments = item.get("arguments") or "{}"
+        if (name == "lookup_orders" and utterance and utterance.lookup_selection is not None
+                and st.selected_order is utterance.lookup_selection and isinstance(arguments, dict)
+                and arguments.get("scope") is None and arguments.get("other_customer", False) is False):
+            tool_arguments = json.dumps(arguments | {"scope": "selected"})
         if name == "record_fields":
             if utterance:
                 readback_turn = utterance.utterance_id
@@ -1129,7 +1151,7 @@ class LiveFlow:
                     and arguments.get("include_values", False) is False and utterance is not None
                     and utterance is turns[-1] and st.pending and utterance.parcel_confirmation_id == st.pending.id):
                 ctx.outputs.setdefault(call_id, {"status": "ok", "confirmation": "await_server"})
-            out = await run_tool(ctx, name, item.get("arguments") or "{}", call_id, allowed=MODEL_TOOLS)
+            out = await run_tool(ctx, name, tool_arguments, call_id, allowed=MODEL_TOOLS)
         readback_id = (out.get("facts") or {}).get("readback_id")
         if readback_id:
             out = out | {"facts": {key: value for key, value in out["facts"].items() if key != "readback_id"}}
@@ -1166,7 +1188,9 @@ class LiveFlow:
             "type": "function_call_output", "call_id": call_id, "output": json.dumps(out, ensure_ascii=False)}})
         d = self._dl(s, did)
         if delivered and out.get("missing") is not None:
-            d["summary_delivered"] = True
+            d["summary_delivered"] = (out.get("stage"), out.get("next_field"))
+        if delivered and (out.get("facts") or {}).get("lookup_order"):
+            d["lookup_delivered"] = True
         d["readback_offer"] = (readback_id, readback_turn) if delivered and readback_id else None
         d["inflight"] -= 1
         d["outputs"] += 1
@@ -1245,17 +1269,22 @@ class LiveFlow:
                 return
             if unless_tool_turn:
                 turn = unless_tool_turn
-                if not rt.customer_turns or rt.customer_turns[-1] != turn or s.state.intent != "order":
+                lookup = "lookup_order" in facts
+                if rt.customer_turns[-1:] != [turn] or s.state.intent != ("lookup" if lookup else "order"):
                     return
-                if any(d.get("summary_delivered") and (not readback_id or d.get("readback_sent_id") == readback_id)
+                summary = state_summary(s.state, self.policy) if not lookup else {}
+                delivered_key = "lookup_delivered" if lookup else "summary_delivered"
+                expected = True if lookup else (summary["stage"], summary.get("next_field"))
+                if any(d.get(delivered_key) == expected and (not readback_id or d.get("readback_sent_id") == readback_id)
                        and d["offset_ms"] is not None
                        and turn.start_ms <= d["offset_ms"] <= turn.end_ms + self.cfg.utterance_gap_ms
                        for d in rt.delegations.values()):
                     return  # 같은 발화의 도구 결과가 이미 다음 질문에 필요한 최신 상태를 전달했다.
-                facts = facts | {"summary": state_summary(s.state, self.policy)}
-                if facts["summary"].get("sender_change_next") or s.state.current and s.state.current["sender_address"].valid:
-                    facts.pop("origin_confirm", None)
-                content = json.dumps(facts, ensure_ascii=False, sort_keys=True)
+                if not lookup:
+                    facts = facts | {"summary": summary}
+                    if facts["summary"].get("sender_change_next") or s.state.current and s.state.current["sender_address"].valid:
+                        facts.pop("origin_confirm", None)
+                    content = json.dumps(facts, ensure_ascii=False, sort_keys=True)
             if readback_id and not self._mark_readback(s, readback_id, readback_turn):
                 return
             if facts.get("greeting_confirmation") == "ask_intent" and (

@@ -4,7 +4,7 @@
 
 ## 0. 현행 도구 계약 (`app/tools/`)
 
-**결과 형식** `ToolOutcome.to_output()`: `{status, code?, facts?, needs?: [{field, reason}], stage?, fields?, missing?, can_proceed?, parcels?}`. `status` ∈ ok · needs_input · needs_choice · needs_confirmation · rejected · unavailable · unknown(`error-recovery.md` §1). 값 기록 결과에는 상태 요약(fields = 필드별 상태, 값은 없음)을 붙인다.
+**결과 형식** `ToolOutcome.to_output()`: `{status, code?, facts?, needs?: [{field, reason}], stage?, fields?, missing?, next_field?, can_proceed?, parcels?}`. `status` ∈ ok · needs_input · needs_choice · needs_confirmation · rejected · unavailable · unknown(`error-recovery.md` §1). 값 기록 결과에는 상태 요약(fields = 필드별 상태, 값은 없음)을 붙인다. `next_field`는 서버가 수집 순서에서 지정한 다음 질문 항목이다.
 
 **접수 확인 답변**: 서버가 접수 동의를 확인한 발화에서 상태만 보는 `get_state`가 호출되면 `confirmation: await_server`를 반환한다. 음성·Backend는 상태 안내를 기다리고, 같은 발화에 새 값이 있으면 `record_fields`로 기록한다. 서버는 그 기록과 기존 접수 확인이 일치할 때 확정한다.
 
@@ -20,7 +20,7 @@
 |---|---|---|
 | `record_fields` | 보내는 분 성함·주소·상세, 받는 분 성함·연락처·주소·상세, 수량 4종·기타 물품, 물품 가액, 요청사항, 수거 시각(들은 항목만) | ok / needs_choice(받는 분 성함·주소가 주소록과 일치하면 발송 기본주소·상세주소 확인 뒤 이름표 제시, 후보는 `state.candidates`) / needs_input(`PHONE_INVALID_DIGITS`, `PICKUP_TOO_SOON`·`PICKUP_IN_PAST`·`PICKUP_INVALID_FORMAT`, `ADDRESS_NOT_FOUND`, `ADDRESS_REGION_NEEDED`(같은 주소가 여러 시군구에 있음 — needs에 `regions`·`heard`, 2026-11-05), `ITEM_UNSPECIFIED`, `NOTHING_TO_RECORD`, `RESULT_SUPERSEDED`). facts: recorded·changed·cleared·auto_selected(P6)·geo_missing·phones_to_read·readback(되읽기 gate가 열렸을 때 읽을 값, 발신번호·저장 상세주소 제외) |
 | `find_destination` | name·place·detail·organization·department. 상세주소가 없다는 답은 detail에 빈 문자열 | needs_choice(이름표, 후보는 `state.candidates`; 1건이면 facts.guidance로 질문형 확인) / ok(발송 기본주소·상세주소 확인 중에는 후보를 보류하고 다음 질문 반환. 일치하는 후보가 없으면 들은 받는 분 성함을 보존) / ok(`DEST_PICKED`: 이미 제시한 후보 중 1건으로 좁혀지면 그 핀을 바로 적용) / ok(`DEST_NEW_RECEIVER`: 실제 주소의 핀이 없으면 받는 곳 주소·성함·들은 상세 기록) / needs_input(`ADDRESS_REGION_NEEDED`·`DEST_NONE`·`DEST_TOO_MANY`·`RESULT_SUPERSEDED`) / unavailable(BE) |
-| `lookup_orders` | receiver_name, other_customer | ok(1건 → `state.selected_order`) / needs_choice(여러 건) / needs_input(`ORDER_NOT_FOUND_BY_NAME`) / rejected(`ORDER_OTHER_CUSTOMER`: 다른 번호·다른 고객 접수, BE 호출 없음) / unavailable(`CALL_NOT_REGISTERED`). 조회 결과 facts에 `scope`(이 번호로 접수된 택배만) |
+| `lookup_orders` | receiver_name, other_customer, scope(optional: current_call·previous_call·selected) | ok(1건 → `state.selected_order`, 조회 상세 `facts.lookup_order`) / needs_choice(여러 건) / needs_input(`ORDER_NOT_FOUND_BY_NAME` 또는 `ORDER_SELECTION_REQUIRED`) / rejected(`ORDER_OTHER_CUSTOMER`: 다른 번호·다른 고객 접수, BE 호출 없음) / unavailable(`CALL_NOT_REGISTERED`). 조회 결과 facts에 `scope`(이 번호로 접수된 택배만) |
 | `search_manual` | question | ok(answerable, context; `KB_NO_EVIDENCE`·`KB_LOW_SCORE`) / unavailable(`KB_UNAVAILABLE`·`KB_TIMEOUT`) |
 | `get_state` | `include_values`(bool, 기본 false) | ok + 상태 요약(아무것도 바꾸지 않음). `include_values=true`면 `facts.current`(진행 중 택배의 검증된 값 `{value, from?}`, 발신번호 제외)·`facts.candidates`(제시 중인 받는 곳 후보의 이름표·성함·주소·상세주소·연락처). 기업 사원 후보·값의 연락처·상세주소는 넣지 않음 |
 

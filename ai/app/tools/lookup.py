@@ -6,6 +6,7 @@
 import asyncio
 import logging
 import time
+from typing import Literal
 
 from pydantic import Field
 
@@ -13,13 +14,15 @@ from app.address.parse import detail_text
 from app.domain.address_book import receiver_questions_deferred
 from app.domain.candidates import apply_pick, buffer_destination_fields, offer, reject_candidates
 from app.domain.state import DOCUMENT_ITEM_PRICE, CandidateSet, Items, ParcelDraft, Place, Source
+from app.domain.store import is_pending_reconfirm
 from app.integrations.backend.gateway import BackendFailure
+from app.integrations.backend.mapping import to_order
 from app.observability.trace import observe_latency
 from app.rag.schemas import Evidence, SearchContext
 from app.tools.context import ToolContext
 from app.tools.executor import Args, model_tool
 from app.tools.outcome import ToolOutcome, order_values, state_summary
-from backend_client.api import parcel_lookup_details
+from backend_client.api import parcel_body, parcel_lookup_details
 from backend_client.order import Place as BEPlace
 from backend_client.order import match_places, pin_labels, words
 
@@ -300,6 +303,9 @@ class LookupArgs(Args):
     receiver_name: str | None = Field(None, max_length=30, description="받는 분 성함(조사·호칭 빼고). 기억하지 못하면 null")
     other_customer: bool = Field(False, description="고객이 다른 전화번호로 접수된 택배나 다른 사람(다른 고객)이 접수한 택배를 "
                                                      "찾으면 true. 받는 분 성함은 다른 사람이어도 false")
+    scope: Literal["current_call", "previous_call", "selected"] | None = Field(
+        None, description="이번 통화에서 방금 접수한 건은 current_call, 직전 통화에서 접수한 건은 previous_call, "
+                          "이미 선택한 택배의 후속 질문은 selected. 일반 조회나 취소는 null")
 
 
 @model_tool("lookup_orders", "지금 전화한 번호의 기존 주문과 이번 통화에서 저장한 택배를 받는 분 성함으로 찾는다. "
@@ -312,23 +318,48 @@ async def lookup_orders(ctx: ToolContext, args: LookupArgs) -> ToolOutcome:
     if not seq:
         return ToolOutcome("unavailable", "CALL_NOT_REGISTERED")  # 2단계 고객 확인 전·실패: 고객 범위 없음
     api = ctx.backend.api
+    scope = ("지금 전화하신 번호의 주문과 이번 통화에서 저장한 택배만 조회됨. "
+             "다른 번호·다른 고객의 정보는 안내할 수 없음") if ctx.draft_intake else SCOPE
+    async with ctx.lock:
+        intent = ctx.state.intent
+        pending_cancel = ctx.state.pending
+        current_cancel = (pending_cancel and pending_cancel.kind == "cancel"
+                          and "client_parcel_id" in pending_cancel.snapshot)
+        lookup_scope = args.scope if intent != "cancel" and not current_cancel else None
+        if lookup_scope == "selected":
+            selected = ctx.state.selected_order
+            if selected is None:
+                return ToolOutcome("needs_input", "ORDER_SELECTION_REQUIRED", {"scope": scope})
+            return ToolOutcome("ok", facts={"found": 1, "scope": scope, "lookup_order": lookup_order_facts(selected)})
+        ctx.state.order_lookup_id += 1
+        lookup_id = ctx.state.order_lookup_id
+        if lookup_scope:
+            ctx.state.selected_order = None
+            if ctx.state.candidates and ctx.state.candidates.kind == "order":
+                ctx.state.candidates = None
+            ctx.state.bump()
     failed = []
-    if ctx.draft_intake:
+    if ctx.draft_intake and lookup_scope != "previous_call":
         budget = ctx.tool_budget_sec * 0.8
         pending = ctx.pending_drafts and ctx.pending_drafts()
-        results = await asyncio.gather(
-            ctx.backend.read("find_parcels", api.find_parcels, seq, ctx.lookup_limit, budget_sec=budget), *(
-            ctx.backend.read("list_drafts", api.list_drafts, seq, status, same_call=True, budget_sec=budget)
-            for status in DRAFT_STATUS_TEXT), return_exceptions=True)
-        for source, result in zip(("order", "ready_drafts", "editing_drafts"), results):
+        reads = {}
+        if lookup_scope != "current_call":
+            reads["order"] = ctx.backend.read("find_parcels", api.find_parcels, seq, ctx.lookup_limit, budget_sec=budget)
+        statuses = ("READY",) if lookup_scope == "current_call" else DRAFT_STATUS_TEXT
+        for status in statuses:
+            reads[f"{status.lower()}_drafts"] = ctx.backend.read(
+                "list_drafts", api.list_drafts, seq, status, same_call=True, budget_sec=budget)
+        results = dict(zip(reads, await asyncio.gather(*reads.values(), return_exceptions=True)))
+        for source, result in results.items():
             if isinstance(result, BackendFailure):
                 failed.append(source)
             elif isinstance(result, BaseException):
                 raise result
-        orders = [] if "order" in failed else results[0]
+        orders = [] if "order" in failed else results.get("order", [])
         order_parcels = {(order.get("order_seq"), order.get("order_parcel_seq")) for order in orders}
         drafts = {}
-        for rows in results[1:]:
+        for status in statuses:
+            rows = results[f"{status.lower()}_drafts"]
             if not isinstance(rows, BackendFailure):
                 for row in rows:
                     mapped = row.get("orderSeq"), row.get("orderParcelSeq")
@@ -340,21 +371,44 @@ async def lookup_orders(ctx: ToolContext, args: LookupArgs) -> ToolOutcome:
         orders = orders + [_draft_result(row) for row in drafts.values()]
         if pending or (ctx.pending_drafts and ctx.pending_drafts()):
             failed.append("draft_save_pending")
+    elif lookup_scope == "current_call":
+        async with ctx.lock:
+            orders = [{"status": "READY", "current_call": True, "receiver_name": p.confirmed_snapshot["receiver_name"],
+                       "details": parcel_lookup_details(parcel_body(to_order(p.confirmed_snapshot)))}
+                      for p in ctx.state.parcels if p.confirmed_snapshot and not is_pending_reconfirm(p)]
     else:
         orders = await ctx.backend.read("find_parcels", api.find_parcels, seq, ctx.lookup_limit)
+        if lookup_scope == "previous_call":
+            orders = [o for o in orders if o.get("creation_source") != "ADMIN" and o.get("call_session_seq") != seq]
+            if orders:
+                latest = orders[0]["order_seq"]  # 백엔드 목록이 최근 주문부터 반환한다.
+                orders = [o for o in orders if o["order_seq"] == latest]
     if args.receiver_name:
         said = "".join(words(args.receiver_name))
         orders = [o for o in orders if said and said in "".join(words(o.get("receiver_name")))]
-    scope = ("지금 전화하신 번호의 주문과 이번 통화에서 저장한 택배만 조회됨. "
-             "다른 번호·다른 고객의 정보는 안내할 수 없음") if ctx.draft_intake else SCOPE
+    if lookup_scope == "current_call" and failed:
+        orders = []
     facts = {"found": len(orders), "scope": scope}
     if failed:
         facts["unavailable_sources"] = failed
         facts["guidance"] = "조회에 실패한 범위의 내역은 확인하지 못했다고 안내한다. 없다고 단정하지 않는다."
-    labels = [f"{i}번 {o.get('receiver_name') or '받는 분 미상'}님 택배"
-              + (" (이번 통화)" if "draft_seq" in o else " (기존 주문)" if ctx.draft_intake else "")
-              for i, o in enumerate(orders, 1)]
+    labels = [f"{o.get('receiver_name') or '받는 분 미상'}님 택배"
+              + (" (이번 통화)" if _lookup_source(o) == "draft" else " (기존 주문)" if ctx.draft_intake else "")
+              for o in orders]
+    if ctx.state.intent == "cancel":
+        labels = [f"{i}번 {label}" for i, label in enumerate(labels, 1)]
+    elif len(orders) > 1:
+        labels = [" ".join(part for part in (label, o.get("receiver_area"), o.get("ordered_at")) if part)
+                  for label, o in zip(labels, orders)]
+        if len(set(labels)) < len(labels):
+            labels = [f"{label} [후보 {i}]" for i, label in enumerate(labels, 1)]
     async with ctx.lock:
+        active_intent = ctx.state.intent
+        entered_lookup = intent in (None, "order") and (
+            active_intent == "lookup" or active_intent == "cancel" and lookup_scope is None)
+        switched_away = active_intent != intent and not entered_lookup
+        if ctx.state.order_lookup_id != lookup_id or switched_away:
+            return ToolOutcome("needs_input", "RESULT_SUPERSEDED")
         pending_cancel = ctx.state.pending
         current_cancel = (pending_cancel and pending_cancel.kind == "cancel"
                           and "client_parcel_id" in pending_cancel.snapshot)
@@ -374,10 +428,14 @@ async def lookup_orders(ctx: ToolContext, args: LookupArgs) -> ToolOutcome:
         return ToolOutcome("unavailable" if failed else "needs_input",
                            "ORDER_LOOKUP_PARTIAL" if failed else "ORDER_NOT_FOUND_BY_NAME", facts)
     facts["orders"] = [{"label": label, "status": o.get("status"), "status_text": status_text(o.get("status")),
-                        **({"source": "draft" if "draft_seq" in o else "order"} if ctx.draft_intake else {})}
+                        "receiver_name": o.get("receiver_name"), "ordered_at": o.get("ordered_at"),
+                        "receiver_area": o.get("receiver_area"),
+                        **({"source": _lookup_source(o)} if ctx.draft_intake or lookup_scope else {})}
                        for label, o in zip(labels, orders)]
     if len(orders) == 1 and not current_cancel and ctx.state.intent != "cancel":
         facts["lookup_order"] = lookup_order_facts(orders[0])
+        if lookup_scope:
+            facts.pop("orders")  # 범위를 좁혀 하나를 찾았으면 후보 확인을 다시 할 필요가 없다.
     return ToolOutcome("needs_choice" if len(orders) > 1 else "ok", None,
                        facts)
 
@@ -385,7 +443,13 @@ async def lookup_orders(ctx: ToolContext, args: LookupArgs) -> ToolOutcome:
 def _draft_result(row: dict) -> dict:
     parcel = row["parcel"] or {}
     return {"draft_seq": row["draftSeq"], "version": row["version"], "status": row["status"],
-            "receiver_name": (parcel.get("destination") or {}).get("name"), "details": parcel_lookup_details(parcel)}
+            "receiver_name": (parcel.get("destination") or {}).get("name"),
+            "receiver_area": (parcel.get("destination") or {}).get("dongName"),
+            "details": parcel_lookup_details(parcel)}
+
+
+def _lookup_source(order: dict) -> str:
+    return "draft" if "draft_seq" in order or order.get("current_call") else "order"
 
 
 def lookup_order_facts(order: dict) -> dict:
@@ -395,7 +459,7 @@ def lookup_order_facts(order: dict) -> dict:
         details.pop("item_price")
     return {"receiver_name": order.get("receiver_name"), "status": status,
             "status_text": "접수된 택배" if status == "ACCEPTED" else status_text(status),
-            "source": "draft" if "draft_seq" in order else "order", **details}
+            "source": _lookup_source(order), **details}
 
 
 # --- search_manual ---

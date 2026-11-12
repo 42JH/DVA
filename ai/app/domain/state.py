@@ -209,7 +209,8 @@ class ConversationState:
     pending: PendingConfirmation | None = None
     awaiting_fix: bool = False             # no·change로 확인 대기를 푼 뒤 고친 값을 기다림(그동안 되읽기를 다시 열지 않는다)
     candidates: CandidateSet | None = None
-    selected_order: dict | None = None     # 취소 대상(조회 후보에서 고른 것)
+    selected_order: dict | None = None     # 조회·취소 후보에서 고른 대상
+    order_lookup_id: int = 0              # 늦게 끝난 조회가 새 후보를 덮지 않게 한다
     state_version: int = 0
     no_more_parcels: bool = False          # 고객이 더 보낼 택배가 없다고 함(more_parcels 단계 완료)
     order_submitted: bool = False          # 결과 전송 시작 — 이후 택배 수정·추가 없음(접수 후 수정 불가)
