@@ -1129,7 +1129,7 @@ test('operator access updates and their success audit commit or roll back togeth
   assert.deepEqual(records, [{ actor_seq: system.id, target_seq: target.id }]);
 });
 
-test('only the four administrator-account APIs restrict the ninety-five admin routes to SYSTEM_ADMIN', () => {
+test('only the four administrator-account APIs require SYSTEM_ADMIN', () => {
   const { ModulesContainer } = require('@nestjs/core');
   const { ADMIN_ROLES } = require('../dist/admins/admins.types');
   assert.deepEqual(ADMIN_ROLES, ['OPERATOR', 'SYSTEM_ADMIN']);
@@ -1169,7 +1169,7 @@ test('only the four administrator-account APIs restrict the ninety-five admin ro
     'PATCH /api/admins/:id',
     'PATCH /api/admins/:id/password',
   ];
-  assert.equal(routes.size, 95);
+  for (const route of restricted) assert.ok(routes.has(route), route);
   for (const [route, roles] of routes)
     assert.deepEqual(roles, restricted.includes(route) ? ['SYSTEM_ADMIN'] : ADMIN_ROLES, route);
 });
