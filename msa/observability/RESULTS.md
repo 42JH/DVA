@@ -68,4 +68,6 @@
 
 이전 수집·확장·장애 복구 시험의 MSA 소스와 이번 빌드의 MSA 소스가 동일하다. MR 변경은 `msa/`의 21개 파일이고, 기존 테스트 파일 69개를 유지했다. 세부 로그와 검증 근거는 로컬 `msa/liquibase/verification-logs/observability-128/`의 `mr-final-cli/`와 `mr-latest-release/`에 있다.
 
+백엔드 Jenkins #146에서 성공한 `54f7f56f`를 `6cd1cae4`에 반영했다. 이 통합본에서 MSA 검사 범위와 이미지 11개의 실행 내용이 기존 검증과 일치했고, 앱 5개와 DB 패키지의 SHA-256을 다시 확인했다. 로컬 근거는 `msa/liquibase/verification-logs/observability-128/mr-jenkins146-release/`에 있다.
+
 운영 Jenkins 잡 `dva-msa`는 대상 브랜치 병합 후 실제 빌드와 앱 배포를 실행한다. 운영 관측 스택과 주문 HPA는 런북에 따라 적용한다.
