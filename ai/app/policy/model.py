@@ -14,7 +14,7 @@ from app.config import ROOT
 
 DecisionSet = Literal["intent", "collect", "confirm", "pick", "more", "off"]
 # pick은 후보 이름표가 통화마다 달라 정책에 질문을 두지 않고 서버가 만든다(delegation.md §3.2)
-STATIC_DECISION_SETS = ("intent", "collect", "confirm", "more", "callback", "origin", "sender_change", "sender_name_scope", "box")
+STATIC_DECISION_SETS = ("intent", "collect", "confirm", "more", "callback", "origin", "sender_change", "sender_name_scope", "box", "reply")
 
 
 class _Strict(BaseModel):
