@@ -1244,3 +1244,10 @@
 - `origin/develop-ai`의 `d546e567`에서 `fix/live-waiting-phrases`를 생성했다. Jira 번호는 사용자 확인에 따라 생략했다.
 - Live 공통 프롬프트에서 백엔드 결과를 기다릴 때 안내가 필요하면 “네, 잠시만요.”, “확인해 보겠습니다.”, “잠시만 기다려 주세요.” 중 하나만 한 번 말하도록 했다. 대기 멘트에 고객 발화나 확인 질문을 덧붙이지 않도록 했다.
 - 기본·운영 페르소나로 생성한 프롬프트에 같은 규칙이 들어가는지 기존 정책 테스트에서 검사한다. AI 전체 테스트 887개 통과. 실제 통화의 이상 음성 재현 여부는 검증하지 않았다.
+
+## 2026-11-12 — '접수했습니다'는 BE가 READY로 저장했을 때만
+
+- 운영 통화에서 BE가 초안 저장을 거절(403)해 `draft_intake=not_ready`였는데, 담기 알림에 항상 붙던 `followup_help=ask` 때문에 AI가 "접수했습니다"라고 안내했다.
+- `followup_help=ask`는 `confirmed_status`가 `ready`(BE 응답 저장 결과 status=READY)일 때만 붙인다. 알림 직전 재확인에서 ready가 아니게 되면 뺀다. not_ready·failed 안내는 그대로.
+- 테스트: not_ready 알림에 followup_help가 없음을 확인(수정 전 실패), 전체 583 passed.
+- 추가(사용자 결정): BE가 저장을 거절하면(저장 결과 없음) 보낸 상태가 EDITING이어도 `confirmed_status`가 `pending`을 돌려 실패 안내 + 상담원 연결 제안으로 간다. 탈퇴 고객 403 사례가 "정보 부족"으로 안내되던 것을 막는다. BE가 EDITING으로 저장한 경우의 not_ready(정보 부족)는 그대로. 회귀 테스트 추가(수정 전 not_ready로 실패), 전체 584 passed.

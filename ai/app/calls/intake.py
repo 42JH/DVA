@@ -141,7 +141,8 @@ class IntakeService:
             return "not_ready"
         for step in reversed(self.outbox.intake_steps(s.call_id)):
             if step["parcel_id"] and step["parcel_id"] == parcel.draft.client_parcel_id:
-                if step["action"] == "SAVE" and step["payload"]["status"] == "READY":
+                if step["action"] == "SAVE" and (step["payload"]["status"] == "READY" or not step["result"]):
+                    # BE가 저장하지 않았으면(거절·무응답) 보낸 상태와 상관없이 실패로 안내한다(사용자 결정 2026-11-12)
                     return "ready" if step["result"] and step["result"].get("status") == "READY" else "pending"
                 break
         return "not_ready"

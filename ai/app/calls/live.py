@@ -666,7 +666,7 @@ class LiveFlow:
                     rt.confirm_t = 0.0
                 if pid and s.state.address_offer:
                     s.state.address_offer = s.state.address_offer | {"parcel": pid}
-                facts = {"parcel_added": pid, "parcels": len(s.state.parcels), "followup_help": "ask"} if pid else None
+                facts = {"parcel_added": pid, "parcels": len(s.state.parcels)} if pid else None
                 if pid:
                     s.state.selected_order = None
                     draft_save = self._sync_intake(s)
@@ -688,10 +688,13 @@ class LiveFlow:
                     status = self.svc.intake.confirmed_status(s, facts["parcel_added"])
                     if status == "pending":  # 저장 실패이거나 상한 안에 끝나지 않음 → 실패 안내 + 상담원 연결 제안
                         facts |= {"draft_intake": "failed", "agent": "suggest"}
-                        facts.pop("followup_help")
                         s.note("접수 저장", "실패 또는 시간 초과")
                     else:
                         facts["draft_intake"] = status
+                    if status == "ready":  # '접수했습니다'는 BE가 READY로 저장했다고 응답했을 때만(사용자 결정 2026-11-12)
+                        facts["followup_help"] = "ask"
+                else:
+                    facts["followup_help"] = "ask"
                 s.note("담기", facts["parcel_added"])
                 await self.notify(s, "N2", facts | {"summary": state_summary(s.state, self.policy)})
             return
@@ -1392,9 +1395,10 @@ class LiveFlow:
                 status = self.svc.intake.confirmed_status(s, receipt_pid)
                 if status == "pending":
                     facts |= {"draft_intake": "failed", "agent": "suggest"}
-                    facts.pop("followup_help", None)
                 else:
                     facts["draft_intake"] = status
+                if status != "ready":
+                    facts.pop("followup_help", None)
                 content = json.dumps(facts, ensure_ascii=False, sort_keys=True)
         etype = {"N1'": "session.thinking.append", "N2": "session.commentary.append"}[level]
         s.stats[f"전달 {level}"] += 1

@@ -218,7 +218,8 @@ def test_confirmation_reports_missing_requirements_instead_of_ready(tmp_path):
         await lf.commit(s, issue_parcel_confirmation(s.state, P, 100).id)
         [draft] = db.drafts.values()
         assert draft["status"] == "EDITING"
-        assert any(e.get("data", {}).get("content", {}).get("draft_intake") == "not_ready" for e in s.events)
+        sent = [e["data"]["content"] for e in s.events if e.get("data", {}).get("content", {}).get("draft_intake")]
+        assert sent and all(c["draft_intake"] == "not_ready" and "followup_help" not in c for c in sent)
 
     run(scenario())
 
@@ -324,6 +325,27 @@ def test_lost_create_and_patch_responses_recover_before_complete(tmp_path):
         await restarted.recover()
         assert (await db.intake_detail(seq))["status"] == "FINALIZED"
         assert len(db.drafts) == len(db.orders) == 1
+
+    run(scenario())
+
+
+def test_rejected_editing_save_reports_failure_not_missing_info(tmp_path):
+    """탈퇴 고객처럼 READY가 아닌 저장도 BE가 거절(403)하면 '정보 부족'이 아니라 실패 안내 + 상담원 연결 제안."""
+    class Rejects(MockBackend):
+        async def create_draft(self, call_seq, body):
+            raise BackendError("FORBIDDEN", 403, "FORBIDDEN")
+
+    intake, results, db, s = setup_intake(tmp_path, Rejects())
+    s.state.customer.status = "WITHDRAWN"
+    svc, _ = flow()
+    svc.intake, svc.results, svc.d.backend = intake, results, results.backend
+    lf = LiveFlow(svc)
+
+    async def scenario():
+        await lf.commit(s, issue_parcel_confirmation(s.state, P, 100).id)
+        sent = [e["data"]["content"] for e in s.events if e["kind"] == "전달 N2"]
+        assert sent and sent[-1]["draft_intake"] == "failed" and sent[-1]["agent"] == "suggest"
+        assert "followup_help" not in sent[-1]
 
     run(scenario())
 
