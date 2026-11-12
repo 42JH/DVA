@@ -16,7 +16,7 @@ from dataclasses import dataclass, field, replace
 from app.address.matcher import sido_aliases
 from app.address.parse import clean_text, parse, split_gil, unlink_gil
 from app.calls.session import CallSession, Phase
-from app.domain.rules import KST
+from app.domain.rules import KST, restore_phone_ending
 from app.domain.address_book import (begin_sender_name_change, origin_confirmation, prefill_sender,
                                      receiver_questions_deferred, request_sender_address_change, save_offer, sender_change_available,
                                      sender_change_next)
@@ -28,14 +28,14 @@ from app.domain.confirm import (ConfirmAnswer, Utterance, asks, asks_parcel_conf
                                 explicitly_requests_parcel, issue_cancel_confirmation, issue_parcel_confirmation,
                                 release, take_cancel)
 from app.domain.state import BOX_SIZE_NAMES, BoxProposal, CandidateSet, ConversationState, ParcelDraft
-from app.domain.store import hold_unclassified_items, item_issues_pending
+from app.domain.store import hold_unclassified_items, item_issues_pending, receiver_phone_pending
 from app.observability.trace import span
 from app.policy.render import decision_questions
 from app.tools import MODEL_TOOLS, run_tool
 from app.tools.cancel import cancel_parcel
 from app.tools.lookup import lookup_order_facts, resume_destination, status_text
 from app.tools.outcome import destination_change_question, state_summary
-from app.tools.record import RecordArgs, record_fields
+from app.tools.record import PHONE_INPUT_MAX_LENGTH, RecordArgs, record_fields
 
 log = logging.getLogger(__name__)
 BUSINESS = ("order", "lookup", "cancel", "inquiry", "agent")
@@ -1027,7 +1027,7 @@ class LiveFlow:
         st = s.state
         a = assess(st, self.policy)
         ready = (st.parcels and st.no_more_parcels and (st.payment.valid or a.payment_auto)
-                 and not st.candidates and not item_issues_pending(st))
+                 and not st.candidates and not item_issues_pending(st) and not receiver_phone_pending(st))
         if force and (st.parcels or st.intent) or ready:
             st.order_submitted = bool(st.parcels)
             results.start(s)
@@ -1144,6 +1144,11 @@ class LiveFlow:
                 readback_turn = utterance.utterance_id
                 if records_sender_name and utterance.scope_decided is not None:
                     await self._decided(s, utterance.scope_decided)
+                if (offset is not None and utterance is turns[-1] and isinstance(arguments, dict)
+                        and isinstance(phone := arguments.get("receiver_phone"), str)):
+                    heard_phone = restore_phone_ending(phone, utterance.text)
+                    if heard_phone != phone and len(heard_phone) <= PHONE_INPUT_MAX_LENGTH:
+                        tool_arguments = json.dumps(arguments | {"receiver_phone": heard_phone})
             ctx = replace(ctx, item_utterance=(utterance.utterance_id, utterance.text) if utterance else (0, ""),
                           sender_name_scope=utterance.sender_name_scope if utterance else None)
         with span("tool", tool=name):

@@ -223,6 +223,30 @@ def test_confirmation_reports_missing_requirements_instead_of_ready(tmp_path):
     run(scenario())
 
 
+def test_landline_receiver_can_reach_ready_but_unclear_edit_clears_destination_phone(tmp_path):
+    intake, _, db, s = setup_intake(tmp_path)
+    s.tools.clock = lambda: 100.0
+
+    async def scenario():
+        initial = await run_tool(s.tools, "record_fields", json.dumps({"receiver_phone": "02-123-4567"}), "landline")
+        assert initial["facts"]["receiver_phone_readback"] == "021234567"
+        pid = confirm_once(s.state)
+        assert intake.sync(s)
+        await intake.flush(s.call_id)
+        [draft] = db.drafts.values()
+        assert draft["status"] == "READY" and draft["parcel"]["destination"]["phoneNumber"] == "021234567"
+
+        open_for_edit(s.state, pid)
+        unclear = await run_tool(s.tools, "record_fields", json.dumps({"receiver_phone": "02-1234-488이요"}), "unclear")
+        assert unclear["code"] == "PHONE_AMBIGUOUS"
+        assert intake.sync(s)
+        await intake.flush(s.call_id)
+        [draft] = db.drafts.values()
+        assert draft["status"] == "EDITING" and "phoneNumber" not in draft["parcel"]["destination"]
+
+    run(scenario())
+
+
 def test_failed_draft_save_reports_failure_and_suggests_agent_without_pending(tmp_path):
     """통화 471: 접수 요청 뒤 저장이 400으로 실패하면 '확인 중'(pending) 없이 실패 안내 + 상담원 연결 제안."""
     class Rejects(MockBackend):

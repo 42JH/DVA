@@ -65,13 +65,15 @@ def test_persona_first_then_fixed_business_rules_and_fallback_on_blank():
 
 def test_server_results_are_rendered_from_workflow_policy():
     text = render_live(None, POLICY)
-    for key in ("call_started", "closing", "agent", "phones_to_read", "missing", "origin_confirm", "pickup",
+    for key in ("call_started", "closing", "agent", "receiver_phone_readback", "phone_question", "missing", "origin_confirm", "pickup",
                 "confirm_route", "readback", "sender_change_question", "address_detail_question", "destination_choices",
                 "destination_selected", "destination_change_question", "destination_partial_change",
                 "followup_help", "next_parcel_field"):
         assert text.count(f"\n- {key}: {POLICY.results[key]}") == 1
     assert "이대로 접수할까요?" in POLICY.results["readback"]  # 간소화한 되읽기도 질문으로 끝나야 G3을 통과한다
     assert "접수 정보를 수집할 때만" in text
+    assert "자릿수가 모호해 보여도 들은 표현으로 기록을 요청합니다" in text
+    assert "수량·전화번호 또는" not in text
     assert "궁금한 점이 더 있는지" not in POLICY.results["more_parcels"]
     assert "{pickup_allowed}" not in text
 
@@ -80,7 +82,7 @@ def test_backend_instructions_list_free_fields_and_no_choice_judgment():
     text = render_backend(POLICY)
     assert all(f"({n})" in text for n in POLICY.free_fields())
     assert "예/아니요" in text and "하지 않습니다" in text and "{fields}" not in text
-    assert "그 부분만 바꾼 전체 번호" in text  # 번호 부분 정정(업무 규칙 d)
+    assert "끝 네 자리 사팔팔이요" in text and "범위나 나머지 숫자를 붙이지 않습니다" in text
     assert "들은 그대로 기록" in text and "숫자로 바꾸지 않습니다" in text  # 주소 기록 규칙: 수사 변환·상세 분리는 서버가(P13)
     assert "confirm_route" in text and "confirm_route" in business_rules()  # 두 주소가 갖춰지면 동 이름으로 확인(S15P31D109-164)
 

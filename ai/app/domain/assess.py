@@ -61,7 +61,8 @@ def assess(state: ConversationState, policy: Policy) -> Assessment:
             if name == "item_price" and documents_only:
                 continue
             f = _field(state, name)
-            blocked = name == "items" and items_blocked
+            blocked = (name == "items" and items_blocked
+                       or name == "receiver_phone" and state.current and state.current.receiver_phone_pending)
             if blocked or f is None or not f.valid:
                 m.append(name)
             if blocked or f is not None and f.status in (FieldStatus.INVALID, FieldStatus.PENDING_CHOICE):
@@ -89,7 +90,8 @@ def assess(state: ConversationState, policy: Policy) -> Assessment:
 
     fields = [(n, _field(state, n)) for n in policy.fields]
     exceeded = tuple(n for n, f in fields if f is not None and f.attempts >= policy.reask.max_attempts
-                     and not f.valid and not (n == "item_price" and documents_only))
+                     and (not f.valid or n == "receiver_phone" and state.current.receiver_phone_pending)
+                     and not (n == "item_price" and documents_only))
     # 빠진 항목은 받는 중이거나, 접수 업무인데 아직 담은 택배가 없을 때만(담은 뒤 마무리 단계에서 전부 빠진 것처럼 보이지 않게)
     show_missing = collecting or (state.intent == "order" and not state.parcels)
     return Assessment(stage, stages, tuple(missing) if show_missing else (), readback_ready,

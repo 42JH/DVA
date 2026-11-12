@@ -100,12 +100,13 @@ class IntakeService:
             changed = True
         return changed
 
-    @staticmethod
-    def _ready(parcel: dict) -> bool:
+    def _ready(self, parcel: dict) -> bool:
         required = ("name", "phoneNumber", "roadAddress", "jibunAddress", "dongName", "postalCode")
+        phone = self.policy.phone
         return (all(all(parcel.get(side, {}).get(k) for k in required) for side in ("origin", "destination"))
-                and all(len(parcel[side]["phoneNumber"]) == 11 and len(parcel[side]["postalCode"]) == 5
-                        for side in ("origin", "destination"))
+                and phone.mobile.accepts(parcel["origin"]["phoneNumber"])
+                and phone.accepts_recipient(parcel["destination"]["phoneNumber"])
+                and all(len(parcel[side]["postalCode"]) == 5 for side in ("origin", "destination"))
                 and 1 <= parcel.get("itemPrice", 0) <= 100_000_000 and any(parcel.get(k) for k in COUNTS))
 
     def current_target(self, s) -> dict | None:

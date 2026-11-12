@@ -26,7 +26,7 @@ from app.domain.confirm import issue_parcel_confirmation
 from app.domain.parcel_items import (ItemIssue, contextual_keyword, excluded_evidence, measurements, mentions,
                                      size_issues, supported_box_correction, unclassified_mentions)
 from app.domain.pickup import check_pickup, default_pickup, describe, rule_of
-from app.domain.rules import normalize_phone, parse_pickup
+from app.domain.rules import parse_pickup, resolve_phone
 from app.domain.state import BoxProposal, ConversationState, Items, ParcelDraft, Source
 from app.domain.store import hold_items, open_for_edit
 from app.observability.trace import observe_latency
@@ -40,6 +40,7 @@ TEXT = ("sender_name", "sender_address_detail", "receiver_name", "receiver_addre
 ADDRESSES = ("sender_address", "receiver_address")
 COUNTS = ("document_count", "small_box_count", "medium_box_count", "big_box_count")
 BOX_COUNTS = COUNTS[1:]
+PHONE_INPUT_MAX_LENGTH = 64
 CountField = Literal["document_count", "small_box_count", "medium_box_count", "big_box_count"]
 
 
@@ -62,7 +63,8 @@ class RecordArgs(Args):
     sender_address: str | None = Field(None, max_length=120, description="발송 기본주소(도로명·지번). '○○에서 보낼게요'의 ○○")
     sender_address_detail: str | None = Field(None, max_length=60, description="발송지 상세주소. 없다고 하면 빈 문자열")
     receiver_name: str | None = Field(None, max_length=30)
-    receiver_phone: str | None = Field(None, max_length=40, description="들은 그대로(한글 숫자 가능)")
+    receiver_phone: str | None = Field(None, max_length=PHONE_INPUT_MAX_LENGTH, description="들은 번호 표현 그대로(한글 숫자와 말끝 포함). "
+                                       "끝 네 자리만 정정하면 '끝 네 자리 ' 뒤에 들은 번호 표현을 넣는다")
     receiver_address: str | None = Field(None, max_length=120, description="받는 곳 기본주소(도로명·지번). '○○로 보낼게요'의 ○○")
     receiver_address_detail: str | None = Field(None, max_length=60, description="받는 곳 상세주소. 없다고 하면 빈 문자열")
     document_count: int | None = Field(None, ge=0, description="서류 봉투 수. 생략하면 기존 값을 유지하고 0은 제외한다")
@@ -159,12 +161,6 @@ async def record_fields(ctx: ToolContext, args: RecordArgs, *, expected_box: Box
             values[name] = (clean_name(given[name]) if name.endswith("_name")
                             else detail_text(given[name]) if name.endswith("_detail")  # 상세주소 수사 → 숫자(서버가 한다)
                             else given[name].strip())
-    if "receiver_phone" in given:
-        phone = normalize_phone(given["receiver_phone"], policy.phone)
-        if phone:
-            values["receiver_phone"] = phone
-        else:
-            needs.append({"field": "receiver_phone", "reason": "PHONE_INVALID_DIGITS"})
     rule = rule_of(policy.pickup)
     if "pickup_at" in given:  # 고객 조정: 형식 → 업무 범위(1시간 이후·09~17시·3일 이내)
         now = ctx.now()
@@ -180,6 +176,7 @@ async def record_fields(ctx: ToolContext, args: RecordArgs, *, expected_box: Box
         deps = {a: s.field_of(a).version for a in ADDRESSES}
         current = {a: s.field_of(a).value for a in ADDRESSES}
         draft = s.current
+        phone_version = draft["receiver_phone"].version
     heard = {a: given[a].strip() for a in ADDRESSES if a in given and given[a].strip() != current[a]}
     results = dict(zip(heard, await asyncio.gather(*(_resolve(ctx, h) for h in heard.values()))))  # ②
 
@@ -200,6 +197,19 @@ async def record_fields(ctx: ToolContext, args: RecordArgs, *, expected_box: Box
             price = _price_for_items(s, draft, old_items, was_box_pending, args.item_price, facts)
             if price is not None:
                 values["item_price"] = price
+        if "receiver_phone" in given:
+            previous = draft["receiver_phone"]
+            if s.current is not draft or previous.version != phone_version:
+                needs.append({"field": "receiver_phone", "reason": "RESULT_SUPERSEDED"})
+            else:
+                phone, error, last_four = resolve_phone(given["receiver_phone"], policy.phone,
+                                                        previous.value if previous.valid else None)
+                if error:
+                    needs.append({"field": "receiver_phone", "reason": error})
+                    facts["phone_question"] = ("마지막 네 자리를 한 자리씩 다시 말씀해 주세요." if last_four
+                                               else "받는 분 연락처를 처음부터 한 자리씩 다시 말씀해 주세요.")
+                else:
+                    values["receiver_phone"] = phone
         keep_origin = False
         spoken_origin = given.get("sender_address", "").strip()
         if (spoken_origin and s.current is draft and draft["sender_address"].version == deps["sender_address"]
@@ -253,6 +263,9 @@ async def record_fields(ctx: ToolContext, args: RecordArgs, *, expected_box: Box
             facts["recorded"].extend(prefill_sender(s, full=True))
         for name in invalid_fields(needs):
             s.record_invalid(name, next(n["reason"] for n in needs if n["field"] == name))
+        if "receiver_phone" in facts["recorded"]:
+            facts["phones_to_read"] = ["receiver_phone"]
+            facts["receiver_phone_readback"] = values["receiver_phone"]
         changed = bool(facts["recorded"] or facts["cleared"] or facts.get("blocked_parcel_omitted") or facts.get("box_proposal")
                        or facts.get("box_request_removed"))
         if changed:
@@ -263,7 +276,8 @@ async def record_fields(ctx: ToolContext, args: RecordArgs, *, expected_box: Box
         next_sender = sender_change_next(s)
         address_pending = next_sender in ("sender_address", "sender_address_detail")
         partial_change = s.current.destination_partial_change if s.current else None
-        if partial_change and all(s.current[name].valid for name in DESTINATION_CHANGE_FIELDS[partial_change]):
+        if (partial_change and all(s.current[name].valid for name in DESTINATION_CHANGE_FIELDS[partial_change])
+                and (partial_change != "recipient" or not s.current.receiver_phone_pending)):
             s.current.destination_partial_change = None
         address_completed = (sender_address_pending and s.current is draft and
                              all(draft[name].valid for name in ("sender_address", "sender_address_detail")))
@@ -313,9 +327,6 @@ async def record_fields(ctx: ToolContext, args: RecordArgs, *, expected_box: Box
                                       "to": area_label(s.current["receiver_address"].value, s.current.receiver_geo)}
         if pending or "pickup_at" in values or any(n["field"] == "pickup_at" for n in needs):
             facts["pickup"] = {"at": s.pickup_at.value, "today_unavailable": moved, "allowed": describe(rule)}
-        phones = [n for n in facts["recorded"] if n.endswith("_phone")]
-        if phones:
-            facts["phones_to_read"] = phones  # 고객이 새로 불러 준 번호: 한 번 끊어 읽어 확인(README §5)
         facts = {k: v for k, v in facts.items() if v}
         status = "needs_input" if needs else "ok"
         code = needs[0]["reason"] if needs else "NOTHING_CHANGED" if nothing else None

@@ -87,7 +87,7 @@ def item_issues_pending(state: ConversationState) -> bool:
 
 
 def is_pending_reconfirm(p: StoredParcel) -> bool:
-    return (p.draft.box_size_pending or p.confirmed_hash is None
+    return (p.draft.box_size_pending or p.draft.receiver_phone_pending or p.confirmed_hash is None
             or snapshot_hash(draft_snapshot(p.draft)) != p.confirmed_hash)
 
 
@@ -105,7 +105,8 @@ def snapshot_for_submit(state: ConversationState) -> list[dict]:
         return []  # 어느 택배가 제한 대상인지 모르면 마지막 확인본도 제출할 수 없다
     out = []
     for p in state.parcels:
-        if p.draft.item_issues:
+        draft = state.current if p.parcel_id == state.editing else p.draft
+        if p.draft.item_issues or draft and draft.receiver_phone_pending:
             continue
         if p.parcel_id == state.editing or is_pending_reconfirm(p):
             if p.confirmed_snapshot is not None:
@@ -113,3 +114,8 @@ def snapshot_for_submit(state: ConversationState) -> list[dict]:
         else:
             out.append(draft_snapshot(p.draft))
     return out
+
+
+def receiver_phone_pending(state: ConversationState) -> bool:
+    return bool(state.current and state.current.receiver_phone_pending) or any(
+        p.draft.receiver_phone_pending for p in state.parcels if p.parcel_id != state.editing)

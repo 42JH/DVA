@@ -108,23 +108,33 @@ class ParcelItems(_Strict):
     rules: dict[str, ItemRestriction]
 
 
-class Phone(_Strict):
-    mobile_prefix: str
-    mobile_digits: int = Field(gt=0)
-    domestic_min_digits: int = Field(gt=0)
-    domestic_max_digits: int = Field(gt=0)
-    service_prefixes: tuple[str, ...] = Field(min_length=1)
-    service_digits: int = Field(gt=0)
+class PhoneRange(_Strict):
+    prefixes: tuple[str, ...] = Field(min_length=1)
+    min_digits: int = Field(gt=0)
+    max_digits: int = Field(gt=0)
 
     @model_validator(mode="after")
     def valid_format(self):
-        if not self.mobile_prefix.startswith("0") or not self.mobile_prefix.isdigit():
-            raise ValueError("휴대전화 접두번호 오류")
-        if len(self.mobile_prefix) > self.mobile_digits or self.domestic_min_digits > self.domestic_max_digits:
+        if self.min_digits > self.max_digits:
             raise ValueError("전화번호 자릿수 오류")
-        if any(not p.isdigit() or len(p) > self.service_digits for p in self.service_prefixes):
-            raise ValueError("대표번호 접두번호 오류")
+        if any(not p.startswith("0") or not p.isascii() or not p.isdigit() or len(p) >= self.min_digits
+               for p in self.prefixes):
+            raise ValueError("전화번호 접두번호 오류")
         return self
+
+    def accepts(self, digits: str) -> bool:
+        return (self.min_digits <= len(digits) <= self.max_digits
+                and digits.isascii() and digits.isdigit() and digits.startswith(self.prefixes))
+
+
+class Phone(_Strict):
+    mobile: PhoneRange
+    seoul: PhoneRange
+    regional: PhoneRange
+    internet: PhoneRange
+
+    def accepts_recipient(self, digits: str) -> bool:
+        return any(group.accepts(digits) for group in (self.mobile, self.seoul, self.regional, self.internet))
 
 
 class Reask(_Strict):
