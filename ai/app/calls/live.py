@@ -444,6 +444,12 @@ class LiveFlow:
             if switch and switch[1] >= th and switch[0] in ("agent", "end", "cancel_current"):
                 # 연결·종료·현재 택배 취소 요청이 섞인 "네"는 접수 확인으로 처리하지 않는다.
                 answers = {"switch": switch}
+            if (st.intent == "order" and st.current is not None and st.current is candidate_draft
+                    and not pending_cancel and confirm and confirm[0] == "change" and confirm[1] >= th
+                    and switch and switch[0] == "edit_parcel"):
+                # 현재 접수 정정과 기존 택배 전환이 충돌하면 현재 택배를 보존한다(통화 #594).
+                answers.pop("switch", None)
+                switch = None
             destination_reply = (self._apply_destination_reply(s, utt, prev, candidates, answers.get("pick"), switch)
                                  if st.current is candidate_draft else None)
             if destination_reply is not None:
@@ -537,6 +543,7 @@ class LiveFlow:
                 st.awaiting_fix = True  # 고친 값이 올 때까지 되읽기를 다시 열지 않는다
             picked_lookup = False
             picked_cancel = False
+            picked_parcel = False
             active_candidates = st.candidates
             if ((p := answers.get("pick")) and p[1] >= th
                     and active_candidates and (candidates is None or active_candidates is candidates)
@@ -547,6 +554,7 @@ class LiveFlow:
                     reject_candidates(st)
                 elif p[0] != "not_answer" and apply_pick(st, p[0]):
                     self._sync_intake(s)
+                    picked_parcel = kind == "parcel"
                     picked_cancel = kind == "order" and switch and switch[1] >= th and switch[0] == "cancel"
                     entering_lookup = (st.intent in (None, "order") and switch and switch[1] >= th
                                        and switch[0] == "lookup" and not sender_change)
@@ -572,6 +580,7 @@ class LiveFlow:
                 followups.append(("clarify_greeting", utt))
             switching = ((w := answers.get("switch")) and w[1] >= th and w[0] != "none" and not sender_change
                          and not ((origin_change or destination_reply is not None) and w[0] == "edit_parcel")
+                         and not (picked_parcel and w[0] == "edit_parcel")
                          and not (picked_lookup and st.intent == "lookup" and w[0] == "lookup"))
             if switching:
                 intent = w[0]
@@ -1040,7 +1049,7 @@ class LiveFlow:
             return {"edit_parcel": chosen.parcel_id, "summary": state_summary(st, self.policy)}
         if not st.parcels:
             return {"edit_parcel": "none"}
-        if len(st.parcels) == 1:
+        if len(st.parcels) == 1 and not use_lookup:
             open_for_edit(st, st.parcels[0].parcel_id)
             self._sync_intake(s)
             return {"edit_parcel": st.parcels[0].parcel_id, "summary": state_summary(st, self.policy)}
