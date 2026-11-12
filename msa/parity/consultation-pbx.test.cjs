@@ -42,6 +42,44 @@ test('consultation retention claims preserve source expiry, upload leases, locks
     console.log(JSON.stringify({retentionClaims:{claimed:1,uploadKeys:keys,onlyIncomingAt:true,busyUploadPreserved:true,locksReleased:true,staleWorkerFenced:true}}));
   }finally{await gate.query('ROLLBACK');gate.release();}
 });
+test('consultation retention finish preserves source child deletion, rollback and notification',async t=>{
+  assert.equal(process.env.NODE_ENV,'test');assert.equal(process.env.PGDATABASE,'dva_webhook_test');
+  const {RetentionRepository}=require('../dist/retention/retention.repository');
+  const db=new Pool();t.after(()=>db.end());await truncateFixture(db,'TRUNCATE pbx_webhooks.call_ended_events,recordings,call_sessions RESTART IDENTITY CASCADE');
+  const transaction=async work=>{const client=await db.connect();try{await client.query('BEGIN');const value=await work(client);await client.query('COMMIT');return value;}catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}};
+  const repo=new RetentionRepository({pool:db,transaction}),recordingId='20000000-0000-4000-8000-000000000001';
+  await db.query("INSERT INTO call_sessions(provider_call_id,caller_phone_number,incoming_at,started_at,ended_at) VALUES('purge-old','01098880001',clock_timestamp()-interval '6 years',clock_timestamp()-interval '6 years',clock_timestamp()-interval '6 years'),('purge-kept','01098880002',clock_timestamp()-interval '4 years',clock_timestamp()-interval '4 years',clock_timestamp()-interval '4 years')");
+  await db.query("INSERT INTO recordings(call_session_seq,object_key) VALUES(1,'recordings/expired-object')");
+  await db.query("INSERT INTO call_utterances(call_session_seq,utterance_order,speaker,utterance_text,last_sentence_seq) VALUES(1,1,'CUSTOMER','만료 STT',1)");
+  await db.query("INSERT INTO unanswered_questions(event_id,call_session_seq,question_text,occurred_at,reason,payload_hash) VALUES(gen_random_uuid(),1,'만료 질문',clock_timestamp(),'KB_UNAVAILABLE',repeat('a',64))");
+  await db.query("INSERT INTO call_insight_events(event_id,call_session_seq,event_order,kind,occurred_at,call_utterance_seq,payload_hash) VALUES(gen_random_uuid(),1,1,'UTTERANCE',clock_timestamp(),1,repeat('b',64))");
+  await db.query("INSERT INTO call_insight_events(event_id,call_session_seq,event_order,kind,occurred_at,unanswered_question_seq,payload,payload_hash) VALUES(gen_random_uuid(),1,2,'BUSINESS_RESULT',clock_timestamp(),1,'{\"action\":\"QUESTION_UNANSWERED\"}',repeat('c',64))");
+  await db.query("INSERT INTO call_analyses(call_session_seq,ai_started_at,ai_ended_at,complaints,payload_hash,has_callback_request) VALUES(1,clock_timestamp(),clock_timestamp(),'[]',repeat('d',64),true)");
+  await db.query("INSERT INTO pbx_webhooks.call_ended_events(recording_id,payload,call_session_seq) VALUES($1,'{}',1)",[recordingId]);
+  const source=!!(await db.query("SELECT to_regclass('empty_ai_order_results') AS name")).rows[0].name;
+  if(source)await db.query('INSERT INTO empty_ai_order_results(request_id,call_session_seq) VALUES(gen_random_uuid(),1)');
+  const tables=['call_sessions','call_insight_events','unanswered_questions','call_utterances','call_analyses','recordings','pbx_webhooks.call_ended_events','call_dashboard_metrics'];
+  const snapshot=async()=>{const value={};for(const table of tables)value[table]=(await db.query(`SELECT to_jsonb(t) AS row FROM ${table} t ORDER BY to_jsonb(t)::text`)).rows;return value;};
+  const queued=async()=>source?[]:(await db.query("SELECT event_id,payload FROM outbox_events WHERE event_type='ConsultationCallsPurged' ORDER BY outbox_seq")).rows;
+  const claim=await repo.claimCall();assert.equal(claim.id,1);
+  const gate=await db.connect();let notifications=0;
+  try{
+    assert.equal(await repo.finishCall({...claim,claimId:randomUUID()}),false);
+    await db.query("UPDATE call_sessions SET purge_claimed_until=clock_timestamp()-interval '1 second' WHERE call_session_seq=1");assert.equal(await repo.finishCall(claim),false);await db.query("UPDATE call_sessions SET purge_claimed_until=clock_timestamp()+interval '5 minutes' WHERE call_session_seq=1");
+    await gate.query("SELECT pg_advisory_lock(hashtextextended('call-end:01098880001',0))");try{assert.equal(await repo.finishCall(claim),false);}finally{await gate.query("SELECT pg_advisory_unlock(hashtextextended('call-end:01098880001',0))");}
+    await gate.query('LISTEN call_sessions_changed');gate.on('notification',()=>{notifications++;});
+    const before=await snapshot(),pending=await queued();
+    await db.query("CREATE FUNCTION retention_finish_fault() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'controlled finish failure'; END $$; CREATE TRIGGER retention_finish_fault BEFORE DELETE ON call_sessions FOR EACH ROW EXECUTE FUNCTION retention_finish_fault()");
+    try{await assert.rejects(repo.finishCall(claim));assert.deepEqual(await snapshot(),before);assert.deepEqual(await queued(),pending);await delay(20);assert.equal(notifications,0);}finally{await db.query('DROP TRIGGER retention_finish_fault ON call_sessions; DROP FUNCTION retention_finish_fault()');}
+    assert.equal(await repo.finishCall(claim),true);for(let n=0;notifications<1;n++){assert.ok(n<100);await delay(10);}assert.equal(notifications,1);
+    const after=await snapshot();assert.deepEqual(after.call_sessions.map(row=>row.row.call_session_seq),[2]);for(const table of tables.slice(1))assert.deepEqual(after[table],[],table);
+    assert.equal(await repo.finishCall(claim),false);
+    if(source)assert.equal((await db.query('SELECT 1 FROM empty_ai_order_results WHERE call_session_seq=1')).rowCount,0);
+    else{const old=new Set(pending.map(row=>row.event_id));const events=(await queued()).filter(row=>!old.has(row.event_id));assert.equal(events.length,1);assert.deepEqual(events[0].payload,{ids:[1]});}
+    console.log(JSON.stringify({retentionFinish:{remainingCalls:[2],childrenRemoved:true,rollback:true,notification:true,staleClaimRejected:true}}));
+  }finally{await gate.query('UNLISTEN *');gate.release();}
+});
+
 test('production PBX, active count and SSE match with independent operations sessions',async t=>{
   assert.equal(process.env.PGDATABASE,'dva_webhook_test');
   const started=Date.now(),origin='http://localhost:5173',pbx=process.env.PBX_WEBHOOK_TOKEN;

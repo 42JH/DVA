@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { enqueue } from '@dva/events';
 import { createHash, randomUUID } from 'node:crypto';
 import { DatabaseService } from '../database/database.service';
 
@@ -104,5 +105,60 @@ export class RetentionRepository {
       WHERE call_session_seq=$1 AND purge_claim_id=$2`,
       [claim.id, claim.claimId],
     );
+  }
+
+  async finishCall(claim: CallPurge): Promise<boolean> {
+    return this.database.transaction(async (client) => {
+      if (
+        !(
+          await client.query<{ locked: boolean }>(
+            "SELECT pg_try_advisory_xact_lock(hashtextextended('call-end:' || COALESCE($1,''),0)) AS locked",
+            [claim.phone],
+          )
+        ).rows[0].locked
+      )
+        return false;
+      const call = await client.query(
+        `SELECT 1 FROM call_sessions WHERE call_session_seq=$1 AND purge_claim_id=$2
+        AND purge_claimed_until>clock_timestamp() AND incoming_at<=statement_timestamp()-interval '5 years' FOR UPDATE`,
+        [claim.id, claim.claimId],
+      );
+      if (!call.rowCount) return false;
+      await client.query(
+        'DELETE FROM call_insight_events WHERE call_session_seq=$1',
+        [claim.id],
+      );
+      await client.query(
+        'DELETE FROM unanswered_questions WHERE call_session_seq=$1',
+        [claim.id],
+      );
+      await client.query(
+        'DELETE FROM call_utterances WHERE call_session_seq=$1',
+        [claim.id],
+      );
+      await client.query(
+        'DELETE FROM call_analyses WHERE call_session_seq=$1',
+        [claim.id],
+      );
+      await client.query('DELETE FROM recordings WHERE call_session_seq=$1', [
+        claim.id,
+      ]);
+      await enqueue(client, {
+        destination: 'order',
+        eventType: 'ConsultationCallsPurged',
+        aggregateSeq: claim.id,
+        payload: { ids: [claim.id] },
+      });
+      await client.query(
+        'DELETE FROM pbx_webhooks.call_ended_events WHERE call_session_seq=$1',
+        [claim.id],
+      );
+      await client.query(
+        'DELETE FROM call_sessions WHERE call_session_seq=$1',
+        [claim.id],
+      );
+      await client.query("SELECT pg_notify('call_sessions_changed','')");
+      return true;
+    });
   }
 }

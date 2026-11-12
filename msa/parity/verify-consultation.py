@@ -237,12 +237,15 @@ def main():
                    command=('node','--test','--test-name-pattern=^consultation retention','test/consultation-pbx.test.cjs'))
             run('docker','cp',str(probe)+'/.',name+':/app/'+('' if side=='monolith' else 'service/')+'test',label=side+'-claims-copy')
             complete(name)
+            claims[side]={}
             for line in run('docker','logs',name,label=side+'-claims-results').splitlines():
                 try:value=json.loads(line.removeprefix('# '))
                 except ValueError:continue
-                if 'retentionClaims' in value:claims[side]=value
+                if 'retentionClaims' in value:claims[side]['claims']=value
+                if 'retentionFinish' in value:claims[side]['finish']=value
+            assert set(claims[side])=={'claims','finish'}
         assert len(claims)==2 and claims['monolith']==claims['consultation']
-        report['retentionClaims']={'matched':True,'workerConnected':False}
+        report['retentionClaims']={'matched':True,'finishAndOutbox':True,'workerConnected':False}
         report['passed'] = True
     finally:
         for kind, name in reversed(resources):
