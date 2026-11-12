@@ -89,22 +89,25 @@ export function useOrders() {
     anchorQuery: base, // 모든 상태 탭 · 탭 건수가 같은 기준 시각 (탭 조건을 넣으면 '주문 취소' 탭은 마지막 취소 시각이 기준이 돼 그 뒤 주문이 전체 건수에서 빠졌음)
     enabled: g !== 'COLLECTING', // 미완료 탭은 초안 목록 — 주문 목록 · 쪽 당기기가 초안 쪽을 되돌리지 않게
   })
-  // 미완료 = 배송 초안 (055 — 새 AI 접수 · 이관된 옛 미완료는 주문이 아님). 기간 조건 없음, 쪽 번호만
+  // 미완료 = 배송 초안 (055 — 새 AI 접수 · 이관된 옛 미완료는 주문이 아님). 다른 탭과 같은 기간 (11/13 사용자: 전체 0인데 미완료 3), 쪽 번호만
   const drafting = g === 'COLLECTING'
   const { size, setSize } = list // 쪽 크기는 목록과 하나로
   const draftCount = useQuery<number>({
-    queryKey: ['screen', 'drafts', 'count', base.q],
+    queryKey: ['screen', 'drafts', 'count', base.q, base.from],
     queryFn: ({ signal }) =>
-      draftList({ q: base.q, limit: 1, offset: 0 }, signal).then((r) => r.total_count),
+      draftList({ q: base.q, from: base.from, limit: 1, offset: 0 }, signal).then(
+        (r) => r.total_count,
+      ),
     placeholderData: keepPreviousData,
   })
   // 오래된 순이면 총 건수로 뒤쪽부터 (oldestPage)
   const dn = draftCount.data ?? 0
   const drafts = useQuery({
-    queryKey: ['screen', 'drafts', base.q, size, page, asc ? dn : 'desc'],
+    queryKey: ['screen', 'drafts', base.q, base.from, size, page, asc ? dn : 'desc'],
     enabled: drafting && (!asc || draftCount.data !== undefined),
     queryFn: ({ signal }) => {
-      const get = (limit: number, offset: number) => draftList({ q: base.q, limit, offset }, signal)
+      const get = (limit: number, offset: number) =>
+        draftList({ q: base.q, from: base.from, limit, offset }, signal)
       return asc ? oldestPage(dn, page, size, get) : get(size, (page - 1) * size)
     },
     placeholderData: keepPreviousData,
@@ -191,7 +194,6 @@ export function useOrders() {
           ? (draftCount.data ?? null)
           : (counts.data?.[COUNT_KEY[x.value]] ?? null),
     })),
-    ranged: !drafting, // 미완료(초안)는 기간 조건이 없음
     setGroup: (v: StatusGroup) => set({ g: v }),
     range: r,
     asc,

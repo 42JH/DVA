@@ -38,9 +38,7 @@ export function OrdersPage() {
         >
           <div className="flex flex-wrap items-center justify-between gap-3">
             <Segments label="주문 상태" value={vm.group} items={vm.groups} onPick={vm.setGroup} />
-            {vm.ranged && (
-              <Segments label="기간" value={vm.range} items={RANGES} onPick={vm.setRange} />
-            )}
+            <Segments label="기간" value={vm.range} items={RANGES} onPick={vm.setRange} />
           </div>
           <Table vm={vm} />
           {vm.picked && vm.callSeq && (

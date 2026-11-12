@@ -29,7 +29,10 @@ export const fromAdminList = (o: OrderListItem): OrderListItem & { label?: strin
         parcels: o.parcels.map((p) => ({ ...p, orderParcelSeq: -o.draftSeq! })),
       }
 
-export const draftList = (q: { q?: string; limit: number; offset: number }, signal?: AbortSignal) =>
+export const draftList = (
+  q: { q?: string; from?: string; limit: number; offset: number },
+  signal?: AbortSignal,
+) =>
   api.get<ApiList<ParcelDraftDto>>('/parcel-drafts', {
     query: { ...q, status: 'INCOMPLETE' },
     signal,
