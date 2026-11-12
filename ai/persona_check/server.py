@@ -40,6 +40,8 @@ from persona_check import judge, try_call
 log = logging.getLogger(__name__)
 PORT = int(os.environ.get("PERSONA_CHECK_PORT", "8765"))
 FILES = {"verdict": "verdict.json", "record": "backend.json", "audio": "call.wav", "report": "report.html"}
+# 형식을 정해 보낸다: Python 3.14는 .wav를 audio/vnd.wave로 짐작하고, 백엔드 중계는 audio/wav · audio/x-wav만 받아 녹음이 안 들렸다(11/12 서버 첫 시험)
+MEDIA = {"verdict": "application/json", "record": "application/json", "audio": "audio/wav", "report": "text/html; charset=utf-8"}
 RUN_ID = re.compile(r"\d{4}_\d{6}_[0-9a-f]{6}")
 MAX_PROMPT_CHARS = 20000  # 운영 페르소나 글 상한(config/server.toml persona_max_prompt_chars)과 같게
 
@@ -220,7 +222,7 @@ def create_app(runs: Runs, monitor: APIRouter | None = None) -> FastAPI:
     async def result(run_id: str, scenario: str, kind: str) -> FileResponse:
         if (path := runs.file(run_id, scenario, kind)) is None:
             raise HTTPException(404, "없는 결과")
-        return FileResponse(path)
+        return FileResponse(path, media_type=MEDIA[kind])
 
     app = FastAPI(title="persona check", lifespan=lifespan)
     app.include_router(api)

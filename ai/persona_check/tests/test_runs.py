@@ -143,6 +143,9 @@ def test_http_needs_the_token_and_serves_status(tmp_path, monkeypatch):
             assert (await http.get(f"/runs/{run_id}/A1/verdict", headers=AUTH)).json()["scenario"] == "A1"
             assert (await http.get(f"/runs/{run_id}/A1/record", headers=AUTH)).json()["customer"]["lines"][0][1] == "AI"
             assert (await http.get(f"/runs/{run_id}/A1/audio", headers=AUTH)).status_code == 404
+            (tmp_path / run_id / "A1" / "call.wav").write_bytes(b"RIFF\0\0\0\0WAVE")
+            audio = await http.get(f"/runs/{run_id}/A1/audio", headers=AUTH)
+            assert audio.headers["content-type"] == "audio/wav"   # 백엔드 중계가 받는 형식(Python 3.14 짐작값 audio/vnd.wave 아님)
             assert (await http.get("/runs/없는묶음", headers=AUTH)).status_code == 404
 
     asyncio.run(go())
