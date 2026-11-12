@@ -8,7 +8,7 @@
 가로챈 뒤(intercept · capture) 같은 설정으로 WebRTC 세션을 직접 만들고 accept를 통과시킨다.
 기본 WebSocket으로 만든 세션에는 sideband가 붙지 않는다(503, 11/11 확인) — 그래서 WebRTC다(aiortc 필요).
 주소: 주소DB · 카카오 키가 없는 환경에서는 지번 · 우편번호를 고정값으로 채운다(fake_geo) — 없으면 운영 코드가 주문을 미완료로 처리한다.
-ponytail: 매뉴얼 검색(Qdrant)은 붙이지 않고, 주소록 · 기존 주문은 심지 않는다 — FAQ · 조회 · 취소 · 기존 수신자 시나리오를 넣을 때 더한다.
+ponytail: 매뉴얼 검색(Qdrant)은 붙이지 않는다 — FAQ 시나리오를 넣을 때 더한다.
 
     # ai/ 폴더에서 한 통(여러 통 · 화면 연동 창구는 persona_check/server.py)
     PYTHONPATH=.pydeps PERSONA_CHECK_OPENAI_API_KEY=키 python -m persona_check.try_call [시나리오ID] [페르소나.md]
