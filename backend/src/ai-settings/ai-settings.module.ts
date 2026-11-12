@@ -10,16 +10,24 @@ import { AiOptionsController } from './ai-options.controller';
 import { AiRuntimeController } from './ai-runtime.controller';
 import { AiSettingsGuard } from './ai-settings-access';
 import { PersonaApplicationService } from './persona-application.service';
+import { PersonaCheckClient } from './persona-check.client';
+import { PersonaCheckController } from './persona-check.controller';
 
 @Module({
   imports: [ApplicationConfigModule, DatabaseModule, AuditModule],
-  controllers: [PersonasController, AiOptionsController, AiRuntimeController],
+  controllers: [
+    PersonasController,
+    AiOptionsController,
+    AiRuntimeController,
+    PersonaCheckController,
+  ],
   providers: [
     AiSettingsRepository,
     AiSettingsService,
     AiPersonaClient,
     AiSettingsGuard,
     PersonaApplicationService,
+    PersonaCheckClient,
   ],
 })
 export class AiSettingsModule {}
