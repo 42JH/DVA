@@ -4,7 +4,8 @@
     POST /runs                           {scenarios?: [ID], core?: 핵심만, promptText?: 글, voiceId?: 목소리, concurrency?: 수} → 202 {runId}
     GET  /runs/{runId}                   진행 상황 + 시나리오별 상태 · 판정 요약
     GET  /runs/{runId}/{scenario}/verdict   판정 전체(검사 항목별 정답 · 실제)
-    GET  /runs/{runId}/{scenario}/audio     통화 녹음(wav)
+    GET  /runs/{runId}/{scenario}/record    통화 기록: 고객이 한 말 · 고른 행동(customer), 백엔드가 받은 통화 이벤트 · 초안 · 분석(received)
+    GET  /runs/{runId}/{scenario}/audio     통화 녹음(wav, 고객과 AI를 섞은 모노)
     GET  /runs/{runId}/{scenario}/report    한 장 보기(html)
     GET  /scenarios                      시나리오 목록
 
@@ -38,7 +39,7 @@ from persona_check import judge, try_call
 
 log = logging.getLogger(__name__)
 PORT = int(os.environ.get("PERSONA_CHECK_PORT", "8765"))
-FILES = {"verdict": "verdict.json", "audio": "call.wav", "report": "report.html"}
+FILES = {"verdict": "verdict.json", "record": "backend.json", "audio": "call.wav", "report": "report.html"}
 RUN_ID = re.compile(r"\d{4}_\d{6}_[0-9a-f]{6}")
 MAX_PROMPT_CHARS = 20000  # 운영 페르소나 글 상한(config/server.toml persona_max_prompt_chars)과 같게
 

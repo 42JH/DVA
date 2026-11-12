@@ -63,7 +63,8 @@ python -m pytest persona_check -q
 | `POST /runs` | `{scenarios?: [ID], core?: bool, promptText?: 후보 페르소나 글, voiceId?, concurrency?}` → `202 {runId}`. 시나리오를 안 주면 전체, `core`면 핵심 묶음 |
 | `GET /runs/{runId}` | `{status: running/done/interrupted, total, finished, items: [{scenario, name, group, status: queued/running/done/error, passed, summary, error, seconds, liveSeconds}]}` |
 | `GET /runs/{runId}/{scenario}/verdict` | 판정 전체 `{passed, summary, checks: [{name, status: pass/fail/skip, expected, actual, note}]}` |
-| `GET /runs/{runId}/{scenario}/audio` | 통화 녹음(wav, 왼쪽 고객 · 오른쪽 AI) |
+| `GET /runs/{runId}/{scenario}/record` | 통화 기록 `{customer: {lines: [[초, AI/고객, 말]], choices}, received: {events, drafts, analyses, orders, …}, said, liveSeconds}`. 화면의 통화 상세에 쓴다 |
+| `GET /runs/{runId}/{scenario}/audio` | 통화 녹음(wav, 고객과 AI를 섞은 모노) |
 | `GET /runs/{runId}/{scenario}/report` | 한 장 보기(html) |
 
 - `error`는 시나리오 실패가 아니라 시험 자체의 실패다(통화가 연결되지 않음).
