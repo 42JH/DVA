@@ -5,7 +5,8 @@ import { AdminParcelDraftsService } from './admin-parcel-drafts.service';
 import { ParcelDraftsController } from './parcel-draft-reads.controller';
 import { ParcelDraftReadsService } from './parcel-draft-reads.service';
 import { ParcelDraftReadsRepository } from './parcel-draft-reads.repository';
-import { ParcelDraftRetentionWorker } from './parcel-draft-retention.worker';
+import { OrderRetentionWorker } from './order-retention.worker';
+import { OrderRetentionRepository } from './order-retention.repository';
 import { CallReadReferencesController } from './call-read-references.controller';
 import { CallEventOrderScopeController } from './call-event-order-scope.controller';
 import { ParcelDraftMigrationService } from './parcel-draft-migration.service';
@@ -64,7 +65,8 @@ import { PaymentClient } from '../payments/payment.client';
     ParcelDraftReadsService,
     ParcelDraftReadsRepository,
     ParcelDraftMigrationService,
-    ParcelDraftRetentionWorker,
+    OrderRetentionWorker,
+    OrderRetentionRepository,
     OrderShipmentCheckClient,
     OrderDeletionCheckClient,
     OrdersService,

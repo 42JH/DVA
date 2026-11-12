@@ -3,14 +3,14 @@ import { ConfigService } from '@nestjs/config';
 import { restoreLegacyDraftBindings } from '@dva/events/parcel-drafts.cjs';
 import { DatabaseService } from '../database/database.service';
 import type { Environment } from '../config/environment';
-import { ParcelDraftRetentionWorker } from './parcel-draft-retention.worker';
+import { OrderRetentionWorker } from './order-retention.worker';
 
 @Injectable()
 export class ParcelDraftMigrationService implements OnApplicationBootstrap {
   constructor(
     private readonly database: DatabaseService,
     private readonly config: ConfigService<Environment, true>,
-    private readonly retention: ParcelDraftRetentionWorker,
+    private readonly retention: OrderRetentionWorker,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {

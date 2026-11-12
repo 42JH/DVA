@@ -40,10 +40,10 @@ function cardPaymentValue(value, key, identities, started) {
 test('four order read APIs preserve monolith HTTP and stored data across owner databases', async t => {
   assert.equal(process.env.PGDATABASE,'dva_webhook_test');
   const databases = Object.fromEntries(['monolith','operations','customer','consultation','order'].map(name=>[name,new Pool({host:name+'-db',user:name+'_app'})]));
-  const retention=[];
+  const retention=[],fixturePhones=[];
   t.after(async()=> {
     try {
-      for(const client of retention) { await client.query('ROLLBACK');client.release(); }
+      for(const client of [...retention,...fixturePhones]) { await client.query('ROLLBACK');client.release(); }
       for(const db of [databases.monolith,databases.order])await db.query('DELETE FROM order_parcel_drafts WHERE draft_seq BETWEEN 13001 AND 13008');
       for(const db of [databases.monolith,databases.customer]){
         await db.query('DELETE FROM memberships WHERE membership_seq BETWEEN 6101 AND 6105');
@@ -141,13 +141,14 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
       await client.query('COMMIT');
     } catch(error) { await client.query('ROLLBACK');throw error; } finally { client.release(); }
   }
-  const seedCallGuard=await databases.consultation.connect();retention.push(seedCallGuard);
+  const seedCallGuard=await databases.consultation.connect();fixturePhones.push(seedCallGuard);
   await seedCallGuard.query('BEGIN');
-  await seedCallGuard.query("SELECT pg_advisory_xact_lock(hashtextextended('call-end:01000000001',0))");
+  // Keep only the expired read fixture while production GC and table-lock probes remain enabled.
+  await seedCallGuard.query("SELECT pg_advisory_xact_lock(hashtextextended('call-end:01010190000',0))");
   for(const db of [reference,databases.consultation]) {
     for(let n=1;n<=10;n++) await db.query(`INSERT INTO call_sessions(call_session_seq,provider_call_id,caller_phone_number,customer_seq,order_seq,incoming_at,started_at,ended_at,deleted_at,registered_at)
       OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,$4,$5,$6,CASE WHEN $7::timestamptz IS NULL THEN NULL ELSE '2030-01-01T00:00:00Z'::timestamptz END,$7,$8,'2030-01-01T00:00:00Z')`,
-      [1010+n,'read-call-'+n,n===4?null:n===5?'01099999999':'0100000000'+(n===10?4:[1,2,3][n-1]??1),n===10?4:null,n===6?1001:null,
+      [1010+n,'read-call-'+n,n===9?'01010190000':n===4?null:n===5?'01099999999':'0100000000'+(n===10?4:[1,2,3][n-1]??1),n===10?4:null,n===6?1001:null,
         n===9?'2010-01-01T00:00:00Z':'2030-01-01T00:00:00Z',[6,7].includes(n)?'2030-01-02T00:00:00Z':null,n===8?'2026-01-01T00:00:00Z':null]);
   }
   const longDraftPhone='장'.repeat(40000);
@@ -187,7 +188,6 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
     [reference,'call_sessions','call_session_seq',1019],[databases.consultation,'call_sessions','call_session_seq',1019]]) {
     const client=await db.connect();await client.query('BEGIN');await client.query(`SELECT 1 FROM ${table} WHERE ${column}=$1 FOR KEY SHARE`,[id]);retention.push(client);
   }
-  await seedCallGuard.query('ROLLBACK');retention.splice(retention.indexOf(seedCallGuard),1);seedCallGuard.release();
   async function snapshot(db,tables) {
     const value={};for(const table of tables) value[table]=(await db.query(`SELECT to_jsonb(t) AS row FROM ${table} t ORDER BY to_jsonb(t)::text`)).rows;
     return value;
@@ -878,9 +878,11 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
   });
   await t.test('the production consultation timer delivers committed call expiry to the real order owner',async()=>{
     const id=29801,phone='01098889999',guard=await databases.consultation.connect();retention.push(guard);
-    let locked=true;
+    let locked=true,ackLocked=false;
     await guard.query("SELECT pg_advisory_lock(hashtextextended('call-end:'||$1,0))",[phone]);
     try{
+      await guard.query('SELECT pg_advisory_lock(20261114,29801)');ackLocked=true;
+      await databases.consultation.query("CREATE FUNCTION retention_call_ack_gate() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.event_type='ConsultationCallsPurged' AND NEW.aggregate_seq=29801 AND NEW.delivered_at IS NOT NULL AND OLD.delivered_at IS NULL THEN PERFORM pg_advisory_xact_lock(20261114,29801); END IF; RETURN NEW; END $$; CREATE TRIGGER retention_call_ack_gate BEFORE UPDATE OF delivered_at ON outbox_events FOR EACH ROW EXECUTE FUNCTION retention_call_ack_gate()");
       for(const db of [reference,databases.consultation])await db.query("INSERT INTO call_sessions(call_session_seq,provider_call_id,caller_phone_number,incoming_at,started_at,ended_at) OVERRIDING SYSTEM VALUE VALUES($1,'retention-live-owner',$2,'1980-01-01Z','1980-01-01Z','1980-01-02Z')",[id,phone]);
       for(const db of [reference,databases.order])await db.query("INSERT INTO empty_ai_order_results(request_id,call_session_seq,received_at) VALUES('20000000-0000-4000-8000-000000029801',$1,'1980-01-01Z')",[id]);
       const claimId=randomUUID();await reference.query("UPDATE call_sessions SET purge_claim_id=$2,purge_claimed_until=clock_timestamp()+interval '5 minutes' WHERE call_session_seq=$1",[id,claimId]);
@@ -889,12 +891,20 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
       assert.equal(await new RetentionRepository({transaction}).finishCall({id,phone,claimId,keys:[]}),true);
       await guard.query("SELECT pg_advisory_unlock(hashtextextended('call-end:'||$1,0))",[phone]);
       locked=false;
-      const deadline=Date.now()+20000;for(;;){const call=(await databases.consultation.query('SELECT 1 FROM call_sessions WHERE call_session_seq=$1',[id])).rowCount,result=(await databases.order.query('SELECT 1 FROM empty_ai_order_results WHERE call_session_seq=$1',[id])).rowCount;if(!call&&!result)break;assert.ok(Date.now()<deadline,'production retention must erase the call and deliver its committed cleanup');await pause(100);}
+      const deadline=Date.now()+20000;let receivedBeforeAck=false;
+      for(;;){
+        const call=(await databases.consultation.query('SELECT 1 FROM call_sessions WHERE call_session_seq=$1',[id])).rowCount,result=(await databases.order.query('SELECT 1 FROM empty_ai_order_results WHERE call_session_seq=$1',[id])).rowCount;
+        const delivered=(await databases.consultation.query("SELECT 1 FROM outbox_events WHERE event_type='ConsultationCallsPurged' AND aggregate_seq=$1 AND delivered_at IS NOT NULL",[id])).rowCount;
+        if(!call&&!result&&ackLocked){assert.equal(delivered,0);receivedBeforeAck=true;await guard.query('SELECT pg_advisory_unlock(20261114,29801)');ackLocked=false;}
+        if(!call&&!result&&delivered===1)break;
+        assert.ok(Date.now()<deadline,'production retention must erase the call and commit its delivery acknowledgement');await pause(100);
+      }
+      assert.equal(receivedBeforeAck,true,'receiver commit is deliberately visible before the sender acknowledgement');
       const events=(await databases.consultation.query("SELECT event_id,delivered_at FROM outbox_events WHERE event_type='ConsultationCallsPurged' AND payload->'ids'=$1::jsonb",[JSON.stringify([id])])).rows;assert.equal(events.length,1);assert.ok(events[0].delivered_at);
       assert.equal((await databases.order.query("SELECT 1 FROM inbox_events WHERE event_id=$1 AND source='consultation' AND event_type='ConsultationCallsPurged'",[events[0].event_id])).rowCount,1);
       assert.equal((await reference.query('SELECT 1 FROM call_sessions WHERE call_session_seq=$1',[id])).rowCount,0);assert.equal((await reference.query('SELECT 1 FROM empty_ai_order_results WHERE call_session_seq=$1',[id])).rowCount,0);
     }finally{
-      try{for(const db of [reference,databases.order])await db.query('DELETE FROM empty_ai_order_results WHERE call_session_seq=$1',[id]);for(const db of [reference,databases.consultation])await db.query('DELETE FROM call_sessions WHERE call_session_seq=$1',[id]);}finally{if(locked)await guard.query("SELECT pg_advisory_unlock(hashtextextended('call-end:'||$1,0))",[phone]);retention.splice(retention.indexOf(guard),1);guard.release();}
+      try{if(ackLocked)await guard.query('SELECT pg_advisory_unlock(20261114,29801)');await databases.consultation.query('DROP TRIGGER IF EXISTS retention_call_ack_gate ON outbox_events; DROP FUNCTION IF EXISTS retention_call_ack_gate()');for(const db of [reference,databases.order])await db.query('DELETE FROM empty_ai_order_results WHERE call_session_seq=$1',[id]);for(const db of [reference,databases.consultation])await db.query('DELETE FROM call_sessions WHERE call_session_seq=$1',[id]);}finally{if(locked)await guard.query("SELECT pg_advisory_unlock(hashtextextended('call-end:'||$1,0))",[phone]);retention.splice(retention.indexOf(guard),1);guard.release();}
     }
   });
   await t.test('order retention preserves every linked call including deleted, expired and legacy calls without writes',async()=>{
@@ -7444,7 +7454,7 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
       result.months=(await db.query('SELECT to_jsonb(r) AS row FROM organization_billing_months r WHERE organization_seq BETWEEN 930001 AND 930003 ORDER BY organization_seq,billing_month')).rows;return result;
     };
     const shipmentRows=async db=>(await db.query('SELECT order_parcel_seq,tracking_number,status FROM shipments WHERE order_parcel_seq=ANY($1::int[]) ORDER BY order_parcel_seq',[ids])).rows;
-    const guard=await databases.consultation.connect(),locked=[];let originalFetch;
+    const guard=await databases.consultation.connect(),locked=[],outside=[];let originalFetch;
     await guard.query("SELECT pg_advisory_lock(hashtextextended('call-end:'||$1,0))",[phone]);retention.push(guard);
     try{
       for(const db of [reference,databases.order])await local(db).transaction(async client=>{
@@ -7478,6 +7488,10 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
       }
       for(const db of [reference,delivery])for(const id of ids)await db.query("INSERT INTO shipments(order_parcel_seq,tracking_number,status) VALUES($1,$2,'paid')",[id,'retention-root-'+id]);
       await local(databases.order).transaction(async client=>{for(const id of [910000,910018])await enqueue(client,{destination:'delivery',eventType:'OrderSubmissionDeliveryRequested',aggregateSeq:id,payload:{orderParcelSeqs:[id]}});});
+      for(const db of [reference,databases.order]){
+        const client=await db.connect();outside.push(client);await client.query('BEGIN');
+        await client.query("SELECT 1 FROM orders WHERE COALESCE(closed_at,created_at)<=statement_timestamp()-interval '5 years' AND NOT(order_seq=ANY($1::int[])) FOR KEY SHARE",[all]);
+      }
       for(const db of [reference,databases.order]){const client=await db.connect();locked.push(client);await client.query('BEGIN');await client.query('SELECT 1 FROM orders WHERE order_seq=910026 FOR KEY SHARE');}
       const initial=await stored(databases.order),messages=await snapshot(databases.order,['outbox_events']);
       for(const db of [reference,databases.order])await db.query("CREATE FUNCTION retention_order_fault() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF OLD.order_seq=910000 THEN RAISE EXCEPTION 'controlled late order deletion failure'; END IF; RETURN OLD; END $$; CREATE TRIGGER retention_order_fault BEFORE DELETE ON order_billing_charges FOR EACH ROW EXECUTE FUNCTION retention_order_fault()");
@@ -7519,7 +7533,7 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
       assert.deepEqual(await shipmentRows(delivery),await shipmentRows(reference));
     }finally{
       if(originalFetch)global.fetch=originalFetch;
-      for(const client of locked){await client.query('ROLLBACK');client.release();}
+      for(const client of [...locked,...outside]){await client.query('ROLLBACK');client.release();}
       try{
         for(const db of [reference,databases.consultation])await db.query("DELETE FROM call_sessions WHERE provider_call_id LIKE 'retention-order-%'");
         for(const db of [reference,delivery]){await db.query('DELETE FROM shipment_status_history WHERE shipment_seq IN (SELECT shipment_seq FROM shipments WHERE order_parcel_seq=ANY($1::int[]))',[ids]);await db.query('DELETE FROM shipments WHERE order_parcel_seq=ANY($1::int[])',[ids]);}
@@ -7529,4 +7543,49 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
     }
   });
   console.log('Compared HTTP requests: '+compared);
+});
+
+test('production order retention timers expire roots and deliver shipment cleanup while retaining live work',async()=>{
+  assert.equal(process.env.PGDATABASE,'dva_webhook_test');
+  const pools=Object.fromEntries(['monolith','order','delivery'].map(name=>[name,new Pool({host:name+'-db',user:name+'_app'})]));
+  const guards=[],ids=[935001,935002,935003];
+  const transaction=async(pool,work)=>{const client=await pool.connect();try{await client.query('BEGIN');await client.query("SET LOCAL session_replication_role='replica'");const result=await work(client);await client.query('COMMIT');return result;}catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}};
+  try{
+    for(const db of [pools.monolith,pools.order]){const guard=await db.connect();await guard.query('SELECT pg_advisory_lock(20261103,157)');guards.push(guard);}
+    for(const db of [pools.monolith,pools.order])await transaction(db,async client=>{
+      for(const id of ids)await client.query(`INSERT INTO orders(order_seq,status,payment_method_type,total_amount,created_at,updated_at,paid_at,pickup_requested_at)
+        OVERRIDING SYSTEM VALUE VALUES($1,'SUBMISSION_FAILED','credit',3500,$2,$2,$2,$2)`,[id,id===935002?'2094-01-01Z':'2010-01-01Z']);
+      await client.query("INSERT INTO order_parcels(order_parcel_seq,order_seq,parcel_position,origin_name) OVERRIDING SYSTEM VALUE VALUES(935001,935001,1,'타이머 만료 배송')");
+      await client.query(`INSERT INTO order_payment_requests(payment_request_id,order_seq,amount,created_at,expires_at,card_payment_order_id,approval_started_at,provider_payment_key,approval_claim_id,approval_claimed_until,notification_status)
+        VALUES('93500000-0000-4000-8000-000000000003',935003,3500,'2009-01-01Z','2010-01-01Z','93500000-0000-4000-8000-000000000003','2010-01-01Z','live-retention-claim','93500000-0000-4000-8000-000000000003','2094-01-01Z','SENT')`);
+    });
+    for(const db of [pools.monolith,pools.delivery]){
+      await db.query("INSERT INTO shipments(shipment_seq,order_parcel_seq,tracking_number,status) OVERRIDING SYSTEM VALUE VALUES(935001,935001,'production-retention-shipment','paid')");
+      await db.query("INSERT INTO shipment_status_history(shipment_status_history_seq,shipment_seq,request_id,to_status,actor_type) OVERRIDING SYSTEM VALUE VALUES(935001,935001,'93500000-0000-4000-8000-000000000001','paid','SYSTEM')");
+    }
+    const retained=async db=>(await db.query('SELECT to_jsonb(o) AS row FROM orders o WHERE order_seq IN (935002,935003) ORDER BY order_seq')).rows;
+    const before=await retained(pools.monolith);assert.deepEqual(await retained(pools.order),before);
+    for(const guard of guards){await guard.query('SELECT pg_advisory_unlock(20261103,157)');guard.release();}guards.length=0;
+    for(let attempt=0;;attempt++){
+      const roots=await Promise.all([pools.monolith,pools.order].map(async db=>(await db.query('SELECT 1 FROM orders WHERE order_seq=935001')).rowCount));
+      const shipments=await Promise.all([pools.monolith,pools.delivery].map(async db=>(await db.query('SELECT 1 FROM shipments WHERE order_parcel_seq=935001')).rowCount));
+      const acknowledged=(await pools.order.query("SELECT 1 FROM outbox_events WHERE event_type='OrderParcelsPurged' AND aggregate_seq=935001 AND delivered_at IS NOT NULL")).rowCount;
+      if([...roots,...shipments].every(count=>count===0)&&acknowledged===1)break;
+      assert.ok(attempt<200,'real production timers expire the root and deliver its cleanup');await pause(100);
+    }
+    for(const db of [pools.monolith,pools.order]){
+      assert.deepEqual(await retained(db),before);
+      assert.equal((await db.query('SELECT 1 FROM order_parcels WHERE order_seq=935001')).rowCount,0);
+    }
+    for(const db of [pools.monolith,pools.delivery])assert.equal((await db.query('SELECT 1 FROM shipment_status_history WHERE shipment_seq=935001')).rowCount,0);
+    const receipt=(await pools.order.query("SELECT event_id,delivered_at,payload FROM outbox_events WHERE event_type='OrderParcelsPurged' AND aggregate_seq=935001")).rows;
+    assert.equal(receipt.length,1);assert.ok(receipt[0].delivered_at);assert.deepEqual(receipt[0].payload,{orderParcelSeqs:[935001]});
+    assert.equal((await pools.delivery.query('SELECT 1 FROM inbox_events WHERE event_id=$1',[receipt[0].event_id])).rowCount,1);
+  }finally{
+    for(const guard of guards){await guard.query('SELECT pg_advisory_unlock(20261103,157)');guard.release();}
+    try{
+      for(const db of [pools.monolith,pools.delivery]){await db.query('DELETE FROM shipment_status_history WHERE shipment_seq=935001');await db.query('DELETE FROM shipments WHERE order_parcel_seq=935001');}
+      for(const db of [pools.monolith,pools.order])await transaction(db,async client=>{await client.query('DELETE FROM order_parcels WHERE order_seq=ANY($1::int[])',[ids]);await client.query('DELETE FROM order_payment_requests WHERE order_seq=ANY($1::int[])',[ids]);await client.query('DELETE FROM orders WHERE order_seq=ANY($1::int[])',[ids]);});
+    }finally{await Promise.all(Object.values(pools).map(db=>db.end()));}
+  }
 });
