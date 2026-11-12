@@ -1,6 +1,7 @@
 """055 계약의 통화 중 조회, 수정, 종료와 전송 복구."""
 
 import json
+from functools import partial
 
 import httpx2
 import pytest
@@ -8,7 +9,9 @@ from conftest import CALLER, run
 
 from app.calls.intake import IntakeService
 from app.calls.live import LiveFlow, Spoken
+from app.config import load_server_config
 from app.domain.confirm import issue_cancel_confirmation, issue_parcel_confirmation
+from app.domain.fare import parcel_fare
 from app.domain.parcel_items import ItemIssue
 from app.domain.state import Items
 from app.domain.store import hold_items, open_for_edit
@@ -110,6 +113,7 @@ def test_live_confirmation_saves_and_lookup_combines_both_sources(tmp_path):
 
 def test_documents_only_ready_stores_one_won_and_hides_the_amount_from_speech(tmp_path):
     intake, results, db, s = setup_intake(tmp_path)
+    intake.fare_of = partial(parcel_fare, table=load_server_config().fare.model_dump())
     svc, _ = flow()
     svc.intake, svc.results = intake, results
     lf = LiveFlow(svc)
@@ -122,6 +126,7 @@ def test_documents_only_ready_stores_one_won_and_hides_the_amount_from_speech(tm
         await lf.commit(s, s.state.pending.id)
         [draft] = db.drafts.values()
         assert draft["status"] == "READY" and draft["parcel"]["itemPrice"] == 1
+        assert draft["parcel"]["documentCount"] == 100 and draft["parcel"]["notifiedPrice"] == 38500
         s.state.intent = "lookup"
         result = await run_tool(s.tools, "lookup_orders", "{}", "lookup-docs")
         facts = result["facts"]["lookup_order"]
