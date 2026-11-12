@@ -1,0 +1,37 @@
+# 시험 창구(persona_check): 페르소나 적용 전 시나리오 시험. 운영 통화와 무관한 별도 컨테이너(프로젝트 dva-persona-check).
+# deploy.sh가 AI 서버 배포를 확인한 뒤에 띄운다. shared/.env에 PERSONA_CHECK_TOKEN이 있을 때만 띄우고,
+# 실패해도 AI 서버 배포 결과는 바꾸지 않는다. 릴리스 폴더(config/, prompts/가 있는 곳)를 기준으로 읽는다.
+# 백엔드 → http://persona-check:8765 (Authorization: Bearer <PERSONA_CHECK_TOKEN>). 호스트 포트는 열지 않는다.
+services:
+  persona-check:
+    image: ${PERSONA_CHECK_IMAGE:?upload.sh writes PERSONA_CHECK_IMAGE to release.env}
+    environment:
+      TZ: Asia/Seoul
+      PERSONA_CHECK_TOKEN: ${PERSONA_CHECK_TOKEN:?Set PERSONA_CHECK_TOKEN in .env}
+      # 운영과 한도 · 청구를 나누는 시험 전용 키. OPENAI_API_KEY는 읽지 않는다
+      PERSONA_CHECK_OPENAI_API_KEY: ${PERSONA_CHECK_OPENAI_API_KEY:?Set PERSONA_CHECK_OPENAI_API_KEY in .env}
+      PERSONA_CHECK_HOST: 0.0.0.0
+      PERSONA_CHECK_MAX_CONCURRENCY: ${PERSONA_CHECK_MAX_CONCURRENCY:-2}
+      # 운영 통화와 같은 판단 모델로 시험한다(ai 서비스와 같은 값)
+      BACKEND_MODEL: ${BACKEND_MODEL:-gpt-6-luna}
+      BACKEND_EFFORT: ${BACKEND_EFFORT:-low}
+      KAKAO_REST_API_KEY: ${KAKAO_REST_API_KEY:-}
+    volumes:
+      # 시험 결과(판정 · 통화 기록 · 녹음). 릴리스가 바뀌어도 남아야 화면이 지난 결과를 보여 준다
+      - persona_check_runs:/app/logs/persona_check
+      - ./config:/app/config:ro
+      - ./prompts:/app/prompts:ro
+      - ${ADDRESS_DATA_DIR:-./data}:/app/data:ro
+    networks:
+      backend:
+        aliases:
+          - persona-check
+    restart: unless-stopped
+
+volumes:
+  persona_check_runs:
+
+networks:
+  backend:
+    external: true
+    name: dva-prod_ai_net

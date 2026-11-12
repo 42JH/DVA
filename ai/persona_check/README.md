@@ -61,7 +61,9 @@ python -m pytest persona_check -q
 | 요청 | 내용 |
 |---|---|
 | `GET /scenarios` | 시나리오 목록 `[{id, name, group, core, available}]`. `available`이 false면 이 환경에서 돌릴 수 없다(FAQ 검색 서버 미연결). 전체 · 핵심 묶음에서 빠지고, 골라서 요청하면 422 |
-| `POST /runs` | `{scenarios?: [ID], core?: bool, promptText?: 후보 페르소나 글, voiceId?, concurrency?}` → `202 {runId}`. 시나리오를 안 주면 전체, `core`면 핵심 묶음 |
+| `GET /scenarios/{id}` | 시나리오 한 개의 내용 `{id, name, group, core, available, caller, lines: [{text, optional}], expected: [{name, value}], checks: [문장]}`. `expected`는 판정 결과표의 코드 검사와 같은 이름과 값이다(화면의 시나리오 보기) |
+| `POST /runs` | `{scenarios?: [ID], core?: bool, promptText?: 후보 페르소나 글, voiceId?, concurrency?, tag?}` → `202 {runId}`. 시나리오를 안 주면 전체, `core`면 핵심 묶음. `tag`는 화면이 붙이는 표시(어느 상담가 버전의 시험인지)로, 창구는 저장과 조회만 한다 |
+| `GET /runs` | 묶음 목록(최신순). 항목은 `GET /runs/{runId}`와 같은 모양에 `tag`, `createdAt`이 붙는다. `?tag=`를 주면 그 표시의 묶음만 |
 | `GET /runs/{runId}` | `{status: running/done/interrupted, total, finished, items: [{scenario, name, group, status: queued/running/done/error, passed, summary, error, seconds, liveSeconds}]}` |
 | `GET /runs/{runId}/{scenario}/verdict` | 판정 전체 `{passed, summary, checks: [{name, status: pass/fail/skip, expected, actual, note}]}` |
 | `GET /runs/{runId}/{scenario}/record` | 통화 기록 `{customer: {lines: [[초, AI/고객, 말]], choices}, received: {events, drafts, analyses, orders, …}, said, liveSeconds}`. 화면의 통화 상세에 쓴다 |
@@ -108,7 +110,16 @@ python -m pytest persona_check -q
 - 서버의 주소DB(`data/address.db`)와 카카오 키를 연결하면 주소까지 검증된다.
 - FAQ 검색 서버 설정값 네 개를 넣으면 G1이 돈다.
 - WebRTC는 밖으로 나가는 UDP가 열려 있어야 한다.
-- 화면이 쓰려면 백엔드가 이 창구를 부르고 결과를 저장해야 한다.
+- 화면이 쓰려면 백엔드가 이 창구로 요청을 넘겨 줘야 한다(관리자 확인 뒤 그대로 전달). 결과는 이 창구가 보관하므로 백엔드 저장은 필요 없다.
+
+배포는 AI 서버 배포에 얹혀 있다(`deploy/upload.sh`, `deploy/deploy.sh`, `deploy/compose.persona-check.yaml`, `persona_check/Dockerfile`).
+
+- 이미지는 그 릴리스의 AI 서버 이미지 위에 `persona_check`와 WebRTC 라이브러리를 얹어 만든다. 통화 코드가 늘 운영과 같은 커밋이다.
+- 서버 설정(Jenkins 비밀 파일 `dva-ai`)에 `PERSONA_CHECK_TOKEN`이 있을 때만 뜬다. 함께 `PERSONA_CHECK_OPENAI_API_KEY`(시험 전용 키)가 있어야 한다. 동시 통화 수는 `PERSONA_CHECK_MAX_CONCURRENCY`(배포 기본 2).
+- AI 서버 배포를 확인한 뒤에 띄우고, 빌드나 기동이 실패해도 AI 서버 배포는 성공으로 둔다.
+- 결과 폴더는 볼륨 `dva-persona-check_persona_check_runs`에 남는다. 릴리스가 바뀌어도 지난 결과가 조회된다.
+- 백엔드는 `http://persona-check:8765`로 부른다(네트워크 `dva-prod_ai_net`). 호스트 포트는 열지 않는다.
+- FAQ 검색 서버 연결(G1)은 아직 넣지 않았다.
 
 ## 시험 통화에서 본 것 (2026-11-11 ~ 11-12, develop-ai a7e6dfa2 ~ 6e79326e)
 

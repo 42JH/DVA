@@ -50,6 +50,7 @@ class RunRequest(BaseModel):
     promptText: str | None = Field(None, min_length=1, max_length=MAX_PROMPT_CHARS)  # 후보 페르소나 글. 없으면 서버 기본 페르소나
     voiceId: str | None = Field(None, max_length=64)                          # promptText와 함께 줄 때만 쓰인다
     concurrency: int = Field(1, ge=1)
+    tag: str | None = Field(None, min_length=1, max_length=64)                # 화면이 붙이는 표시(어느 상담가 버전의 시험인지). 창구는 뜻을 모르고 저장 · 조회만 한다
 
 
 def available(scenario: dict) -> bool:
@@ -75,8 +76,8 @@ class Runs:
             raise ValueError(f"모르는 시나리오: {unknown}")
         if blocked := [i for i in ids if not available(known[i])]:
             raise ValueError(f"이 환경에서 돌릴 수 없는 시나리오(FAQ 검색 서버 미연결): {blocked}")
-        run = {"runId": f"{datetime.now():%m%d_%H%M%S}_{uuid.uuid4().hex[:6]}", "createdAt": datetime.now().isoformat(timespec="seconds"),
-               "status": "running", "candidate": bool(req.promptText), "voiceId": req.voiceId,
+        run = {"runId": f"{datetime.now():%m%d_%H%M%S}_{uuid.uuid4().hex[:6]}", "createdAt": datetime.now().isoformat(timespec="milliseconds"),
+               "status": "running", "candidate": bool(req.promptText), "voiceId": req.voiceId, "tag": req.tag,
                "concurrency": min(req.concurrency, self.max_concurrency), "total": len(ids), "finished": 0,
                "items": [{"scenario": i, "name": known[i].get("name"), "group": known[i].get("group"), "status": "queued",
                           "passed": None, "summary": None, "error": None, "seconds": None, "liveSeconds": None} for i in ids]}
@@ -101,6 +102,13 @@ class Runs:
         if run["status"] == "running":  # 실행기가 꺼졌다 켜졌다: 그 묶음은 더 진행되지 않는다
             run["status"] = "interrupted"
         return run
+
+    def recent(self, tag: str | None = None) -> list[dict]:
+        """묶음 목록(최신순). tag를 주면 그 표시가 붙은 묶음만. 화면이 버전마다 시나리오별 최신 결과를 모을 때 쓴다.
+        shortcut: 부를 때마다 run.json을 전부 읽는다. 묶음이 수천 개가 되면 목록 파일을 따로 두거나 개수 제한을 건다."""
+        found = [run for path in self.root.glob("*/run.json") if (run := self.get(path.parent.name))]
+        return sorted((r for r in found if tag is None or r.get("tag") == tag),
+                      key=lambda r: (r["createdAt"], r["runId"]), reverse=True)
 
     def file(self, run_id: str, scenario: str, kind: str) -> Path | None:
         run = self.get(run_id)
@@ -166,6 +174,26 @@ def create_app(runs: Runs, monitor: APIRouter | None = None) -> FastAPI:
     async def list_scenarios() -> list[dict]:
         return [{"id": s["id"], "name": s.get("name"), "group": s.get("group"), "core": bool(s.get("core")),
                  "available": available(s)} for s in judge.load_scenarios()]
+
+    @api.get("/scenarios/{scenario_id}")
+    async def scenario_detail(scenario_id: str) -> dict:
+        """시나리오 한 개의 내용(화면의 시나리오 보기): 고객 대본 · 정답 · 행동 확인.
+        정답은 판정기를 통화 기록 없이 돌려 얻는다 — 이름과 값이 판정 결과표와 늘 같다."""
+        scenario = {s["id"]: s for s in judge.load_scenarios()}.get(scenario_id)
+        if scenario is None:
+            raise HTTPException(404, "없는 시나리오")
+        who = scenario.get("customer")
+        checks = judge.judge(scenario, {"caller": scenario.get("caller", "")})["checks"]
+        return {"id": scenario["id"], "name": scenario.get("name"), "group": scenario.get("group"),
+                "core": bool(scenario.get("core")), "available": available(scenario),
+                "caller": f"등록 고객 {who['name']}" if who else "신규 고객",
+                "lines": [{"text": line["text"], "optional": bool(line.get("optional"))} for line in scenario["lines"]],
+                "expected": [{"name": c["name"], "value": c["expected"]} for c in checks if c["name"] != "대본 진행"],
+                "checks": scenario.get("checks", [])}
+
+    @api.get("/runs")
+    async def recent(tag: str | None = None) -> list[dict]:
+        return runs.recent(tag)
 
     @api.post("/runs", status_code=202)
     async def start(req: RunRequest) -> dict:

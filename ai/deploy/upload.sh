@@ -18,6 +18,7 @@ ai_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 server="$ssh_user@${DEPLOY_HOST:?Set DEPLOY_HOST}"
 remote_root=/home/ubuntu/dva-ai
 image="dva-ai-server:$version"
+check_image="dva-persona-check:$version"
 
 key_dir="$(mktemp -d)"
 trap 'rm -rf -- "$key_dir"' EXIT
@@ -38,9 +39,14 @@ ssh "${options[@]}" "$server" "test ! -e $remote_root/releases/$version && mkdir
 # 2GB 이미지를 통째로 보내지 않고 소스(수 MB)만 보내 대상 서버에서 다시 빌드한다. 서버의 레이어 캐시로 바뀐 층만 빌드된다
 tar -C "$ai_root" --exclude=.venv -cf - . \
  | ssh "${options[@]}" "$server" "sudo -n docker build --quiet --pull --platform linux/amd64 --tag $image - >/dev/null"
+# 시험 창구(persona_check) 이미지는 방금 빌드한 AI 서버 이미지 위에 얹는다(같은 커밋의 통화 코드). 운영 통화와 무관하므로
+# 빌드가 실패해도 AI 서버 배포는 계속한다(deploy.sh가 이미지가 없으면 시험 창구만 건너뛴다)
+tar -C "$ai_root" --exclude=.venv -cf - . \
+ | ssh "${options[@]}" "$server" "sudo -n docker build --quiet --platform linux/amd64 --build-arg AI_IMAGE=$image --file persona_check/Dockerfile --tag $check_image - >/dev/null" \
+ || echo 'Persona check image build failed. The AI server deployment continues.' >&2
 # 주소DB는 릴리스마다 보내지 않고 서버의 shared/data에 한 번 올려 둔다(spec/address.md)
-printf 'AI_IMAGE=%s\nADDRESS_DATA_DIR=%s\n' "$image" "$remote_root/shared/data" > "$key_dir/release.env"
+printf 'AI_IMAGE=%s\nADDRESS_DATA_DIR=%s\nPERSONA_CHECK_IMAGE=%s\n' "$image" "$remote_root/shared/data" "$check_image" > "$key_dir/release.env"
 tar -C "$ai_root" -cf - compose.yaml config prompts \
- -C "$ai_root/deploy" deploy.sh apply-faq-runtime.py compose.deploy.yaml -C "$key_dir" release.env \
+ -C "$ai_root/deploy" deploy.sh apply-faq-runtime.py compose.deploy.yaml compose.persona-check.yaml -C "$key_dir" release.env \
  | ssh "${options[@]}" "$server" "tar -xf - -C $remote_root/releases/$version"
 ssh "${options[@]}" "$server" "bash $remote_root/releases/$version/deploy.sh" </dev/null
