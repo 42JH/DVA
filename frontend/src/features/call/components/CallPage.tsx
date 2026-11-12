@@ -169,7 +169,7 @@ function Chat({ vm, arrival, showAi }: { vm: CallView; arrival: Arrival; showAi:
       className="relative flex min-h-0 min-w-0 flex-1 [scrollbar-width:thin] flex-col gap-0.5 overflow-y-auto bg-white px-4 py-4"
     >
       {lines.length === 0 && (
-        <p className="py-10 text-center text-[14px] text-ops-sub">
+        <p className="m-auto text-center text-[14px] text-ops-sub">
           {vm.isLoading ? '불러오는 중…' : vm.scriptEmpty}
         </p>
       )}
