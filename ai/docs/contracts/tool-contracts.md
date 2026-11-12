@@ -6,6 +6,8 @@
 
 **결과 형식** `ToolOutcome.to_output()`: `{status, code?, facts?, needs?: [{field, reason}], stage?, fields?, missing?, can_proceed?, parcels?}`. `status` ∈ ok · needs_input · needs_choice · needs_confirmation · rejected · unavailable · unknown(`error-recovery.md` §1). 값 기록 결과에는 상태 요약(fields = 필드별 상태, 값은 없음)을 붙인다.
 
+**접수 확인 답변**: 서버가 접수 동의를 확인한 발화에서 상태만 보는 `get_state`가 호출되면 `confirmation: await_server`를 반환한다. 음성·Backend는 상태 안내를 기다리고, 같은 발화에 새 값이 있으면 `record_fields`로 기록한다. 서버는 그 기록과 기존 접수 확인이 일치할 때 확정한다.
+
 **받는 곳 부분 변경**: 개인 주소록·이전 도착지 후보 확인에서 서버가 `destination_change_question`을 보내면 후보 이름을 포함한 질문을 그대로 한다. `destination_partial_change`가 `address`이면 기존 이름·연락처를 유지하고 새 주소를 받는다. `recipient`이면 기존 주소·상세주소를 유지하고 새 이름·연락처를 받는다. 구체적인 새 값만 `record_fields`에 넣는다. 범위 확인 중 받은 새 값은 현재 후보에 보관해 답변 후 검증한다. 주소로 검증되지 않고 도로명·지번과 번호도 없는 입력은 `RECEIVER_ADDRESS_VALUE_REQUIRED`를 반환한다. 부분 변경 중 `find_destination`은 `DEST_CHANGE_USE_RECORD`와 현재 누락 항목을 반환한다.
 
 **개인 주소록 후보**: 받는 분 이름이 기록된 택배는 두 도구 모두 이름이 일치하는 후보만 찾는다. 이름이 아직 없으면 주소로 후보를 제안할 수 있다. `find_destination`에 기록된 이름과 다른 이름이 들어오면 `DEST_RECIPIENT_USE_RECORD`를 반환한다. 고객이 이름을 정정하면 `record_fields`에 실제로 들은 이름을 넣는다.

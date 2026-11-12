@@ -78,6 +78,7 @@ class Spoken:
     sender_name_scope: str | None = None
     scope_decided: asyncio.Event | None = None
     buffered_destination_address: bool = False
+    parcel_confirmation_id: str | None = None
 
     def utterance(self) -> Utterance:
         return Utterance(self.utterance_id, self.start_ms or 0, self.end_ms or 0, self.t_start, self.text, self.readback_id)
@@ -494,19 +495,25 @@ class LiveFlow:
                 followups.append(("greeting_order", utt) if greeting and task[0] == "order" else ("intent", task[0]))
             elif greeting:
                 followups.append(("clarify_greeting", utt))
-            if (w := answers.get("switch")) and w[1] >= th and w[0] != "none" and not sender_change \
-                    and not ((origin_change or destination_reply is not None) and w[0] == "edit_parcel") \
-                    and not (picked_lookup and w[0] == "lookup"):
+            switching = ((w := answers.get("switch")) and w[1] >= th and w[0] != "none" and not sender_change
+                         and not ((origin_change or destination_reply is not None) and w[0] == "edit_parcel")
+                         and not (picked_lookup and w[0] == "lookup"))
+            if switching:
                 followups.append(("intent", w[0]))
-            if (m := answers.get("more")) and m[1] >= th and m[0] == "no_more" and st.parcels:
-                followups.append(("no_more", None))
+            if (not switching and (m := answers.get("more")) and m[1] >= th
+                    and assess(st, self.policy).stage == "more_parcels" and m[0] in ("more", "no_more", "clarify")):
+                followups.append(("no_more", utt) if m[0] == "no_more" else ("more_help", (m[0], utt)))
             if (cb := answers.get("callback")) and cb[1] >= th and cb[0] in ("yes", "no") and st.callback_offered:
                 st.callback_offered = False
                 st.callback_requested = cb[0] == "yes"
                 followups.append(("callback", cb[0]))
         for f in followups:
             if f:
-                await self._follow(s, *f)
+                if f[0] == "hold" and utt.parcel_confirmation_id:
+                    # 도구는 판단까지만 기다리고, 확정은 같은 발화의 도구가 끝난 뒤 검증한다.
+                    s.spawn(self._follow(s, *f), "parcel_confirmation_hold")
+                else:
+                    await self._follow(s, *f)
 
     def _apply_destination_reply(self, s: CallSession, utt: Spoken, prev: Spoken | None,
                                  candidates: CandidateSet | None, answer, switch) -> dict[str, str] | None:
@@ -564,6 +571,8 @@ class LiveFlow:
                     return ("ask_confirm_after_delegation", (pending_id, utt.utterance_id, delegations))
                 return ("ask_confirm", pending_id)
             return None
+        if st.pending.kind == "parcel":
+            utt.parcel_confirmation_id = pending_id
         if delegations := self._delegations_for(s, utt):  # G6: 같은 발화의 위임이 끝난 뒤 다시 본다
             s.note("확인 관문", "COMMIT_HELD_FOR_DELEGATION")
             rt.confirm_t = utt.t_last
@@ -620,7 +629,7 @@ class LiveFlow:
                     rt.confirm_t = 0.0
                 if pid and s.state.address_offer:
                     s.state.address_offer = s.state.address_offer | {"parcel": pid}
-                facts = {"parcel_added": pid, "parcels": len(s.state.parcels)} if pid else None
+                facts = {"parcel_added": pid, "parcels": len(s.state.parcels), "followup_help": "ask"} if pid else None
                 if pid:
                     s.state.selected_order = None
                     draft_save = self._sync_intake(s)
@@ -642,6 +651,7 @@ class LiveFlow:
                     status = self.svc.intake.confirmed_status(s, facts["parcel_added"])
                     if status == "pending":  # 저장 실패이거나 상한 안에 끝나지 않음 → 실패 안내 + 상담원 연결 제안
                         facts |= {"draft_intake": "failed", "agent": "suggest"}
+                        facts.pop("followup_help")
                         s.note("접수 저장", "실패 또는 시간 초과")
                     else:
                         facts["draft_intake"] = status
@@ -766,16 +776,25 @@ class LiveFlow:
         elif what == "callback":  # 콜백 동의(yes) → 분석 hasCallbackRequest, 안내는 "담당자가 연락"
             s.note("콜백", value)
             await self.notify(s, "N2", {"agent": "callback_registered" if value == "yes" else "callback_declined"})
+        elif what == "more_help":
+            answer, utterance = value
+            async with s.lock:
+                if assess(st, self.policy).stage != "more_parcels":
+                    return
+                if answer == "more":
+                    first = "receiver_name" if st.field_of("sender_name").valid else "sender_name"
+                    facts = {"next_parcel_field": first}
+                else:
+                    facts = {"followup_help": "clarify"}
+            s.spawn(self.notify(s, "N2", facts, again=True, unless_tool_turn=utterance), "more_help")
         elif what == "no_more":
             await self._wait_delegations(s)
             async with s.lock:
+                if (assess(st, self.policy).stage != "more_parcels"
+                        or value is not None and self.rt(s).customer_turns[-1:] != [value]):
+                    return
                 st.no_more_parcels = True
-                done = assess(st, self.policy).stage == "closing"
-            if done:  # 접수 완료 단계 → 결과로 마무리 인사 뒤 끊는다
-                await self._finish(s)
-                return
-            await self.notify(s, "N1'", {"more_parcels": False})
-            self._maybe_submit(s)
+            await self._finish(s)
 
     async def _answer_box(self, s: CallSession, box: BoxProposal, answer: str, utt: Spoken) -> None:
         await self._wait_delegations(s)  # 같은 발화에서 직접 말한 정정이 먼저 반영된다.
@@ -839,7 +858,6 @@ class LiveFlow:
         if facts.get("closing"):
             await self._wait_delegations(s)
             self._maybe_submit(s, force=True)
-            facts["order"] = _order_status(s)
         if greeting_turn:
             # 이 발화의 도구는 Decision 반영을 기다린다. 안내가 도구를 기다리며 서로 막히지 않도록 별도 작업으로 보낸다.
             s.spawn(self.notify(s, "N2", facts, unless_tool_turn=greeting_turn), "greeting_order")
@@ -850,20 +868,11 @@ class LiveFlow:
                                    remind=lambda: self.notify(s, "N2", facts, again=True))
 
     async def _finish(self, s: CallSession) -> None:
-        """접수 완료 단계(assess closing): 결과를 closing_result_wait_sec까지 기다려 그 상태로 마무리 인사(N2 closing)를
-        시키고 끊는다. 고객이 먼저 끝냈거나 이미 끝나는 중이면 하지 않는다."""
+        """추가 요청을 마친 통화에 마무리 인사를 보내고 기존 백엔드 처리를 시작한다."""
         if s.phase != Phase.ACTIVE:
             return
         self._maybe_submit(s, force=True)
-        results = getattr(self.svc, "results", None)
-        task = results.tasks.get(s.call_id) if results is not None else None
-        if task is not None:
-            t0 = time.monotonic()
-            await asyncio.wait({task}, timeout=self.cfg.closing_result_wait_sec)  # 실패·초과여도 pending으로 마무리
-            s.timing("마무리 결과 대기", (time.monotonic() - t0) * 1000)
-        if s.phase != Phase.ACTIVE:
-            return
-        facts = {"more_parcels": False, "closing": True, "order": _order_status(s)}
+        facts = {"more_parcels": False, "closing": True}
         s.note("마무리", "접수 완료 단계")
         await self.notify(s, "N2", facts)
         self.svc.begin_closing(s, "flow_complete", after_speech=True,
@@ -998,18 +1007,13 @@ class LiveFlow:
                  and not st.candidates and not item_issues_pending(st))
         if force and (st.parcels or st.intent) or ready:
             st.order_submitted = bool(st.parcels)
-            results.start(s, self._on_result)
+            results.start(s)
 
     def _sync_intake(self, s: CallSession) -> asyncio.Task | None:
         """잠금 안에서 저장 순서를 고정하고, HTTP는 통화 작업에서 실행한다."""
         if s.tools.draft_intake and not s.closed and self.svc.intake.sync(s):
             return s.spawn(self.svc.intake.flush(s.call_id), "draft_save")
         return None
-
-    async def _on_result(self, s: CallSession, data: dict) -> None:
-        """통화 중에 결과가 오면 무음으로 사실만(마무리 안내에 쓴다). ACCEPTED만 접수 성공."""
-        if s.phase in (Phase.ACTIVE, Phase.CLOSING):
-            await self.notify(s, "N1'", {"order": _order_status(s)})
 
     def _business(self, s: CallSession, intent: str) -> None:
         """첫 업무 의도 → 2단계 고객 확인 1회(call-lifecycle.md §2.2)."""
@@ -1085,6 +1089,7 @@ class LiveFlow:
         if ((st.origin_offered and st.origin_answer is None and not st.origin_applied) or sender_change_available(st)
                 or name in ("record_fields", "find_destination", "get_state")
                 and st.candidates and st.candidates.kind == "destination"
+                or name == "get_state" and st.pending and st.pending.kind == "parcel"
                 or records_sender_name and st.customer.customer_seq):
             await self._customer_quiet(s)  # 고객 발화 끝에 보내는 분 변경을 판단한 뒤 그 발화의 값을 기록한다.
         await self._decided(s)
@@ -1101,12 +1106,12 @@ class LiveFlow:
         ctx = s.tools
         turns = self.rt(s).customer_turns
         readback_turn = turns[-1].utterance_id if turns else 0
+        offset = d0["offset_ms"]
+        utterance = next((u for u in reversed(turns) if offset is not None
+                          and u.start_ms <= offset <= u.end_ms + self.cfg.utterance_gap_ms), None)
+        if not utterance and offset is None and len(turns) == 1:
+            utterance = turns[0]
         if name == "record_fields":
-            offset = d0["offset_ms"]
-            utterance = next((u for u in reversed(turns) if offset is not None
-                              and u.start_ms <= offset <= u.end_ms + self.cfg.utterance_gap_ms), None)
-            if not utterance and offset is None and len(turns) == 1:
-                utterance = turns[0]
             if utterance:
                 readback_turn = utterance.utterance_id
                 if records_sender_name and utterance.scope_decided is not None:
@@ -1114,6 +1119,10 @@ class LiveFlow:
             ctx = replace(ctx, item_utterance=(utterance.utterance_id, utterance.text) if utterance else (0, ""),
                           sender_name_scope=utterance.sender_name_scope if utterance else None)
         with span("tool", tool=name):
+            if (name == "get_state" and isinstance(arguments, dict) and arguments.keys() <= {"include_values"}
+                    and arguments.get("include_values", False) is False and utterance is not None
+                    and utterance is turns[-1] and st.pending and utterance.parcel_confirmation_id == st.pending.id):
+                ctx.outputs.setdefault(call_id, {"status": "ok", "confirmation": "await_server"})
             out = await run_tool(ctx, name, item.get("arguments") or "{}", call_id, allowed=MODEL_TOOLS)
         readback_id = (out.get("facts") or {}).get("readback_id")
         if readback_id:
@@ -1221,9 +1230,13 @@ class LiveFlow:
             return  # 같은 내용 중복 송신 안 함(§6.3)
         rt.sent_hashes.add(h)
         if level == "N2":
-            receipt_pid = facts.get("parcel_added") if facts.get("draft_intake") == "ready" else None
+            parcel_added = facts.get("parcel_added")
+            receipt_pid = parcel_added if facts.get("draft_intake") == "ready" else None
             t0 = time.monotonic()
-            await self._wait_quiet(s, min_quiet_ms=self.cfg.utterance_gap_ms if receipt_pid else 0)
+            await self._wait_quiet(s, min_quiet_ms=self.cfg.utterance_gap_ms if receipt_pid else 0,
+                                   wait_delegations=not parcel_added)
+            if parcel_added and (s.closing_requested_t or s.closed or assess(s.state, self.policy).stage != "more_parcels"):
+                return
             if unless_tool_turn:
                 turn = unless_tool_turn
                 if not rt.customer_turns or rt.customer_turns[-1] != turn or s.state.intent != "order":
@@ -1248,8 +1261,12 @@ class LiveFlow:
                 s.note("N2 대기", f"{waited:.1f}s")
             if receipt_pid:
                 status = self.svc.intake.confirmed_status(s, receipt_pid)
-                if status != "ready":
-                    content = json.dumps(facts | {"draft_intake": status}, ensure_ascii=False, sort_keys=True)
+                if status == "pending":
+                    facts |= {"draft_intake": "failed", "agent": "suggest"}
+                    facts.pop("followup_help", None)
+                else:
+                    facts["draft_intake"] = status
+                content = json.dumps(facts, ensure_ascii=False, sort_keys=True)
         etype = {"N1'": "session.thinking.append", "N2": "session.commentary.append"}[level]
         s.stats[f"전달 {level}"] += 1
         s.note(f"전달 {level}", content[:200], {"content": json.loads(content)})
@@ -1261,11 +1278,13 @@ class LiveFlow:
         if level == "N2":
             rt.await_speech = ("N2→AI 발화", time.time())
 
-    async def _wait_quiet(self, s: CallSession, timeout: float = 8.0, *, min_quiet_ms: int = 0) -> None:
+    async def _wait_quiet(self, s: CallSession, timeout: float = 8.0, *, min_quiet_ms: int = 0,
+                          wait_delegations: bool = True) -> None:
         deadline = time.monotonic() + timeout
         quiet = max(self.cfg.notify_quiet_ms, min_quiet_ms) / 1000
         while time.monotonic() < deadline:
-            busy = self.rt(s).cust is not None or any(d["inflight"] or d["offset_ms"] is not None for d in self._open(s))
+            busy = self.rt(s).cust is not None or (wait_delegations and
+                    any(d["inflight"] or d["offset_ms"] is not None for d in self._open(s)))
             if not busy and time.time() - s.last_output_t >= quiet:
                 return
             await asyncio.sleep(0.1)
@@ -1415,17 +1434,6 @@ def _greeting_offer(state: ConversationState, text: str) -> str | None:
                     and heard[0] in sido_aliases(expected[0]):
                 return "registered_origin"
     return "origin_mentioned"
-
-
-def _order_status(s: CallSession) -> dict:
-    """결과 상태 사실(정책 [results].order). 응답 전이면 pending."""
-    data = s.result or {}
-    if not data:
-        return {"status": "pending"}
-    out = {"status": data.get("status")}
-    if data.get("status") == "ACCEPTED" and data.get("parcelNo"):
-        out["parcelNo"] = data["parcelNo"]
-    return out
 
 
 def _order_facts(order: dict) -> dict:

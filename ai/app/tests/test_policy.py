@@ -67,7 +67,7 @@ def test_server_results_are_rendered_from_workflow_policy():
     text = render_live(None, POLICY)
     for key in ("call_started", "closing", "agent", "phones_to_read", "missing", "origin_confirm", "pickup",
                 "confirm_route", "readback", "sender_change_question", "address_detail_question", "destination_choices",
-                "destination_change_question", "destination_partial_change"):
+                "destination_change_question", "destination_partial_change", "followup_help", "next_parcel_field"):
         assert text.count(f"\n- {key}: {POLICY.results[key]}") == 1
     assert "이대로 접수할까요?" in POLICY.results["readback"]  # 간소화한 되읽기도 질문으로 끝나야 G3을 통과한다
     assert "접수 정보를 수집할 때만" in text
