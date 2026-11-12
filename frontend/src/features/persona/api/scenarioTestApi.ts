@@ -1,10 +1,18 @@
 // 시나리오 시험 (11/12) — 페르소나 글을 통화에 쓰기 전에, 정해진 고객 대본으로 AI에게 전화를 걸어 보는 시험
 // 주소와 모양은 시험 창구(ai/persona_check)의 것 그대로. 백엔드는 관리자 확인 뒤 /api/persona-check/* 를 창구로 넘기기만 함(저장 · 가공 없음)
+// JSON 응답은 백엔드의 기본 모양 { data, meta }로 감싸져 옴(녹음만 파일 그대로) → unwrap으로 알맹이를 꺼냄
 // 창구는 결과를 자기 쪽 폴더에 보관. '어느 버전의 시험인지'는 화면이 시작할 때 붙인 tag로 남고, 버전별로 모으는 일은 화면이 함 (scenarioTestMap.ts)
 // 시험 통화는 창구 안의 가짜 백엔드를 써서 통화 내역 · 주문 · 고객 · 통계에 남지 않음
 import { queryOptions } from '@tanstack/react-query'
 import { api, API_BASE_URL } from '@/shared/api/client'
-import { runsToTests, tagOf, type RunDto, type TestItem, type VersionTest } from './scenarioTestMap'
+import {
+  runsToTests,
+  tagOf,
+  unwrap,
+  type RunDto,
+  type TestItem,
+  type VersionTest,
+} from './scenarioTestMap'
 
 export type { TestItem, VersionTest }
 
@@ -51,13 +59,8 @@ export interface TestRecord {
   audioUrl: string | null // 녹음 주소 — 창구의 …/audio (쿠키로 인증되는 같은 주소라 재생기에 바로 넣음)
 }
 
-// 백엔드가 창구 응답을 그대로 넘기든 팀 규칙대로 { data }로 감싸 넘기든 받음 (어느 쪽으로 할지 백엔드가 정함)
-const bare = <T>(x: unknown): T =>
-  x && typeof x === 'object' && !Array.isArray(x) && 'data' in x && Object.keys(x).length === 1
-    ? (x as { data: T }).data
-    : (x as T)
 const get = async <T>(path: string, signal?: AbortSignal) =>
-  bare<T>(await api.get<unknown>(`/persona-check${path}`, { signal }))
+  unwrap<T>(await api.get<unknown>(`/persona-check${path}`, { signal }))
 
 export const scenarioTestQueries = {
   all: () => ['personaTests'] as const,
