@@ -52,8 +52,8 @@ def test_record_versions_and_invalid_correction_keeps_value():
     assert not s.record("receiver_phone", "01098765432")  # 같은 값은 버전 그대로
     s.record_invalid("receiver_phone", "PHONE_INVALID_DIGITS")  # 잘못 들은 정정
     f = s.field_of("receiver_phone")
-    assert (f.value, f.status, f.version, f.attempts, f.code) == ("01098765432", FieldStatus.VALID, v, 1,
-                                                                  "PHONE_INVALID_DIGITS")
+    assert (f.value, f.status, f.attempts, f.code) == ("01098765432", FieldStatus.VALID, 1, "PHONE_INVALID_DIGITS")
+    assert f.version > v and s.current.receiver_phone_pending
     s.record_invalid("receiver_address", "ADDRESS_NOT_FOUND")
     assert s.field_of("receiver_address").status == FieldStatus.INVALID
 

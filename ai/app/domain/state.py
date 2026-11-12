@@ -133,6 +133,10 @@ class ParcelDraft:
     def __getitem__(self, name: str) -> FieldState:
         return self.fields[name]
 
+    @property
+    def receiver_phone_pending(self) -> bool:
+        return self["receiver_phone"].code in ("PHONE_INVALID_DIGITS", "PHONE_AMBIGUOUS")
+
     def place_detail(self, role: str, detail: str | None) -> str | None:
         """기본주소를 건물명·상호명으로 찾았으면 상세주소 앞에 검색이 찾은 이름을 붙인다("국회의사당 3층", 없다고 하면 이름만).
         그 뒤 기본주소가 바뀌었거나 이미 이름으로 시작하면 그대로 둔다."""
@@ -253,7 +257,8 @@ class ConversationState:
     def record(self, name: str, value: Any, source: Source = Source.CUSTOMER) -> bool:
         """검증을 통과한 값 기록. 바뀌었으면 True(같은 값이면 버전을 올리지 않는다)."""
         f = self.field_of(name)
-        if f.valid and f.value == value and f.source == source:
+        if f.valid and f.value == value and f.source == source and (
+                name != "receiver_phone" or not self.current.receiver_phone_pending):
             return False
         v = self.bump()
         f.previous = f.value if f.valid else f.previous
@@ -266,6 +271,10 @@ class ConversationState:
         v = self.bump()
         f.attempts += 1
         f.code = code
+        if name == "receiver_phone":
+            f.version = v  # 이전 번호가 보존돼도 이미 열린 접수 확인은 무효다.
+            if self.pending and self.pending.kind == "parcel":
+                self.pending = self.address_offer = None
         if not f.valid:
             f.value, f.status, f.version = None, FieldStatus.INVALID, v
 
@@ -278,7 +287,7 @@ class ConversationState:
         f = self.field_of(name)
         if f.status != FieldStatus.EMPTY:
             f.previous = f.value if f.valid else f.previous
-            f.value, f.status, f.source, f.version = None, FieldStatus.EMPTY, None, self.bump()
+            f.value, f.status, f.source, f.version, f.code = None, FieldStatus.EMPTY, None, self.bump(), None
 
     def new_parcel_id(self) -> str:
         pid = f"p{self._next_parcel}"
@@ -299,6 +308,8 @@ def _plain(o):
 def draft_snapshot(draft: ParcelDraft) -> dict:
     """택배의 현재 VALID 값(되읽기·확인·전송의 단위). geo·요청사항 포함, 상태·버전은 뺀다."""
     out = {name: f.value for name, f in draft.fields.items() if f.valid}
+    if draft.receiver_phone_pending:
+        out.pop("receiver_phone", None)
     if (price := draft.declared_item_price()) is not None:
         out["item_price"] = price
     out |= {"sender_geo": draft.sender_geo, "receiver_geo": draft.receiver_geo, "client_comment": draft.client_comment}

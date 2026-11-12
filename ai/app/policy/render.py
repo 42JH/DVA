@@ -37,9 +37,10 @@ def render_input_rules(policy: Policy) -> str:
         f"- 현재 받는 곳별 접수 묶음(parcel)마다 소형·중형·대형 박스 합계 최대 {limits.box_total_max}개.",
         f"- 서류는 같은 묶음에서 박스와 별도로 최대 {limits.document_max}개. 서류를 박스 합계에 더하지 않습니다.",
         "- 수거 가능 범위: " + describe(rule_of(policy.pickup)) + ". 시간대는 한국 시간입니다.",
-        f"- 전화번호: 한글 숫자·국가번호 +82·구분 기호를 정리한 뒤 {phone.mobile_prefix} 시작은 "
-        f"정확히 {phone.mobile_digits}자리, 그 외 0 시작은 {phone.domestic_min_digits}~{phone.domestic_max_digits}자리. "
-        f"{'·'.join(phone.service_prefixes)} 시작 대표번호는 {phone.service_digits}자리입니다. 번호를 추측해 채우지 않습니다.",
+        f"- 받는 분 연락처: 서버가 한글 숫자·국가번호 +82·구분 기호를 정리해 휴대전화 {phone.mobile.min_digits}자리, "
+        f"02는 {phone.seoul.min_digits}~{phone.seoul.max_digits}자리, 기타 지역번호는 "
+        f"{phone.regional.min_digits}~{phone.regional.max_digits}자리, 070은 {phone.internet.min_digits}자리를 받습니다. "
+        "번호를 추측해 채우지 않습니다.",
         "- 허용 범위 밖 값은 임의로 줄이거나 상한으로 바꾸지 않고 허용 범위를 설명한 뒤 다시 받습니다.",
     ])
 
@@ -51,11 +52,13 @@ def _labels(policy: Policy, names) -> list[str]:
 def render_delegation(policy: Policy, tools: tuple[tuple[str, str], ...] = ()) -> str:
     """위임 정책. 페르소나 바로 뒤에 둔다 — 지시문 끝 쪽에 있을 때 Live가 값을 받고도 위임하지 않는 통화가 이어져서."""
     choice = [n for n, f in policy.fields.items() if f.kind == "choice"]
+    regular_values = (n for n in policy.free_fields() if n != "receiver_phone")
     lines = ["# 백엔드 위임(<|SpawnThinking|>)", "Generate <|SpawnThinking|> when:",
               "- 고객이 새 발송 기본주소나 상세주소를 말할 때, 또는 발송 상세주소가 없다고 답할 때. "
               "동의와 주소를 한 발화에서 함께 말해도 주소 값으로 생성합니다. 서버 기록 결과가 오기 전에는 "
               "그 주소를 확인했다고 말하거나 받는 분 정보를 묻지 않습니다.",
-              f"- 고객이 다음 정상 범위의 값을 말하거나 고칠 때: {', '.join(_labels(policy, policy.free_fields()))}",
+              f"- 고객이 다음 정상 범위의 값을 말하거나 고칠 때: {', '.join(_labels(policy, regular_values))}",
+              "- 고객이 받는 분 연락처를 말하거나 고칠 때. 자릿수가 모호해 보여도 들은 표현으로 기록을 요청합니다.",
               "- 고객이 처음 또는 추가로 물건 이름을 말하면 박스 후보를 제안할 근거가 있을 때 box_suggestion, "
               "크기나 개수가 애매할 때 box_size_needed로 기록을 요청합니다.",
               "- 고객이 수거 시각을 바꾸려 할 때. 허용 여부는 서버가 현재 시각 기준으로 최종 검사합니다. 통화 시작 시각만으로 허용 여부를 확정하지 않습니다.",
@@ -70,7 +73,7 @@ def render_delegation(policy: Policy, tools: tuple[tuple[str, str], ...] = ()) -
     lines += ["", "Do not generate <|SpawnThinking|> when:",
               "- 고객이 되읽기 접수 질문에 '네, 그렇게 접수해 주세요'처럼 동의만 했거나 추가 도움이 없다고만 답했을 때. "
               "서버가 그 답을 직접 처리하므로 다음 안내를 기다립니다. 고객이 접수 값도 새로 말하거나 고치면 그 값만 기록하도록 요청합니다.",
-              "- 고객이 말한 수량·전화번호 또는 서버가 요청한 물품 가액이 공통 입력 제한을 명백히 벗어나고 다른 정상 정보는 없을 때. "
+              "- 고객이 말한 수량 또는 서버가 요청한 물품 가액이 공통 입력 제한을 명백히 벗어나고 다른 정상 정보는 없을 때. "
               "도구 거절을 기다리지 말고 허용 범위를 설명해 해당 항목만 다시 묻습니다. 애매한 값은 추측하지 않고 확인합니다.",
               f"- 고객이 {', '.join(['예/아니요', '후보 고르기', *_labels(policy, choice)])}처럼 고르는 답을 할 때(서버가 직접 듣고 판단합니다). "
               "상세주소가 없다는 답은 기록할 값이므로 생성합니다.",

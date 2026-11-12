@@ -73,14 +73,26 @@ kind = "format"
 terms = ["쇼핑백", "비닐봉지", "스티로폼", "박스 없이", "포장 없이"]
 guidance = "서류와 소형·중형·대형 박스로 접수합니다. 지원하는 규격으로 포장할 수 있는지 확인해 주세요."
 
-# 기존 전화번호 허용 범위를 유지한다. 한글 숫자/+82 정규화 뒤 적용한다.
-[phone]
-mobile_prefix = "010"
-mobile_digits = 11
-domestic_min_digits = 9
-domestic_max_digits = 11
-service_prefixes = ["15", "16", "18"]
-service_digits = 8
+# 백엔드 배송 전화번호 계약(수령인 집전화 허용). 한글 숫자/+82 정규화 뒤 적용한다.
+[phone.mobile]
+prefixes = ["010", "011", "016", "017", "018", "019"]
+min_digits = 11
+max_digits = 11
+
+[phone.seoul]
+prefixes = ["02"]
+min_digits = 9
+max_digits = 10
+
+[phone.regional]
+prefixes = ["031", "032", "033", "041", "042", "043", "044", "051", "052", "053", "054", "055", "061", "062", "063", "064"]
+min_digits = 10
+max_digits = 11
+
+[phone.internet]
+prefixes = ["070"]
+min_digits = 11
+max_digits = 11
 
 # --- 필드 목록. 이름은 Business State·BE 매핑과 같다(backend_client/order.py) ---
 # kind: free = Backend가 strict 도구 인자로 추출(Live가 위임) · choice = Decision 질문 · auto = 서버가 채움(묻지 않음)
@@ -220,7 +232,9 @@ box_request_removed = "규격을 확인 중이던 추가 박스만 제외했다.
 missing = "현재 택배에 아직 받지 못한 필수 항목"
 needs = "다시 물어야 할 항목과 사유(예: PHONE_INVALID_DIGITS = 자릿수가 맞지 않음)"
 confirm_route = "발송 주소와 받는 곳 주소가 다 갖춰졌을 때의 동 이름(from·to). '{from}에서 {to}으로 보내시는군요.'처럼 한 번 말해 확인하고 다음 항목을 묻는다. 도로명·번지·상세주소는 읽지 않는다. 아니라고 하면 어느 주소가 틀렸는지 묻고 그 답으로 기록을 요청한다"
-phones_to_read = "고객이 이번 통화에서 직접 불러 주고 서버가 이 목록에 표시한 번호를 한 번 끊어 읽어 확인한다"
+phones_to_read = "이번 통화에서 고객이 말하고 서버가 기록한 전화번호 항목"
+receiver_phone_readback = "기록된 받는 분 연락처. 이 숫자를 한 자리씩 끊어 한 번 읽어 확인한다"
+phone_question = "번호를 다시 받아야 할 때 서버가 정한 질문. 이 질문을 그대로 한다"
 more_parcels = "false면 더 보낼 택배가 없다"
 call_started = "true면 전화가 연결된 것이다. 고객 말을 기다리지 않고 바로 첫 인사를 한다(인사 규칙대로, 한 번만)"
 greeting_confirmation = "confirmed면 첫 인사에 대한 접수 의사를 확인했다. sender_change_next가 있으면 그 질문부터, 그 다음으로 origin_confirm 또는 summary의 첫 누락 항목을 따른다. ask_intent면 어떤 업무를 도와드릴지 한 번 묻는다. 이미 기록된 성함을 다시 확인하지 않는다"

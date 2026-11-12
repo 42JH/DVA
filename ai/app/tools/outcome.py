@@ -54,6 +54,8 @@ def state_summary(state: ConversationState, policy: Policy) -> dict:
     fields = {}
     if state.current is not None:
         fields = {n: f.status.value for n, f in state.current.fields.items() if policy.fields[n].kind != "auto"}
+        if state.current.receiver_phone_pending:
+            fields["receiver_phone"] = "invalid"
     summary = {"stage": a.stage, "fields": fields, "missing": list(a.missing), "can_proceed": a.readback_ready,
                "parcels": len(state.parcels)}
     destination = state.candidates if state.candidates and state.candidates.kind == "destination" else None
@@ -105,6 +107,8 @@ def order_values(state: ConversationState, policy: Policy) -> dict:
     if state.current is not None:
         current = {}
         for name, f in state.current.fields.items():
+            if name == "receiver_phone" and state.current.receiver_phone_pending:
+                continue
             if not f.valid or f.value is None or policy.fields[name].kind == "auto" or not _shown(f.source, name):
                 continue
             value = {k: v for k, v in f.value.__dict__.items() if v} if isinstance(f.value, Items) else f.value

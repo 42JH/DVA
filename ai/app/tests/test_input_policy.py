@@ -52,7 +52,7 @@ def test_toml_change_reaches_prompts_session_schema_and_executor(tmp_path):
                     "box_total_max = 10": "box_total_max = 7", "document_max = 100": "document_max = 80",
                     "min_lead_minutes = 60": "min_lead_minutes = 90",
                     "max_days_ahead = 3": "max_days_ahead = 2",
-                    "mobile_digits = 11": "mobile_digits = 12"}
+                    "min_digits = 11\nmax_digits = 11": "min_digits = 12\nmax_digits = 12"}
     for old, new in replacements.items():
         assert old in text
         text = text.replace(old, new)
@@ -63,7 +63,7 @@ def test_toml_change_reaches_prompts_session_schema_and_executor(tmp_path):
         assert "2원~123,456원" in rendered
         assert "최대 7개" in rendered and "최대 80개" in rendered
         assert "90분 이후" in rendered and "2일(48시간)" in rendered
-        assert "정확히 12자리" in rendered
+        assert "휴대전화 12자리" in rendered
         assert "100,000,000" not in rendered and "{pickup_allowed}" not in rendered
 
     svc = service()
@@ -122,7 +122,7 @@ def test_default_pickup_never_rounds_below_minimum(hour, second, microsecond):
     ("input_limits", {"box_total_max": 0}),
     ("pickup", {"open": "18:00"}), ("pickup", {"close": "25:00"}),
     ("pickup", {"min_lead_minutes": 5000}),
-    ("phone", {"domestic_min_digits": 12}),
+    ("phone", {"seoul": {"prefixes": ("02",), "min_digits": 12, "max_digits": 10}}),
 ])
 def test_inconsistent_limit_config_is_rejected(section, change):
     data = load_policy().model_dump()
@@ -131,10 +131,10 @@ def test_inconsistent_limit_config_is_rejected(section, change):
         Policy.model_validate(data)
 
 
-def test_phone_existing_formats_and_rendered_pickup_range_agree():
+def test_recipient_phone_formats_and_rendered_pickup_range_agree():
     p = load_policy()
     for raw, expected in [("+82 10 1234 5678", "01012345678"), ("02-123-4567", "021234567"),
-                          ("1588-1234", "15881234"), ("0101234567", None)]:
+                          ("1588-1234", None), ("0101234567", None)]:
         assert normalize_phone(raw, p.phone) == expected
     assert describe(rule_of(p.pickup)) in render_live("test", p)
     assert describe(rule_of(p.pickup)) in render_backend(p)

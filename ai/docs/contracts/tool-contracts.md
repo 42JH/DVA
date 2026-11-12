@@ -14,6 +14,8 @@
 
 **접수 조회 주소**: 선택된 택배의 `lookup_order`에 `sender_address_detail`과 `receiver_address_detail`을 해당 기본주소와 함께 전달한다. 빈 문자열은 상세주소 없음, 누락은 조회 결과로 확인할 수 없음을 뜻한다.
 
+**받는 분 연락처**: `record_fields.receiver_phone`에 말끝까지 들은 번호 표현을 넣는다. 끝 네 자리 정정은 `끝 네 자리 사팔팔이요`처럼 전달하며 서버가 기존 번호에 합쳐 검사한다. 가능한 번호가 하나면 `facts.receiver_phone_readback`에 기록한 숫자를 반환한다. 유효한 해석이 없거나 여러 개면 `PHONE_INVALID_DIGITS` 또는 `PHONE_AMBIGUOUS`와 `facts.phone_question`을 반환한다. 정정이 해결될 때까지 기존 번호는 내부에 보존하고 접수와 조회용 현재 값에는 사용하지 않는다.
+
 **실행기** `run_tool(ctx, name, arguments, call_id, allowed=None)`: 같은 `call_id` 재수신은 처음 결과 그대로 → 허용 확인(`TOOL_NOT_ALLOWED`, 인수 검증보다 먼저) → strict 인수 검증(`TOOL_ARGS_INVALID` + needs에 필드 경로) → 예산 안 실행(도구 3초·RAG 12초 → `TOOL_TIMEOUT`/`KB_TIMEOUT`) → BE 실패는 `BackendFailure.code`, 그 밖 예외는 `INTERNAL_ERROR`(모두 unavailable).
 
 | 모델 도구(strict) | 인수 | 결과 |

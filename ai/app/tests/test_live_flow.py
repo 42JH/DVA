@@ -1353,6 +1353,41 @@ def test_cancel_target_carries_status_meaning():
     assert facts == {"receiver_name": "홍길동", "status": "COLLECTING", "status_text": "접수 미완료(정보 수집 중), 최종 접수 전"}
 
 
+@pytest.mark.parametrize(("transcript", "tool_phone", "expected", "code"), [
+    ("공일공 하나다섯여섯일곱 여덟아홉팔이요", "0101567898", "01015678982", None),
+    ("공일공 하나다섯여섯일곱 여덟아홉팔", "0101567898", None, "PHONE_INVALID_DIGITS"),
+    ("공일공 하나다섯여섯일곱 여덟아홉팔이요", "0101567897", None, "PHONE_INVALID_DIGITS"),
+    ("공이 일이삼사 사팔팔이요", "0212344882", None, "PHONE_AMBIGUOUS"),
+])
+def test_phone_ending_uses_matching_transcript_from_same_utterance(transcript, tool_phone, expected, code):
+    svc, client = flow()
+
+    async def scenario():
+        task = asyncio.create_task(svc.on_incoming(incoming()))
+        await until(lambda: client.conns)
+        conn = client.conns[0]
+        conn.push(started())
+        await until(lambda: svc.registry.calls["live_1"].phase == Phase.ACTIVE)
+        s = svc.registry.calls["live_1"]
+        await say(conn, "택배 보내려고요", 1000)
+        await say(conn, transcript, 3000)
+        conn.push({"type": "session.delegation.created", "delegation": {"id": "phone"}, "offset_ms": 3150})
+        conn.push({"type": "response.event", "delegation_id": "phone", "event": {
+            "type": "response.output_item.done", "item": {"type": "function_call", "call_id": "phone",
+                "name": "record_fields", "arguments": json.dumps({"receiver_phone": tool_phone})}}})
+        conn.push({"type": "response.event", "delegation_id": "phone", "event": {"type": "response.completed"}})
+        await until(lambda: s.tool_calls and s.tool_calls[0]["done_at"])
+        out = s.tool_calls[0]["output"]
+        assert s.state.field_of("receiver_phone").value == expected
+        assert out.get("facts", {}).get("receiver_phone_readback") == expected
+        assert out.get("code") == code
+        assert len(s.tool_calls) == 1
+        conn.push({"type": "session.closed", "reason": "remote_hangup"})
+        await task
+
+    run(scenario())
+
+
 def test_call_record_keeps_decision_io_backend_text_tool_args_and_delivery():
     """관제·통화 기록: Decision 입력·답 확률, 위임 메타, Backend 출력 문장·추론 요약, 도구 인수(dict)·결과, 전달 원문."""
     svc, client = flow()

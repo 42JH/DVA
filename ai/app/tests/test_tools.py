@@ -12,7 +12,8 @@ from app.address.gazetteer import AddressDB
 from app.address.matcher import correct
 from app.domain.candidates import apply_pick, offer
 from app.domain.rules import normalize_phone, parse_pickup
-from app.domain.state import ConversationState, Customer, FieldStatus, Geo, Items, Place, Source
+from app.domain.state import ConversationState, Customer, FieldStatus, Geo, Items, Place, Source, draft_snapshot
+from app.domain.store import open_for_edit, snapshot_for_submit
 from app.integrations.address import AddressService
 from app.integrations.backend.gateway import BackendGateway
 from app.policy.model import load_policy
@@ -60,9 +61,18 @@ def address(corrector, fake_kakao):
     ("공일공 일이삼사 오육칠팔", "01012345678"), ("공일공삼 하나하나오오사이팔", "01031155428"),
     ("공일공 일곱여덟아홉공 둘셋넷다섯", "01078902345"), ("010-1234-5678", "01012345678"),
     ("+82 10 1234 5678", "01012345678"), ("0101234567", None), ("02-123-4567", "021234567"),
-    ("031 1234 5678", "03112345678"), ("1588-1234", "15881234"), ("일육공공 일이삼사", "16001234"),
+    ("031 1234 5678", "03112345678"), ("1588-1234", None), ("일육공공 일이삼사", None),
+    ("02-1234-56789", None), ("032-12-3456", None), ("070-1234-5678", "07012345678"),
+    ("070-123-4567", None), ("019-1234-5678", "01912345678"), ("050-1234-5678", None),
     ("12345", None), ("0212", None),
     ("010-283-54286", "01028354286"),  # S0d 19:07: 잘못 받아쓴 번호도 11자리면 통과 — 자릿수 검사로는 못 잡고 되읽기로 잡는다
+    ("공일공 하나다섯여섯일곱 여덟아홉팔이요", "01015678982"),
+    ("공일공 하 나둘셋넷 다섯여섯일 곱여덟", "01012345678"),
+    ("영일빵 일이삼사 사팔팔이요", "01012344882"),
+    ("공일공 일이삼사 사팔팔", None),
+    ("010-1234-4882이요", "01012344882"),
+    ("02-1234-488이요", None),  # 두 해석 모두 기존 유선 번호 자릿수를 만족
+    ("010-1234-4882 또는 4883", None),
 ])
 def test_normalize_phone(raw, expected):
     assert normalize_phone(raw) == expected
@@ -122,6 +132,7 @@ def test_record_normalizes_reports_and_summarizes():
     assert out["status"] == "ok" and s.field_of("receiver_phone").value == "01098765432"
     assert s.field_of("items").value == Items(small_box_count=2)
     assert out["facts"]["phones_to_read"] == ["receiver_phone"]
+    assert out["facts"]["receiver_phone_readback"] == "01098765432"
     assert s.field_of("sender_phone").source == Source.CALLER_ID  # 발신번호는 서버가 채운다
     assert out["fields"]["receiver_name"] == "valid" and "sender_phone" not in out["fields"]
     assert out["missing"][0] == "sender_address" and out["stage"] == "address"  # 등록 고객 성함은 이미 채워짐
@@ -137,6 +148,51 @@ def test_bad_phone_and_pickup_not_saved_other_values_are():
     f = c.state.field_of("receiver_phone")
     assert (f.value, f.status, f.attempts) == ("01098765432", FieldStatus.VALID, 1)  # 정정 실패: 기존 값 유지
     assert call(c, "record_fields", {"pickup_at": TOMORROW})["facts"]["pickup"]["at"] == TOMORROW  # 수거 일시는 받지 않는다
+
+
+def test_receiver_phone_correction_reasks_and_hides_unresolved_number_from_submission():
+    from app.tests.test_domain import confirm_once, filled
+
+    c = ctx()
+    c.state = filled()
+    parcel_id = confirm_once(c.state)
+    open_for_edit(c.state, parcel_id)
+    previous = c.state.field_of("receiver_phone").value
+
+    unclear = call(c, "record_fields", {"receiver_phone": "02-1234-488이요"})
+    assert unclear["code"] == "PHONE_AMBIGUOUS"
+    assert unclear["facts"]["phone_question"] == "받는 분 연락처를 처음부터 한 자리씩 다시 말씀해 주세요."
+    assert not unclear["can_proceed"]
+    assert c.state.field_of("receiver_phone").value == previous
+    assert "receiver_phone" not in draft_snapshot(c.state.current)
+    assert snapshot_for_submit(c.state) == []
+
+    short = call(c, "record_fields", {"receiver_phone": "끝 네 자리 사팔팔"})
+    assert short["code"] == "PHONE_INVALID_DIGITS"
+    assert short["facts"]["phone_question"] == "마지막 네 자리를 한 자리씩 다시 말씀해 주세요."
+
+    corrected = call(c, "record_fields", {"receiver_phone": "끝 네 자리 사팔팔이요"})
+    assert corrected["facts"]["receiver_phone_readback"] == previous[:-4] + "4882"
+    assert not c.state.current.receiver_phone_pending
+    assert corrected["can_proceed"]
+
+
+def test_invalid_receiver_phone_closes_confirmation_and_same_number_can_reopen_it():
+    from app.domain.confirm import issue_parcel_confirmation
+    from app.tests.test_domain import filled
+
+    c = ctx()
+    c.state = filled()
+    previous = c.state.field_of("receiver_phone").value
+    pending = issue_parcel_confirmation(c.state, P, c.clock())
+    assert pending
+    call(c, "record_fields", {"receiver_phone": "4882"})
+    assert c.state.pending is None
+    assert issue_parcel_confirmation(c.state, P, c.clock()) is None
+
+    recovered = call(c, "record_fields", {"receiver_phone": previous})
+    assert recovered["facts"]["receiver_phone_readback"] == previous
+    assert c.state.pending and c.state.pending.id != pending.id
 
 
 def test_item_changes_preserve_unmentioned_counts_and_respect_explicit_removal():
