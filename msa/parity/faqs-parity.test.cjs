@@ -20,6 +20,13 @@ test('FAQ production APIs preserve HTTP, snapshots, audits and durable notificat
     try{for(const guard of guards){await guard.query('ROLLBACK');guard.release();}}
     finally{await Promise.all([...sides.map((s) => s.db.end()), consultation.end()]);}
   });
+  const documents=await Promise.all(sides.map(async side=>{
+    const response=await fetch(side.base+(side.name==='monolith'?'/api/docs-json':'/operations/docs-json'));
+    assert.equal(response.status,200);return response.json();
+  }));
+  const security=documents.map(document=>document.paths['/api/ai/faqs'].get.security);
+  assert.deepEqual(security[0],[{adminSession:[]},{bearer:[]}]);
+  assert.deepEqual(security[1],security[0],'AI FAQ OpenAPI must require the same session or Bearer authentication');
   // Expired read fixtures stay in place; separate retention cases verify their physical removal.
   for(const side of sides){const guard=await side.db.connect();guards.push(guard);await guard.query('BEGIN');await guard.query('SELECT pg_advisory_xact_lock(20261103,157)');}
   const hash = await hashPassword('faq-parity-password');
@@ -101,6 +108,9 @@ test('FAQ production APIs preserve HTTP, snapshots, audits and durable notificat
   await pair('GET','/api/ai/faqs/10001',undefined,404,null);
   await pair('GET','/api/ai/faqs?category=기타',undefined,400,null);
   await pair('GET','/api/ai/faqs',undefined,401,null,{Cookie:'dva_session=invalid'});
+  await pair('GET','/api/ai/faqs',undefined,401,null,{Authorization:undefined});
+  await pair('GET','/api/ai/faqs',undefined,401,null,{Authorization:'Bearer invalid'});
+  await pair('GET','/api/ai/faqs',undefined,200,0,{Authorization:undefined});
   // Source AuthGuard requires Origin on writes; authenticated GET remains valid without it.
   await pair('GET','/api/ai/faqs',undefined,200,0,{Origin:undefined});
   await pair('PATCH','/api/faqs/10001',faq('Origin 거절'),403,0,{Origin:undefined});

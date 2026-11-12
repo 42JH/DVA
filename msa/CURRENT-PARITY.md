@@ -982,3 +982,10 @@ MSA #55는 operations 실패 뒤의 실제 신규 이미지 전달·DB 전달·�
 - 원본의 7개 자동 처리 책임을 현재 모듈·타이머·복구 진입점과 대조했다. FAQ 알림·PBX 녹취·진행 통화 수·불만 판정 네 구현은 TypeScript를 실행 JavaScript로 변환한 AST/리터럴이 원본과 같다. 주문 유지보수는 초안/접수 복구·청구 월 전환·만료 취소·유료 주문 재접수로, 결제는 order의 결제/안내와 customer의 카드 해제로, 보관은 각 소유 DB 워커와 삭제 이벤트로 연결되어 있다. 새 워커나 도구를 추가하지 않는다.
 - !603에서 검증한 불변 이미지로 여섯 격리 DB와 전체 API를 한 번 종합 대조했다. 현재 인증·주소 계약에 맞춘 임시 진단 복사본만 사용하며 최초 052 검증 코드/기준/과거 로그는 바꾸지 않았다. 117개 경로의 순차 응답/계약 대조에서 AI FAQ의 OpenAPI가 Bearer 대신 인증 생략을 표기하는 차이를 확인했다. 실제 인증 응답은 같았다. 감사 생성 시각·홈 observedAt·프로세스별 metrics도 바이트 차이가 있어 업무 값과 구분해 확인한다.
 - 원본과 MSA 모두 신규 통화의 구형 주문 생성 fixture를 409로 거절하므로 과거 052의 201 기대를 현재 실행에 그대로 적용할 수 없다. 새 API 동작은 바꾸지 않고 현행 신규 통화 흐름과 legacy fixture를 구분해 나머지 종합 대조를 이어간다. 근거는 verification-logs/current-parity/current-global-second/differential.json과 worker-executable-audit.json이다. 이 커밋은 대조 기록만 추가하며 다음 단위는 확인된 FAQ 계약 차이 수정과 영향 서비스 실행 검증이다.
+
+### 101. AI FAQ의 실제 인증과 OpenAPI 계약 일치
+
+- 종합 HTTP/계약 대조에서 GET /api/ai/faqs의 원본 security는 관리자 세션 또는 Bearer인데 MSA는 관리자 세션 또는 인증 생략으로 표기했다. 실제 guard는 양쪽 모두 AI_BUSINESS_TOKEN 또는 관리자 세션을 요구했다. 기존 MSA 컨트롤러의 security와 안내 문구 세 곳만 원본대로 바꿨고 guard·업무 API·DTO는 유지했다.
+- 기존 FAQ 검사 안에 실제 양쪽 OpenAPI의 security 비교와 무토큰/잘못된 토큰 401·정상 관리자 세션 200을 추가했다. 변경 전 실제 응답의 인증 생략 배열을 같은 단언이 거절하는 것을 확인했다. 테스트 파일을 추가하지 않았다.
+- 새 operations checks·운영 이미지의 lint·Jest 10·Node/보안 21건과 실제 전체 operations 드라이버 198단계가 통과했다. 원본 fa0e4a2f와 기존의 다른 서비스/DB 이미지 ID를 재사용했고 로컬 1 CPU·3GB 조건이다. 원본 계약 검사 11건도 새로 통과했다. 근거는 faq-security-red.log·faq-security-build.log와 faq-security-native/verification.json·validated-inputs.json이다.
+- 이 단위는 FAQ 계약 보강이며 Jenkins #62 성공을 뜻하지 않는다. 사용자 실패 보고 후 실제 콘솔을 읽었고 공통 이벤트 검증의 PostgreSQL 시작 중 CREATE DATABASE 실패를 별도 단위로 추적한다. Jenkins 설정·슬롯·Job은 변경하지 않았다.
