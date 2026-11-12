@@ -112,6 +112,8 @@ class Runtime:
     # 서버 질문(후보·확인·출발지·박스·콜백)에 답하는 발화의 Decision 반영 대기. 같은 턴의 Backend 도구 호출이 기다린다
     deciding: asyncio.Event | None = None
     name_saving: tuple | None = None                  # 동의 즉시 PATCH를 보낸 (이름[, 주소, 상세])(중복 전송 방지)
+    guidance_t: float = 0.0                          # 마지막 서버 발화 요청 시각(늦은 수긍 안내를 버리는 기준)
+    pending_guidance: int = 0                        # 실행 중 업무 처리·대기 중 N2는 일반 수긍보다 우선한다
 
     def cancel(self) -> None:
         for h in (self.endpoint, self.ai_end, self.commit):
@@ -594,6 +596,12 @@ class LiveFlow:
                     s.spawn(self._follow(s, *f), "confirmation_hold")
                 else:
                     await self._follow(s, *f)
+        reply = answers.get("reply")
+        if (not any(followups) and reply and reply[1] >= th and reply[0] in ("acknowledge", "help")
+                and (not switch or switch[0] == "none")
+                and (not task or task[0] == "chit_chat")):
+            s.spawn(self.notify(s, "N2", {"acknowledgement": reply[0]}, again=True, reply_turn=utt),
+                    "acknowledgement")
 
     def _apply_destination_reply(self, s: CallSession, utt: Spoken, prev: Spoken | None,
                                  candidates: CandidateSet | None, answer, switch) -> dict[str, str] | None:
@@ -696,6 +704,14 @@ class LiveFlow:
 
     async def commit(self, s: CallSession, pending_id: str) -> None:
         rt = self.rt(s)
+        rt.pending_guidance += 1
+        try:
+            await self._commit(s, pending_id)
+        finally:
+            rt.pending_guidance -= 1
+
+    async def _commit(self, s: CallSession, pending_id: str) -> None:
+        rt = self.rt(s)
         rt.commit = rt.commit_pid = None
         draft_save = None
         draft_cancel = None
@@ -769,6 +785,14 @@ class LiveFlow:
             await self.notify(s, "N2", {"cancel": out.to_output()})
 
     async def _follow(self, s: CallSession, what: str, value) -> None:
+        rt = self.rt(s)
+        rt.pending_guidance += 1
+        try:
+            await self._follow_inner(s, what, value)
+        finally:
+            rt.pending_guidance -= 1
+
+    async def _follow_inner(self, s: CallSession, what: str, value) -> None:
         st = s.state
         if what == "hold":
             pending_id, utterance_id, delegations = value
@@ -1094,6 +1118,14 @@ class LiveFlow:
             dtime.fromisoformat(self.cfg.agent_open) <= k.time() < dtime.fromisoformat(self.cfg.agent_close)
 
     async def _transfer(self, s: CallSession) -> None:
+        rt = self.rt(s)
+        rt.pending_guidance += 1
+        try:
+            await self._transfer_inner(s)
+        finally:
+            rt.pending_guidance -= 1
+
+    async def _transfer_inner(self, s: CallSession) -> None:
         """안내("바로 연결해 드리겠습니다")가 끝나면 통화 전환(SIP REFER, PBX 계약: 고객 동의 후에만). 실패 → 콜백 제안."""
         deadline = time.monotonic() + 10.0
         rt = self.rt(s)
@@ -1386,7 +1418,21 @@ class LiveFlow:
 
     # ------------------------------------------------------------------ 전달(N1'/N2)
     async def notify(self, s: CallSession, level: str, facts: dict, again: bool = False,
-                     *, unless_tool_turn: Spoken | None = None, cancel_confirmation_id: str | None = None) -> None:
+                     *, unless_tool_turn: Spoken | None = None, cancel_confirmation_id: str | None = None,
+                     reply_turn: Spoken | None = None) -> None:
+        rt = self.rt(s)
+        if level == "N2":
+            rt.pending_guidance += 1
+        try:
+            await self._notify(s, level, facts, again, unless_tool_turn=unless_tool_turn,
+                               cancel_confirmation_id=cancel_confirmation_id, reply_turn=reply_turn)
+        finally:
+            if level == "N2":
+                rt.pending_guidance -= 1
+
+    async def _notify(self, s: CallSession, level: str, facts: dict, again: bool = False,
+                      *, unless_tool_turn: Spoken | None = None, cancel_confirmation_id: str | None = None,
+                      reply_turn: Spoken | None = None) -> None:
         """N1' thinking(무음) · N2 commentary(말할 것, AI 발화가 멈춘 뒤·진행 위임 뒤).
         again: 같은 내용이라도 다시 보낸다(마무리 인사 재요청)."""
         rt = self.rt(s)
@@ -1405,6 +1451,26 @@ class LiveFlow:
             t0 = time.monotonic()
             await self._wait_quiet(s, min_quiet_ms=self.cfg.utterance_gap_ms if receipt_pid else 0,
                                    wait_delegations=not parcel_added)
+            if reply_turn:
+                # 대기 상한이 지나도 실행 중 업무·다른 안내·새 고객 발화를 앞질러 말하지 않는다.
+                if (s.phase != Phase.ACTIVE or s.closed or rt.customer_turns[-1:] != [reply_turn]
+                        or rt.cust is not None or rt.pending_guidance > 1 or self._awaiting_answer(s)
+                        or rt.guidance_t >= reply_turn.t_start or s.last_output_t > reply_turn.t_start
+                        or any(d["inflight"] or d["outputs"] or not d["done"].is_set()
+                               for d in rt.delegations.values())):
+                    return
+                if facts["acknowledgement"] == "help":
+                    facts = {"acknowledgement": "clarify"}
+                elif (s.state.intent == "lookup" and s.state.selected_order is None
+                      or s.state.intent == "cancel" and not s.state.cancel_done):
+                    facts = {"acknowledgement": "clarify", "intent": s.state.intent}
+                elif s.state.intent == "order":
+                    summary = state_summary(s.state, self.policy)
+                    facts = {"acknowledgement": "ask_help" if summary["stage"] == "more_parcels" else "continue",
+                             "summary": summary}
+                else:
+                    facts = {"acknowledgement": "ask_help" if s.state.intent else "ask_intent"}
+                content = json.dumps(facts, ensure_ascii=False, sort_keys=True)
             if cancel_confirmation_id and (not s.state.pending or s.state.pending.id != cancel_confirmation_id):
                 return
             if parcel_added and (s.closing_requested_t or s.closed or assess(s.state, self.policy).stage != "more_parcels"):
@@ -1477,6 +1543,8 @@ class LiveFlow:
         if s.sideband is None or s.phase in (Phase.CLOSED, Phase.FAILED, Phase.FINALIZING, Phase.DONE):
             return False
         try:
+            if event.get("type") in ("session.commentary.append", "response.create"):
+                self.rt(s).guidance_t = time.time()
             await s.sideband.send(event | {"event_id": s.next_event_id()})
         except Exception as e:
             log.warning("송신 실패 %s %s %s", s.call_id, event.get("type"), type(e).__name__)
