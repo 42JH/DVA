@@ -889,3 +889,11 @@ MSA #55는 operations 실패 뒤의 실제 신규 이미지 전달·DB 전달·�
 - 원본/분리 DB에 고객 1,160명과 주문 참조 1,050건·최근 PIN/카드/멤버십을 넣었다. 실제 저장소와 워커에서 잠긴 고객을 건너뛰고 100·4·1명을 순차 삭제했으며, 최종 1,055명의 전체 행을 정규화한 해시와 보존 ID가 일치했다. 주문 조회 503과 실제 삭제 트리거 실패에서 전체 고객 행이 롤백됐다. 원본/MSA 워커의 실제 10초 타이머·중복 실행 공유·실패 후 재시도·진행 중 종료/종료 뒤 무작업도 통과했다. 초기 fixture의 존재하지 않는 고객 created_at/updated_at 사용은 실제 스키마에 맞춰 수정했다.
 - 연결된 최종 고객 checks/운영 이미지와 고객 전체 78단계, 주문 전체 237단계가 통과했다. 새 카드 검사는 정리 워커와 같은 전역 잠금을 별도 세션에서 유지해 자동 작업과 통제된 실패 검사가 경합하지 않게 했다. 실제 내부 HTTP·FK 결과·재시도/중복·동시 접수 20건·삭제/복구/취소·결제/배송·청구/정기 작업을 포함한다. 근거는 customer-retention-final-customer-native.log·customer-retention-final-order-native.log와 card-retention-{customer,order}-native/verification.json이다.
 - 최신 원격 fcf482bc에서 새 feature/msa-customer-retention 브랜치를 만들어 검증한 세 선행 커밋만 연결했고 코드 트리가 이전 작업과 같음을 확인했다. 기존 브랜치는 보존했다. backend/프론트/AI·Jenkins 설정은 수정하지 않았으며 DDL과 테스트 파일 69개도 그대로다. 고객 보관 네 단위의 동작 대조는 완료했으며 같은 커밋의 나머지 서비스/CI 진입점·패키징 검증을 이어간다. 상담·주문/배송 보관과 전체 최종 동등성·실제 Jenkins/운영 배포는 남아 있다.
+
+### 87. 고객 보관 묶음의 전체 CI 진입점과 패키징 검증
+
+- 실행 커밋 c37193b2611e01077164e309748cd3532deef580의 실제 ci_workspace/ci_images 진입점으로 고정 원본·깨끗한 snapshot·11개 이미지 ID/소유 라벨을 검증했다. 계약 11건, 각 서비스의 checks/운영 이미지 빌드와 공통 Node 37·실제 PostgreSQL/HTTP 16건이 통과했다.
+- 로컬 1 CPU·3GB 격리 Docker에서 같은 이미지로 operations 198·고객 78·상담 154·주문 237단계, 총 667단계가 모두 통과했다. 보고서별 원본 트리와 모든 공유 이미지 ID를 교차 확인했다. 원본과 프론트/AI에는 변경을 쓰지 않았다.
+- DDL/DB 검사 입력이 같음을 기존 ci_verification.reuse_database가 확인해 11cca4d7의 실제 DB 236단계 성공 근거를 재사용했다. DB 전체 검사를 반복하지 않았다. 변경 없는 배포·선택·이력·롤백 130건도 검증 입력의 바이트 일치를 확인해 재사용했다. 서비스별 비교용 격리 DB에는 스키마를 적용했다.
+- 다섯 앱과 DB 패키징·이미지 ID·manifest 태그 치환·전체 SHA256SUMS가 통과했다. 로컬 검증 보조 스크립트의 이미지 전송 경로 오류는 기존 읽기 전용 전송 마운트로 바로잡았고, 이미 성공한 동일 커밋의 이미지/공통 검증을 확인한 뒤 재생성 없이 나머지 서비스와 패키징부터 이어 실행했다. 운영 Jenkins 설정·슬롯·Job에는 접근하거나 변경하지 않았다.
+- 근거는 verification-logs/current-parity/customer-retention-cli/summary.json·ci-images.json·서비스별 verification.json·release-manifests와 실행 로그다. 테스트 파일 경로는 최초와 같은 69개다. 최신 원격은 여전히 fcf482bc/원본 ce88b8e3이며 이 후속 커밋은 검증 보고만 추가한다. 고객 보관 묶음을 MR로 제출하고 상담 보관 이식을 이어간다. 실제 새 Jenkins 실행·운영 배포와 전체 MSA 동등성 완료는 미검증이다.
