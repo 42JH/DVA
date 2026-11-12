@@ -63,7 +63,7 @@ order의 쓰기 감사는 기존 `AuditPrepared`/`AuditCommitted`/`AuditAborted`
 
 ## 주문 취소 명령과 배송 조회
 
-`@dva/events/order-cancellation.cjs`의 OrderCancellationRequested는 AI의 기존 두 POST를 위한 고정 명령이다. order → consultation → customer → order 순서이며 통화/고객의 기존 공유 잠금을 업무/감사 ACK까지 유지한다. id·callSessionSeq·requestId·orderParcelSeqs만 입력받고 타 소유자가 확인한 caller/customerSeq만 다음 단계로 전달한다. 관리자 actor를 입력으로 받지 않는다. 각 내부 경로는 기존 token/source/정확한 키·ID·결과를 검증하고 OpenAPI/Ingress에서 제외한다.
+`@dva/events/order-cancellation.cjs`의 OrderCancellationRequested는 AI의 기존 두 POST를 위한 고정 명령이다. order → consultation → customer → order 순서이며 통화/고객의 기존 공유 잠금을 업무/감사 ACK까지 유지한다. id·callSessionSeq·requestId·orderParcelSeqs를 입력받고 각 서비스가 확인한 caller/customerSeq를 다음 단계로 전달한다. 배송 초안 방식의 통화는 consultation이 `unpaidOnly: true`를 붙이고 order가 잠근 주문의 결제 대기 상태를 확인한다. 관리자 actor를 입력으로 받지 않는다. 각 내부 경로는 기존 token/source/정확한 키·ID·결과를 검증하고 OpenAPI/Ingress에서 제외한다.
 
 조회 OrderReadRequested는 읽기 전용으로 유지한다. 취소 명령은 큐/자동 재시도/개인정보 결과 저장을 추가하지 않으며, 원본의 전체 재시도 409·상세 기취소 no-op 204를 따른다. 성공 ACK는 같은 eventId/processed/payload=null이다. 감사 확정 ACK와 구분하며 영속 감사는 기존 outbox/relay/생산자 종료 복구를 사용한다. 공개 100KiB 한도는 유지하고 필드가 더해지는 내부 취소/배송 envelope만 256KiB 파서를 사용한다. 내부 callback에는 감사 준비·확정이 포함되므로 hop timeout은 30/25/20초다. 의존 장애·잘못된 ACK는 503으로 실패한다.
 

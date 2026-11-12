@@ -7,8 +7,10 @@ const date = value => typeof value === 'string' && Number.isFinite(Date.parse(va
 function validateOrderCancellation(event, source) {
   validateEvent(event);
   const payload = event.payload, command = payload.command;
+  const scopeKeys = source === 'order' ? 'command' : source === 'consultation' ? 'caller,command' : 'command,customerSeq';
+  const unpaidOnly = source !== 'order' && payload.unpaidOnly === true;
   if (!['order','consultation','customer'].includes(source) || event.source !== source || event.eventType !== 'OrderCancellationRequested' ||
-      !keys(payload, source === 'order' ? 'command' : source === 'consultation' ? 'caller,command' : 'command,customerSeq') ||
+      !keys(payload, unpaidOnly ? scopeKeys + ',unpaidOnly' : scopeKeys) ||
       !keys(command, 'callSessionSeq,id,orderParcelSeqs,requestId') || !id(command.id) || !id(command.callSessionSeq) ||
       typeof command.requestId !== 'string' || command.requestId.length < 1 || command.requestId.length > 128 ||
       !(command.orderParcelSeqs === null || Array.isArray(command.orderParcelSeqs) && command.orderParcelSeqs.length > 0 &&

@@ -32,6 +32,7 @@ export class OrderCancellationController {
       command.requestId,
       command.orderParcelSeqs ?? undefined,
       event.payload.customerSeq!,
+      event.payload.unpaidOnly,
     );
     return { eventId: event.eventId, status: 'processed', payload: null };
   }

@@ -91,9 +91,16 @@ export class OrdersService {
     adminId: number | null,
     callId: number | null,
     orderId?: number,
+    draftCancellation = false,
   ) {
     if (adminId !== null) return null;
     const call = await this.repository.readCustomer(client, callId!);
+    if (!call && draftCancellation)
+      throw new ApiException(
+        409,
+        'INVALID_STATE',
+        '신규 통화의 수정·취소는 배송 초안 API를 사용해 주세요.',
+      );
     if (!call) throw new ApiException(404, 'NOT_FOUND', '통화를 찾을 수 없습니다.');
     if (call.endedAt !== null && call.orderSeq !== orderId)
       throw new ApiException(
@@ -638,22 +645,24 @@ export class OrdersService {
   ): Promise<void> {
     const callId = this.callId(adminId, callSessionHeader);
     await this.database.transaction(async (client) => {
-      if (adminId === null && (await this.repository.isDraftCall(client, callId!)))
-        throw new ApiException(
-          409,
-          'INVALID_STATE',
-          '신규 통화의 수정·취소는 배송 초안 API를 사용해 주세요.',
-        );
-      const customerId = await this.readCustomer(client, adminId, callId, id);
+      const unpaidOnly = adminId === null && (await this.repository.isDraftCall(client, callId!));
+      const customerId = await this.readCustomer(client, adminId, callId, id, unpaidOnly);
       const order = await this.repository.lockOrder(client, id);
-      if (await this.repository.hasMigratedDrafts(client, id))
+      const ownsOrder = customerId === null || order?.customerSeq === customerId;
+      if (ownsOrder && (await this.repository.hasMigratedDrafts(client, id)))
         throw new ApiException(
           409,
           'INVALID_STATE',
           '미완료 배송 초안으로 이관된 주문입니다. 배송 초안 API에서 보완해 주세요.',
         );
-      if (!order || (customerId !== null && order.customerSeq !== customerId))
+      if (!order || !ownsOrder)
         throw new ApiException(404, 'NOT_FOUND', '주문을 찾을 수 없습니다.');
+      if (unpaidOnly && order.status !== 'notPaid')
+        throw new ApiException(
+          409,
+          'INVALID_STATE',
+          '신규 통화에서 결제 대기 주문만 취소할 수 있습니다.',
+        );
       const parcels = await this.repository.lockParcels(client, id);
       const selectedIds = orderParcelSeqs === undefined ? null : new Set(orderParcelSeqs);
       const selected = selectedIds

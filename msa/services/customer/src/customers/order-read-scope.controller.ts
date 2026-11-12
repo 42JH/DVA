@@ -99,7 +99,13 @@ export class OrderReadScopeController {
         const next = {
           ...event,
           source: 'customer',
-          payload: { command, customerSeq: customer.id },
+          payload: {
+            command,
+            customerSeq: customer.id,
+            ...('unpaidOnly' in event.payload && event.payload.unpaidOnly
+              ? { unpaidOnly: true as const }
+              : {}),
+          },
         };
         const token = this.config.get('CUSTOMER_AUTH_TOKEN', { infer: true });
         const payload =

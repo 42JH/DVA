@@ -410,34 +410,38 @@ export class OrderReadScopeController {
     try {
       return await this.database.transaction(async (client) => {
         const command = event.payload.command;
-        if (
-          event.eventType === 'OrderCancellationRequested' &&
-          (
-            await client.query(
-              'SELECT 1 FROM call_sessions WHERE call_session_seq=$1 AND order_intake_enabled',
-              [command.callSessionSeq],
-            )
-          ).rowCount
-        )
-          throw new ApiException(
-            409,
-            'INVALID_STATE',
-            '신규 통화의 수정·취소는 배송 초안 API를 사용해 주세요.',
-          );
-        const caller = (
+        const call = (
           await client.query<{
             phone: string | null;
             endedAt: Date | null;
             orderSeq: number | null;
+            orderIntakeEnabled: boolean;
           }>(
-            `SELECT caller_phone_number AS phone,ended_at AS "endedAt",order_seq AS "orderSeq"
+            `SELECT caller_phone_number AS phone,ended_at AS "endedAt",order_seq AS "orderSeq",
+             order_intake_enabled AS "orderIntakeEnabled"
            FROM call_sessions WHERE call_session_seq=$1 AND deleted_at IS NULL
              AND (incoming_at IS NULL OR incoming_at>clock_timestamp()-interval '5 years') FOR SHARE`,
             [command.callSessionSeq],
           )
         ).rows[0];
-        if (!caller)
+        if (!call) {
+          if (
+            event.eventType === 'OrderCancellationRequested' &&
+            (
+              await client.query(
+                'SELECT 1 FROM call_sessions WHERE call_session_seq=$1 AND order_intake_enabled',
+                [command.callSessionSeq],
+              )
+            ).rowCount
+          )
+            throw new ApiException(
+              409,
+              'INVALID_STATE',
+              '신규 통화의 수정·취소는 배송 초안 API를 사용해 주세요.',
+            );
           throw new ApiException(404, 'NOT_FOUND', '통화를 찾을 수 없습니다.');
+        }
+        const { orderIntakeEnabled, ...caller } = call;
         if (
           caller.endedAt !== null &&
           !(
@@ -457,6 +461,10 @@ export class OrderReadScopeController {
           source: 'consultation',
           payload: {
             command,
+            ...(event.eventType === 'OrderCancellationRequested' &&
+            orderIntakeEnabled
+              ? { unpaidOnly: true as const }
+              : {}),
             caller: {
               ...caller,
               endedAt: caller.endedAt?.toISOString() ?? null,
