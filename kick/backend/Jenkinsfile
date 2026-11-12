@@ -1,0 +1,36 @@
+pipeline {
+    agent { label 'built-in' }
+
+    options {
+        disableConcurrentBuilds()
+        timeout(time: 20, unit: 'MINUTES')
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+    }
+
+    parameters {
+        booleanParam(name: 'DEPLOY_KICK', defaultValue: false, description: '검증한 이미지를 Kick Lightsail 스택에 배포')
+    }
+
+    triggers {
+        pollSCM('H/5 * * * *')
+    }
+
+    stages {
+        stage('Build and verify') {
+            steps {
+                dir('kick/backend') {
+                    sh 'sh scripts/ci.sh'
+                }
+            }
+        }
+
+        stage('Deploy Kick') {
+            when { expression { params.DEPLOY_KICK } }
+            steps {
+                dir('kick/backend') {
+                    sh 'sh scripts/deploy.sh'
+                }
+            }
+        }
+    }
+}
