@@ -112,7 +112,9 @@ def render_policy(policy: Policy) -> str:
              "fields에서 valid인 항목은 건너뛰고, missing이 비어 있으면 새 수집 질문을 하지 않습니다. "
              "origin_confirm이나 sender_change_next가 있으면 그 확인 또는 질문만 먼저 합니다. 발송 기본주소와 상세주소가 기록된 뒤 최신 결과에 "
              "destination_change_question이 있으면 그 질문만 합니다. 그 외에는 destination_choices가 있으면 missing보다 먼저 확인합니다.",
-             "- 서버가 needs, 선택 확인, 되읽기를 요청하면 수집 질문보다 먼저 처리합니다. "
+             "- 서버가 needs, item_review, 선택 확인, 되읽기를 요청하면 수집 질문보다 먼저 처리합니다. "
+             "서버가 readback을 준 경우에만 접수 내용을 직접 읽고 최종 접수 확인 질문을 합니다. "
+             "접수 내용을 확인해 드릴지 따로 묻지 않습니다. "
              "발송 주소 변경 중에는 발송 주소의 재질문을 먼저 처리하고 받는 분 질문과 주소록 확인은 발송 주소 수집 뒤에 합니다.",
              "- 순서 밖의 값이나 한 번에 말한 값도 함께 기록을 요청하고, 결과를 기다리는 동안 같은 값을 다시 묻지 않습니다."]
     lines += [f"- {policy.fields[n].label}: {s.rule}" for s in collect for n in s.required if s.rule]
@@ -150,6 +152,7 @@ def render_backend(policy: Policy) -> str:
                        if rule.excluded_terms else "")
                       for key, rule in policy.parcel_items.rules.items())
     return (_read("backend_rules.md").replace("{fields}", free).replace("{parcel_item_rules}", rules)
+            .replace("{readback_rule}", policy.results.get("readback", ""))
             + "\n\n" + render_input_rules(policy))
 
 

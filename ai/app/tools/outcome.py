@@ -86,8 +86,13 @@ def state_summary(state: ConversationState, policy: Policy) -> dict:
         summary["box_size_pending"] = True
     elif state.current and state.current.documents_only():
         fields["item_price"] = FieldStatus.VALID.value
+    if state.intent == "order" and state.unassigned_item_issues:
+        summary["item_review"] = {"code": "ITEM_PARCEL_UNCLEAR"}
+    elif state.intent == "order" and state.current and state.current.item_issues:
+        issues = state.current.item_issues.values()
+        summary["item_review"] = {"code": next(iter(issues)).code, "guidance": [issue.guidance for issue in issues]}
     if (state.intent == "order" and summary["missing"]
-            and not (summary.keys() & {"sender_change_next", "destination_choices", "box_size_pending"})):
+            and not (summary.keys() & {"sender_change_next", "destination_choices", "box_size_pending", "item_review"})):
         summary["next_field"] = summary["missing"][0]
     return summary
 

@@ -46,9 +46,13 @@ def test_readback_yields_to_customer_before_the_confirmation_question():
     assert "접수 확인을 읽는 중에도 문장 중간에서 멈춥니다" in text
     assert "끊긴 문장을 그대로 이어 읽지 않습니다" in text
     assert "고객이 끼어들지 않으면" in readback and "이대로 접수할까요?" in readback
+    assert "바로 같은 응답에서 접수 내용을 요약한다" in readback
+    assert "요약해도 되는지 먼저 묻거나 중간에 고객의 답을 기다리지 않는다" in readback
     assert "고객이 끼어들면 공통 끼어들기 규칙을 따른다" in readback
     assert "읽는 중 고객이 끼어들면 공통 끼어들기 규칙이 우선합니다" in business_rules()
-    assert "고객의 최신 발화가 정정이나 새 질문이면 그 내용을 먼저 처리합니다" in render_backend(POLICY)
+    backend = render_backend(POLICY)
+    assert readback in backend and "{readback_rule}" not in backend
+    assert "고객의 최신 발화가 정정이나 새 질문이면 그 내용을 먼저 처리합니다" in backend
 
 
 def test_live_instructions_carry_policy_order_forbid_and_delegation():

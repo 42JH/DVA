@@ -146,6 +146,7 @@ def test_order_flow_end_to_end(tmp_path, readback, answer, answer_at):
         await until(lambda: "response.create" in sent_types(conn))
         out = json.loads(next(e for e in conn.sent if e["type"] == "response.item.create")["item"]["output"])
         assert out["status"] == "ok" and out["can_proceed"] and "readback" in out["facts"]  # N1: 확인 내용
+        assert set(out["facts"]["readback"]) == {"sender_name", "from", "to", "receiver_name"}
         assert "readback_id" not in out["facts"]
         conn.push({"type": "response.event", "delegation_id": "d1", "event": {"type": "response.completed"}})
         await ai(conn, readback, 5000)

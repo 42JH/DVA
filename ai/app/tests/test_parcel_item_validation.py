@@ -85,6 +85,42 @@ def test_faq_prohibited_categories_block_even_when_box_is_valid(rule, item):
     assert outcome.kind == "INCOMPLETE" and not outcome.parcels
 
 
+def test_watch_denial_does_not_block_readback_after_price():
+    c = ctx()
+    c.state = filled()
+    c.state.clear("items")
+    c.state.clear("item_price")
+    result = record(c, "시계 하나 보내려고요", "valuables", "inquiry",
+                    box_suggestion={"size": "small", "count": 1, "quote": "시계 하나"})
+    assert "box_proposal" in result["facts"]
+    record(c, "네, 맞습니다", turn=2, small_box_count=1)
+    result = record(c, "아닙니다", "valuables", "condition_unmet", turn=3)
+    assert result["missing"] == ["item_price"] and not c.state.current.item_issues
+
+    result = record(c, "이십만 원이요", turn=4, item_price=200000)
+    assert result["status"] == "ok" and "readback" in result["facts"]
+
+    result = record(c, "보석 시계예요", "valuables", turn=5)
+    assert result["code"] == "PROHIBITED_ITEM" and "readback" not in result.get("facts", {})
+    summary = call(c, "get_state", {})
+    assert summary["item_review"]["code"] == "PROHIBITED_ITEM"
+    assert "next_field" not in summary and not summary["can_proceed"]
+    result = record(c, "삼십만 원이요", turn=6, item_price=300000)
+    assert result["item_review"]["code"] == "PROHIBITED_ITEM"
+    assert "readback" not in result.get("facts", {})
+
+
+@pytest.mark.parametrize(("rule", "item"), [("valuables", "보석"), ("dangerous_goods", "농약"), ("perishables", "냉동식품")])
+def test_short_denial_cannot_be_recorded_as_prohibited_item(rule, item):
+    c = ctx()
+    c.state = filled()
+    result = record(c, "아, 아닙니다.", rule, "included")
+    assert result["can_proceed"] and not c.state.current.item_issues
+
+    result = record(c, f"아닙니다. {item}은 같이 넣었어요.", rule, "included", turn=2)
+    assert result["code"] == "PROHIBITED_ITEM" and not result["can_proceed"]
+
+
 @pytest.mark.parametrize(("rule", "first", "answer"), [
     ("batteries", "배터리가 들어 있어요", "기기에 장착했어요"),
     ("liquids", "음료가 들어 있어요", "누수 방지 포장을 했어요"),
