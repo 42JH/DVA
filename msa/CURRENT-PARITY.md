@@ -944,6 +944,12 @@ MSA #55는 operations 실패 뒤의 실제 신규 이미지 전달·DB 전달·�
 ### 95. 단일 주문 보관 워커와 실제 production 주기 검증
 
 - 초안 전용 워커를 OrderRetentionWorker로 통합하고 기존 복원 서비스가 완료된 뒤 시작한다. 즉시/10초 실행·test 자동 실행 금지·중복 tick 공유·실패 재시도·진행 중 종료 대기를 유지하며 보관 이벤트만 주기당 최대 10건 전달한다. 기존 배송 접수 intent와 다른 업무 릴레이는 유지한다.
-- order checks/운영 이미지의 lint·Jest 7·보안 9·Node 35건이 통과했다. 전체 주문 드라이버 242단계가 통과했고 주 비교 47건, 기존 복원·삭제·취소·결제·청구 회귀와 별도 실제 production 주문 타이머가 포함된다. 원본/MSA의 만료 주문·상세·배송·이력 삭제, 최근 주문·살아 있는 승인 임대 보존, sender delivered_at과 receiver inbox를 확인했다.
+- order checks/운영 이미지의 lint·Jest 7·보안 9·Node 35건이 통과했다. 전체 주문 드라이버 243단계가 통과했고 주 비교 47건, 기존 복원·삭제·취소·결제·청구 회귀와 별도 실제 production 주문 타이머가 포함된다. 원본/MSA의 만료 주문·상세·배송·이력 삭제, 최근 주문·살아 있는 승인 임대 보존, sender delivered_at과 receiver inbox를 확인했다.
 - production GC가 읽기용 만료 fixture를 건드리던 경합은 전용 전화 잠금으로 분리해 자동 GC와 실제 table-lock 검사를 모두 유지했다. 보관 배치는 다른 사례의 과거 주문과 분리해 원본의 10건 한도를 그대로 검사한다. 상담 수신 커밋 뒤 sender ACK가 늦어지는 기존 검증 경합은 실제 advisory gate로 재현하고 같은 20초 제한 안에서 ACK 커밋까지 확인했다. 기대값·검사·기한은 완화하지 않았다.
 - 근거는 order-retention-full-order/verification.json·실행 로그와 order-retention-worker-{checks,production}.log다. 기존 테스트 파일 69개와 DDL·의존성을 유지한다. 실제 Jenkins 설정·슬롯·Job에 접근하지 않았으며 전체 서비스 CI/패키징과 운영 배포는 아직 확인하지 않았다. 다음은 삭제 뒤 재시도·키 재사용·지연 이벤트의 마지막 대조다.
+
+### 96. 물리 만료 뒤 생성 키 재사용과 워커 복구
+
+- 같은 공개 관리자 API와 Idempotency-Key로 원본/MSA를 호출했다. 보관 중 재시도는 같은 주문을 반환하고, 만료됐지만 물리 삭제 전인 키는 원본 코드·실행과 같이 409 INVALID_STATE다. 실제 보관 SQL이 주문을 지운 뒤에는 같은 키로 새 주문을 만들며 다시 재시도해도 새 주문 하나만 남는다. 생성 시퀀스·상태·버전과 각 소유 DB의 제거를 함께 확인했다.
+- 실제 order 워커의 배송 목적지를 503으로 만들었다. 업무 삭제가 커밋되어도 outbox는 같은 eventId와 attempt_count=1로 남고 수신 inbox는 생기지 않았다. 워커 인스턴스를 종료한 뒤 새 인스턴스가 실제 delivery에 같은 이벤트를 전달해 ACK와 inbox 한 건을 확정했다. 원본은 없어진 상세의 배송 INSERT를 FK로 거절했고 MSA도 뒤늦은 생성 이벤트를 받아 업무 배송을 재생성하지 않았다.
+- 기존 주문 보관 사례 안에서 검증했으며 테스트 파일은 69개 그대로다. 마지막 집중 드라이버와 별도 실제 production 주문 타이머가 통과했다. 근거는 order-retention-replay-order-native-focus/verification.json과 실행 로그다. 주문·배송 다섯 단위의 대조를 마쳤으며 다음은 같은 커밋의 전체 서비스 CI·패키징 검증이다. 새 Jenkins 실행·운영 배포는 아직 확인하지 않았다.

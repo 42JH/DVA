@@ -7454,7 +7454,7 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
       result.months=(await db.query('SELECT to_jsonb(r) AS row FROM organization_billing_months r WHERE organization_seq BETWEEN 930001 AND 930003 ORDER BY organization_seq,billing_month')).rows;return result;
     };
     const shipmentRows=async db=>(await db.query('SELECT order_parcel_seq,tracking_number,status FROM shipments WHERE order_parcel_seq=ANY($1::int[]) ORDER BY order_parcel_seq',[ids])).rows;
-    const guard=await databases.consultation.connect(),locked=[],outside=[];let originalFetch;
+    const guard=await databases.consultation.connect(),locked=[],outside=[],createdRoots=[[],[]];let originalFetch;
     await guard.query("SELECT pg_advisory_lock(hashtextextended('call-end:'||$1,0))",[phone]);retention.push(guard);
     try{
       for(const db of [reference,databases.order])await local(db).transaction(async client=>{
@@ -7531,6 +7531,48 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
       for(const id of [910018,910019,910020])assert.equal((await roots(reference)).includes(id),false);
       for(let attempt=0;attempt<20&&await relay();attempt++);
       assert.deepEqual(await shipmentRows(delivery),await shipmentRows(reference));
+      const customerId=941001,key=randomUUID();
+      for(const db of [reference,databases.customer])await db.query("INSERT INTO customers(customer_seq,name,phone_number,status) OVERRIDING SYSTEM VALUE VALUES($1,'보관 키 재사용 고객','01094110000','ACTIVE')",[customerId]);
+      const address={name:'보관 키 수령인',phoneNumber:'01094112222',roadAddress:'보관 검증 도로',jibunAddress:'보관 검증 지번',detailAddress:'',dongName:'검증동',postalCode:'00123'};
+      const input={customerSeq:customerId,paymentMethodType:'billing',totalAmount:5000,pickupRequestedAt:new Date(Date.now()+3*86400000).toISOString(),parcels:[{origin:address,destination:address,documentCount:1,itemPrice:1000,notifiedPrice:5000}]};
+      async function create(status){
+        const requestId=randomUUID(),result=[];
+        for(const side of sides){const response=await fetch(side.base+'/api/admin/orders',{method:'POST',headers:{...headers,Origin:'http://localhost:5173','Content-Type':'application/json','Idempotency-Key':key,'X-Request-Id':requestId},body:JSON.stringify(input),signal:AbortSignal.timeout(30000)});const body=await response.json();assert.equal(response.status,status,side.name+' creation key '+JSON.stringify(body));result.push(body.data??body.error);}
+        if(status===201)assert.deepEqual(result.map(data=>({orderSeq:data.orderSeq,status:data.status,version:data.version}))[1],result.map(data=>({orderSeq:data.orderSeq,status:data.status,version:data.version}))[0]);
+        else assert.deepEqual(result[1],result[0]);
+        compared++;return result;
+      }
+      const first=await create(201),initialParcels=[];
+      for(const [side,db]of [reference,databases.order].entries()){
+        createdRoots[side].push(first[side].orderSeq);
+        initialParcels.push((await db.query('SELECT order_parcel_seq FROM order_parcels WHERE order_seq=$1 ORDER BY order_parcel_seq',[first[side].orderSeq])).rows.map(row=>row.order_parcel_seq));
+      }
+      const repeated=await create(201);for(const side of [0,1])assert.equal(repeated[side].orderSeq,first[side].orderSeq);
+      for(const [side,db]of [reference,databases.order].entries())await local(db).transaction(async client=>{
+        await client.query("SET LOCAL session_replication_role='replica'");
+        await client.query("UPDATE orders SET created_at='2010-01-01Z',updated_at='2010-01-01Z',closed_at=CASE WHEN status IN ('ACCEPTED','CANCELLED') THEN '2010-01-01Z'::timestamptz ELSE NULL END WHERE order_seq=$1",[first[side].orderSeq]);
+      });
+      await create(409);await source.purgeDatabase();await repository.purgeDatabase();
+      for(const [side,db]of [reference,databases.order].entries())assert.equal((await db.query('SELECT 1 FROM orders WHERE order_seq=$1',[first[side].orderSeq])).rowCount,0);
+      const events=(await databases.order.query("SELECT event_id,payload FROM outbox_events WHERE event_type='OrderParcelsPurged' AND aggregate_seq=$1",[first[1].orderSeq])).rows;
+      assert.equal(events.length,1);assert.deepEqual(events[0].payload,{orderParcelSeqs:initialParcels[1]});
+      const {OrderRetentionWorker}=require('../dist/orders/order-retention.worker');
+      const {createServer}=require('node:http');
+      const failed=createServer((request,response)=>{request.resume();response.writeHead(503,{'Content-Type':'application/json'}).end('{"error":"controlled delivery outage"}');});
+      await new Promise(resolve=>failed.listen(0,'127.0.0.1',resolve));
+      const failedConfig={get:name=>({NODE_ENV:'test',DELIVERY_URL:'http://127.0.0.1:'+failed.address().port,CUSTOMER_AUTH_TOKEN:token})[name]};
+      const interrupted=new OrderRetentionWorker(repository,{pool:databases.order},failedConfig);
+      try{await interrupted.run();const waiting=(await databases.order.query('SELECT delivered_at,attempt_count FROM outbox_events WHERE event_id=$1',[events[0].event_id])).rows[0];assert.equal(waiting.delivered_at,null);assert.equal(waiting.attempt_count,1);assert.equal((await delivery.query('SELECT 1 FROM inbox_events WHERE event_id=$1',[events[0].event_id])).rowCount,0);}
+      finally{await interrupted.onModuleDestroy();await new Promise((resolve,reject)=>failed.close(error=>error?reject(error):resolve()));}
+      await databases.order.query("UPDATE outbox_events SET next_attempt_at=clock_timestamp()-interval '1 second' WHERE event_id=$1",[events[0].event_id]);
+      const resumed=new OrderRetentionWorker(repository,{pool:databases.order},{get:name=>({NODE_ENV:'test',DELIVERY_URL:'http://delivery-app:3003',CUSTOMER_AUTH_TOKEN:token})[name]});
+      try{await resumed.run();assert.ok((await databases.order.query('SELECT delivered_at FROM outbox_events WHERE event_id=$1',[events[0].event_id])).rows[0].delivered_at);assert.equal((await delivery.query('SELECT 1 FROM inbox_events WHERE event_id=$1',[events[0].event_id])).rowCount,1);}finally{await resumed.onModuleDestroy();}
+      await assert.rejects(reference.query("INSERT INTO shipments(order_parcel_seq,tracking_number,status) VALUES($1,'late-retired-order','paid')",[initialParcels[0][0]]),error=>error.code==='23503');
+      const late={eventId:randomUUID(),source:'order',eventType:'OrderSubmissionDeliveryRequested',payload:{orderParcelSeqs:initialParcels[1]}};
+      const lateResponse=await fetch('http://delivery-app:3003/internal/order-accepted',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(late),signal:AbortSignal.timeout(5000)});
+      assert.equal(lateResponse.status,200);assert.deepEqual(await lateResponse.json(),{eventId:late.eventId,status:'processed'});assert.equal((await delivery.query('SELECT 1 FROM shipments WHERE order_parcel_seq=ANY($1::int[])',[initialParcels[1]])).rowCount,0);
+      const fresh=await create(201);for(const side of [0,1]){createdRoots[side].push(fresh[side].orderSeq);assert.notEqual(fresh[side].orderSeq,first[side].orderSeq,'physical expiry releases the original creation key');}
+      const freshRepeat=await create(201);for(const side of [0,1])assert.equal(freshRepeat[side].orderSeq,fresh[side].orderSeq);
     }finally{
       if(originalFetch)global.fetch=originalFetch;
       for(const client of [...locked,...outside]){await client.query('ROLLBACK');client.release();}
@@ -7539,6 +7581,8 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
         for(const db of [reference,delivery]){await db.query('DELETE FROM shipment_status_history WHERE shipment_seq IN (SELECT shipment_seq FROM shipments WHERE order_parcel_seq=ANY($1::int[]))',[ids]);await db.query('DELETE FROM shipments WHERE order_parcel_seq=ANY($1::int[])',[ids]);}
         for(const db of [reference,databases.order])await local(db).transaction(async client=>{await client.query("SET LOCAL session_replication_role='replica'");for(const table of ['order_parcels','order_payment_requests','order_billing_charges','orders'])await client.query('DELETE FROM '+table+' WHERE order_seq=ANY($1::int[])',[all]);await client.query('DELETE FROM organization_billing_months WHERE organization_seq BETWEEN 930001 AND 930003');});
         await databases.order.query("DELETE FROM outbox_events WHERE aggregate_seq=ANY($1::int[]) AND event_type IN ('OrderSubmissionDeliveryRequested','OrderParcelsPurged')",[all]);
+        for(const [side,db]of [reference,databases.order].entries())await local(db).transaction(async client=>{await client.query("SET LOCAL session_replication_role='replica'");for(const table of ['order_parcels','order_payment_requests','order_billing_charges','orders'])await client.query('DELETE FROM '+table+' WHERE order_seq=ANY($1::int[])',[createdRoots[side]]);});
+        for(const db of [reference,databases.customer]){await db.query('DELETE FROM personal_pins WHERE customer_seq=941001');await db.query('DELETE FROM customers WHERE customer_seq=941001');}
       }finally{await guard.query("SELECT pg_advisory_unlock(hashtextextended('call-end:'||$1,0))",[phone]);retention.splice(retention.indexOf(guard),1);guard.release();await delivery.end();}
     }
   });
