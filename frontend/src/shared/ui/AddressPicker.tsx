@@ -37,8 +37,8 @@ export function AddressPicker({
             })
           }
           style={{ height: 620 }}
-          // 카카오 기본 회색 바탕 → 흰 바탕 · 선은 화면 선 색. 지도 · 영문 버튼은 관리 화면에 안 씀
-          theme={{ bgColor: '#FFFFFF', pageBgColor: '#FFFFFF', outlineColor: '#e3e6eb' }}
+          // 카카오 기본 회색(진함) → 화면 바탕색(ops-paper) · 결과 상자 · 번호 줄은 흰색 (11/13 팀: 흰 패널에 흰 바탕은 밋밋). 선은 화면 선 색. 지도 · 영문 버튼은 관리 화면에 안 씀
+          theme={{ bgColor: '#f5f6f8', pageBgColor: '#FFFFFF', outlineColor: '#e3e6eb' }}
           hideMapBtn
           hideEngBtn
           errorMessage={
