@@ -1,4 +1,5 @@
 @import 'tailwindcss';
+@import '../assets/fonts/pretendard/pretendard.css';
 
 thead th {
   text-align: center;
