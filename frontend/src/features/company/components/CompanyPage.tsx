@@ -577,7 +577,14 @@ function Modals({ vm, id }: { vm: VM; id: number }) {
           error={vm.error}
           onOk={() => vm.deleteDept(m.dept)}
           onClose={vm.close}
-        />
+        >
+          {/* 11/13 의견: 사원도 지워진다는 걸 제목만으론 놓침 — 사원이 있을 때만 빨간 경고 */}
+          {m.dept.memberCount > 0 && (
+            <p className="font-semibold text-ops-stop">
+              이 부서의 사원 {m.dept.memberCount}명도 기업에서 함께 삭제되며, 되돌릴 수 없습니다.
+            </p>
+          )}
+        </Confirm>
       )
     case 'deleteCompany':
       return (
