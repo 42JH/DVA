@@ -26,6 +26,8 @@ type DraftCallSnapshot = Pick<
 >;
 @Injectable()
 export class ParcelDraftWriteService {
+  private activeWrites = 0;
+  private readonly waitingWrites: (() => void)[] = [];
   readonly activeCalls = new Map<
     string,
     { id: number | null; command: DraftWriteCommand }
@@ -44,6 +46,10 @@ export class ParcelDraftWriteService {
     } catch {
       throw new HttpException({ error: 'INVALID_DRAFT_WRITE' }, 422);
     }
+    // Leave one of the five business connections for commit confirmation and completion reads.
+    if (this.activeWrites === 4)
+      await new Promise<void>((resolve) => this.waitingWrites.push(resolve));
+    else this.activeWrites++;
     try {
       return await this.database.transaction(async (client) => {
         await client.query("SET LOCAL lock_timeout='2s'");
@@ -143,6 +149,10 @@ export class ParcelDraftWriteService {
       });
     } catch (error) {
       this.failure(error);
+    } finally {
+      const next = this.waitingWrites.shift();
+      next?.();
+      if (!next) this.activeWrites--;
     }
   }
 
