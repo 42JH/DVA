@@ -20,3 +20,24 @@ Jenkins가 브랜치 변경을 주기적으로 확인하고 CI를 실행합니�
 `DEPLOY_KICK=true`로 실행하면 검증한 커밋 이미지가 같은 서버의 `kick-backend` 프로젝트에 배포됩니다.
 배포용 DB 비밀번호는 Jenkins 홈의 `kick-backend/.env`에 첫 배포 때 생성하고 이후 재사용합니다.
 `3010`은 서버의 루프백에서 접근합니다.
+
+## Jenkins 연결
+
+| 항목 | 설정 |
+| --- | --- |
+| Job | `kick-backend` (Pipeline) |
+| Definition | Pipeline script from SCM / Git |
+| Repository URL | `https://lab.ssafy.com/s15-final/S15P31D109.git` |
+| Credentials | `gitlab-ssafy` |
+| Branch Specifier | `*/chore/kick-backend-bootstrap` |
+| Script Path | `kick/backend/Jenkinsfile` |
+
+Lightsail의 Jenkins `built-in` 노드는 Docker를 실행할 수 있습니다. 별도 노드가 필요할 때는
+**Manage Jenkins → Nodes → New Node → Permanent Agent**에서 이름·작업 경로·라벨을 등록하고
+SSH 연결을 설정합니다. 이 Job의 배포 단계가 실행되는 노드는 Kick 스택이 위치한 Lightsail의
+Docker에 접근할 수 있어야 합니다. [Jenkins 에이전트 설정](https://www.jenkins.io/doc/book/using/using-agents/)
+
+CLI용 API 토큰은 Jenkins에 로그인한 후 우측 상단 사용자 메뉴의 **Security → API Token →
+Add new Token**에서 발급합니다. CLI에는 저장소 밖에 둔 `사용자명:토큰` 파일을
+`-auth @파일경로`로 전달합니다. Job 생성과 빌드 권한은 토큰을 발급한 계정의 권한을 따릅니다.
+[Jenkins CLI 인증](https://www.jenkins.io/doc/book/managing/cli/)
