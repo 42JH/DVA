@@ -266,7 +266,7 @@ thead th {
   --color-ops-wait-soft: #fff4e0;
   --color-ops-done: #107a50; /* 완료 — 연한 초록 바탕 4.80:1 (전 #138a5b 3.91:1) */
   --color-ops-done-soft: #e7f6ef;
-  --color-ops-stop: #d93b3b; /* 실패 · 불만 */
+  --color-ops-stop: #c73434; /* 실패 · 불만 — 연한 빨강 바탕 4.63:1 (11/12 접근성, 전 #d93b3b 3.96:1) */
   --color-ops-stop-soft: #fdecec;
   --color-ops-cancel: #7c3aed; /* 취소 */
   --color-ops-cancel-soft: #f3e8ff;

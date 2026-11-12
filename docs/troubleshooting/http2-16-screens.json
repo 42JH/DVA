@@ -1,0 +1,291 @@
+{
+ "note": "11/12 HTTP/2 전후. 전 = CDN 글꼴 + HTTP/1.1(14:27 KST), 후 = CDN 글꼴 + HTTP/2(20:51 KST, 색 대비 반영 뒤). Lighthouse 13.6 데스크톱 첫 방문 1회",
+ "login": {
+  "before": {
+   "fetchTime": "2026-11-12T05:27:03.060Z",
+   "perf": 100,
+   "accessibility": 100,
+   "fcpMs": 432,
+   "lcpMs": 787,
+   "protocol": "http/1.1"
+  },
+  "after": {
+   "fetchTime": "2026-11-12T11:51:41.810Z",
+   "perf": 100,
+   "accessibility": 100,
+   "fcpMs": 423,
+   "lcpMs": 631,
+   "protocol": "h2"
+  }
+ },
+ "home": {
+  "before": {
+   "fetchTime": "2026-11-12T05:27:11.818Z",
+   "perf": 100,
+   "accessibility": 96,
+   "fcpMs": 436,
+   "lcpMs": 780,
+   "protocol": "http/1.1/"
+  },
+  "after": {
+   "fetchTime": "2026-11-12T11:51:49.345Z",
+   "perf": 100,
+   "accessibility": 100,
+   "fcpMs": 439,
+   "lcpMs": 719,
+   "protocol": "h2"
+  }
+ },
+ "calls": {
+  "before": {
+   "fetchTime": "2026-11-12T05:27:19.275Z",
+   "perf": 99,
+   "accessibility": 97,
+   "fcpMs": 448,
+   "lcpMs": 889,
+   "protocol": "http/1.1/"
+  },
+  "after": {
+   "fetchTime": "2026-11-12T11:51:56.256Z",
+   "perf": 100,
+   "accessibility": 97,
+   "fcpMs": 434,
+   "lcpMs": 635,
+   "protocol": "h2"
+  }
+ },
+ "call-detail": {
+  "before": {
+   "fetchTime": "2026-11-12T05:27:26.822Z",
+   "perf": 99,
+   "accessibility": 95,
+   "fcpMs": 472,
+   "lcpMs": 925,
+   "protocol": "http/1.1/"
+  },
+  "after": {
+   "fetchTime": "2026-11-12T11:52:03.624Z",
+   "perf": 100,
+   "accessibility": 100,
+   "fcpMs": 437,
+   "lcpMs": 597,
+   "protocol": "h2"
+  }
+ },
+ "orders": {
+  "before": {
+   "fetchTime": "2026-11-12T05:27:34.388Z",
+   "perf": 99,
+   "accessibility": 97,
+   "fcpMs": 448,
+   "lcpMs": 1008,
+   "protocol": "http/1.1/"
+  },
+  "after": {
+   "fetchTime": "2026-11-12T11:52:10.304Z",
+   "perf": 100,
+   "accessibility": 97,
+   "fcpMs": 436,
+   "lcpMs": 717,
+   "protocol": "h2"
+  }
+ },
+ "faqs": {
+  "before": {
+   "fetchTime": "2026-11-12T05:27:41.963Z",
+   "perf": 99,
+   "accessibility": 96,
+   "fcpMs": 448,
+   "lcpMs": 968,
+   "protocol": "http/1.1/"
+  },
+  "after": {
+   "fetchTime": "2026-11-12T11:52:17.150Z",
+   "perf": 100,
+   "accessibility": 96,
+   "fcpMs": 432,
+   "lcpMs": 752,
+   "protocol": "h2"
+  }
+ },
+ "customers": {
+  "before": {
+   "fetchTime": "2026-11-12T05:27:49.863Z",
+   "perf": 100,
+   "accessibility": 96,
+   "fcpMs": 450,
+   "lcpMs": 810,
+   "protocol": "http/1.1/"
+  },
+  "after": {
+   "fetchTime": "2026-11-12T11:52:24.345Z",
+   "perf": 100,
+   "accessibility": 100,
+   "fcpMs": 431,
+   "lcpMs": 671,
+   "protocol": "h2"
+  }
+ },
+ "companies": {
+  "before": {
+   "fetchTime": "2026-11-12T05:27:57.386Z",
+   "perf": 99,
+   "accessibility": 96,
+   "fcpMs": 437,
+   "lcpMs": 877,
+   "protocol": "http/1.1/"
+  },
+  "after": {
+   "fetchTime": "2026-11-12T11:52:30.955Z",
+   "perf": 100,
+   "accessibility": 100,
+   "fcpMs": 432,
+   "lcpMs": 552,
+   "protocol": "h2"
+  }
+ },
+ "stats": {
+  "before": {
+   "fetchTime": "2026-11-12T05:28:05.100Z",
+   "perf": 99,
+   "accessibility": 96,
+   "fcpMs": 444,
+   "lcpMs": 965,
+   "protocol": "http/1.1/"
+  },
+  "after": {
+   "fetchTime": "2026-11-12T11:52:37.367Z",
+   "perf": 100,
+   "accessibility": 96,
+   "fcpMs": 443,
+   "lcpMs": 724,
+   "protocol": "h2"
+  }
+ },
+ "personas": {
+  "before": {
+   "fetchTime": "2026-11-12T05:28:13.396Z",
+   "perf": 99,
+   "accessibility": 95,
+   "fcpMs": 471,
+   "lcpMs": 992,
+   "protocol": "http/1.1/"
+  },
+  "after": {
+   "fetchTime": "2026-11-12T11:52:44.325Z",
+   "perf": 100,
+   "accessibility": 98,
+   "fcpMs": 435,
+   "lcpMs": 715,
+   "protocol": "h2"
+  }
+ },
+ "signup": {
+  "before": {
+   "fetchTime": "2026-11-12T05:28:26.281Z",
+   "perf": 100,
+   "accessibility": 100,
+   "fcpMs": 420,
+   "lcpMs": 705,
+   "protocol": "http/1.1"
+  },
+  "after": {
+   "fetchTime": "2026-11-12T11:52:56.077Z",
+   "perf": 100,
+   "accessibility": 100,
+   "fcpMs": 414,
+   "lcpMs": 594,
+   "protocol": "h2"
+  }
+ },
+ "unanswered": {
+  "before": {
+   "fetchTime": "2026-11-12T05:29:21.076Z",
+   "perf": 99,
+   "accessibility": 96,
+   "fcpMs": 505,
+   "lcpMs": 889,
+   "protocol": "http/1.1/"
+  },
+  "after": {
+   "fetchTime": "2026-11-12T11:53:50.272Z",
+   "perf": 100,
+   "accessibility": 96,
+   "fcpMs": 450,
+   "lcpMs": 587,
+   "protocol": "h2"
+  }
+ },
+ "stats-wait": {
+  "before": {
+   "fetchTime": "2026-11-12T05:29:28.778Z",
+   "perf": 99,
+   "accessibility": 95,
+   "fcpMs": 470,
+   "lcpMs": 951,
+   "protocol": "http/1.1/"
+  },
+  "after": {
+   "fetchTime": "2026-11-12T11:53:57.045Z",
+   "perf": 100,
+   "accessibility": 100,
+   "fcpMs": 443,
+   "lcpMs": 723,
+   "protocol": "h2"
+  }
+ },
+ "stats-dropoff": {
+  "before": {
+   "fetchTime": "2026-11-12T05:29:36.820Z",
+   "perf": 99,
+   "accessibility": 95,
+   "fcpMs": 448,
+   "lcpMs": 928,
+   "protocol": "http/1.1/"
+  },
+  "after": {
+   "fetchTime": "2026-11-12T11:54:03.660Z",
+   "perf": 100,
+   "accessibility": 100,
+   "fcpMs": 437,
+   "lcpMs": 677,
+   "protocol": "h2"
+  }
+ },
+ "admins": {
+  "before": {
+   "fetchTime": "2026-11-12T05:29:44.659Z",
+   "perf": 99,
+   "accessibility": 97,
+   "fcpMs": 466,
+   "lcpMs": 877,
+   "protocol": "http/1.1/"
+  },
+  "after": {
+   "fetchTime": "2026-11-12T11:54:10.362Z",
+   "perf": 100,
+   "accessibility": 100,
+   "fcpMs": 434,
+   "lcpMs": 634,
+   "protocol": "h2"
+  }
+ },
+ "me": {
+  "before": {
+   "fetchTime": "2026-11-12T05:29:52.061Z",
+   "perf": 99,
+   "accessibility": 96,
+   "fcpMs": 463,
+   "lcpMs": 823,
+   "protocol": "http/1.1/"
+  },
+  "after": {
+   "fetchTime": "2026-11-12T11:54:16.793Z",
+   "perf": 100,
+   "accessibility": 100,
+   "fcpMs": 434,
+   "lcpMs": 634,
+   "protocol": "h2"
+  }
+ }
+}
