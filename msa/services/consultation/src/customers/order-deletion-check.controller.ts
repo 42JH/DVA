@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import { ApiExcludeController } from '@nestjs/swagger';
 import { validateEvent } from '@dva/events';
+import { validateRetainedOrdersQuery } from '@dva/events/call-read-references.cjs';
 import { DatabaseService } from '../database/database.service';
 
 @ApiExcludeController()
@@ -21,6 +22,32 @@ export class OrderDeletionCheckController {
   @HttpCode(200)
   @Header('Cache-Control', 'no-store')
   async query(@Body() event: unknown) {
+    if (
+      event !== null &&
+      typeof event === 'object' &&
+      'eventType' in event &&
+      event.eventType === 'OrderRetentionReferencesReadRequested'
+    ) {
+      try {
+        validateRetainedOrdersQuery(event);
+      } catch {
+        throw new HttpException(
+          { error: 'INVALID_ORDER_RETENTION_REFERENCES' },
+          422,
+        );
+      }
+      const { rows } = await this.database.referencePool.query<{
+        order_seq: number;
+      }>(
+        'SELECT DISTINCT order_seq FROM call_sessions WHERE order_seq=ANY($1::int[]) ORDER BY order_seq',
+        [event.payload.ids],
+      );
+      return {
+        eventId: event.eventId,
+        status: 'processed',
+        payload: rows.map((row) => row.order_seq),
+      };
+    }
     try {
       validateEvent(event);
       if (

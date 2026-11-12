@@ -141,7 +141,7 @@ def main():
         name = RUN+'-differential'
         create(name, images['order-checks'], '-e', 'NODE_ENV=test', '-e', 'PGPASSWORD='+password, '-e', 'PGDATABASE=dva_webhook_test',
                '-e', 'CUSTOMER_AUTH_TOKEN='+password, '-e', 'CONSULTATION_AUTH_TOKEN='+token,
-               command=('node', '--test', 'test/order-reads-parity.test.cjs'))
+               command=('node', '--test', '--test-skip-pattern=^production order retention ', 'test/order-reads-parity.test.cjs'))
         run('docker', 'cp', str(ROOT/'msa/parity/order-reads-parity.test.cjs'), name+':/app/service/test/order-reads-parity.test.cjs', label='differential-copy')
         run('docker', 'cp', str(runtime), name+':/app/service/test/monolith-runtime', label='differential-source-copy')
         run('docker', 'cp', str(ROOT/'msa/parity/final-parity.cjs'), name+':/app/service/test/final-parity.cjs', label='differential-helper-copy')
@@ -155,6 +155,11 @@ def main():
             run('docker', 'stop', '--time=5', RUN+'-'+side+'-payment-read-app', label=side+'-payment-read-finish')
             run('docker', 'start', RUN+'-'+side+'-app', label=side+'-production-restart')
             wait_app(side, 3000 if side == 'monolith' else 3002)
+        name = RUN+'-retention-production'
+        create(name, images['order-checks'], '-e', 'PGPASSWORD='+password, '-e', 'PGDATABASE=dva_webhook_test',
+               command=('node', '--test', '--test-name-pattern=^production order retention ', 'test/order-reads-parity.test.cjs'))
+        run('docker', 'cp', str(ROOT/'msa/parity/order-reads-parity.test.cjs'), name+':/app/service/test/order-reads-parity.test.cjs', label='retention-production-copy')
+        complete(name)
         for suite in ['order-deletion-parity', 'order-deletion-recovery', 'order-cancellation-parity', 'order-cancellation-recovery', 'parcel-draft-compatibility']:
             name = RUN+'-'+suite
             create(name, images['order-checks'], '-e', 'NODE_ENV=test', '-e', 'PGPASSWORD='+password, '-e', 'PGDATABASE=dva_webhook_test',

@@ -33,7 +33,7 @@ def main():
         run('docker', 'create', '--name', name, '--label', LABEL, '--network', network,
             *args, image, *command, label=name+'-create')
         resources.append(('container', name))
-        if '--test' in command:
+        if '--test' in command and image!=images['monolith']:
             run('docker', 'cp', str(ROOT/'msa/parity/fixture-reset.cjs'), name+':/app/service/test/fixture-reset.cjs',
                 label=name+'-copy-fixture-reset')
 
@@ -175,7 +175,7 @@ def main():
         name = RUN+'-differential'
         create(name, images['consultation-checks'], '-e', 'AI_BUSINESS_TOKEN='+password, '-e', 'PGPASSWORD='+password,
                '-e', 'PGDATABASE=dva_webhook_test', '-e', 'PBX_WEBHOOK_TOKEN='+pbx,
-               command=('node', '--test', 'test/consultation-pbx.test.cjs'))
+               command=('node', '--test', '--test-skip-pattern=^consultation retention', 'test/consultation-pbx.test.cjs'))
         for source in (ROOT/'msa/parity/consultation-pbx.test.cjs', LOGS/'seed-password.cjs'):
             run('docker', 'cp', str(source), name+':/app/service/test/'+source.name, label='copy-'+source.name)
         complete(name)
@@ -223,6 +223,31 @@ def main():
         for source in (ROOT/'msa/parity/customer-pins.test.cjs', ROOT/'msa/parity/pin-scope-claimant.cjs', LOGS/'seed-password.cjs'):
             run('docker', 'cp', str(source), name+':/app/service/test/'+source.name, label='pins-copy-'+source.name)
         complete(name)
+        for side in ('monolith','operations','customer','consultation','order'):
+            run('docker','stop','--time=5',RUN+'-'+side+'-app',label=side+'-stop-before-retention-claims')
+        claims={}
+        probe=LOGS/'retention-claims-probe';probe.mkdir(exist_ok=True)
+        for source in (ROOT/'msa/parity/consultation-pbx.test.cjs',ROOT/'msa/parity/fixture-reset.cjs',LOGS/'seed-password.cjs'):
+            (probe/source.name).write_bytes(source.read_bytes())
+        for side in ('monolith','consultation'):
+            name=RUN+'-'+side+'-retention-claims'
+            create(name,images['monolith'] if side=='monolith' else images['consultation-checks'],
+                   '-e','NODE_ENV=test','-e','PGDATABASE=dva_webhook_test','-e','PGPASSWORD='+password,
+                   '-e','PGHOST='+side+'-db','-e','PGUSER='+side+'_app',
+                   command=('node','--test','--test-name-pattern=^consultation retention','test/consultation-pbx.test.cjs'))
+            run('docker','cp',str(probe)+'/.',name+':/app/'+('' if side=='monolith' else 'service/')+'test',label=side+'-claims-copy')
+            complete(name)
+            claims[side]={}
+            for line in run('docker','logs',name,label=side+'-claims-results').splitlines():
+                try:value=json.loads(line.removeprefix('# '))
+                except ValueError:continue
+                if 'retentionClaims' in value:claims[side]['claims']=value
+                if 'retentionFinish' in value:claims[side]['finish']=value
+                if 'retentionWorker' in value:claims[side]['worker']=value
+                if 'retentionLifecycle' in value:claims[side]['lifecycle']=value
+            assert set(claims[side])=={'claims','finish','worker','lifecycle'}
+        assert len(claims)==2 and claims['monolith']==claims['consultation']
+        report['retentionClaims']={'matched':True,'finishAndOutbox':True,'workerConnected':True}
         report['passed'] = True
     finally:
         for kind, name in reversed(resources):

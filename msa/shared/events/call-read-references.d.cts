@@ -18,10 +18,23 @@ export interface RetainedCustomersQuery extends Event {
 export function validateRetainedCustomersQuery(value:unknown):asserts value is RetainedCustomersQuery;
 export function validateRetainedCustomers(value:unknown,ids:number[]):asserts value is number[];
 export function requestRetainedCustomers(url:string,token:string,ids:number[]):Promise<number[]>;
+export interface RetainedOrdersQuery extends Event {
+  source:'order';eventType:'OrderRetentionReferencesReadRequested';payload:{ids:number[]};
+}
+export function validateRetainedOrdersQuery(value:unknown):asserts value is RetainedOrdersQuery;
+export function requestRetainedOrders(url:string,token:string,ids:number[]):Promise<number[]>;
 export interface PurgedCardsEvent extends Event {
   source:'customer';eventType:'CustomerPaymentCardsPurged';payload:{ids:number[]};
 }
 export function validatePurgedCardsEvent(value:unknown):asserts value is PurgedCardsEvent;
+export interface PurgedCallsEvent extends Event {
+  source:'consultation';eventType:'ConsultationCallsPurged';payload:{ids:number[]};
+}
+export function validatePurgedCallsEvent(value:unknown):asserts value is PurgedCallsEvent;
+export interface PurgedParcelsEvent extends Event {
+  source:'order';eventType:'OrderParcelsPurged';payload:{orderParcelSeqs:number[]};
+}
+export function validatePurgedParcelsEvent(value:unknown):asserts value is PurgedParcelsEvent;
 export interface PersonaComparisonRow {
   ai_persona_seq:number;ai_persona_version_seq:number;name:string;version:number;
   status:'ACTIVE'|'PENDING'|'INACTIVE';previous_active_version_seq:number|null;

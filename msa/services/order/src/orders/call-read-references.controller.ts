@@ -16,6 +16,7 @@ import {
   validateReferenceQuery,
   validateRetainedCustomersQuery,
   validatePurgedCardsEvent,
+  validatePurgedCallsEvent,
   type ReferenceRows,
 } from '@dva/events/call-read-references.cjs';
 import { DatabaseService } from '../database/database.service';
@@ -33,11 +34,20 @@ export class CallReadReferencesController {
   ) {
     this.receiveEvent = createReceiver<PoolClient>({
       pool: database.pool,
-      sources: { customer: config.get('CUSTOMER_AUTH_TOKEN', { infer: true }) },
+      sources: {
+        customer: config.get('CUSTOMER_AUTH_TOKEN', { infer: true }),
+        consultation: config.get('CUSTOMER_AUTH_TOKEN', { infer: true }),
+      },
       handlers: {
         'customer:CustomerPaymentCardsPurged': async (client, event) => {
           await client.query(
             'UPDATE order_payment_requests SET payment_card_seq=NULL WHERE payment_card_seq=ANY($1::int[])',
+            [event.payload.ids],
+          );
+        },
+        'consultation:ConsultationCallsPurged': async (client, event) => {
+          await client.query(
+            'DELETE FROM empty_ai_order_results WHERE call_session_seq=ANY($1::int[])',
             [event.payload.ids],
           );
         },
@@ -49,10 +59,19 @@ export class CallReadReferencesController {
   @HttpCode(200)
   @Header('Cache-Control', 'no-store')
   async receive(@Body() input: unknown, @Headers('authorization') authorization: string) {
+    const calls =
+      input !== null &&
+      typeof input === 'object' &&
+      'eventType' in input &&
+      input.eventType === 'ConsultationCallsPurged';
     try {
-      validatePurgedCardsEvent(input);
+      if (calls) validatePurgedCallsEvent(input);
+      else validatePurgedCardsEvent(input);
     } catch {
-      throw new HttpException({ error: 'INVALID_PURGED_CARDS' }, 422);
+      throw new HttpException(
+        { error: calls ? 'INVALID_PURGED_CALLS' : 'INVALID_PURGED_CARDS' },
+        422,
+      );
     }
     try {
       return await this.receiveEvent(input, authorization);

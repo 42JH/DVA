@@ -40,10 +40,10 @@ function cardPaymentValue(value, key, identities, started) {
 test('four order read APIs preserve monolith HTTP and stored data across owner databases', async t => {
   assert.equal(process.env.PGDATABASE,'dva_webhook_test');
   const databases = Object.fromEntries(['monolith','operations','customer','consultation','order'].map(name=>[name,new Pool({host:name+'-db',user:name+'_app'})]));
-  const retention=[];
+  const retention=[],fixturePhones=[];
   t.after(async()=> {
     try {
-      for(const client of retention) { await client.query('ROLLBACK');client.release(); }
+      for(const client of [...retention,...fixturePhones]) { await client.query('ROLLBACK');client.release(); }
       for(const db of [databases.monolith,databases.order])await db.query('DELETE FROM order_parcel_drafts WHERE draft_seq BETWEEN 13001 AND 13008');
       for(const db of [databases.monolith,databases.customer]){
         await db.query('DELETE FROM memberships WHERE membership_seq BETWEEN 6101 AND 6105');
@@ -141,10 +141,14 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
       await client.query('COMMIT');
     } catch(error) { await client.query('ROLLBACK');throw error; } finally { client.release(); }
   }
+  const seedCallGuard=await databases.consultation.connect();fixturePhones.push(seedCallGuard);
+  await seedCallGuard.query('BEGIN');
+  // Keep only the expired read fixture while production GC and table-lock probes remain enabled.
+  await seedCallGuard.query("SELECT pg_advisory_xact_lock(hashtextextended('call-end:01010190000',0))");
   for(const db of [reference,databases.consultation]) {
     for(let n=1;n<=10;n++) await db.query(`INSERT INTO call_sessions(call_session_seq,provider_call_id,caller_phone_number,customer_seq,order_seq,incoming_at,started_at,ended_at,deleted_at,registered_at)
       OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,$4,$5,$6,CASE WHEN $7::timestamptz IS NULL THEN NULL ELSE '2030-01-01T00:00:00Z'::timestamptz END,$7,$8,'2030-01-01T00:00:00Z')`,
-      [1010+n,'read-call-'+n,n===4?null:n===5?'01099999999':'0100000000'+(n===10?4:[1,2,3][n-1]??1),n===10?4:null,n===6?1001:null,
+      [1010+n,'read-call-'+n,n===9?'01010190000':n===4?null:n===5?'01099999999':'0100000000'+(n===10?4:[1,2,3][n-1]??1),n===10?4:null,n===6?1001:null,
         n===9?'2010-01-01T00:00:00Z':'2030-01-01T00:00:00Z',[6,7].includes(n)?'2030-01-02T00:00:00Z':null,n===8?'2026-01-01T00:00:00Z':null]);
   }
   const longDraftPhone='장'.repeat(40000);
@@ -853,6 +857,147 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
         for(const db of [reference,databases.order])for(const {row}of original)await db.query('UPDATE order_payment_requests SET payment_card_seq=$2 WHERE payment_request_id=$1',[row.payment_request_id,row.payment_card_seq]);
         for(const db of [reference,databases.customer])await db.query('DELETE FROM payment_cards WHERE payment_card_seq=ANY($1::int[])',[cards]);
       }finally{await keeper.query('SELECT pg_advisory_unlock(20261103,157)');retention.splice(retention.indexOf(keeper),1);keeper.release();}
+    }
+  });
+  await t.test('call retention removes only its original empty results and fences failed and duplicate deliveries',async()=>{
+    const ids=[29701,29702,29703],url=sides[1].base+'/internal/call-read-references/events',token=process.env.CUSTOMER_AUTH_TOKEN;
+    for(const db of [reference,databases.order])for(const id of ids)await db.query("INSERT INTO empty_ai_order_results(request_id,call_session_seq,received_at) VALUES($1,$2,'2020-01-01Z')",['10000000-0000-4000-8000-'+String(id).padStart(12,'0'),id]);
+    const rows=async db=>(await db.query('SELECT to_jsonb(r) AS row FROM empty_ai_order_results r WHERE call_session_seq=ANY($1::int[]) ORDER BY call_session_seq',[ids])).rows;
+    const event={eventId:randomUUID(),source:'consultation',eventType:'ConsultationCallsPurged',payload:{ids:ids.slice(0,2)}};
+    const post=async(body,credential=token)=>{const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+credential},body:JSON.stringify(body),signal:AbortSignal.timeout(5000)});return{status:response.status,body:await response.json()};};
+    try{
+      const before=await rows(databases.order);
+      assert.equal((await post(event,'invalid')).status,403);assert.equal((await post({...event,source:'customer'})).status,422);assert.equal((await post({...event,payload:{ids:[29701,29701]}})).status,422);
+      assert.deepEqual(await rows(databases.order),before);assert.equal((await databases.order.query('SELECT 1 FROM inbox_events WHERE event_id=$1',[event.eventId])).rowCount,0);
+      await databases.order.query("CREATE FUNCTION retention_call_result_fault() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'controlled call result failure'; END $$; CREATE TRIGGER retention_call_result_fault BEFORE DELETE ON empty_ai_order_results FOR EACH ROW EXECUTE FUNCTION retention_call_result_fault()");
+      try{assert.equal((await post(event)).status,500);assert.deepEqual(await rows(databases.order),before);assert.equal((await databases.order.query('SELECT 1 FROM inbox_events WHERE event_id=$1',[event.eventId])).rowCount,0);}finally{await databases.order.query('DROP TRIGGER retention_call_result_fault ON empty_ai_order_results; DROP FUNCTION retention_call_result_fault()');}
+      for(const id of event.payload.ids)await reference.query('DELETE FROM empty_ai_order_results WHERE call_session_seq=$1',[id]);
+      assert.deepEqual(await post(event),{status:200,body:{eventId:event.eventId,status:'processed'}});assert.deepEqual(await rows(databases.order),await rows(reference));assert.equal((await rows(reference)).length,1);
+      assert.deepEqual(await post(event),{status:200,body:{eventId:event.eventId,status:'duplicate'}});assert.equal((await post({...event,payload:{ids:[29703]}})).status,409);assert.deepEqual(await rows(databases.order),await rows(reference));
+    }finally{for(const db of [reference,databases.order])await db.query('DELETE FROM empty_ai_order_results WHERE call_session_seq=ANY($1::int[])',[ids]);}
+  });
+  await t.test('the production consultation timer delivers committed call expiry to the real order owner',async()=>{
+    const id=29801,phone='01098889999',guard=await databases.consultation.connect();retention.push(guard);
+    let locked=true,ackLocked=false;
+    await guard.query("SELECT pg_advisory_lock(hashtextextended('call-end:'||$1,0))",[phone]);
+    try{
+      await guard.query('SELECT pg_advisory_lock(20261114,29801)');ackLocked=true;
+      await databases.consultation.query("CREATE FUNCTION retention_call_ack_gate() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.event_type='ConsultationCallsPurged' AND NEW.aggregate_seq=29801 AND NEW.delivered_at IS NOT NULL AND OLD.delivered_at IS NULL THEN PERFORM pg_advisory_xact_lock(20261114,29801); END IF; RETURN NEW; END $$; CREATE TRIGGER retention_call_ack_gate BEFORE UPDATE OF delivered_at ON outbox_events FOR EACH ROW EXECUTE FUNCTION retention_call_ack_gate()");
+      for(const db of [reference,databases.consultation])await db.query("INSERT INTO call_sessions(call_session_seq,provider_call_id,caller_phone_number,incoming_at,started_at,ended_at) OVERRIDING SYSTEM VALUE VALUES($1,'retention-live-owner',$2,'1980-01-01Z','1980-01-01Z','1980-01-02Z')",[id,phone]);
+      for(const db of [reference,databases.order])await db.query("INSERT INTO empty_ai_order_results(request_id,call_session_seq,received_at) VALUES('20000000-0000-4000-8000-000000029801',$1,'1980-01-01Z')",[id]);
+      const claimId=randomUUID();await reference.query("UPDATE call_sessions SET purge_claim_id=$2,purge_claimed_until=clock_timestamp()+interval '5 minutes' WHERE call_session_seq=$1",[id,claimId]);
+      const {RetentionRepository}=require('./monolith-runtime/retention/retention.repository');
+      const transaction=async work=>{const client=await reference.connect();try{await client.query('BEGIN');const value=await work(client);await client.query('COMMIT');return value;}catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}};
+      assert.equal(await new RetentionRepository({transaction}).finishCall({id,phone,claimId,keys:[]}),true);
+      await guard.query("SELECT pg_advisory_unlock(hashtextextended('call-end:'||$1,0))",[phone]);
+      locked=false;
+      const deadline=Date.now()+20000;let receivedBeforeAck=false;
+      for(;;){
+        const call=(await databases.consultation.query('SELECT 1 FROM call_sessions WHERE call_session_seq=$1',[id])).rowCount,result=(await databases.order.query('SELECT 1 FROM empty_ai_order_results WHERE call_session_seq=$1',[id])).rowCount;
+        const delivered=(await databases.consultation.query("SELECT 1 FROM outbox_events WHERE event_type='ConsultationCallsPurged' AND aggregate_seq=$1 AND delivered_at IS NOT NULL",[id])).rowCount;
+        if(!call&&!result&&ackLocked){assert.equal(delivered,0);receivedBeforeAck=true;await guard.query('SELECT pg_advisory_unlock(20261114,29801)');ackLocked=false;}
+        if(!call&&!result&&delivered===1)break;
+        assert.ok(Date.now()<deadline,'production retention must erase the call and commit its delivery acknowledgement');await pause(100);
+      }
+      assert.equal(receivedBeforeAck,true,'receiver commit is deliberately visible before the sender acknowledgement');
+      const events=(await databases.consultation.query("SELECT event_id,delivered_at FROM outbox_events WHERE event_type='ConsultationCallsPurged' AND payload->'ids'=$1::jsonb",[JSON.stringify([id])])).rows;assert.equal(events.length,1);assert.ok(events[0].delivered_at);
+      assert.equal((await databases.order.query("SELECT 1 FROM inbox_events WHERE event_id=$1 AND source='consultation' AND event_type='ConsultationCallsPurged'",[events[0].event_id])).rowCount,1);
+      assert.equal((await reference.query('SELECT 1 FROM call_sessions WHERE call_session_seq=$1',[id])).rowCount,0);assert.equal((await reference.query('SELECT 1 FROM empty_ai_order_results WHERE call_session_seq=$1',[id])).rowCount,0);
+    }finally{
+      try{if(ackLocked)await guard.query('SELECT pg_advisory_unlock(20261114,29801)');await databases.consultation.query('DROP TRIGGER IF EXISTS retention_call_ack_gate ON outbox_events; DROP FUNCTION IF EXISTS retention_call_ack_gate()');for(const db of [reference,databases.order])await db.query('DELETE FROM empty_ai_order_results WHERE call_session_seq=$1',[id]);for(const db of [reference,databases.consultation])await db.query('DELETE FROM call_sessions WHERE call_session_seq=$1',[id]);}finally{if(locked)await guard.query("SELECT pg_advisory_unlock(hashtextextended('call-end:'||$1,0))",[phone]);retention.splice(retention.indexOf(guard),1);guard.release();}
+    }
+  });
+  await t.test('order retention preserves every linked call including deleted, expired and legacy calls without writes',async()=>{
+    const {requestRetainedOrders}=require('@dva/events/call-read-references.cjs');
+    const ids=[29913,29912,29911,2147483647],url='http://consultation-app:3004/internal/order-deletion-check',token=process.env.CUSTOMER_AUTH_TOKEN;
+    const guard=await databases.consultation.connect();retention.push(guard);const phone='01098889998';await guard.query("SELECT pg_advisory_lock(hashtextextended('call-end:'||$1,0))",[phone]);
+    try{
+      for(const db of [reference,databases.order])for(const id of ids.slice(0,3))await db.query("INSERT INTO orders(order_seq,creation_source,created_at,updated_at) OVERRIDING SYSTEM VALUE VALUES($1,'ADMIN','2030-01-01Z','2030-01-01Z')",[id]);
+      for(const db of [reference,databases.consultation])await db.query(`INSERT INTO call_sessions(call_session_seq,provider_call_id,caller_phone_number,order_seq,incoming_at,started_at,ended_at,deleted_at)
+        OVERRIDING SYSTEM VALUE VALUES(29901,'retention-linked-deleted',$1,29911,'1980-01-01Z','1980-01-01Z','1980-01-02Z','1980-01-03Z'),
+        (29902,'retention-linked-expired',$1,29912,'1980-01-01Z','1980-01-01Z','1980-01-02Z',NULL),
+        (29903,'retention-linked-legacy',$1,29911,NULL,'1980-01-01Z','1980-01-02Z',NULL)`,[phone]);
+      const stored=await snapshot(databases.consultation,['call_sessions','inbox_events','outbox_events']);
+      const expected=(await reference.query('SELECT DISTINCT order_seq FROM call_sessions WHERE order_seq=ANY($1::int[]) ORDER BY order_seq',[ids])).rows.map(row=>row.order_seq);assert.deepEqual(expected,[29911,29912]);
+      assert.deepEqual(await requestRetainedOrders(url,token,ids),expected);assert.deepEqual(await requestRetainedOrders(url,token,[29913]),[]);
+      const event={eventId:randomUUID(),source:'order',eventType:'OrderRetentionReferencesReadRequested',payload:{ids}};
+      const post=async(body,credential=token)=>{const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+credential},body:JSON.stringify(body),signal:AbortSignal.timeout(5000)});return{status:response.status,body:await response.json()};};
+      assert.equal((await post(event,'invalid')).status,403);assert.equal((await post({...event,source:'customer'})).status,422);assert.equal((await post({...event,payload:{ids:[29911,29911]}})).status,422);
+      assert.deepEqual((await post(event)).body,{eventId:event.eventId,status:'processed',payload:expected});
+      const ordinary=await post({...event,eventType:'OrderDeletionCheckRequested',payload:{orderSeq:29911}});assert.equal(ordinary.status,200);assert.deepEqual(ordinary.body.payload,{blocked:false});
+      assert.deepEqual(await snapshot(databases.consultation,['call_sessions','inbox_events','outbox_events']),stored);
+    }finally{
+      try{for(const db of [reference,databases.consultation])await db.query('DELETE FROM call_sessions WHERE call_session_seq BETWEEN 29901 AND 29903');for(const db of [reference,databases.order])await db.query('DELETE FROM orders WHERE order_seq BETWEEN 29911 AND 29913');}finally{await guard.query("SELECT pg_advisory_unlock(hashtextextended('call-end:'||$1,0))",[phone]);retention.splice(retention.indexOf(guard),1);guard.release();}
+    }
+  });
+  await t.test('delivery retention matches original shipment removal and prevents delayed or racing recreation',async()=>{
+    const delivery=new Pool({host:'delivery-db',user:'delivery_app'}),ids=[30011,30012,30013,30014];
+    const token=process.env.CUSTOMER_AUTH_TOKEN,url='http://delivery-app:3003/internal/order-accepted';
+    const post=async(body,credential=token)=>{const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+credential},body:JSON.stringify(body),signal:AbortSignal.timeout(20000)});return{status:response.status,body:await response.json()};};
+    const packet=orderParcelSeqs=>({eventId:randomUUID(),source:'order',eventType:'OrderParcelsPurged',payload:{orderParcelSeqs}});
+    const rows=async db=>({shipments:(await db.query('SELECT to_jsonb(s) AS row FROM shipments s WHERE order_parcel_seq=ANY($1::int[]) ORDER BY order_parcel_seq',[ids])).rows,
+      history:(await db.query('SELECT to_jsonb(h) AS row FROM shipment_status_history h WHERE shipment_seq=ANY($1::int[]) ORDER BY shipment_seq',[ids])).rows});
+    try{
+      for(const db of [reference,databases.order]){
+        const client=await db.connect();try{await client.query('BEGIN');await client.query("SET LOCAL session_replication_role='replica'");
+          await client.query(`INSERT INTO orders(order_seq,customer_seq,status,payment_method_type,creation_source,total_amount,paid_at,created_at,updated_at)
+            OVERRIDING SYSTEM VALUE VALUES(30001,1,'PAID','billing','ADMIN',8000,'2030-01-01Z','2030-01-01Z','2030-01-01Z')`);
+          for(const [index,id]of ids.entries())await client.query('INSERT INTO order_parcels(order_parcel_seq,order_seq,parcel_position,notified_price) OVERRIDING SYSTEM VALUE VALUES($1,30001,$2,2000)',[id,index+1]);
+          await client.query('COMMIT');
+        }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
+      }
+      for(const db of [reference,delivery])for(const id of ids.slice(0,3)){
+        await db.query(`INSERT INTO shipments(shipment_seq,order_parcel_seq,tracking_number,status,status_changed_at,created_at)
+          OVERRIDING SYSTEM VALUE VALUES($1,$1,$2,'paid','2030-01-01Z','2030-01-01Z')`,[id,'retention-shipment-'+id]);
+        await db.query(`INSERT INTO shipment_status_history(shipment_status_history_seq,shipment_seq,request_id,to_status,actor_type,occurred_at)
+          OVERRIDING SYSTEM VALUE VALUES($1,$1,$2,'paid','SYSTEM','2030-01-01Z')`,[id,'30000000-0000-4000-8000-'+String(id).padStart(12,'0')]);
+      }
+      const event=packet(ids.slice(0,2)),before=await rows(delivery),receipts=await snapshot(delivery,['inbox_events']);
+      assert.deepEqual(before,await rows(reference));
+      assert.equal((await post(event,'invalid')).status,401);
+      assert.equal((await post({...event,source:'customer'})).status,401);
+      for(const values of [[],[30011,30011],['30011']])assert.equal((await post({...event,payload:{orderParcelSeqs:values}})).status,422);
+      assert.deepEqual(await snapshot(delivery,['inbox_events']),receipts);
+      await delivery.query("CREATE FUNCTION retention_shipment_fault() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'controlled shipment deletion failure'; END $$; CREATE TRIGGER retention_shipment_fault BEFORE DELETE ON shipments FOR EACH ROW EXECUTE FUNCTION retention_shipment_fault()");
+      try{assert.equal((await post(event)).status,500);assert.deepEqual(await rows(delivery),before);assert.deepEqual(await snapshot(delivery,['inbox_events']),receipts);}
+      finally{await delivery.query('DROP TRIGGER retention_shipment_fault ON shipments; DROP FUNCTION retention_shipment_fault()');}
+      await reference.query('DELETE FROM shipment_status_history WHERE shipment_seq IN (SELECT shipment_seq FROM shipments WHERE order_parcel_seq=ANY($1::int[]))',[event.payload.orderParcelSeqs]);
+      await reference.query('DELETE FROM shipments WHERE order_parcel_seq=ANY($1::int[])',[event.payload.orderParcelSeqs]);
+      assert.deepEqual(await post(event),{status:200,body:{eventId:event.eventId,status:'processed'}});
+      assert.deepEqual(await rows(delivery),await rows(reference));
+      assert.deepEqual(await post(event),{status:200,body:{eventId:event.eventId,status:'duplicate'}});
+      assert.equal((await post({...event,payload:{orderParcelSeqs:[30013]}})).status,409);
+      for(let attempt=0;attempt<2;attempt++){
+        const late={...event,eventId:randomUUID(),eventType:'OrderSubmissionDeliveryRequested'};
+        assert.deepEqual(await post(late),{status:200,body:{eventId:late.eventId,status:'processed'}});
+        assert.deepEqual(await rows(delivery),await rows(reference));
+      }
+      const gate=await delivery.connect();let creating,purging;
+      try{
+        await gate.query('SELECT pg_advisory_lock(20261113,30014)');
+        await delivery.query("CREATE FUNCTION retention_shipment_gate() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.order_parcel_seq=30014 THEN PERFORM pg_advisory_xact_lock(20261113,30014); END IF; RETURN NEW; END $$; CREATE TRIGGER retention_shipment_gate BEFORE INSERT ON shipments FOR EACH ROW EXECUTE FUNCTION retention_shipment_gate()");
+        creating=post({...packet([30014]),eventType:'OrderSubmissionDeliveryRequested'});
+        for(let attempt=0;;attempt++){
+          const waiting=(await delivery.query("SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid() AND wait_event_type='Lock' AND query LIKE '%INSERT INTO shipments%' AND query NOT LIKE '%pg_stat_activity%'")).rowCount;
+          if(waiting)break;assert.ok(attempt<100,'creation reaches its controlled insert');await pause(20);
+        }
+        let finished=false;purging=post(packet([30014])).then(result=>{finished=true;return result;});
+        await pause(75);assert.equal(finished,false,'purge waits for the same parcel creation transaction');
+        await gate.query('SELECT pg_advisory_unlock(20261113,30014)');
+        assert.equal((await creating).status,200);assert.equal((await purging).status,200);
+        assert.deepEqual(await rows(delivery),await rows(reference));
+      }finally{
+        await gate.query('SELECT pg_advisory_unlock(20261113,30014)');gate.release();
+        await Promise.allSettled([creating,purging].filter(Boolean));
+        await delivery.query('DROP TRIGGER IF EXISTS retention_shipment_gate ON shipments; DROP FUNCTION IF EXISTS retention_shipment_gate()');
+      }
+    }finally{
+      try{
+        for(const db of [reference,delivery]){await db.query('DELETE FROM shipment_status_history WHERE shipment_seq IN (SELECT shipment_seq FROM shipments WHERE order_parcel_seq=ANY($1::int[]))',[ids]);await db.query('DELETE FROM shipments WHERE order_parcel_seq=ANY($1::int[])',[ids]);}
+        for(const db of [reference,databases.order]){
+          const client=await db.connect();try{await client.query('BEGIN');await client.query("SET LOCAL session_replication_role='replica'");await client.query('DELETE FROM order_parcels WHERE order_seq=30001');await client.query('DELETE FROM orders WHERE order_seq=30001');await client.query('COMMIT');}catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
+        }
+      }finally{await delivery.end();}
     }
   });
   await t.test('private queries reject forged tokens/sources and replay reads current state without writes',async()=> {
@@ -5261,20 +5406,14 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
           "SELECT setval('call_sessions_call_session_seq_seq',110100,true)",
         );
       }
-      const guards = [];
-      creation.after(async () => {
-        for (const client of guards) {
-          await client.query('ROLLBACK');
-          client.release();
-        }
-      });
+      // Later read-only checks also compare the complete event history while production GC runs.
       for (const side of owners) {
         const client = await side.calls.connect();
         await client.query('BEGIN');
         await client.query(
           'SELECT 1 FROM call_sessions WHERE call_session_seq=110004 FOR KEY SHARE',
         );
-        guards.push(client);
+        retention.push(client);
       }
       const { schema, envelope } = require('./final-parity.cjs');
       const specs = [];
@@ -7293,5 +7432,198 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
       t.diagnostic('card revocation matches '+cases.length+' source states, pending transaction protection, 90-second leases and confirmed key erasure');
     });
   });
+  await t.test('order retention matches source root expiry, payment leases, invoice totals and all call references',async()=>{
+    const {RetentionRepository:SourceRetention}=require('./monolith-runtime/retention/retention.repository');
+    const {OrderRetentionRepository}=require('../dist/orders/order-retention.repository');
+    const {createRelay,enqueue}=require('@dva/events');
+    const delivery=new Pool({host:'delivery-db',user:'delivery_app'}),phone='01098887766';
+    const ids=Array.from({length:28},(_,n)=>910000+n),protectedIds=Array.from({length:1050},(_,n)=>920000+n),free=921050;
+    const all=[...ids,...protectedIds,free],token=process.env.CUSTOMER_AUTH_TOKEN;
+    const config={get:key=>({CONSULTATION_URL:'http://consultation-app:3004',CUSTOMER_AUTH_TOKEN:token})[key]};
+    const local=pool=>({transaction:async work=>{const client=await pool.connect();try{await client.query('BEGIN');const result=await work(client);await client.query('COMMIT');return result;}catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}}});
+    const source=new SourceRetention(local(reference)),repository=new OrderRetentionRepository(local(databases.order),config);
+    const roots=async db=>(await db.query('SELECT order_seq FROM orders WHERE order_seq=ANY($1::int[]) ORDER BY order_seq',[all])).rows.map(row=>row.order_seq);
+    const stored=async db=>{
+      const result={};for(const table of ['orders','order_parcels','order_payment_requests','order_billing_charges'])result[table]=(await db.query(`SELECT to_jsonb(r) AS row FROM ${table} r WHERE order_seq=ANY($1::int[]) ORDER BY to_jsonb(r)::text`,[all])).rows;
+      result.months=(await db.query('SELECT to_jsonb(r) AS row FROM organization_billing_months r WHERE organization_seq BETWEEN 930001 AND 930003 ORDER BY organization_seq,billing_month')).rows;return result;
+    };
+    const shipmentRows=async db=>(await db.query('SELECT order_parcel_seq,tracking_number,status FROM shipments WHERE order_parcel_seq=ANY($1::int[]) ORDER BY order_parcel_seq',[ids])).rows;
+    const guard=await databases.consultation.connect(),locked=[],outside=[],createdRoots=[[],[]];let originalFetch;
+    await guard.query("SELECT pg_advisory_lock(hashtextextended('call-end:'||$1,0))",[phone]);retention.push(guard);
+    try{
+      for(const db of [reference,databases.order])await local(db).transaction(async client=>{
+        await client.query("SET LOCAL session_replication_role='replica'");
+        for(const [n,id]of ids.entries()){
+          const status=n===16?'ACCEPTED':n===17?'SUBMITTING':n>=18?'SUBMISSION_FAILED':['COLLECTING','notPaid','PAID','SUBMITTING','SUBMITTING_FAILED','SUBMISSION_FAILED','ACCEPTED','CANCELLED'][n%8];
+          const created=n>=8&&n<16?'2094-01-01Z':'2010-01-01Z',paid=['PAID','SUBMITTING','SUBMITTING_FAILED','SUBMISSION_FAILED','ACCEPTED'].includes(status);
+          await client.query(`INSERT INTO orders(order_seq,status,payment_method_type,total_amount,creation_source,created_at,updated_at,paid_at,pickup_requested_at,closed_at,parcel_no,dver_received_at,submission_last_attempt_at)
+            OVERRIDING SYSTEM VALUE VALUES($1,$2,'credit',3500,'ADMIN',$3,$4,$5,$5,$6,$7,$8,$9)`,
+          [id,status,created,n===17?'2094-01-01Z':created,paid?created:null,['ACCEPTED','CANCELLED'].includes(status)?n===16?'2094-01-01Z':created:null,status==='ACCEPTED'?'RET'+String(n).padStart(5,'0'):null,status==='ACCEPTED'?created:null,n===17?'2094-01-01Z':null]);
+          await client.query('INSERT INTO order_parcels(order_parcel_seq,order_seq,parcel_position,origin_name) OVERRIDING SYSTEM VALUE VALUES($1,$1,1,$2)',[id,'보관 만료 주소 '+id]);
+          if(n>=18&&n<=23){
+            const kind=n%3,live=n<21,complete=kind===2;
+            await client.query(`INSERT INTO order_payment_requests(payment_request_id,order_seq,amount,created_at,expires_at,card_payment_order_id,approval_started_at,provider_payment_key,completed_at,provider_reference,
+              approval_claim_id,approval_claimed_until,notification_status,notification_attempted_at,completion_notification_status,completion_notification_attempted_at)
+              VALUES($1,$2,3500,'2009-01-01Z','2010-01-01Z',$1,$3,$4,$5,$6,$7,$8,$9,$10,$11,$10)`,
+            ['91000000-0000-4000-8000-'+String(id).padStart(12,'0'),id,kind===0?'2010-01-01Z':null,kind===0?'retention-payment-'+id:null,complete?'2010-01-01Z':null,complete?'retention-reference-'+id:null,
+              kind===0?'91000000-0000-4000-8000-'+String(id).padStart(12,'0'):null,kind===0?live?'2094-01-01Z':'2010-01-01Z':null,kind===1?'SENDING':'SENT',live?'2094-01-01Z':'2010-01-01Z',complete?'SENDING':'WAITING']);
+          }
+        }
+        await client.query(`INSERT INTO orders(order_seq,status,created_at,updated_at) OVERRIDING SYSTEM VALUE
+          SELECT n,'COLLECTING','1980-01-01Z'::timestamptz,'1980-01-01Z'::timestamptz FROM generate_series(920000,921049) n
+          UNION ALL SELECT 921050,'COLLECTING','1990-01-01Z'::timestamptz,'1990-01-01Z'::timestamptz`);
+        await client.query("INSERT INTO order_billing_charges(order_seq,organization_seq,billing_month,payment_method_type,amount,occurred_at) VALUES(910000,930001,'2020-01-01','credit',3500,'2010-01-01Z'),(910018,930003,'2020-01-01','credit',3500,'2010-01-01Z')");
+        await client.query("INSERT INTO organization_billing_months(organization_seq,billing_month,organization_name,monthly_amount) VALUES(930001,'2094-01-01','보존할 합계',7777),(930002,'2000-01-01','만료한 청구',1234),(930003,'2020-01-01','참조 중 청구',5678)");
+      });
+      for(const db of [reference,databases.consultation]){
+        await db.query(`INSERT INTO call_sessions(call_session_seq,provider_call_id,caller_phone_number,order_seq,incoming_at,deleted_at) OVERRIDING SYSTEM VALUE
+          SELECT n,'retention-order-'||n,$1,n,'2010-01-01Z','2010-01-02Z' FROM generate_series(920000,921049) n`,[phone]);
+        await db.query("INSERT INTO call_sessions(call_session_seq,provider_call_id,caller_phone_number,order_seq,incoming_at,deleted_at) OVERRIDING SYSTEM VALUE VALUES(910024,'retention-order-expired',$1,910024,'2010-01-01Z','2010-01-02Z'),(910025,'retention-order-legacy',$1,910025,NULL,NULL)",[phone]);
+      }
+      for(const db of [reference,delivery])for(const id of ids)await db.query("INSERT INTO shipments(order_parcel_seq,tracking_number,status) VALUES($1,$2,'paid')",[id,'retention-root-'+id]);
+      await local(databases.order).transaction(async client=>{for(const id of [910000,910018])await enqueue(client,{destination:'delivery',eventType:'OrderSubmissionDeliveryRequested',aggregateSeq:id,payload:{orderParcelSeqs:[id]}});});
+      for(const db of [reference,databases.order]){
+        const client=await db.connect();outside.push(client);await client.query('BEGIN');
+        await client.query("SELECT 1 FROM orders WHERE COALESCE(closed_at,created_at)<=statement_timestamp()-interval '5 years' AND NOT(order_seq=ANY($1::int[])) FOR KEY SHARE",[all]);
+      }
+      for(const db of [reference,databases.order]){const client=await db.connect();locked.push(client);await client.query('BEGIN');await client.query('SELECT 1 FROM orders WHERE order_seq=910026 FOR KEY SHARE');}
+      const initial=await stored(databases.order),messages=await snapshot(databases.order,['outbox_events']);
+      for(const db of [reference,databases.order])await db.query("CREATE FUNCTION retention_order_fault() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF OLD.order_seq=910000 THEN RAISE EXCEPTION 'controlled late order deletion failure'; END IF; RETURN OLD; END $$; CREATE TRIGGER retention_order_fault BEFORE DELETE ON order_billing_charges FOR EACH ROW EXECUTE FUNCTION retention_order_fault()");
+      try{await assert.rejects(source.purgeDatabase());await assert.rejects(repository.purgeDatabase());assert.deepEqual(await stored(databases.order),initial);assert.deepEqual(await stored(reference),initial);assert.deepEqual(await snapshot(databases.order,['outbox_events']),messages);}
+      finally{for(const db of [reference,databases.order])await db.query('DROP TRIGGER retention_order_fault ON order_billing_charges; DROP FUNCTION retention_order_fault()');}
+      originalFetch=global.fetch;global.fetch=async(url,...args)=>String(url).endsWith('/internal/order-deletion-check')?Response.json({error:'controlled owner outage'},{status:503}):originalFetch(url,...args);
+      try{await assert.rejects(repository.purgeDatabase());assert.deepEqual(await stored(databases.order),initial);assert.deepEqual(await snapshot(databases.order,['outbox_events']),messages);}finally{global.fetch=originalFetch;originalFetch=undefined;}
+      const relay=createRelay({pool:databases.order,source:'order',eventTypes:['OrderParcelsPurged'],destinations:{delivery:{url:'http://delivery-app:3003/internal/order-accepted',token}}});
+      for(let batch=0;batch<2;batch++){
+        const before=await roots(reference);await source.purgeDatabase();assert.equal(await repository.purgeDatabase(),true);
+        assert.deepEqual(await stored(databases.order),await stored(reference));
+        const remaining=await roots(reference),removed=before.filter(id=>!remaining.includes(id));assert.equal(removed.length,batch===0?10:3);
+        assert.ok(remaining.includes(910018)&&remaining.includes(910019)&&remaining.includes(910020),'active payment work survives');
+        assert.ok(remaining.includes(910024)&&remaining.includes(910025),'expired/deleted and legacy calls retain roots');
+        assert.ok(remaining.includes(910026)&&remaining.includes(910016)&&remaining.includes(910017),'locked and recently closed/submitting roots survive');
+        assert.equal(remaining.includes(free),false,'more than 1000 referenced earlier roots do not starve an unreferenced root');
+        for(let attempt=0;attempt<20&&await relay();attempt++);
+        assert.deepEqual(await shipmentRows(delivery),await shipmentRows(reference));
+      }
+      assert.equal((await databases.order.query('SELECT monthly_amount::text AS amount FROM organization_billing_months WHERE organization_seq=930001')).rows[0].amount,'7777');
+      assert.equal((await databases.order.query('SELECT 1 FROM organization_billing_months WHERE organization_seq=930002')).rowCount,0);
+      assert.equal((await databases.order.query('SELECT 1 FROM organization_billing_months WHERE organization_seq=930003')).rowCount,1);
+      assert.deepEqual((await databases.order.query("SELECT aggregate_seq FROM outbox_events WHERE aggregate_seq=ANY($1::int[]) AND event_type='OrderSubmissionDeliveryRequested' ORDER BY aggregate_seq",[[910000,910018]])).rows,[{aggregate_seq:910018}]);
+      for(const client of locked){await client.query('ROLLBACK');client.release();}locked.length=0;
+      await source.purgeDatabase();await repository.purgeDatabase();assert.deepEqual(await stored(databases.order),await stored(reference));
+      assert.equal((await roots(reference)).includes(910026),false);
+      for(const db of [reference,databases.order])await db.query("UPDATE order_payment_requests SET approval_claimed_until='2010-01-01Z' WHERE order_seq=910018");
+      const recheck=pool=>({transaction:work=>local(pool).transaction(client=>work({query:async(sql,...params)=>{
+        const result=await client.query(sql,...params);
+        if(sql.startsWith('SELECT o.order_seq AS id')&&result.rows.some(row=>row.id===910018))await client.query("UPDATE order_payment_requests SET approval_claimed_until='2094-01-01Z' WHERE order_seq=910018");
+        return result;
+      }}))});
+      await new SourceRetention(recheck(reference)).purgeDatabase();await new OrderRetentionRepository(recheck(databases.order),config).purgeDatabase();
+      assert.ok((await roots(reference)).includes(910018),'a newly active lease is rechecked after root selection');assert.deepEqual(await stored(databases.order),await stored(reference));
+      for(const db of [reference,databases.order])await db.query("UPDATE order_payment_requests SET approval_claim_id=NULL,approval_claimed_until=NULL,notification_status='SENT',completion_notification_status=CASE WHEN completed_at IS NULL THEN 'WAITING' ELSE 'SENT' END WHERE order_seq BETWEEN 910018 AND 910020");
+      await source.purgeDatabase();await repository.purgeDatabase();assert.deepEqual(await stored(databases.order),await stored(reference));
+      for(const id of [910018,910019,910020])assert.equal((await roots(reference)).includes(id),false);
+      for(let attempt=0;attempt<20&&await relay();attempt++);
+      assert.deepEqual(await shipmentRows(delivery),await shipmentRows(reference));
+      const customerId=941001,key=randomUUID();
+      for(const db of [reference,databases.customer])await db.query("INSERT INTO customers(customer_seq,name,phone_number,status) OVERRIDING SYSTEM VALUE VALUES($1,'보관 키 재사용 고객','01094110000','ACTIVE')",[customerId]);
+      const address={name:'보관 키 수령인',phoneNumber:'01094112222',roadAddress:'보관 검증 도로',jibunAddress:'보관 검증 지번',detailAddress:'',dongName:'검증동',postalCode:'00123'};
+      const input={customerSeq:customerId,paymentMethodType:'billing',totalAmount:5000,pickupRequestedAt:new Date(Date.now()+3*86400000).toISOString(),parcels:[{origin:address,destination:address,documentCount:1,itemPrice:1000,notifiedPrice:5000}]};
+      async function create(status){
+        const requestId=randomUUID(),result=[];
+        for(const side of sides){const response=await fetch(side.base+'/api/admin/orders',{method:'POST',headers:{...headers,Origin:'http://localhost:5173','Content-Type':'application/json','Idempotency-Key':key,'X-Request-Id':requestId},body:JSON.stringify(input),signal:AbortSignal.timeout(30000)});const body=await response.json();assert.equal(response.status,status,side.name+' creation key '+JSON.stringify(body));result.push(body.data??body.error);}
+        if(status===201)assert.deepEqual(result.map(data=>({orderSeq:data.orderSeq,status:data.status,version:data.version}))[1],result.map(data=>({orderSeq:data.orderSeq,status:data.status,version:data.version}))[0]);
+        else assert.deepEqual(result[1],result[0]);
+        compared++;return result;
+      }
+      const first=await create(201),initialParcels=[];
+      for(const [side,db]of [reference,databases.order].entries()){
+        createdRoots[side].push(first[side].orderSeq);
+        initialParcels.push((await db.query('SELECT order_parcel_seq FROM order_parcels WHERE order_seq=$1 ORDER BY order_parcel_seq',[first[side].orderSeq])).rows.map(row=>row.order_parcel_seq));
+      }
+      const repeated=await create(201);for(const side of [0,1])assert.equal(repeated[side].orderSeq,first[side].orderSeq);
+      for(const [side,db]of [reference,databases.order].entries())await local(db).transaction(async client=>{
+        await client.query("SET LOCAL session_replication_role='replica'");
+        await client.query("UPDATE orders SET created_at='2010-01-01Z',updated_at='2010-01-01Z',closed_at=CASE WHEN status IN ('ACCEPTED','CANCELLED') THEN '2010-01-01Z'::timestamptz ELSE NULL END WHERE order_seq=$1",[first[side].orderSeq]);
+      });
+      await create(409);await source.purgeDatabase();await repository.purgeDatabase();
+      for(const [side,db]of [reference,databases.order].entries())assert.equal((await db.query('SELECT 1 FROM orders WHERE order_seq=$1',[first[side].orderSeq])).rowCount,0);
+      const events=(await databases.order.query("SELECT event_id,payload FROM outbox_events WHERE event_type='OrderParcelsPurged' AND aggregate_seq=$1",[first[1].orderSeq])).rows;
+      assert.equal(events.length,1);assert.deepEqual(events[0].payload,{orderParcelSeqs:initialParcels[1]});
+      const {OrderRetentionWorker}=require('../dist/orders/order-retention.worker');
+      const {createServer}=require('node:http');
+      const failed=createServer((request,response)=>{request.resume();response.writeHead(503,{'Content-Type':'application/json'}).end('{"error":"controlled delivery outage"}');});
+      await new Promise(resolve=>failed.listen(0,'127.0.0.1',resolve));
+      const failedConfig={get:name=>({NODE_ENV:'test',DELIVERY_URL:'http://127.0.0.1:'+failed.address().port,CUSTOMER_AUTH_TOKEN:token})[name]};
+      const interrupted=new OrderRetentionWorker(repository,{pool:databases.order},failedConfig);
+      try{await interrupted.run();const waiting=(await databases.order.query('SELECT delivered_at,attempt_count FROM outbox_events WHERE event_id=$1',[events[0].event_id])).rows[0];assert.equal(waiting.delivered_at,null);assert.equal(waiting.attempt_count,1);assert.equal((await delivery.query('SELECT 1 FROM inbox_events WHERE event_id=$1',[events[0].event_id])).rowCount,0);}
+      finally{await interrupted.onModuleDestroy();await new Promise((resolve,reject)=>failed.close(error=>error?reject(error):resolve()));}
+      await databases.order.query("UPDATE outbox_events SET next_attempt_at=clock_timestamp()-interval '1 second' WHERE event_id=$1",[events[0].event_id]);
+      const resumed=new OrderRetentionWorker(repository,{pool:databases.order},{get:name=>({NODE_ENV:'test',DELIVERY_URL:'http://delivery-app:3003',CUSTOMER_AUTH_TOKEN:token})[name]});
+      try{await resumed.run();assert.ok((await databases.order.query('SELECT delivered_at FROM outbox_events WHERE event_id=$1',[events[0].event_id])).rows[0].delivered_at);assert.equal((await delivery.query('SELECT 1 FROM inbox_events WHERE event_id=$1',[events[0].event_id])).rowCount,1);}finally{await resumed.onModuleDestroy();}
+      await assert.rejects(reference.query("INSERT INTO shipments(order_parcel_seq,tracking_number,status) VALUES($1,'late-retired-order','paid')",[initialParcels[0][0]]),error=>error.code==='23503');
+      const late={eventId:randomUUID(),source:'order',eventType:'OrderSubmissionDeliveryRequested',payload:{orderParcelSeqs:initialParcels[1]}};
+      const lateResponse=await fetch('http://delivery-app:3003/internal/order-accepted',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(late),signal:AbortSignal.timeout(5000)});
+      assert.equal(lateResponse.status,200);assert.deepEqual(await lateResponse.json(),{eventId:late.eventId,status:'processed'});assert.equal((await delivery.query('SELECT 1 FROM shipments WHERE order_parcel_seq=ANY($1::int[])',[initialParcels[1]])).rowCount,0);
+      const fresh=await create(201);for(const side of [0,1]){createdRoots[side].push(fresh[side].orderSeq);assert.notEqual(fresh[side].orderSeq,first[side].orderSeq,'physical expiry releases the original creation key');}
+      const freshRepeat=await create(201);for(const side of [0,1])assert.equal(freshRepeat[side].orderSeq,fresh[side].orderSeq);
+    }finally{
+      if(originalFetch)global.fetch=originalFetch;
+      for(const client of [...locked,...outside]){await client.query('ROLLBACK');client.release();}
+      try{
+        for(const db of [reference,databases.consultation])await db.query("DELETE FROM call_sessions WHERE provider_call_id LIKE 'retention-order-%'");
+        for(const db of [reference,delivery]){await db.query('DELETE FROM shipment_status_history WHERE shipment_seq IN (SELECT shipment_seq FROM shipments WHERE order_parcel_seq=ANY($1::int[]))',[ids]);await db.query('DELETE FROM shipments WHERE order_parcel_seq=ANY($1::int[])',[ids]);}
+        for(const db of [reference,databases.order])await local(db).transaction(async client=>{await client.query("SET LOCAL session_replication_role='replica'");for(const table of ['order_parcels','order_payment_requests','order_billing_charges','orders'])await client.query('DELETE FROM '+table+' WHERE order_seq=ANY($1::int[])',[all]);await client.query('DELETE FROM organization_billing_months WHERE organization_seq BETWEEN 930001 AND 930003');});
+        await databases.order.query("DELETE FROM outbox_events WHERE aggregate_seq=ANY($1::int[]) AND event_type IN ('OrderSubmissionDeliveryRequested','OrderParcelsPurged')",[all]);
+        for(const [side,db]of [reference,databases.order].entries())await local(db).transaction(async client=>{await client.query("SET LOCAL session_replication_role='replica'");for(const table of ['order_parcels','order_payment_requests','order_billing_charges','orders'])await client.query('DELETE FROM '+table+' WHERE order_seq=ANY($1::int[])',[createdRoots[side]]);});
+        for(const db of [reference,databases.customer]){await db.query('DELETE FROM personal_pins WHERE customer_seq=941001');await db.query('DELETE FROM customers WHERE customer_seq=941001');}
+      }finally{await guard.query("SELECT pg_advisory_unlock(hashtextextended('call-end:'||$1,0))",[phone]);retention.splice(retention.indexOf(guard),1);guard.release();await delivery.end();}
+    }
+  });
   console.log('Compared HTTP requests: '+compared);
+});
+
+test('production order retention timers expire roots and deliver shipment cleanup while retaining live work',async()=>{
+  assert.equal(process.env.PGDATABASE,'dva_webhook_test');
+  const pools=Object.fromEntries(['monolith','order','delivery'].map(name=>[name,new Pool({host:name+'-db',user:name+'_app'})]));
+  const guards=[],ids=[935001,935002,935003];
+  const transaction=async(pool,work)=>{const client=await pool.connect();try{await client.query('BEGIN');await client.query("SET LOCAL session_replication_role='replica'");const result=await work(client);await client.query('COMMIT');return result;}catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}};
+  try{
+    for(const db of [pools.monolith,pools.order]){const guard=await db.connect();await guard.query('SELECT pg_advisory_lock(20261103,157)');guards.push(guard);}
+    for(const db of [pools.monolith,pools.order])await transaction(db,async client=>{
+      for(const id of ids)await client.query(`INSERT INTO orders(order_seq,status,payment_method_type,total_amount,created_at,updated_at,paid_at,pickup_requested_at)
+        OVERRIDING SYSTEM VALUE VALUES($1,'SUBMISSION_FAILED','credit',3500,$2,$2,$2,$2)`,[id,id===935002?'2094-01-01Z':'2010-01-01Z']);
+      await client.query("INSERT INTO order_parcels(order_parcel_seq,order_seq,parcel_position,origin_name) OVERRIDING SYSTEM VALUE VALUES(935001,935001,1,'타이머 만료 배송')");
+      await client.query(`INSERT INTO order_payment_requests(payment_request_id,order_seq,amount,created_at,expires_at,card_payment_order_id,approval_started_at,provider_payment_key,approval_claim_id,approval_claimed_until,notification_status)
+        VALUES('93500000-0000-4000-8000-000000000003',935003,3500,'2009-01-01Z','2010-01-01Z','93500000-0000-4000-8000-000000000003','2010-01-01Z','live-retention-claim','93500000-0000-4000-8000-000000000003','2094-01-01Z','SENT')`);
+    });
+    for(const db of [pools.monolith,pools.delivery]){
+      await db.query("INSERT INTO shipments(shipment_seq,order_parcel_seq,tracking_number,status) OVERRIDING SYSTEM VALUE VALUES(935001,935001,'production-retention-shipment','paid')");
+      await db.query("INSERT INTO shipment_status_history(shipment_status_history_seq,shipment_seq,request_id,to_status,actor_type) OVERRIDING SYSTEM VALUE VALUES(935001,935001,'93500000-0000-4000-8000-000000000001','paid','SYSTEM')");
+    }
+    const retained=async db=>(await db.query('SELECT to_jsonb(o) AS row FROM orders o WHERE order_seq IN (935002,935003) ORDER BY order_seq')).rows;
+    const before=await retained(pools.monolith);assert.deepEqual(await retained(pools.order),before);
+    for(const guard of guards){await guard.query('SELECT pg_advisory_unlock(20261103,157)');guard.release();}guards.length=0;
+    for(let attempt=0;;attempt++){
+      const roots=await Promise.all([pools.monolith,pools.order].map(async db=>(await db.query('SELECT 1 FROM orders WHERE order_seq=935001')).rowCount));
+      const shipments=await Promise.all([pools.monolith,pools.delivery].map(async db=>(await db.query('SELECT 1 FROM shipments WHERE order_parcel_seq=935001')).rowCount));
+      const acknowledged=(await pools.order.query("SELECT 1 FROM outbox_events WHERE event_type='OrderParcelsPurged' AND aggregate_seq=935001 AND delivered_at IS NOT NULL")).rowCount;
+      if([...roots,...shipments].every(count=>count===0)&&acknowledged===1)break;
+      assert.ok(attempt<200,'real production timers expire the root and deliver its cleanup');await pause(100);
+    }
+    for(const db of [pools.monolith,pools.order]){
+      assert.deepEqual(await retained(db),before);
+      assert.equal((await db.query('SELECT 1 FROM order_parcels WHERE order_seq=935001')).rowCount,0);
+    }
+    for(const db of [pools.monolith,pools.delivery])assert.equal((await db.query('SELECT 1 FROM shipment_status_history WHERE shipment_seq=935001')).rowCount,0);
+    const receipt=(await pools.order.query("SELECT event_id,delivered_at,payload FROM outbox_events WHERE event_type='OrderParcelsPurged' AND aggregate_seq=935001")).rows;
+    assert.equal(receipt.length,1);assert.ok(receipt[0].delivered_at);assert.deepEqual(receipt[0].payload,{orderParcelSeqs:[935001]});
+    assert.equal((await pools.delivery.query('SELECT 1 FROM inbox_events WHERE event_id=$1',[receipt[0].event_id])).rowCount,1);
+  }finally{
+    for(const guard of guards){await guard.query('SELECT pg_advisory_unlock(20261103,157)');guard.release();}
+    try{
+      for(const db of [pools.monolith,pools.delivery]){await db.query('DELETE FROM shipment_status_history WHERE shipment_seq=935001');await db.query('DELETE FROM shipments WHERE order_parcel_seq=935001');}
+      for(const db of [pools.monolith,pools.order])await transaction(db,async client=>{await client.query('DELETE FROM order_parcels WHERE order_seq=ANY($1::int[])',[ids]);await client.query('DELETE FROM order_payment_requests WHERE order_seq=ANY($1::int[])',[ids]);await client.query('DELETE FROM orders WHERE order_seq=ANY($1::int[])',[ids]);});
+    }finally{await Promise.all(Object.values(pools).map(db=>db.end()));}
+  }
 });

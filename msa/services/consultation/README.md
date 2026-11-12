@@ -1,5 +1,9 @@
 # Consultation 서비스
 
+보관 워커는 시작 시와 10초마다 incoming_at에서 5년 지난 통화를 최대 5건 처리한다. 진행 중인 PBX 업로드 임대와 번호/행 잠금을 보호하고, 5분 작업 임대 안에서 기존 녹취 저장소의 erase로 모든 객체 버전·삭제 표식을 지운 뒤 통화 자식을 정리한다. S3 실패는 데이터를 유지하고 1분 뒤 재시도하며 오래된 작업자는 임대 ID로 차단한다. DB 잠금은 외부 저장소 요청 동안 유지하지 않는다.
+
+통화 삭제와 같은 트랜잭션에 저장한 이벤트는 order의 빈 주문 결과를 정리한다. 기존 ORDER_URL/CUSTOMER_AUTH_TOKEN으로 전송하고 실패·응답 유실은 outbox에서 재시도한다. ORDER_URL 미설정은 보관 실패로 기록하며 기존 API 시작은 유지한다. test 환경의 자동 실행은 끈다. 현재 범위와 원본 대조 근거는 [작업 보고서](../../CURRENT-PARITY.md)를 따른다.
+
 [주문 조회 이식](../../../docs/msa-order-reads-plan.md)은 기존 공개 상담 API를 유지하고 `/internal/order-read`만 추가한다. 기존 customer 토큰과 `OrderReadRequested`를 검증하고, 통화의 삭제/보관·종료·연결 주문 조건을 확인한 뒤 customer에 현재 발신번호의 활성 고객 확인을 요청한다. 조회가 끝날 때까지 통화 공유 잠금을 유지한다. 내부 경로는 Ingress/Swagger에 공개하지 않으며 이벤트 업무 행이나 개인정보 응답을 저장하지 않는다.
 
 모놀리식과 같은 PBX 수신·녹취 워커와 진행 통화 수/SSE를 제공한다. 프론트·AI의 요청 형식은 바꾸지 않는다. Jira [S15P31D109-160](https://ssafy.atlassian.net/browse/S15P31D109-160), [이번 단계 계획·검증](../../../docs/msa-consultation-pbx-plan.md), [전체 동등성 계획](../../../docs/msa-parity-plan.md)을 따른다.
