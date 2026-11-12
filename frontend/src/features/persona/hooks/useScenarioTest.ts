@@ -8,7 +8,7 @@ import {
   scenarioTestQueries,
   startTest,
 } from '@/features/persona/api/scenarioTestApi'
-import { rowsOf, testOf } from './scenarioTest'
+import { restOf, rowsOf, testOf } from './scenarioTest'
 
 export { SCENARIO_TEST } // 화면(components)은 api를 직접 부르지 않아 여기서 내보냄
 
@@ -120,7 +120,7 @@ export function useScenarioTest(me: TestTarget, dateOf: (version: number) => str
   const r = d.read(me)
   const items = r.shown?.items ?? []
   const ended = items.filter((i) => i.status === 'done' || i.status === 'error').length
-  const errors = r.rows.filter((x) => x.now === 'error').map((x) => x.id)
+  const rest = restOf(r.state, r.rows)
   const tested = r.state === 'done' || r.state === 'partial' || r.state === 'stale'
   const ask = (what: NonNullable<typeof asking>) => {
     start.reset() // 지난번 실패 문구가 새 창에 먼저 뜨지 않게
@@ -160,14 +160,12 @@ export function useScenarioTest(me: TestTarget, dateOf: (version: number) => str
       // 누르면 상세 — 통화가 없어도 시나리오 내용(대본 · 정답)은 볼 수 있음
       to: `/personas/${me.personaSeq}/tests/${shownVersion}/${x.id}`,
     })),
-    // 버튼 — 도는 동안은 숨김. 연결 실패 다시 시험은 이 버전의 결과일 때만 (고치기 전 결과에는 없음)
+    // 버튼 — 도는 동안은 숨김
     canRun: r.state !== 'running',
     allLabel: `전체 ${r.rows.length}개 시험`,
-    retryLabel:
-      errors.length && r.state !== 'stale' ? `연결 실패 ${errors.length}개 다시 시험` : null,
+    retryLabel: rest.length ? `남은 ${rest.length}개 시험` : null,
     runAll: () => ask({ title: `시나리오 ${r.rows.length}개를 시험할까요?` }),
-    retry: () =>
-      ask({ title: `연결 실패 ${errors.length}개를 다시 시험할까요?`, scenarios: errors }),
+    retry: () => ask({ title: `남은 ${rest.length}개를 시험할까요?`, scenarios: rest }),
     // 확인 창 — [시험 시작]을 눌러야 통화가 걸림
     confirm: asking && {
       title: asking.title,

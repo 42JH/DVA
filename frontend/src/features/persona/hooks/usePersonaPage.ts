@@ -37,7 +37,7 @@ export interface PersonaItem {
   applying: string | null // '적용 대기' — 통화에 쓰려고 AI 확인을 기다리는 중
   voice: string // 'marin' — 음성 이름만
   useLabel: string | null // [통화에 사용하기] · [새 버전 통화에 사용하기] 문구. null = 버튼 없음
-  useDisabled: boolean // 전체 시나리오 시험이 끝나기 전 (가짜 모드에서만)
+  useDisabled: boolean // 전체 시나리오 시험이 끝나기 전
   deletable: boolean // [삭제] 버튼 — 관리 권한 + 통화에 사용 중도 적용 대기도 아닐 때만
 }
 
@@ -120,7 +120,7 @@ const conflictText =
 /** 07 AI 상담가 훅 (11/11 — 저장 = 새 버전, [적용] 없음)
  * 가운데 = 고른 상담가의 현재 버전(확정된 최신). 오른쪽 위 탭 [버전 히스토리] → 오른쪽이 고른 상담가의 버전 기록, 고른 버전이 가운데
  * 지난 버전: 현재 버전 기준 차이 표시 · [이 버전 다시 쓰기](그 내용을 새 버전으로 저장)
- * 통화 상담가 바꾸기 · 새 버전 반영은 [통화에 사용하기]로만. 시나리오 시험은 따로 화면 (가짜 모드에서만) */
+ * 통화 상담가 바꾸기 · 새 버전 반영은 [통화에 사용하기]로만. 시나리오 시험은 따로 화면 */
 export function usePersonaPage() {
   const { key, state } = useLocation()
   const [back] = useState(() => (SCENARIO_TEST ? (kept(key) ?? fromTest(state)) : null))

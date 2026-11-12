@@ -1,7 +1,7 @@
 // 실행: npx tsx src/features/persona/hooks/scenarioTest.test.ts  (프레임워크 없이 assert만)
 import assert from 'node:assert/strict'
 import type { Scenario, TestItem, VersionTest } from '@/features/persona/api/scenarioTestApi'
-import { changeOf, failLine, rowsOf, testOf } from './scenarioTest'
+import { changeOf, failLine, restOf, rowsOf, testOf, type Cell } from './scenarioTest'
 
 const scenarios: Scenario[] = ['A1', 'B3', 'E1'].map((id) => ({
   id,
@@ -77,6 +77,13 @@ const cut = test(8, 'interrupted', [
   item('E1', 'queued', null),
 ])
 assert.equal(testOf([cut], scenarios, head, active).state, 'partial')
+// [남은 N개 시험] — 끊긴 것(결과 없음)과 연결 실패만, 끝난 것은 다시 걸지 않음
+const rowsAs = (now: Cell[]) => now.map((c, i) => ({ id: ['A1', 'B3', 'E1'][i], now: c }))
+assert.deepEqual(restOf('partial', rowsAs(['pass', 'none', 'error'])), ['B3', 'E1'])
+assert.deepEqual(restOf('partial', rowsAs(['fail', 'pass', 'none'])), ['E1'])
+assert.deepEqual(restOf('none', rowsAs(['none', 'none', 'none'])), []) // 시험 전은 [전체 시험]
+assert.deepEqual(restOf('stale', rowsAs(['pass', 'error', 'none'])), []) // 고치기 전 글의 결과
+assert.deepEqual(restOf('done', rowsAs(['pass', 'fail', 'pass'])), [])
 
 assert.deepEqual(
   rowsOf(scenarios, v6, all).map((r) => [r.id, r.base, r.now, r.change]),
@@ -95,9 +102,8 @@ const talk: [number, 'AI' | '고객', string][] = [
   [12, 'AI', '번호를 다시 말씀해 주세요.'],
 ]
 const script = ['네. 받는 사람은 박서준이에요.', '010-7777-8888이요.', '대전 유성구요.']
-const fail = (name: string, actual: unknown, at?: number) =>
-  failLine({ name, status: 'fail', expected: '', actual, at }, talk, script)
-assert.equal(fail('기존 주문 상태', { 이지은: 'PAID' }, 7), 2) // 판정이 준 시각에 하던 말
+const fail = (name: string, actual: unknown) =>
+  failLine({ name, status: 'fail', expected: '', actual }, talk, script)
 assert.equal(fail('연락처를 묻지 않는다', '어김: 보내는 분 연락처를 알려 주세요.'), 2) // AI가 한 말
 assert.equal(fail('대본 진행', '말하지 못한 발화: [3]'), 3) // 마지막으로 한 대본 문장(2번)
 assert.equal(fail('대본 진행', '말하지 못한 발화: [1, 2, 3]'), 4) // 한 문장도 못 했으면 마지막 말
@@ -107,8 +113,8 @@ assert.equal(
   null,
 )
 // 대화 기록보다 판정이 먼저 온 때 — 줄이 없으니 위치도 없음 (실제 창구에 붙였을 때 화면이 깨졌던 경우, 11/12)
-const noLines = (name: string, actual: unknown, at?: number) =>
-  failLine({ name, status: 'fail', expected: '', actual, at }, [], script)
+const noLines = (name: string, actual: unknown) =>
+  failLine({ name, status: 'fail', expected: '', actual }, [], script)
 assert.equal(noLines('대본 진행', '말하지 못한 발화: [3]'), null)
-assert.equal(noLines('기존 주문 상태', {}, 7), null)
+assert.equal(noLines('연락처를 묻지 않는다', '어김: 보내는 분 연락처를 알려 주세요.'), null)
 console.log('scenarioTest ok')
