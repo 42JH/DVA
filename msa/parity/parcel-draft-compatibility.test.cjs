@@ -87,7 +87,7 @@ test('055 existing lists, both cancellations and call DELETE match source HTTP, 
       if (finalized) await side.call.query(`UPDATE call_sessions SET order_completion_received_at='2050-01-02Z',order_completion_payload='{}',order_finalized_at='2050-01-02Z',order_finalization_result='{}' WHERE call_session_seq=$1`, [id]);
     }
     const statusCode = !deleted && !expired && !finalized && ['READY', 'EDITING'].includes(status) ? 409 : 204;
-    await pair('DELETE', '/api/calls/' + id, statusCode, { call: true, ...(statusCode === 204 ? { deletedCall: id } : {}) });
+    await pair('DELETE', '/api/calls', statusCode, { body: { callSessionSeqs: [id] }, call: true, ...(statusCode === 204 ? { deletedCall: id } : {}) });
   }
   console.log(JSON.stringify({ parcelDraftCompatibilityPairs: compared }));
 });

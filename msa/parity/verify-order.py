@@ -59,6 +59,7 @@ def main():
                '-e', 'CORS_ORIGINS=http://localhost:5173,https://payments.example.test', '-e', 'SWAGGER_ENABLED=true', '-e', 'AI_BUSINESS_TOKEN='+password,
                *(['-e', 'ORDER_PAYMENTS_ENABLED=true', '-e', 'PAYMENT_PUBLIC_URL=https://payments.example.test/api/payments',
                   '-e', 'TOSS_TEST_CLIENT_KEY=test_gck_parity', '-e', 'TOSS_TEST_SECRET_KEY=test_gsk_parity',
+                  '-e', 'TOSS_BILLING_SECRET_KEY=test_sk_parity', '-e', 'PAYMENT_CARD_ENCRYPTION_KEY='+'11'*32,
                   '-e', 'PAYMENT_TOSS_BASE_URL=http://127.0.0.1:8000',
                   '-e', 'DVER_API_URL=http://127.0.0.1:8000/parcel', '-e', 'DVER_API_KEY='+password,
                   '-e', 'PAYMENT_MATTERMOST_WEBHOOK_URL=https://mattermost.example.test/hooks/parity'] if payment_reads else []),
@@ -71,6 +72,8 @@ def main():
             peer = RUN+'-'+side+'-payment-peer'
             create(peer, images[side], '-e', 'NODE_ENV=test', '-e', 'FINAL_SERVICE_TOKEN='+password,
                    '-e', 'FINAL_TOSS_TEST_SECRET_KEY=test_gsk_parity',
+                   '-e', 'FINAL_TOSS_BILLING_SECRET_KEY=test_sk_parity',
+                   *(['-e', 'FINAL_ORDER_CARD_CLAIMS=true'] if side == 'monolith' else []),
                    command=('node', '/tmp/final-peer.cjs'), network='container:'+name)
             run('docker', 'cp', str(ROOT/'msa/parity/final-peer.cjs'), peer+':/tmp/final-peer.cjs',
                 label=side+'-payment-peer-copy')

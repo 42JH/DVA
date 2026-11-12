@@ -10,7 +10,11 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
 import { requestDraftDeletion, OrderReadError } from '@dva/events/order-read.cjs';
-import { requestDraftCallReferences, type DraftDeletionEvent } from '@dva/events/parcel-drafts.cjs';
+import {
+  requestDraftCallReferences,
+  type DraftDeletionEvent,
+  type DraftDeletionHint,
+} from '@dva/events/parcel-drafts.cjs';
 import { readCallbackUrl } from '@dva/events/read-scope.cjs';
 import { AuditService } from '../audit/audit.service';
 import { ApiException, type ErrorCode } from '../common/errors/api.exception';
@@ -147,7 +151,8 @@ export class AdminParcelDraftsService {
     return saved;
   }
 
-  async delete(id: number, adminId: number, requestId: string): Promise<void> {
+  async delete(id: number | number[], adminId: number, requestId: string): Promise<void> {
+    const ids = (Array.isArray(id) ? [...id] : [id]).sort((a, b) => a - b);
     try {
       await requestDraftDeletion(
         this.config.get('CONSULTATION_URL', { infer: true }) + '/internal/parcel-draft-delete',
@@ -157,7 +162,7 @@ export class AdminParcelDraftsService {
           source: 'order',
           eventType: 'ParcelDraftDeletionRequested',
           payload: {
-            command: { id, adminId, requestId },
+            command: { ids, adminId, requestId },
             orderAddress: this.config.get('MSA_INSTANCE_IP', { infer: true }) ?? null,
           },
         },
@@ -193,32 +198,46 @@ export class AdminParcelDraftsService {
       );
     if (phase === 'hint')
       return this.database.transaction(async (client) => {
-        const row = await this.repository.draft(client, command.id, readCalls);
-        return row ? { callSessionSeq: row.callSessionSeq } : null;
+        const hints: DraftDeletionHint[] = [];
+        for (const id of command.ids) {
+          const row = await this.repository.draft(client, id, readCalls);
+          if (!row) return null;
+          hints.push({ draftSeq: id, callSessionSeq: row.callSessionSeq });
+        }
+        return hints;
       });
     return writeOrder(this.database, async (client) => {
-      const row = await this.repository.draft(client, command.id, readCalls, true);
-      if (!row) throw new ApiException(404, 'NOT_FOUND', '배송 초안을 찾을 수 없습니다.');
-      if (callFinalized === false && ['READY', 'EDITING'].includes(row.status))
-        throw new ApiException(
-          409,
-          'INVALID_STATE',
-          '통화 주문 확정 전에는 초안을 삭제할 수 없습니다.',
+      for (const [index, id] of command.ids.entries()) {
+        const row = await this.repository.draft(client, id, readCalls, true);
+        if (!row) throw new ApiException(404, 'NOT_FOUND', '배송 초안을 찾을 수 없습니다.');
+        const call = callFinalized?.[index];
+        if (!call || call.draftSeq !== id || call.callSessionSeq !== row.callSessionSeq)
+          throw new ApiException(
+            503,
+            'DEPENDENCY_UNAVAILABLE',
+            '서비스를 일시적으로 사용할 수 없습니다.',
+          );
+        if (call.finalized === false && ['READY', 'EDITING'].includes(row.status))
+          throw new ApiException(
+            409,
+            'INVALID_STATE',
+            '통화 주문 확정 전에는 초안을 삭제할 수 없습니다.',
+          );
+        await client.query(
+          'UPDATE order_parcel_drafts SET deleted_at=clock_timestamp(),version=version+1,updated_at=clock_timestamp() WHERE draft_seq=$1',
+          [id],
         );
-      await client.query(
-        'UPDATE order_parcel_drafts SET deleted_at=clock_timestamp(),version=version+1,updated_at=clock_timestamp() WHERE draft_seq=$1',
-        [command.id],
-      );
-      await this.audit.recordSuccess(
-        {
-          actorId: command.adminId,
-          targetId: command.id,
-          targetType: 'ORDER_PARCEL_DRAFT',
-          action: 'PARCEL_DRAFT_DELETED',
-          requestId: command.requestId,
-        },
-        client,
-      );
+        await this.audit.recordSuccess(
+          {
+            actorId: command.adminId,
+            targetId: id,
+            targetType: 'ORDER_PARCEL_DRAFT',
+            action: 'PARCEL_DRAFT_DELETED',
+            requestId: command.requestId,
+          },
+          client,
+        );
+      }
       return true as const;
     });
   }

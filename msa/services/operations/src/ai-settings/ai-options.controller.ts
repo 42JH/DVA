@@ -7,7 +7,7 @@ import { AiOptionsResponseDto } from './dto/persona-response.dto';
 
 @ApiTags('AI Settings')
 @ApiCookieAuth('adminSession')
-@Roles('SUPERVISOR', 'SYSTEM_ADMIN')
+@Roles('OPERATOR', 'SYSTEM_ADMIN')
 @Controller('ai')
 export class AiOptionsController {
   constructor(private readonly ai: AiPersonaClient) {}

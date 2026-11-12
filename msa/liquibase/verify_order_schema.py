@@ -19,9 +19,9 @@ def verify_order_schema(base, sql, report):
         sql(db, 'BEGIN;\n' + '\n'.join(p.read_text(encoding='utf-8') for p in files) + '\nCOMMIT;', label)
 
     # Constraint names differ in the initial MSA. Compare their complete definitions.
-    # Only the two explicitly identified foreign-owner FKs are omitted from source.
+    # Only the explicitly identified foreign-owner FKs are omitted from source.
     def catalog(db, table, label, source=False):
-        remote = "AND conname NOT IN ('orders_customer_seq_fk','shipments_order_parcel_seq_fk')" if source else ''
+        remote = "AND conname NOT IN ('orders_customer_seq_fk','shipments_order_parcel_seq_fk','order_payment_requests_payment_card_seq_fkey')" if source else ''
         return json.loads(sql(db, f"""SELECT jsonb_build_object(
           'columns',(SELECT jsonb_agg(jsonb_build_array(a.attname,format_type(a.atttypid,a.atttypmod),
             a.attnotnull,a.attidentity,a.attgenerated,pg_get_expr(d.adbin,d.adrelid)) ORDER BY a.attname)
@@ -46,8 +46,9 @@ def verify_order_schema(base, sql, report):
         'shipments'::regclass,'shipment_status_history'::regclass)
       AND ((conrelid IN ({order_relations}) AND confrelid NOT IN ({order_relations}))
         OR (conrelid IN ({delivery_relations}) AND confrelid NOT IN ({delivery_relations})));""", 'order-source-external-fks')
-    assert remote == 'orders_customer_seq_fk,shipments_order_parcel_seq_fk', remote
+    assert remote == 'order_payment_requests_payment_card_seq_fkey,orders_customer_seq_fk,shipments_order_parcel_seq_fk', remote
     for service, tables, check in (
+        ('customer', ('payment_cards',), None),
         ('order', ORDER_TABLES, 'order-storage-check.sql'),
         ('delivery', DELIVERY_TABLES, 'delivery-storage-check.sql'),
     ):
@@ -60,6 +61,8 @@ def verify_order_schema(base, sql, report):
     functions = f"SELECT jsonb_agg(pg_get_functiondef(oid) ORDER BY proname) FROM pg_proc WHERE pronamespace='public'::regnamespace AND proname IN ({function_names});"
     assert sql(source_db, functions, 'source-order-function-contract') == sql('order_db', functions, 'msa-order-function-contract')
     for owner, table, fields, indexes in (
+        ('customer', 'memberships', ('monthly_billing_enabled', 'group_billing_enabled'), ()),
+        ('customer', 'organizations', ('monthly_billing_enabled',), ()),
         ('consultation', 'call_sessions', ('analysis_failed_at',), ('call_sessions_finalized_customer_idx', 'call_sessions_finalized_caller_idx')),
         ('consultation', 'call_analyses', ('complaint_attempts', 'complaint_retry_at'), ('call_analyses_complaint_pending_idx',)),
         ('operations', 'ai_persona_versions', ('role_text', 'personality_text', 'tone_text', 'speed_instruction', 'backchannel_text', 'interruption_text'), ()),

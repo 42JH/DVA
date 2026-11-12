@@ -12,7 +12,7 @@ BEGIN
  EXCEPTION WHEN check_violation THEN NULL; END;
  INSERT INTO organizations(name,status) VALUES('read company','ACTIVE') RETURNING organization_seq INTO o;
  INSERT INTO organizations(name,status) VALUES('other company','ACTIVE') RETURNING organization_seq INTO other_company;
- IF (SELECT created_at IS NULL OR monthly_billing_enabled OR deleted_at IS NOT NULL FROM organizations WHERE organization_seq=o) THEN
+ IF (SELECT created_at IS NULL OR NOT monthly_billing_enabled OR deleted_at IS NOT NULL FROM organizations WHERE organization_seq=o) THEN
   RAISE EXCEPTION 'Organization defaults differ'; END IF;
  INSERT INTO departments(organization_seq,name) VALUES(o,'Team') RETURNING department_seq INTO d;
  INSERT INTO memberships(customer_seq,organization_seq,employee_no,status) VALUES(c,o,'001','ACTIVE') RETURNING membership_seq INTO m;

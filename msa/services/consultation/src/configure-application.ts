@@ -73,6 +73,8 @@ export function configureApplication(
   });
   app.setGlobalPrefix(API_PREFIX, {
     exclude: [
+      { path: 'internal/card-call-scope', method: RequestMethod.ALL },
+      { path: 'internal/card-call-scope/caller', method: RequestMethod.ALL },
       {
         path: 'internal/legacy-draft-call-bindings/read',
         method: RequestMethod.ALL,

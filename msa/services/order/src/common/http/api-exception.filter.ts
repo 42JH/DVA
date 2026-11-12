@@ -76,6 +76,7 @@ export class ApiExceptionFilter implements ExceptionFilter {
         '/internal/order-read',
         '/internal/order-cancellation',
         '/internal/parcel-draft-write',
+        '/internal/card-payment-scope',
         '/internal/parcel-draft-write/reference',
         '/internal/parcel-draft-write/submit',
       ].includes(request.path.replace(/\/$/, ''))

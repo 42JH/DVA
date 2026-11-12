@@ -1,3 +1,4 @@
+import { PaymentCardsModule } from '../payments/payment-cards.module';
 import { OrderCustomerWritesService } from './order-customer-writes.service';
 import { OrderRecipientPinsService } from './order-recipient-pins.service';
 import { ParcelDraftWriteController } from './parcel-draft-write.controller';
@@ -15,7 +16,7 @@ import { CustomersRepository } from './customers.repository';
 import { CustomersService } from './customers.service';
 
 @Module({
-  imports: [DatabaseModule, CallScopeModule],
+  imports: [DatabaseModule, CallScopeModule, PaymentCardsModule],
   controllers: [
     ParcelDraftWriteController,
     OrderReadScopeController,

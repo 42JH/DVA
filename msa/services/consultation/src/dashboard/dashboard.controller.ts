@@ -21,7 +21,7 @@ import {
 
 @ApiTags('Dashboard')
 @ApiCookieAuth('adminSession')
-@Roles('OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN')
+@Roles('OPERATOR', 'SYSTEM_ADMIN')
 @ApiResponse({ status: 400, type: ErrorResponseDto })
 @ApiResponse({ status: 401, type: ErrorResponseDto })
 @ApiResponse({ status: 403, type: ErrorResponseDto })

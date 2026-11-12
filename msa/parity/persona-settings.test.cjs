@@ -38,7 +38,7 @@ test('persona APIs preserve production HTTP, complete settings, drafts, publicat
   }
   const hash = await hashPassword('persona-parity-password');
   const created = new Date().toISOString();
-  for (const side of sides) for (const [index, role] of ['SYSTEM_ADMIN', 'SUPERVISOR', 'OPERATOR'].entries()) {
+  for (const side of sides) for (const [index, role] of ['SYSTEM_ADMIN', 'OPERATOR', 'OPERATOR'].entries()) {
     await side.db.query(`INSERT INTO admin_users(login_id,name,password_hash,role,status,created_at)
       VALUES($1,$2,$3,$4,'ACTIVE',$5)`, ['personaadmin' + index, '관리자 ' + index, hash, role, created]);
   }
@@ -129,7 +129,7 @@ test('persona APIs preserve production HTTP, complete settings, drafts, publicat
   for (let actor = 0; actor < 3; actor++) await request('POST', '/api/auth/login', { loginId: 'personaadmin' + actor, password: 'persona-parity-password' }, 200, actor);
   const documents = await Promise.all(sides.map(async (side) => (await fetch(side.base + '/api/docs-json')).json()));
   const declarations = {
-    '/api/personas': ['get', 'post'], '/api/personas/{id}': ['get', 'patch'],
+    '/api/personas': ['get', 'post', 'delete'], '/api/personas/{id}': ['get', 'patch'],
     '/api/personas/{id}/versions': ['get', 'post'], '/api/personas/{id}/activate': ['post'],
     '/api/ai/options': ['get'], '/api/ai/config': ['get'], '/api/ai/config/apply-result': ['post'],
   };
@@ -158,12 +158,14 @@ test('persona APIs preserve production HTTP, complete settings, drafts, publicat
   await request('GET', '/api/personas', undefined, 401, null, { Cookie: 'dva_session=invalid' });
   await request('GET', '/api/ai/config', undefined, 404, null, auth);
   await request('GET', '/api/ai/config?status=PENDING', undefined, 404, 0);
-  for (const actor of [1, 2]) await request('GET', '/api/ai/config', undefined, 403, actor);
+  for (const actor of [1, 2]) await request('GET', '/api/ai/config', undefined, 404, actor);
   await request('GET', '/api/ai/config', undefined, 401, null, { Authorization: 'Bearer wrong' });
   await request('GET', '/api/ai/config', undefined, 401, null, { ...auth, Cookie: 'dva_session=invalid' });
   for (const actor of [0, 1]) await request('GET', '/api/ai/options', undefined, 200, actor);
-  await request('GET', '/api/ai/options', undefined, 403, 2);
-  await request('POST', '/api/personas', settings, 403, 2);
+  await request('GET', '/api/ai/options', undefined, 200, 2);
+  const operatorPersona=await request('POST','/api/personas',{...settings,code:'operator-permission'},201,2);
+  assert.equal(operatorPersona[0].createdByAdminUserSeq,3);
+  await request('DELETE','/api/personas',{aiPersonaSeqs:[operatorPersona[0].aiPersonaSeq]},204,2);
   await request('POST', '/api/personas', settings, 403, 0, { Origin: undefined });
   for (const extra of [{ promptText: '' }, { voiceId: 'not-supported' }, { speakingRate: 2 }, { turnWaitLevel: 'BAD' }, { extra: 'unknown' }]) {
     await request('POST', '/api/personas', { ...settings, ...extra }, 'voiceId' in extra || 'speakingRate' in extra ? 422 : 400);
@@ -237,6 +239,59 @@ test('persona APIs preserve production HTTP, complete settings, drafts, publicat
   await request('GET', '/api/personas/?limit=1&offset=1', undefined, 200, 2);
   await request('GET', '/api/personas?limit=1&offset=2', undefined, 200, 2);
   await request('GET', `/api/personas/${id}/versions?limit=1&offset=1`, undefined, 200, 2);
+  await t.test('bulk deletion protects every ACTIVE version and preserves transactional version history', async () => {
+    const deletedA=await request('POST','/api/personas',{...settings,code:'delete-a',name:'삭제 A'},201);
+    const deletedB=await request('POST','/api/personas',{...settings,code:'delete-b',name:'삭제 B'},201);
+    const a=deletedA[0].aiPersonaSeq,b=deletedB[0].aiPersonaSeq,active=next[0].aiPersonaSeq;
+    await request('PATCH',`/api/personas/${a}`,{expectedVersion:1,expectedDraftRevision:null,name:'삭제할 초안'},200);
+    const draftB=await request('PATCH',`/api/personas/${b}`,{expectedVersion:1,expectedDraftRevision:null,name:'새 이력'},200);
+    await request('POST',`/api/personas/${b}/versions`,side=>({expectedVersion:1,expectedDraftRevision:draftB[sides.indexOf(side)].draftRevision}),200);
+    const activeDraft=await request('PATCH',`/api/personas/${active}`,{expectedVersion:1,expectedDraftRevision:null,name:'ACTIVE 이후 HEAD'},200);
+    const newHead=await request('POST',`/api/personas/${active}/versions`,side=>({expectedVersion:1,expectedDraftRevision:activeDraft[sides.indexOf(side)].draftRevision}),200);
+    assert.equal(newHead[0].status,'INACTIVE');
+    for(const input of [{},{aiPersonaSeqs:null},{aiPersonaSeqs:[]},{aiPersonaSeqs:a},
+      {aiPersonaSeqs:[a,a]},{aiPersonaSeqs:[0]},{aiPersonaSeqs:[-1]},{aiPersonaSeqs:[1.5]},
+      {aiPersonaSeqs:['1']},{aiPersonaSeqs:[2147483648]},
+      {aiPersonaSeqs:Array.from({length:101},(_,index)=>index+1)},{aiPersonaSeqs:[a],extra:true}])
+      await request('DELETE','/api/personas',input,400);
+    await request('DELETE','/api/personas',{aiPersonaSeqs:[a]},401,null);
+    await request('DELETE','/api/personas',{aiPersonaSeqs:[a]},403,0,{Origin:'https://untrusted.invalid'});
+    const before=await Promise.all(sides.map(async side=>{
+      const {audit_logs,...business}=await readTables(side);return business;
+    }));
+    await request('DELETE','/api/personas',{aiPersonaSeqs:[a,2147483647]},404);
+    await request('DELETE','/api/personas',{aiPersonaSeqs:[a,active]},409);
+    for(const [index,side]of sides.entries()) {
+      const {audit_logs,...business}=await readTables(side);assert.deepEqual(business,before[index]);
+    }
+    for(const side of sides) await side.db.query("CREATE FUNCTION persona_delete_fault() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.action='PERSONA_DELETED' AND NEW.result='SUCCESS' THEN RAISE EXCEPTION 'test-only persona deletion audit failure'; END IF; RETURN NEW; END $$; CREATE TRIGGER persona_delete_fault BEFORE INSERT ON audit_logs FOR EACH ROW EXECUTE FUNCTION persona_delete_fault()");
+    try {await request('DELETE','/api/personas',{aiPersonaSeqs:[b,a]},500);}
+    finally {for(const side of sides) await side.db.query('DROP TRIGGER persona_delete_fault ON audit_logs; DROP FUNCTION persona_delete_fault()');}
+    for(const [index,side]of sides.entries()) {
+      const {audit_logs,...business}=await readTables(side);assert.deepEqual(business,before[index]);
+    }
+    await request('DELETE','/api/personas',{aiPersonaSeqs:[b,a]},204,1);
+    for(const side of sides) {
+      const parents=(await side.db.query('SELECT deleted_at FROM ai_personas WHERE ai_persona_seq=ANY($1::int[])',[[a,b]])).rows;
+      const versions=(await side.db.query('SELECT deleted_at,status FROM ai_persona_versions WHERE ai_persona_seq=ANY($1::int[])',[[a,b]])).rows;
+      const drafts=(await side.db.query('SELECT deleted_at FROM ai_persona_drafts WHERE ai_persona_seq=ANY($1::int[])',[[a,b]])).rows;
+      assert.equal(parents.length,2);assert.equal(versions.length,3);assert.equal(drafts.length,1);
+      assert.ok(versions.every(value=>value.status==='INACTIVE'));
+      const timestamps=[...parents,...versions,...drafts].map(value=>value.deleted_at?.getTime());
+      assert.ok(timestamps.every(Number.isFinite));assert.equal(new Set(timestamps).size,1);
+    }
+    await request('DELETE','/api/personas',{aiPersonaSeqs:[a]},404);
+    await request('GET',`/api/personas/${a}`,undefined,404);
+    await request('GET',`/api/personas/${b}/versions`,undefined,404);
+    await request('PATCH',`/api/personas/${a}`,{expectedVersion:1,expectedDraftRevision:null,name:'복구 금지'},404);
+    await request('POST',`/api/personas/${a}/activate`,{expectedVersion:1,aiPersonaVersionSeq:deletedA[0].aiPersonaVersionSeq},404);
+    const pendingDelete=await request('POST','/api/personas',{...settings,code:'delete-pending',name:'대기 삭제'},201);
+    const pendingId=pendingDelete[0].aiPersonaSeq;
+    const pendingApplication=await request('POST',`/api/personas/${pendingId}/activate`,{expectedVersion:1,aiPersonaVersionSeq:pendingDelete[0].aiPersonaVersionSeq},202);
+    await request('DELETE','/api/personas',{aiPersonaSeqs:[pendingId]},204);
+    await request('POST','/api/ai/config/apply-result',callback(pendingApplication,'APPLIED'),409,null,auth);
+    await request('GET','/api/personas?limit=100',undefined,200);
+  });
   // Leave a failed notification to verify recovery after actual process SIGKILL.
   await Promise.all(sides.map((side) => ai(side, { refreshStatus: 503 })));
   await request('POST', `/api/personas/${id}/activate`, activate, 202);
@@ -248,5 +303,5 @@ test('persona APIs preserve production HTTP, complete settings, drafts, publicat
   const beforeRestart = {};
   for (const side of sides) beforeRestart[side.name] = { tables: await readTables(side), peer: await ai(side) };
   require('node:fs').writeFileSync('/app/service/test/persona-before-restart.json', JSON.stringify(beforeRestart));
-  console.log(JSON.stringify({ requestsPerSide: requests, declarations: 10, schemas: refs.size, environment: 'production', worker: 'real 5s timer and HTTP peer' }));
+  console.log(JSON.stringify({ requestsPerSide: requests, declarations: 11, schemas: refs.size, environment: 'production', worker: 'real 5s timer and HTTP peer' }));
 });

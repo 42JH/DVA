@@ -46,7 +46,7 @@ import { OrderIntakeService } from './order-intake.service';
     },
   },
 })
-@Roles('OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN')
+@Roles('OPERATOR', 'SYSTEM_ADMIN')
 @Controller('calls/:id/order-intake')
 export class OrderIntakeController {
   constructor(private readonly intake: OrderIntakeService) {}

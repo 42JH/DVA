@@ -2,6 +2,25 @@ require('reflect-metadata');
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const {DatabaseService}=require('../dist/database/database.service');
+
+test('card selection reuses a held customer transaction and avoids the occupied business pool otherwise', async () => {
+  const { ParcelDraftWriteController } = require('../dist/customers/parcel-draft-write.controller');
+  const { randomUUID } = require('node:crypto');
+  let referenceReads = 0, heldReads = 0;
+  const database = {
+    pool: { query: async () => { throw new Error('All five business connections are occupied'); } },
+    referencePool: { query: async () => { referenceReads++; return { rows: [{ id: 7 }] }; } },
+  };
+  const held = { query: async () => { heldReads++; return { rows: [] }; } };
+  const controller = new ParcelDraftWriteController(database, null, { use: async (_id, work) => work(held) }, null, null);
+  const event = { eventId: randomUUID(), source: 'order', eventType: 'ParcelDraftWriteReferenceRequested',
+    payload: { operation: 'CustomerPaymentCardRead', input: { customerSeq: 1, organizationSeq: null } } };
+  assert.equal((await controller.reference(event)).payload, 7);
+  const scopeId = randomUUID();
+  assert.equal((await controller.reference(event, scopeId)).payload, null);
+  assert.equal(referenceReads, 1);
+  assert.equal(heldReads, 1);
+});
 async function fixture(mode){
   const values={DB_HOST:'unused',DB_PORT:5432,DB_USER:'unused',DB_PASSWORD:'unused',DB_NAME:'unused'};
   const db=new DatabaseService({get:key=>values[key]});assert.equal(db.pool.options.max,5);assert.equal(db.referencePool.options.max,1);await Promise.all([db.pool.end(),db.referencePool.end()]);

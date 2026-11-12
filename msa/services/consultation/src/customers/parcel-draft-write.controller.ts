@@ -87,7 +87,9 @@ export class ParcelDraftWriteController {
     }
     const active = this.executor.activeCalls.get(scopeId);
     const id = event.payload.input.id;
-    const creating = active?.command.operation === 'OrderCreated';
+    const creating = ['OrderCreated', 'ManualOrderCreated'].includes(
+      active?.command.operation ?? '',
+    );
     if (
       !active ||
       (event.payload.operation !== 'CallEnsured' &&
@@ -215,9 +217,12 @@ export class ParcelDraftWriteController {
           id,
           event.payload.operation === 'CallRead',
           false,
-          ['OrderCreated', 'OrderUpdated', 'OrderSubmitted'].includes(
-            active.command.operation,
-          ),
+          [
+            'OrderCreated',
+            'ManualOrderCreated',
+            'OrderUpdated',
+            'OrderSubmitted',
+          ].includes(active.command.operation),
         );
       });
       return { eventId: event.eventId, status: 'processed', payload };

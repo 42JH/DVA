@@ -1,6 +1,10 @@
 import { ApiProperty, ApiPropertyOptional, OmitType, PartialType } from '@nestjs/swagger';
 import { Transform, TransformFnParams } from 'class-transformer';
 import {
+  IsArray,
+  ArrayMinSize,
+  ArrayMaxSize,
+  ArrayUnique,
   IsIn,
   IsInt,
   IsNumber,
@@ -13,6 +17,23 @@ import {
 } from 'class-validator';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import { TURN_WAIT_LEVELS, type TurnWaitLevel } from '../ai-settings.types';
+
+export class DeletePersonasDto {
+  @ApiProperty({
+    type: [Number],
+    minItems: 1,
+    maxItems: 100,
+    description: '삭제할 분류 ID. 한 개이면 단건, 여러 개이면 다건. 중복 불가.',
+  })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(100)
+  @ArrayUnique()
+  @IsInt({ each: true })
+  @Min(1, { each: true })
+  @Max(2147483647, { each: true })
+  aiPersonaSeqs!: number[];
+}
 
 export class PersonaPromptInputDto {
   @ApiProperty({ description: '역할 본문. 제목 없이 줄바꿈·원문 보존.' })

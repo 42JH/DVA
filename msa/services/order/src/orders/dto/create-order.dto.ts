@@ -15,8 +15,12 @@ import {
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional, OmitType } from '@nestjs/swagger';
 import { MOBILE_PHONE_PATTERN } from '../../common/mobile-phone';
+import {
+  DELIVERY_SENDER_PHONE_PATTERN,
+  DELIVERY_RECIPIENT_PHONE_PATTERN,
+} from '../../common/delivery-phone';
 import { MAX_ORDER_ITEM_PRICE, MIN_ORDER_ITEM_PRICE } from '../orders.types';
 import { OrderCallDto } from './order-call.dto';
 
@@ -29,15 +33,16 @@ export class OrderAddressPatchDto {
   name?: string | null;
 
   @ApiPropertyOptional({
-    description: '연락처. 하이픈·공백 없는 휴대전화 번호 11자리 문자열.',
-    pattern: MOBILE_PHONE_PATTERN.source,
+    description:
+      '발송인 연락처. 010·011·016·017·018·019로 시작하는 휴대전화 11자리. 하이픈·공백 없음.',
+    pattern: DELIVERY_SENDER_PHONE_PATTERN.source,
     example: '01012345678',
     type: String,
     nullable: true,
   })
   @IsOptional()
   @IsString()
-  @Matches(MOBILE_PHONE_PATTERN)
+  @Matches(DELIVERY_SENDER_PHONE_PATTERN)
   phoneNumber?: string | null;
 
   @ApiPropertyOptional({ description: '도로명 주소.', type: String, nullable: true })
@@ -70,6 +75,23 @@ export class OrderAddressPatchDto {
   postalCode?: string | null;
 }
 
+export class OrderDestinationAddressPatchDto extends OmitType(OrderAddressPatchDto, [
+  'phoneNumber',
+] as const) {
+  @ApiPropertyOptional({
+    description:
+      '수령인 연락처. 휴대전화 11자리, 02 지역번호 9~10자리, 기타 지역번호 10~11자리 또는 070 인터넷전화 11자리. 하이픈·공백 없음.',
+    pattern: DELIVERY_RECIPIENT_PHONE_PATTERN.source,
+    example: '0212345678',
+    type: String,
+    nullable: true,
+  })
+  @IsOptional()
+  @IsString()
+  @Matches(DELIVERY_RECIPIENT_PHONE_PATTERN)
+  phoneNumber?: string | null;
+}
+
 export class ParcelInputDto {
   @ApiPropertyOptional({
     description: '이 배송 항목의 배송비(원). 최종 확정 시 필수.',
@@ -95,13 +117,13 @@ export class ParcelInputDto {
 
   @ApiPropertyOptional({
     description: '도착지 정보. 확인한 항목만 입력할 수 있습니다.',
-    type: () => OrderAddressPatchDto,
+    type: () => OrderDestinationAddressPatchDto,
   })
   @ValidateIf(present)
   @IsObject()
   @ValidateNested()
-  @Type(() => OrderAddressPatchDto)
-  destination?: OrderAddressPatchDto;
+  @Type(() => OrderDestinationAddressPatchDto)
+  destination?: OrderDestinationAddressPatchDto;
 
   @ApiPropertyOptional({
     description: '참조할 출발지 주소록. 주소 내용은 origin에 별도로 입력합니다.',

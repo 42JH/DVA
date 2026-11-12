@@ -1,3 +1,4 @@
+import { DeleteQuestionsDto } from '../common/dto/delete-request.dto';
 import {
   Body,
   Controller,
@@ -19,14 +20,13 @@ import {
 import { AuditOperation } from '../audit/audit-operation';
 import { type AuthRequest, Roles } from '../auth/auth.guard';
 import { ErrorResponseDto } from '../common/dto/api-response.dto';
-import { ApiException } from '../common/errors/api.exception';
 import { UnansweredQuestionIdDto } from './dto/unanswered-question-id.dto';
 import { UnansweredQuestionsService } from './unanswered-questions.service';
 import { CreateFaqDto } from './dto/create-faq.dto';
 
 @ApiTags('Unanswered Questions')
 @ApiCookieAuth('adminSession')
-@Roles('OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN')
+@Roles('OPERATOR', 'SYSTEM_ADMIN')
 @ApiResponse({
   status: 400,
   type: ErrorResponseDto,
@@ -96,12 +96,13 @@ export class UnansweredQuestionsManagementController {
     response.location(`/api/faqs/${id}`);
   }
 
-  @Delete(':id')
+  @Delete()
   @HttpCode(204)
   @AuditOperation({
     action: 'UNANSWERED_QUESTION_DELETED',
     targetType: 'UNANSWERED_QUESTION',
-    target: 'id',
+    target: 'ids',
+    idsField: 'unansweredQuestionSeqs',
   })
   @ApiOperation({
     summary: '미처리 미답변 질문 삭제',
@@ -111,25 +112,9 @@ export class UnansweredQuestionsManagementController {
   @ApiNoContentResponse({
     description: '삭제 완료 또는 이미 삭제됨. 본문 없음.',
   })
-  async delete(
-    @Param() params: UnansweredQuestionIdDto,
-    @Req() request: AuthRequest,
-  ): Promise<void> {
-    const body: unknown = request.body;
-    if (
-      body !== undefined &&
-      (body === null ||
-        typeof body !== 'object' ||
-        Array.isArray(body) ||
-        Object.keys(body).length > 0)
-    )
-      throw new ApiException(
-        400,
-        'INVALID_REQUEST',
-        '삭제 요청에는 본문 필드를 보내지 않습니다.',
-      );
+  async delete(@Body() input: DeleteQuestionsDto, @Req() request: AuthRequest) {
     await this.questions.delete(
-      params.id,
+      input.unansweredQuestionSeqs,
       request.admin.adminUserSeq,
       request.requestId,
     );

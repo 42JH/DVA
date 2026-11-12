@@ -23,7 +23,16 @@ export interface AuditEvent {
     orderParcelSeqs?: number[];
     billingMonth?: string;
     paymentMethodType?: string;
-    reason?: 'PAYMENT_EXPIRED';
+    reason?:
+      | 'PAYMENT_EXPIRED'
+      | 'PAYMENT_DECLINED'
+      | 'PAYMENT_RESULT_UNKNOWN'
+      | 'PAYMENT_REQUEST_FAILED'
+      | 'MODEL_UNAVAILABLE'
+      | 'RECORDING_UNAVAILABLE'
+      | 'INPUT_TOO_LONG';
+    hasComplaint?: boolean;
+    complaintCount?: number;
   };
 }
 

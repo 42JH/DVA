@@ -16,6 +16,8 @@ import {
 } from './complaint-judge.repository';
 import { ComplaintModelClient } from './complaint-model.client';
 import { Segment, speechSegments } from './complaint-timing';
+import { AuditService } from '../../audit/audit.service';
+import { randomUUID } from 'node:crypto';
 
 const TICK_MS = 5000;
 const MAX_RECORDING_BYTES = 32 * 1024 * 1024;
@@ -39,6 +41,7 @@ export class ComplaintJudgeWorker
     private readonly repository: ComplaintJudgeRepository,
     private readonly model: ComplaintModelClient,
     private readonly config: ConfigService<Environment, true>,
+    private readonly audit: AuditService,
   ) {
     this.s3 = new S3Client({
       region: config.get('AWS_REGION', { infer: true }),
@@ -79,12 +82,23 @@ export class ComplaintJudgeWorker
         claimed.attempt,
         claimed.analysedAt,
       )
-        .catch(() =>
+        .catch(async (error: unknown) => {
+          await this.audit.recordFailure(
+            {
+              actorId: null,
+              actorType: 'SYSTEM',
+              targetType: 'CALL_SESSION',
+              targetId: claimed.id,
+              action: 'CALL_COMPLAINT_FAILED',
+              requestId: randomUUID(),
+            },
+            error,
+          );
           this.logger.warn({
             event: 'call_complaint_failed',
             callSessionSeq: claimed.id,
-          }),
-        )
+          });
+        })
         .finally(() => this.running.delete(job));
       this.running.add(job);
     }
@@ -103,7 +117,12 @@ export class ComplaintJudgeWorker
         speech = await this.speech(inputs.recordingKey);
       } catch {
         if (attempt < MAX_TRIES) {
-          await this.repository.retryLater(id, 10, true);
+          await this.repository.retryLater(
+            id,
+            10,
+            true,
+            'RECORDING_UNAVAILABLE',
+          );
           this.logger.warn({
             event: 'call_complaint_recording_unavailable',
             callSessionSeq: id,
@@ -147,14 +166,13 @@ export class ComplaintJudgeWorker
       return;
     }
     const { hasComplaint, complaints } = backendComplaints(result, rec);
-    await this.repository.save(id, hasComplaint, complaints);
+    if (!(await this.repository.save(id, hasComplaint, complaints))) return;
     this.logger.log({
       event: 'call_complaint_judged',
       callSessionSeq: id,
-      types: complaints.map((c) => c.type),
-      votes: result.votes,
-      ms: Date.now() - started,
-      tokens: result.usage,
+      hasComplaint,
+      complaintCount: complaints.length,
+      durationMs: Date.now() - started,
     });
   }
 

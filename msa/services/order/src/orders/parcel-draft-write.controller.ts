@@ -56,7 +56,9 @@ export class ParcelDraftWriteController {
     return {
       eventId: event.eventId,
       status: 'processed',
-      payload: await (event.payload.command.operation === 'OrderCreated'
+      payload: await (['OrderCreated', 'ManualOrderCreated'].includes(
+        event.payload.command.operation,
+      )
         ? this.orders.executeCreation(event)
         : event.payload.command.operation === 'AdminParcelDraftSubmitted'
           ? this.adminDrafts.executeSubmit(event)
@@ -79,7 +81,12 @@ export class ParcelDraftWriteController {
       if (
         !(
           event.source === 'customer'
-            ? ['OrderRecipientsRead', 'RecipientReceiptRead', 'CustomerPreparationOutcomeRead']
+            ? [
+                'OrderRecipientsRead',
+                'RecipientReceiptRead',
+                'CustomerPreparationOutcomeRead',
+                'OrderPendingCardApprovalRead',
+              ]
             : event.source === 'consultation'
               ? ['PendingCallWritesRead', 'IntakeFinalizationRead']
               : []
@@ -88,6 +95,14 @@ export class ParcelDraftWriteController {
         throw new Error('Invalid pending draft write query');
     } catch {
       throw new HttpException({ error: 'INVALID_DRAFT_REFERENCE' }, 422);
+    }
+    if (event.payload.operation === 'OrderPendingCardApprovalRead') {
+      const result = await this.database.referencePool.query<{ pending: boolean }>(
+        `SELECT EXISTS(SELECT 1 FROM order_payment_requests WHERE payment_card_seq=$1
+         AND completed_at IS NULL AND approval_started_at IS NOT NULL AND NOT card_payment_failed) AS pending`,
+        [event.payload.input.id],
+      );
+      return { eventId: event.eventId, status: 'processed', payload: result.rows[0].pending };
     }
     if (event.payload.operation === 'CustomerPreparationOutcomeRead')
       return {

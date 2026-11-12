@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
 const { Pool } = require('pg');
 const { hashPassword } = require('../dist/auth/password');
+const { truncateFixture } = require('./fixture-reset.cjs');
 
 test('FAQ production APIs preserve HTTP, snapshots, audits and durable notification intent', async (t) => {
   assert.equal(process.env.NODE_ENV, 'test');
@@ -22,7 +23,7 @@ test('FAQ production APIs preserve HTTP, snapshots, audits and durable notificat
       ALTER TABLE faq_entries ALTER COLUMN faq_entry_seq RESTART WITH 10001;
       ALTER TABLE faq_change_notifications ALTER COLUMN faq_change_notification_seq RESTART WITH 10001;
       ALTER TABLE faq_question_examples ALTER COLUMN faq_question_example_seq RESTART WITH 10001;`);
-    for (const [i, role] of ['OPERATOR','SUPERVISOR','SYSTEM_ADMIN'].entries()) {
+    for (const [i, role] of ['OPERATOR','OPERATOR','SYSTEM_ADMIN'].entries()) {
       await side.db.query(`INSERT INTO admin_users(admin_user_seq,login_id,name,password_hash,role,status)
         OVERRIDING SYSTEM VALUE VALUES($1,$2,'FAQ 비교 관리자',$3,$4,'ACTIVE')`, [1000001+i,'faqparity'+i,hash,role]);
       const response = await fetch(side.base+'/api/auth/login', { method:'POST',
@@ -199,4 +200,82 @@ test('FAQ production APIs preserve HTTP, snapshots, audits and durable notificat
       VALUES($1,'INSERT',ARRAY[10003],$3),($2,'DELETE',ARRAY[10001],$3)`,[first,second,requestId]);
   }
   console.log(JSON.stringify({httpPairs:pairs,recentQuestionReadOnlyFixture:true,notificationIds:[first,second]}));
+});
+
+test('operations retention timer clears expired audits without removing recent records', async (t) => {
+  assert.equal(process.env.NODE_ENV, 'test');
+  assert.equal(process.env.PGDATABASE, 'dva_webhook_test');
+  const db=new Pool();t.after(()=>db.end());
+  const ids=[];
+  for(const days of [8,6]) ids.push((await db.query("INSERT INTO audit_logs(actor_type,action,target_type,request_id,result,metadata,occurred_at) VALUES('SYSTEM','RETENTION_TEST','SYSTEM',$1,'SUCCESS','{}',clock_timestamp()-$2::interval) RETURNING audit_log_seq",[randomUUID(),days+' days'])).rows[0].audit_log_seq);
+  for(let n=0;(await db.query('SELECT 1 FROM audit_logs WHERE audit_log_seq=$1',[ids[0]])).rowCount;n++) {
+    assert.ok(n<160,'real 10s retention timer did not clear expired audit');
+    await new Promise(resolve=>setTimeout(resolve,250));
+  }
+  assert.equal((await db.query('SELECT 1 FROM audit_logs WHERE audit_log_seq=$1',[ids[1]])).rowCount,1);
+});
+
+test('operations retention preserves clocks, pending notifications, batch limits and transactional cleanup', async (t) => {
+  assert.equal(process.env.NODE_ENV,'test');assert.equal(process.env.PGDATABASE,'dva_webhook_test');
+  const {RetentionRepository}=require('../dist/retention/retention.repository');
+  const {RetentionWorker}=require('../dist/retention/retention.worker');
+  const db=new Pool();t.after(()=>db.end());
+  const transaction=async work=>{const client=await db.connect();try{await client.query('BEGIN');const value=await work(client);await client.query('COMMIT');return value;}catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}};
+  const repo=new RetentionRepository({pool:db,transaction});
+  await truncateFixture(db,'TRUNCATE audit_logs,faq_change_notifications,faq_question_examples,faq_entries,ai_personas,admin_users RESTART IDENTITY CASCADE');
+  const at=process.env.RETENTION_AT;assert.ok(Number.isFinite(Date.parse(at)));
+  await db.query(`INSERT INTO admin_users(login_id,name,password_hash,role,status,created_at,deleted_at)
+    SELECT login,login,'fixture-not-for-login','OPERATOR','ACTIVE',$1::timestamptz,
+    CASE WHEN age IS NULL THEN NULL ELSE $1::timestamptz-age::interval END
+    FROM (VALUES('rtActive',NULL::text),('rtExpired','6 years'),('rtRecent','4 years')) v(login,age)`,[at]);
+  await db.query(`INSERT INTO admin_sessions(session_token_hash,admin_user_seq,created_at,expires_at)
+    SELECT repeat(chr(96+admin_user_seq),64),admin_user_seq,$1::timestamptz,$1::timestamptz+interval '9 hours' FROM admin_users`,[at]);
+  await db.query("INSERT INTO ai_personas(code) VALUES('retention-projection')");
+  for(const [version,years] of [[1,6],[2,4]]) await db.query(`INSERT INTO ai_persona_versions(ai_persona_seq,version,name,prompt_text,turn_wait_level,created_at,created_by_admin_user_name)
+    VALUES(1,$1,'보존 설정','보존 프롬프트','NORMAL',$3::timestamptz-$2::interval,$4)`,[version,years+' years',at,version===1?'만료 작성자':'최근 작성자']);
+  for(const [question,years] of [['만료 FAQ',6],['최근 FAQ',4],['활성 FAQ',null]]) await db.query(`INSERT INTO faq_entries(question,answer,category,updated_by_admin_user_seq,created_at,updated_at,deleted_at)
+    VALUES($1,'보존 답변','기타',1,$3,$3,CASE WHEN $2::text IS NULL THEN NULL ELSE $3::timestamptz-$2::interval END)`,[question,years===null?null:years+' years',at]);
+  for(const [index,faq,years] of [[1,3,6],[2,3,4],[3,1,4]]) await db.query(`INSERT INTO faq_question_examples(faq_entry_seq,event_id,question_text,occurred_at)
+    VALUES($1,$2,'보존 질문',$4::timestamptz-$3::interval)`,[faq,'10000000-0000-4000-8000-'+String(index).padStart(12,'0'),years+' years',at]);
+  for(const [index,days] of [[1,8],[2,6],[3,null]]) await db.query(`INSERT INTO faq_change_notifications(event_id,operation,faq_entry_seqs,request_id,created_at,next_attempt_at,sent_at)
+    VALUES($1,'DELETE',ARRAY[2147483647],$1,$3::timestamptz-interval '30 days',$3,
+      CASE WHEN $2::text IS NULL THEN NULL ELSE $3::timestamptz-$2::interval END)`,['30000000-0000-4000-8000-'+String(index).padStart(12,'0'),days===null?null:days+' days',at]);
+  await db.query(`INSERT INTO audit_logs(actor_type,action,target_type,request_id,result,metadata,occurred_at)
+    SELECT 'SYSTEM','RETENTION_TEST','SYSTEM',('20000000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,'SUCCESS','{}',
+    $1::timestamptz-CASE WHEN n=1006 THEN interval '6 days' ELSE interval '8 days' END FROM generate_series(1,1006) n`,[at]);
+  const snapshot=async()=>{
+    const result={};for(const [table,key]of [['audit_logs','audit_log_seq'],['faq_change_notifications','faq_change_notification_seq'],['ai_persona_versions','ai_persona_version_seq'],['admin_users','admin_user_seq'],['admin_sessions','admin_session_seq'],['faq_entries','faq_entry_seq'],['faq_question_examples','faq_question_example_seq']]) {
+      const order=table==='admin_sessions'?'admin_user_seq,session_token_hash':key;
+      result[table]=(await db.query(`SELECT to_jsonb(t) AS row FROM ${table} t ORDER BY ${order}`)).rows.map(r=>r.row);
+    }return result;
+  };
+  const before=await snapshot();
+  for(const [key,value]of [[20261103,157],[20261027,37]]) {
+    const gate=await db.connect();try{await gate.query('SELECT pg_advisory_lock($1,$2)',[key,value]);await repo.purgeDatabase();assert.deepEqual(await snapshot(),before);}
+    finally{await gate.query('SELECT pg_advisory_unlock($1,$2)',[key,value]);gate.release();}
+  }
+  await db.query("CREATE FUNCTION retention_audit_fault() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'controlled retention deletion failure'; END $$; CREATE TRIGGER retention_audit_fault BEFORE DELETE ON faq_entries FOR EACH ROW EXECUTE FUNCTION retention_audit_fault()");
+  try{await assert.rejects(repo.purgeDatabase());assert.deepEqual(await snapshot(),before);}
+  finally{await db.query('DROP TRIGGER retention_audit_fault ON faq_entries; DROP FUNCTION retention_audit_fault()');}
+  const locked=await db.connect();try {
+    await locked.query('BEGIN');await locked.query('SELECT 1 FROM audit_logs WHERE audit_log_seq=1 FOR UPDATE');
+    await repo.purgeDatabase();assert.deepEqual((await db.query('SELECT audit_log_seq::int AS id FROM audit_logs ORDER BY audit_log_seq')).rows.map(r=>r.id),[1,1002,1003,1004,1005,1006]);
+  }finally{await locked.query('ROLLBACK');locked.release();}
+  await repo.purgeDatabase();const after=await snapshot();
+  assert.deepEqual(after.audit_logs.map(r=>Number(r.audit_log_seq)),[1006]);
+  assert.deepEqual(after.faq_change_notifications.map(r=>r.faq_change_notification_seq),[2,3]);
+  assert.deepEqual(after.ai_persona_versions.map(r=>r.created_by_admin_user_name),[null,'최근 작성자']);
+  assert.deepEqual(after.admin_users.map(r=>r.login_id),['rtActive','rtRecent']);
+  assert.deepEqual(after.admin_sessions.map(r=>r.admin_user_seq),[1,3]);
+  assert.deepEqual(after.faq_entries.map(r=>r.question),['최근 FAQ','활성 FAQ']);
+  assert.deepEqual(after.faq_question_examples.map(r=>r.faq_question_example_seq),[2]);
+  await repo.purgeDatabase();assert.deepEqual(await snapshot(),after);
+  const makeWorker=repository=>new RetentionWorker(repository,...(RetentionWorker.length===3?[{erase:()=>assert.fail('operations scope has no recording work')}]:[]),{get:()=> 'test'});
+  let finish,calls=0;const fake={claimCall:async()=>undefined,purgeDatabase:()=>{calls++;return new Promise(resolve=>finish=resolve);}};
+  const worker=makeWorker(fake);worker.onApplicationBootstrap();assert.equal(calls,0);
+  const first=worker.run();assert.equal(worker.run(),first);await Promise.resolve();await Promise.resolve();assert.equal(calls,1);
+  let stopped=false;const stopping=worker.onModuleDestroy().then(()=>stopped=true);await Promise.resolve();assert.equal(stopped,false);finish();await stopping;await worker.run();assert.equal(calls,1);
+  let retries=0;const retry=makeWorker({claimCall:async()=>undefined,purgeDatabase:async()=>{if(++retries===1)throw Error('private retention error');}});const events=[];retry.logger.error=event=>events.push(event);
+  await assert.rejects(retry.run());await retry.run();assert.equal(retries,2);assert.deepEqual(events,[{event:'retention_cleanup_failed'}]);await retry.onModuleDestroy();
+  console.log(JSON.stringify({retentionProjection:after,expiryBatch:1000,failedCleanupRolledBack:true,lockedRowsSkipped:true}));
 });

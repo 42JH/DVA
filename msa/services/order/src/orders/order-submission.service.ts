@@ -289,9 +289,13 @@ export class OrderSubmissionService {
     requestId: string,
   ) {
     const snapshot = await this.repository.detail(client, id, null);
+    const policy = await this.scope.paymentPolicy(customerId);
+    if (snapshot.paymentMethodType === null && policy.organizationSeq !== null && policy.monthly) {
+      await this.payments.defaultMonthly(client, id);
+      snapshot.paymentMethodType = 'credit';
+    }
     assertOrderSubmissionReady(snapshot, Date.now(), false);
     assertOrderAmount(snapshot);
-    const policy = await this.scope.paymentPolicy(customerId);
     if (
       (snapshot.paymentMethodType === 'credit' && !policy.monthly) ||
       (snapshot.paymentMethodType === 'groupBilling' && !policy.group)
@@ -320,7 +324,13 @@ export class OrderSubmissionService {
         })) as RecipientAddress[];
       await this.scope.prepareRecipientPins(client, id, customerId, addresses, adminId, requestId);
     }
-    if (snapshot.paymentMethodType === 'billing') {
+    if (snapshot.paymentMethodType === 'billing' || snapshot.paymentMethodType === 'groupBilling') {
+      if (snapshot.paymentMethodType === 'groupBilling')
+        await this.payments.prepareCompanyCard(
+          client,
+          id,
+          await this.scope.paymentPolicy(customerId),
+        );
       await client.query(
         "UPDATE orders SET status='notPaid',payment_due_at=clock_timestamp()+interval '24 hours' WHERE order_seq=$1",
         [id],
@@ -341,7 +351,8 @@ export class OrderSubmissionService {
       return;
     }
     this.dver.ensureConfigured();
-    await this.payments.markPaid(client, id, undefined, policy);
+    const paidPolicy = await this.scope.paymentPolicy(customerId);
+    await this.payments.markPaid(client, id, undefined, paidPolicy);
     await this.billing.recordCharge(client, id, requestId);
     await this.audit.recordSuccess(
       {

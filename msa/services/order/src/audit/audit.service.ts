@@ -15,6 +15,7 @@ export class AuditService implements OnModuleInit, OnModuleDestroy {
     { transactionId: string; eventIds: string[] }
   >();
   private readonly logger = new Logger(AuditService.name);
+  private readonly failures = new WeakMap<object, string>();
   private readonly relay: () => Promise<boolean>;
   private timer?: NodeJS.Timeout;
   private running?: Promise<void>;
@@ -87,6 +88,11 @@ export class AuditService implements OnModuleInit, OnModuleDestroy {
     });
   }
   async recordFailure(event: AuditEvent, error: unknown): Promise<void> {
+    // Domain and HTTP boundaries can observe the same failed attempt.
+    if (error !== null && typeof error === 'object') {
+      if (this.failures.get(error) === event.requestId) return;
+      this.failures.set(error, event.requestId);
+    }
     const status = error instanceof HttpException ? error.getStatus() : 500;
     try {
       await this.database.transaction((client) =>

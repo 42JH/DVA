@@ -8,6 +8,8 @@ import {
 } from '../members.types';
 
 export class MembershipResponseDto {
+  @ApiProperty() monthlyBillingEnabled!: boolean;
+  @ApiProperty() groupBillingEnabled!: boolean;
   @ApiProperty({ type: Number, nullable: true, description: '부서가 없으면 null.' })
   departmentSeq!: number | null;
   @ApiProperty() membershipSeq!: number;

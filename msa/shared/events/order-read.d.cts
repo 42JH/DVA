@@ -50,6 +50,8 @@ export interface IntakeOrderResult {
   parcelNo: string | null;
   paymentDueAt: string | null;
   paymentRequest: {
+    autoCharge: boolean;
+    cardPaymentFailed: boolean;
     paymentRequestId: string;
     amount: number;
     expiresAt: string;

@@ -45,7 +45,7 @@ API는 공통 `/api` 응답/에러 envelope·페이지네이션·요청 ID·Orig
 - `GET/POST /api/personas/:id/versions`, `POST /api/personas/:id/activate`
 - `GET /api/ai/options`, `GET /api/ai/config`, `POST /api/ai/config/apply-result`
 
-목록·상세·이력은 모든 ACTIVE 관리자, 설정 변경·publish·지원 옵션은 SUPERVISOR/SYSTEM_ADMIN에게 허용한다. 초안은 유형별 한 개이며 확인한 HEAD와 draftRevision으로 충돌을 검사한다. 확정은 새 INACTIVE 버전을 만들며 publish·AI의 APPLIED 확인 전까지 기존 ACTIVE를 유지한다. AI runtime 조회/회신은 별도 AI_PERSONA_TOKEN을 확인하고 stale 관리자 쿠키를 AI로 강등하지 않는다. SYSTEM_ADMIN은 runtime 조회만 세션으로 호출할 수 있다.
+목록·상세·이력은 모든 ACTIVE 관리자, 설정 변경·publish·지원 옵션은 OPERATOR/SYSTEM_ADMIN에게 허용한다. 초안은 유형별 한 개이며 확인한 HEAD와 draftRevision으로 충돌을 검사한다. 확정은 새 INACTIVE 버전을 만들며 publish·AI의 APPLIED 확인 전까지 기존 ACTIVE를 유지한다. AI runtime 조회/회신은 별도 AI_PERSONA_TOKEN을 확인하고 stale 관리자 쿠키를 AI로 강등하지 않는다. OPERATOR/SYSTEM_ADMIN은 runtime 조회만 세션으로 호출할 수 있다.
 
 AI_AGENT_URL과 AI_PERSONA_TOKEN은 기존 AI와 같은 값을 사용한다. 둘 다 설정한 경우 원본 옵션 조회·2초 timeout·리다이렉트 거절과 5초 알림 워커/30초 claim 간격을 사용한다. 알림은 `/internal/persona/refresh`에 버전 번호와 applicationId만 보내며 ACK만으로 ACTIVE가 되지 않는다. 실패·재시작에도 대기를 유지한다. 설정을 생략해도 기존 인증/감사는 기동하며 AI 연동이 필요한 요청은 503이다.
 

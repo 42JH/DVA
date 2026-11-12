@@ -1,5 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { DatabaseService } from '../../database/database.service';
+import { AuditService } from '../../audit/audit.service';
+import { randomUUID } from 'node:crypto';
 import type { CallEvent } from './complaint-judge';
 import { ComplaintFaqClient } from './complaint-faq.client';
 
@@ -24,6 +26,7 @@ export class ComplaintJudgeRepository {
   constructor(
     private readonly database: DatabaseService,
     private readonly faqs: ComplaintFaqClient,
+    private readonly audit: AuditService,
   ) {}
 
   /** 판정할 통화 하나를 집는다(최신부터) — 시도 수를 올리고 임대 시각을 걸어 다른 인스턴스와 겹치지 않게 */
@@ -98,12 +101,27 @@ export class ComplaintJudgeRepository {
     hasComplaint: boolean,
     complaints: StoredComplaint[],
   ): Promise<boolean> {
-    const result = await this.database.pool.query(
-      `UPDATE call_analyses SET has_complaint=$2,complaints=$3::jsonb,complaint_retry_at=NULL
+    return this.database.transaction(async (client) => {
+      const result = await client.query(
+        `UPDATE call_analyses SET has_complaint=$2,complaints=$3::jsonb,complaint_retry_at=NULL
        WHERE call_session_seq=$1 AND has_complaint IS NULL`,
-      [id, hasComplaint, JSON.stringify(complaints)],
-    );
-    return result.rowCount === 1;
+        [id, hasComplaint, JSON.stringify(complaints)],
+      );
+      if (result.rowCount === 1)
+        await this.audit.recordSuccess(
+          {
+            actorId: null,
+            actorType: 'SYSTEM',
+            targetType: 'CALL_SESSION',
+            targetId: id,
+            action: 'CALL_COMPLAINT_JUDGED',
+            requestId: randomUUID(),
+            metadata: { hasComplaint, complaintCount: complaints.length },
+          },
+          client,
+        );
+      return result.rowCount === 1;
+    });
   }
 
   /** 다시 집을 시각을 정한다. 시도 수를 쓰지 않을 때(녹음을 기다림)는 올린 시도 수를 되돌린다 */
@@ -111,21 +129,54 @@ export class ComplaintJudgeRepository {
     id: number,
     minutes: number,
     countAttempt: boolean,
+    reason: 'MODEL_UNAVAILABLE' | 'RECORDING_UNAVAILABLE' = 'MODEL_UNAVAILABLE',
   ): Promise<void> {
-    await this.database.pool.query(
-      `UPDATE call_analyses SET complaint_retry_at=clock_timestamp()+make_interval(mins=>$2),
+    await this.database.transaction(async (client) => {
+      const result = await client.query(
+        `UPDATE call_analyses SET complaint_retry_at=clock_timestamp()+make_interval(mins=>$2),
          complaint_attempts=complaint_attempts-$3
        WHERE call_session_seq=$1 AND has_complaint IS NULL`,
-      [id, minutes, countAttempt ? 0 : 1],
-    );
+        [id, minutes, countAttempt ? 0 : 1],
+      );
+      if (countAttempt && result.rowCount)
+        await this.audit.recordResult(
+          {
+            actorId: null,
+            actorType: 'SYSTEM',
+            targetType: 'CALL_SESSION',
+            targetId: id,
+            action: 'CALL_COMPLAINT_FAILED',
+            requestId: randomUUID(),
+            metadata: { reason },
+          },
+          'FAILED',
+          client,
+        );
+    });
   }
 
   /** 판정할 수 없는 통화 — 다시 집지 않는다 (미판정으로 남음) */
   async giveUp(id: number): Promise<void> {
-    await this.database.pool.query(
-      `UPDATE call_analyses SET complaint_attempts=${GIVE_UP},complaint_retry_at=NULL
+    await this.database.transaction(async (client) => {
+      const result = await client.query(
+        `UPDATE call_analyses SET complaint_attempts=${GIVE_UP},complaint_retry_at=NULL
        WHERE call_session_seq=$1 AND has_complaint IS NULL`,
-      [id],
-    );
+        [id],
+      );
+      if (result.rowCount)
+        await this.audit.recordResult(
+          {
+            actorId: null,
+            actorType: 'SYSTEM',
+            targetType: 'CALL_SESSION',
+            targetId: id,
+            action: 'CALL_COMPLAINT_FAILED',
+            requestId: randomUUID(),
+            metadata: { reason: 'INPUT_TOO_LONG' },
+          },
+          'FAILED',
+          client,
+        );
+    });
   }
 }

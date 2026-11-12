@@ -22,8 +22,12 @@ import {
   validateDraftWrite,
   validateWriteReference,
   type CustomerReference,
+  validateCardApprovalScope,
+  requestCardApprovalScope,
+  type StoredPaymentCard,
 } from '@dva/events/parcel-draft-write.cjs';
-import type { PoolClient } from 'pg';
+import type { Pool, PoolClient } from 'pg';
+import type { BillingSnapshot } from '@dva/events/order-intake-write.cjs';
 import { OrderReadError } from '@dva/events/order-read.cjs';
 import { readCallbackUrl, validateReadScope } from '@dva/events/read-scope.cjs';
 import { ApiException, type ErrorCode } from '../common/errors/api.exception';
@@ -47,6 +51,44 @@ export class ParcelDraftWriteController {
     private readonly recipientPins: OrderRecipientPinsService,
     private readonly orderCustomers: OrderCustomerWritesService,
   ) {}
+
+  @Post('card-approval')
+  @SetMetadata('auth:internal-operations', true)
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  async cardApproval(@Body() event: unknown) {
+    try {
+      validateCardApprovalScope(event, 'order');
+    } catch {
+      throw new HttpException({ error: 'INVALID_CARD_APPROVAL_SCOPE' }, 422);
+    }
+    try {
+      return await this.database.transaction(async (client) => {
+        await client.query("SET LOCAL lock_timeout='2s'");
+        return this.scopes.run(event.eventId, client, async () => {
+          const payload = await requestCardApprovalScope(
+            readCallbackUrl(
+              this.config.get('ORDER_URL', { infer: true }) ?? '',
+              '/internal/card-payment-scope',
+              event.payload.orderAddress,
+            ),
+            this.config.get('CUSTOMER_AUTH_TOKEN', { infer: true }),
+            {
+              ...event,
+              source: 'customer',
+              payload: {
+                ...event.payload,
+                customerAddress: this.config.get('MSA_INSTANCE_IP', { infer: true }) ?? null,
+              },
+            },
+          );
+          return { eventId: event.eventId, status: 'processed', payload };
+        });
+      });
+    } catch (error) {
+      this.failure(error);
+    }
+  }
 
   @Post()
   @HttpCode(200)
@@ -101,10 +143,16 @@ export class ParcelDraftWriteController {
   @SetMetadata('auth:internal-operations', true)
   @HttpCode(200)
   @Header('Cache-Control', 'no-store')
-  async reference(@Body() event: unknown, @Headers('x-msa-read-scope') scopeId: string) {
+  async reference(@Body() event: unknown, @Headers('x-msa-read-scope') scopeId?: string) {
     try {
       validateWriteReference(event);
-      validateReadScope(scopeId);
+      if (
+        !['CustomerPaymentCardRead', 'OrderBillingSnapshotRead'].includes(
+          event.payload.operation,
+        ) ||
+        scopeId !== undefined
+      )
+        validateReadScope(scopeId);
       if (
         event.source !== 'order' ||
         ![
@@ -116,6 +164,9 @@ export class ParcelDraftWriteController {
           'CustomerCreationApplied',
           'PinChecked',
           'CustomerPaymentPolicyRead',
+          'CustomerPaymentCardRead',
+          'CustomerApprovalCardRead',
+          'OrderBillingSnapshotRead',
           'OrderCustomerRead',
         ].includes(event.payload.operation)
       )
@@ -123,17 +174,40 @@ export class ParcelDraftWriteController {
     } catch {
       throw new HttpException({ error: 'INVALID_DRAFT_REFERENCE' }, 422);
     }
-    if (!this.active.has(scopeId))
-      throw new ApiException(
-        503,
-        'DEPENDENCY_UNAVAILABLE',
-        '서비스를 일시적으로 사용할 수 없습니다.',
-      );
+    if (scopeId === undefined) {
+      const payload =
+        event.payload.operation === 'OrderBillingSnapshotRead'
+          ? await this.billingSnapshot(this.database.referencePool, event.payload.input)
+          : await this.paymentCard(this.database.referencePool, event.payload.input);
+      return { eventId: event.eventId, status: 'processed', payload };
+    }
     try {
       const payload = await this.scopes.use(scopeId, async (client) => {
         const input = event.payload.input;
+        if (event.payload.operation === 'OrderBillingSnapshotRead')
+          return this.billingSnapshot(client, input);
+        if (event.payload.operation === 'CustomerPaymentCardRead')
+          return this.paymentCard(client, input);
+        if (event.payload.operation === 'CustomerApprovalCardRead')
+          return (
+            (
+              await client.query<StoredPaymentCard>(
+                `SELECT payment_card_seq AS "paymentCardSeq",encrypted_billing_key AS "encryptedBillingKey",
+               provider_customer_key AS "providerCustomerKey",provider_environment AS "providerEnvironment"
+               FROM payment_cards WHERE deleted_at IS NULL AND status='ACTIVE'
+                AND ((customer_seq=$1 AND $2::int IS NULL) OR (organization_seq=$2 AND $1::int IS NULL))
+                AND expiration_year*12+expiration_month>=extract(year FROM clock_timestamp() AT TIME ZONE 'Asia/Seoul')*12+extract(month FROM clock_timestamp() AT TIME ZONE 'Asia/Seoul')
+               FOR SHARE`,
+                [input.customerSeq, input.organizationSeq],
+              )
+            ).rows[0] ?? null
+          );
         if (event.payload.operation === 'CustomerCreationApplied') {
-          if (this.active.get(scopeId)!.command.operation !== 'OrderCreated')
+          if (
+            !['OrderCreated', 'ManualOrderCreated'].includes(
+              this.active.get(scopeId)!.command.operation,
+            )
+          )
             throw new ApiException(403, 'FORBIDDEN', '주문 쓰기 범위를 확인해 주세요.');
           await this.orderCustomers.resolveWrite(client, String(input.writeEventId));
           return true;
@@ -144,7 +218,7 @@ export class ParcelDraftWriteController {
             { name: string; phoneNumber: string } | undefined;
           const customer = input.customer as { name: string; phoneNumber: string } | undefined;
           if (
-            command.operation !== 'OrderCreated' ||
+            !['OrderCreated', 'ManualOrderCreated'].includes(command.operation) ||
             (expected
               ? customer?.name !== expected.name || customer.phoneNumber !== expected.phoneNumber
               : input.customerSeq !== command.input.customerSeq)
@@ -169,9 +243,12 @@ export class ParcelDraftWriteController {
         if (event.payload.operation === 'RecipientPinsPrepared') {
           const active = this.active.get(scopeId)!;
           if (
-            !['OrderCreated', 'OrderSubmitted', 'AdminParcelDraftSubmitted'].includes(
-              active.command.operation,
-            ) ||
+            ![
+              'OrderCreated',
+              'ManualOrderCreated',
+              'OrderSubmitted',
+              'AdminParcelDraftSubmitted',
+            ].includes(active.command.operation) ||
             (active.command.operation === 'OrderSubmitted' && active.command.id !== input.id)
           )
             throw new ApiException(403, 'FORBIDDEN', '주문 쓰기 범위를 확인해 주세요.');
@@ -309,6 +386,31 @@ export class ParcelDraftWriteController {
     }
   }
 
+  private async billingSnapshot(client: Pool | PoolClient, input: Record<string, unknown>) {
+    return (
+      await client.query<BillingSnapshot>(
+        `SELECT $1::int AS "organizationSeq",$2::int AS "departmentSeq",
+         (SELECT name FROM organizations WHERE organization_seq=$1) AS "organizationName",
+         (SELECT name FROM departments WHERE department_seq=$2) AS "departmentName"`,
+        [input.organizationSeq, input.departmentSeq],
+      )
+    ).rows[0];
+  }
+
+  private async paymentCard(client: Pool | PoolClient, input: Record<string, unknown>) {
+    return (
+      (
+        await client.query<{ id: number }>(
+          `SELECT payment_card_seq AS id FROM payment_cards WHERE deleted_at IS NULL AND status='ACTIVE'
+           AND ((customer_seq=$1 AND $2::int IS NULL) OR (organization_seq=$2 AND $1::int IS NULL))
+           AND expiration_year*12+expiration_month>=extract(year FROM clock_timestamp() AT TIME ZONE 'Asia/Seoul')*12+extract(month FROM clock_timestamp() AT TIME ZONE 'Asia/Seoul')
+           LIMIT 1`,
+          [input.customerSeq, input.organizationSeq],
+        )
+      ).rows[0]?.id ?? null
+    );
+  }
+
   private async paymentPolicy(client: PoolClient, customerId: number) {
     const customer = (
       await client.query<{ monthlyBillingEnabled: boolean }>(
@@ -324,37 +426,44 @@ export class ParcelDraftWriteController {
         membershipStatus: string;
         organizationStatus: string;
         monthlyBillingEnabled: boolean;
+        memberMonthlyEnabled: boolean;
+        groupBillingEnabled: boolean;
       }>(
         `SELECT o.name AS "organizationName",m.organization_seq AS "organizationSeq",m.department_seq AS "departmentSeq",m.status AS "membershipStatus",o.status AS "organizationStatus",
-       o.monthly_billing_enabled AS "monthlyBillingEnabled"
+       o.monthly_billing_enabled AS "monthlyBillingEnabled",m.monthly_billing_enabled AS "memberMonthlyEnabled",m.group_billing_enabled AS "groupBillingEnabled"
        FROM memberships m JOIN organizations o USING(organization_seq)
        WHERE m.customer_seq=$1 AND m.deleted_at IS NULL AND o.deleted_at IS NULL FOR SHARE OF m,o`,
         [customerId],
       )
     ).rows[0];
+    const active = member?.membershipStatus === 'ACTIVE' && member.organizationStatus === 'ACTIVE';
+    const registeredGroup = active
+      ? (
+          await client.query<{ id: number }>(
+            `SELECT payment_card_seq AS id FROM payment_cards
+             WHERE organization_seq=$1 AND customer_seq IS NULL AND status='ACTIVE' AND deleted_at IS NULL
+              AND expiration_year*12+expiration_month>=extract(year FROM clock_timestamp() AT TIME ZONE 'Asia/Seoul')*12+extract(month FROM clock_timestamp() AT TIME ZONE 'Asia/Seoul')
+             FOR SHARE`,
+            [member.organizationSeq],
+          )
+        ).rows[0]
+      : undefined;
     const department =
-      member?.departmentSeq != null
+      active && member.departmentSeq !== null
         ? (
-            await client.query<{
-              groupBillingEnabled: boolean;
-              name: string;
-              deletedAt: string | null;
-            }>(
-              'SELECT name,deleted_at AS "deletedAt",group_billing_enabled AS "groupBillingEnabled" FROM departments WHERE department_seq=$1 FOR SHARE',
+            await client.query<{ name: string }>(
+              'SELECT name FROM departments WHERE department_seq=$1',
               [member.departmentSeq],
             )
           ).rows[0]
         : undefined;
-    const active = member?.membershipStatus === 'ACTIVE' && member.organizationStatus === 'ACTIVE';
     return {
       monthly:
         !!customer &&
-        (member ? active && member.monthlyBillingEnabled : customer.monthlyBillingEnabled),
-      group:
-        !!customer &&
-        !!active &&
-        department?.deletedAt === null &&
-        department.groupBillingEnabled === true,
+        (member
+          ? active && member.monthlyBillingEnabled && member.memberMonthlyEnabled
+          : customer.monthlyBillingEnabled),
+      group: !!customer && active && member.groupBillingEnabled === true && !!registeredGroup,
       organizationName: active ? member.organizationName : null,
       departmentName: active ? (department?.name ?? null) : null,
       organizationSeq: active ? member.organizationSeq : null,

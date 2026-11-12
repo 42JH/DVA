@@ -52,9 +52,14 @@ export function configureApplication(app: INestApplication, logger = new Logger(
   });
   app.setGlobalPrefix(API_PREFIX, {
     exclude: [
+      { path: 'internal/card-call-scope/callback', method: RequestMethod.ALL },
       { path: 'customer/health', method: RequestMethod.ALL },
       { path: 'customer/health/ready', method: RequestMethod.ALL },
       { path: 'internal/call-read-references/parcel-draft-write', method: RequestMethod.ALL },
+      {
+        path: 'internal/call-read-references/parcel-draft-write/card-approval',
+        method: RequestMethod.ALL,
+      },
       {
         path: 'internal/call-read-references/parcel-draft-write/reference',
         method: RequestMethod.ALL,

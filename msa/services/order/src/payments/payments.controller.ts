@@ -171,6 +171,7 @@ export class PaymentsController {
     return this.payments.read(p.id);
   }
   @Post('requests/:id/confirm')
+  @AuditOperation({ action: 'ORDER_PAYMENT_CONFIRMATION', targetType: 'ORDER', target: 'none' })
   @HttpCode(200)
   @PublicAuth()
   @Header('Referrer-Policy', 'no-referrer')
@@ -191,6 +192,7 @@ export class PaymentsController {
     return this.payments.confirm(p.id, body.orderId, body.amount, body.paymentKey, req.requestId);
   }
   @Post('requests/:id/reconcile')
+  @AuditOperation({ action: 'ORDER_PAYMENT_RECONCILED', targetType: 'ORDER', target: 'none' })
   @HttpCode(200)
   @PublicAuth()
   @Header('Referrer-Policy', 'no-referrer')

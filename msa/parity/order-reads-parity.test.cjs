@@ -2,7 +2,7 @@ const { truncateFixture } = require('./fixture-reset.cjs');
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { randomUUID, createHash } = require('node:crypto');
+const { randomUUID, createHash, createCipheriv, randomBytes } = require('node:crypto');
 const { Pool } = require('pg');
 const { OrdersService } = require('../dist/orders/orders.service');
 const { OrdersRepository } = require('../dist/orders/orders.repository');
@@ -11,6 +11,31 @@ const headers = { Cookie: 'dva_session='+tokens[0] };
 const ai = id => ({ call_session_seq:String(id) });
 const pause = ms => new Promise(resolve=>setTimeout(resolve,ms));
 const orderTables = ['orders','order_parcels','order_payment_requests','organization_billing_months','order_billing_charges','empty_ai_order_results','order_parcel_drafts'];
+async function companyCardFixture(database, id) {
+  const nonce = randomBytes(12), cipher = createCipheriv('aes-256-gcm', Buffer.from('11'.repeat(32), 'hex'), nonce);
+  cipher.setAAD(Buffer.from(String(id)));
+  const encrypted = Buffer.concat([nonce, cipher.update('card-success', 'utf8'), cipher.final(), cipher.getAuthTag()]).toString('base64');
+  const key = '00000000-0000-4000-8000-' + String(id).padStart(12, '0');
+  await database.query(`INSERT INTO payment_cards(payment_card_seq,organization_seq,registration_key,request_hash,provider_customer_key,
+    provider_environment,encrypted_billing_key,expiration_year,expiration_month,masked_number,status)
+    OVERRIDING SYSTEM VALUE VALUES($1,$1,$2,'workflow-fixture',$2,'test',$3,2099,12,'1234********5678','ACTIVE')`, [id,key,encrypted]);
+}
+function cardPaymentValue(value, key, identities, started) {
+  if (['paid_at','occurred_at'].includes(key) && Date.parse(value) === Date.parse('2030-03-02T00:01:00Z')) return value;
+  if (key === 'card_payment_order_id' ||
+      (['provider_payment_key','provider_reference'].includes(key) && value.startsWith('card-payment-'))) {
+    const prefix = key === 'card_payment_order_id' ? '' : 'card-payment-';
+    const id = value.slice(prefix.length);
+    assert.match(id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+    if (!identities.has(id)) identities.set(id, 'card-transaction-' + identities.size);
+    return prefix + identities.get(id);
+  }
+  if (['approval_started_at','approval_next_check_at','completed_at'].includes(key)) {
+    const offset = key === 'approval_next_check_at' ? 60000 : 0;
+    const time = Date.parse(value) - offset;
+    if (time >= started - 1000 && time <= Date.now() + 1000) return '<generated ' + key + '>';
+  }
+}
 
 test('four order read APIs preserve monolith HTTP and stored data across owner databases', async t => {
   assert.equal(process.env.PGDATABASE,'dva_webhook_test');
@@ -29,7 +54,7 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
     } finally { await Promise.all(Object.values(databases).map(db=>db.end())); }
   });
   const reference=databases.monolith;
-  const owners={operations:['admin_users','admin_sessions','audit_logs'],customer:['customers','personal_pins','organizations','memberships'],consultation:['call_sessions'],order:orderTables};
+  const owners={operations:['admin_users','admin_sessions','audit_logs'],customer:['customers','personal_pins','organizations','memberships','payment_cards'],consultation:['call_sessions'],order:orderTables};
   const sides=[{name:'monolith',base:'http://monolith-app:3000'}, {name:'msa',base:'http://order-app:3002'}];
   for (const [service,port] of [['monolith',3000],['operations',3005],['customer',3001],['consultation',3004],['order',3002]]) {
     const url=`http://${service}-app:${port}/${service==='monolith'?'api':service}/docs-json`;
@@ -47,7 +72,7 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
   await truncateFixture(reference, 'TRUNCATE '+[...orderTables,'customers','organizations','call_sessions','admin_users','audit_logs','shipments'].join(',')+' RESTART IDENTITY CASCADE');
   for(const [owner,tables] of Object.entries(owners)) await truncateFixture(databases[owner], 'TRUNCATE '+tables.join(',')+' RESTART IDENTITY CASCADE');
   for(const db of [reference,databases.operations]) {
-    for(const [i,role] of ['OPERATOR','SUPERVISOR','SYSTEM_ADMIN'].entries()) {
+    for(const [i,role] of ['OPERATOR','OPERATOR','SYSTEM_ADMIN'].entries()) {
       await db.query(`INSERT INTO admin_users(admin_user_seq,login_id,name,password_hash,role,status,created_at)
         OVERRIDING SYSTEM VALUE VALUES($1,$2,'조회 담당자','fixture-never-used-for-login',$3,'ACTIVE','2025-01-01T00:00:00Z')`,[i+1,'read'+i,role]);
       await db.query(`INSERT INTO admin_sessions(session_token_hash,admin_user_seq,created_at,expires_at) VALUES($1,$2,'2025-01-01T00:00:00Z','2094-01-01T00:00:00Z')`,[createHash('sha256').update(tokens[i]).digest('hex'),i+1]);
@@ -66,6 +91,9 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
     for(const [id,customer,org,status,deleted]of [[6101,1,6001,'INACTIVE',null],[6102,3,6001,'ACTIVE',null],[6103,4,6001,'ACTIVE',null],[6104,2,6002,'ACTIVE',null],[6105,5,6003,'ACTIVE','2026-01-01Z']])await db.query(
       "INSERT INTO memberships(membership_seq,customer_seq,organization_seq,employee_no,status,deleted_at) OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,$4,$5,$6)",[id,customer,org,'00'+id,status,deleted]);
   }
+  for (const db of [reference, databases.customer])
+    await db.query("INSERT INTO payment_cards(payment_card_seq,customer_seq,registration_key,request_hash,provider_customer_key,provider_environment,expiration_year,expiration_month,status,created_at,updated_at) OVERRIDING SYSTEM VALUE VALUES(1,1,'11111111-1111-4111-8111-111111111111','fixed-card-request','22222222-2222-4222-8222-222222222222','test',2099,12,'FAILED','2025-01-01Z','2025-01-01Z')");
+
   const statuses=['COLLECTING','notPaid','PAID','SUBMITTING','SUBMITTING_FAILED','ACCEPTED','SUBMISSION_FAILED','CANCELLED','ACCEPTED','ACCEPTED','COLLECTING','ACCEPTED','ACCEPTED','ACCEPTED','COLLECTING'];
   for(const db of [reference,databases.order]) {
     const client=await db.connect();
@@ -107,6 +135,7 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
         ['00000000-0000-4000-8000-000000000007',1013,null,null,'2094-01-01T00:00:00Z']])
         await client.query(`INSERT INTO order_payment_requests(payment_request_id,order_seq,amount,expires_at,created_at,invalidated_at,completed_at,provider_reference,notification_status,completion_notification_status)
           VALUES($1,$2,7000,$3,'1999-01-01T00:00:00Z',$4,$5,$6,'SENT',CASE WHEN $5::timestamptz IS NULL THEN 'WAITING' ELSE 'SENT' END)`,[id,order,expires,invalid,completed,completed?'stored-reference':null]);
+      await client.query("UPDATE order_payment_requests SET card_payment_order_id=payment_request_id,payment_card_seq=CASE WHEN payment_request_id IN ('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000004') THEN 1 ELSE NULL END,card_payment_failed=payment_request_id IN ('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000002')");
       await client.query("UPDATE order_payment_requests SET approval_started_at='2030-01-01T00:00:00Z' WHERE payment_request_id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'");
       await client.query('UPDATE order_parcels SET origin_name=$1 WHERE order_parcel_seq=20041', ['닫는 </script> & "이름"']);
       await client.query('COMMIT');
@@ -221,6 +250,8 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
       const view=await compare('/api/payments/requests/'+id,200,{});
       assert.equal(view.data.status,status);
       assert.equal(view.data.token,id);
+      assert.equal(view.data.autoCharge,[1,4].includes(number));
+      assert.equal(view.data.cardPaymentFailed,[1,2].includes(number));
       await compare('/api/payments/requests/'+id.toUpperCase(),200,{Cookie:'dva_session=invalid'});
       for(const mode of ['p','success','fail']) {
         const html=await compare('/api/payments/'+mode+'/'+id,200,{});
@@ -631,6 +662,106 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
     for(const query of ['', '?direction=BAD','?direction=ORIGIN&unknown=1','?direction=ORIGIN&direction=DESTINATION','?direction=ORIGIN&limit=101']) await compare('/api/customers/1/addresses'+query,400);
     for(const query of ['?statusGroup=UNKNOWN','?q='+encodeURIComponent('\0'),'?q='+'x'.repeat(201)]) await compare('/api/admin/orders'+query,400);
   });
+  await t.test('payment eligibility preserves member settings, company cards and source row locks', async (policyTest) => {
+    const { OrderPaymentsRepository: OriginalPayments } = require('./monolith-runtime/orders/order-payments.repository');
+    const { ParcelDraftWriteController: CustomerWrites } = require('./customer-runtime/customers/parcel-draft-write.controller');
+    const { validatePolicy } = require('@dva/events/order-intake-write.cjs');
+    const original = new OriginalPayments();
+    const candidate = new CustomerWrites(null, null, null, null, null);
+    const customerId = 700201, companyId = 700202, departmentId = 700203;
+    const membershipId = 700204, cardId = 700205;
+    const registrationKey = randomUUID(), providerKey = randomUUID();
+    const date = (await reference.query("SELECT extract(year FROM clock_timestamp() AT TIME ZONE 'Asia/Seoul')::int AS year_value,extract(month FROM clock_timestamp() AT TIME ZONE 'Asia/Seoul')::int AS month_value")).rows[0];
+    const owners = [{ db: reference, source: true }, { db: databases.customer, source: false }];
+    policyTest.after(async () => {
+      for (const { db } of owners) {
+        await db.query('DELETE FROM payment_cards WHERE payment_card_seq=$1', [cardId]);
+        await db.query('DELETE FROM memberships WHERE membership_seq=$1', [membershipId]);
+        await db.query('DELETE FROM departments WHERE department_seq=$1', [departmentId]);
+        await db.query('DELETE FROM organizations WHERE organization_seq=$1', [companyId]);
+        await db.query('DELETE FROM customers WHERE customer_seq=$1', [customerId]);
+      }
+    });
+    for (const { db } of owners) {
+      await db.query("INSERT INTO customers(customer_seq,name,phone_number,status,monthly_billing_enabled) OVERRIDING SYSTEM VALUE VALUES($1,'자격 검증 고객','01056000001','ACTIVE',true)", [customerId]);
+      await db.query("INSERT INTO organizations(organization_seq,name,status,monthly_billing_enabled) OVERRIDING SYSTEM VALUE VALUES($1,'자격 검증 기업','ACTIVE',true)", [companyId]);
+      await db.query("INSERT INTO departments(department_seq,organization_seq,name,group_billing_enabled) OVERRIDING SYSTEM VALUE VALUES($1,$2,'자격 검증 부서',false)", [departmentId, companyId]);
+      await db.query("INSERT INTO memberships(membership_seq,customer_seq,organization_seq,employee_no,status,monthly_billing_enabled,group_billing_enabled) OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,'00560001','ACTIVE',true,true)", [membershipId, customerId, companyId]);
+      await db.query("INSERT INTO payment_cards(payment_card_seq,organization_seq,registration_key,request_hash,provider_customer_key,provider_environment,encrypted_billing_key,masked_number,expiration_year,expiration_month,status) OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,'fixture-policy-hash',$4,'test','fixture-policy-key','************1234',2099,12,'ACTIVE')", [cardId, companyId, registrationKey, providerKey]);
+    }
+    const cases = [
+      { name: 'valid company card without department', cardLock: true },
+      { name: 'member monthly disabled', memberMonthly: false },
+      { name: 'company monthly disabled', companyMonthly: false },
+      { name: 'inactive membership', memberStatus: 'INACTIVE' },
+      { name: 'inactive company', companyStatus: 'INACTIVE' },
+      { name: 'withdrawn customer', customerStatus: 'WITHDRAWN' },
+      { name: 'deleted customer', customerDeleted: true },
+      { name: 'deleted membership uses personal policy', memberDeleted: true },
+      { name: 'deleted company uses personal policy', companyDeleted: true },
+      { name: 'personal monthly disabled', memberDeleted: true, customerMonthly: false },
+      { name: 'member group disabled', memberGroup: false },
+      { name: 'deleted group card', cardDeleted: true },
+      { name: 'expired group card', year: 2000, month: 1 },
+      { name: 'registering group card', cardStatus: 'REGISTERING' },
+      { name: 'current Seoul month remains usable', year: date.year_value, month: date.month_value },
+      { name: 'department flag does not grant member access', department: true, departmentGroup: true, memberGroup: false },
+      { name: 'member access works with disabled department flag', department: true, departmentLock: true },
+      { name: 'member access survives department soft deletion', department: true, departmentDeleted: true },
+    ];
+    const defaults = { customerMonthly: true, customerStatus: 'ACTIVE', customerDeleted: false,
+      companyMonthly: true, companyStatus: 'ACTIVE', companyDeleted: false, memberMonthly: true,
+      memberGroup: true, memberStatus: 'ACTIVE', memberDeleted: false, department: false,
+      departmentGroup: false, departmentDeleted: false, cardStatus: 'ACTIVE', cardDeleted: false,
+      year: 2099, month: 12 };
+    for (const item of cases) {
+      const state = { ...defaults, ...item }, values = [];
+      for (const owner of owners) {
+        const { db } = owner;
+        const historical = '2026-01-01T00:00:00Z';
+        await db.query('UPDATE customers SET status=$2,monthly_billing_enabled=$3,deleted_at=$4 WHERE customer_seq=$1', [customerId, state.customerStatus, state.customerMonthly, state.customerDeleted ? historical : null]);
+        await db.query('UPDATE organizations SET status=$2,monthly_billing_enabled=$3,deleted_at=$4 WHERE organization_seq=$1', [companyId, state.companyStatus, state.companyMonthly, state.companyDeleted ? historical : null]);
+        await db.query('UPDATE memberships SET status=$2,monthly_billing_enabled=$3,group_billing_enabled=$4,department_seq=$5,deleted_at=$6 WHERE membership_seq=$1', [membershipId, state.memberStatus, state.memberMonthly, state.memberGroup, state.department ? departmentId : null, state.memberDeleted ? historical : null]);
+        await db.query('UPDATE departments SET group_billing_enabled=$2,deleted_at=$3 WHERE department_seq=$1', [departmentId, state.departmentGroup, state.departmentDeleted ? historical : null]);
+        await db.query('UPDATE payment_cards SET status=$2,expiration_year=$3,expiration_month=$4,deleted_at=$5 WHERE payment_card_seq=$1', [cardId, state.cardStatus, state.year, state.month, state.cardDeleted ? historical : null]);
+        const client = await db.connect();
+        try {
+          await client.query('BEGIN');
+          const result = owner.source
+            ? await original.eligibility(client, customerId)
+            : await candidate.paymentPolicy(client, customerId);
+          if (!owner.source) validatePolicy(result);
+          values.push({ monthly: result.monthly, group: result.group,
+            organizationSeq: result.organizationSeq, departmentSeq: result.departmentSeq });
+          if (item.cardLock || item.departmentLock) {
+            const competing = await db.connect();
+            let committed = false;
+            try {
+              await competing.query('BEGIN');
+              if (item.cardLock) await assert.rejects(
+                competing.query('SELECT payment_card_seq FROM payment_cards WHERE payment_card_seq=$1 FOR UPDATE NOWAIT', [cardId]),
+                error => error.code === '55P03',
+              );
+              else {
+                await competing.query('SELECT department_seq FROM departments WHERE department_seq=$1 FOR UPDATE NOWAIT', [departmentId]);
+                await competing.query("UPDATE departments SET name='결제 직전 부서 이름' WHERE department_seq=$1", [departmentId]);
+                await competing.query('COMMIT');
+                committed = true;
+                const name = owner.source
+                  ? (await client.query('SELECT name FROM departments WHERE department_seq=$1', [departmentId])).rows[0].name
+                  : (await candidate.paymentPolicy(client, customerId)).departmentName;
+                assert.equal(name, '결제 직전 부서 이름');
+              }
+            } finally { if (!committed) await competing.query('ROLLBACK');competing.release(); }
+          }
+        } finally { await client.query('ROLLBACK');client.release(); }
+      }
+      assert.deepEqual(values[1], values[0], item.name);
+    }
+    t.diagnostic('payment eligibility matches '+cases.length+' stored-data cases and card/department lock behavior');
+  });
+
+
   await t.test('more simultaneous AI reads than any owner pool finish without a callback deadlock',async()=> {
     const path='/api/orders/1001',requestId=randomUUID();
     // Sample the unchanged oracle once before saturating the MSA owner callbacks.
@@ -704,6 +835,8 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
     const id = n => '00000000-0000-4000-8000-'+String(n).padStart(12,'0');
     const pending=id(1), paid=id(4), expired=id(3), requests=[];
     const path=(key,completion=false)=>'/api/payments/notifications/'+key+(completion?'/completion':'')+'/retry';
+    for (const database of [reference,databases.order])
+      await database.query('UPDATE order_payment_requests SET payment_card_seq=NULL,card_payment_failed=false WHERE payment_request_id=$1', [pending]);
     async function post(url,expected,extra={},body={}) {
       const requestId=randomUUID();
       requests.push(requestId);
@@ -736,43 +869,70 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
     }
 
     const messages=[];
+    let forcedStatus;
     const server=require('node:http').createServer(async(req,res)=>{
       const chunks=[];for await(const chunk of req)chunks.push(chunk);
       const text=JSON.parse(Buffer.concat(chunks)).text;
       messages.push(text);
-      res.writeHead(text.includes('/p/'+paid)?503:200);
+      res.writeHead(forcedStatus ?? (text.includes('/p/'+paid)?503:200));
       res.end('ok');
     });
-    await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+    await new Promise(resolve=>server.listen(0,'0.0.0.0',resolve));
     const outputs=[];
+    const notificationStarted=Date.now();
+    const compareNotifications=async()=>{
+      const snapshot=async db=>{
+        const rows=(await db.query(`SELECT request_id,action,result,target_type,target_seq,actor_type,actor_seq,actor_name,target_admin_name,metadata,occurred_at
+          FROM audit_logs WHERE action ~ '^ORDER_PAYMENT_(COMPLETION_)?NOTIFICATION_(ATTEMPTED|SENT|FAILED|UNKNOWN)$'
+          ORDER BY target_seq,action,result`)).rows;
+        const ids=new Set();
+        return rows.map(({request_id,occurred_at,...row})=>{
+          assert.match(request_id,/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+          assert.ok(!ids.has(request_id)&&!requests.includes(request_id));ids.add(request_id);
+          assert.ok(occurred_at.getTime()>=notificationStarted-2000&&occurred_at.getTime()<=Date.now()+2000);
+          return row;
+        });
+      };
+      assert.deepEqual(await snapshot(databases.operations),await snapshot(reference));
+    };
+    const runWorker=async mono=>{
+      if(mono){
+        const ip=Object.values(require('node:os').networkInterfaces()).flat().find(value=>value.family==='IPv4'&&!value.internal).address;
+        const response=await fetch('http://monolith-app:8000/__payment-notifications',{
+          method:'POST',signal:AbortSignal.timeout(20000),
+          headers:{Authorization:'Bearer '+process.env.CUSTOMER_AUTH_TOKEN,'Content-Type':'application/json'},
+          body:JSON.stringify({webhook:'http://'+ip+':'+server.address().port+'/notice'}),
+        });
+        assert.equal(response.status,200);assert.deepEqual(await response.json(),{completed:true});return;
+      }
+      const config={get(key){return {
+        NODE_ENV:'test',DB_HOST:'order-db',DB_PORT:5432,DB_USER:'order_app',
+        DB_PASSWORD:process.env.PGPASSWORD,DB_NAME:process.env.PGDATABASE,
+        CUSTOMER_AUTH_TOKEN:process.env.CUSTOMER_AUTH_TOKEN,OPERATIONS_URL:'http://operations-app:3005',
+        ORDER_PAYMENTS_ENABLED:true,PAYMENT_PUBLIC_URL:'https://payments.example.test/api/payments',
+        PAYMENT_MATTERMOST_WEBHOOK_URL:'http://127.0.0.1:'+server.address().port+'/notice',
+      }[key];}};
+      const {DatabaseService}=require('../dist/database/database.service');
+      const {AuditService}=require('../dist/audit/audit.service');
+      const {PaymentsRepository}=require('../dist/payments/payments.repository');
+      const {PaymentsService}=require('../dist/payments/payments.service');
+      const {PaymentsWorker}=require('../dist/payments/payments.worker');
+      const {PaymentClient}=require('../dist/payments/payment.client');
+      const database=new DatabaseService(config),audit=new AuditService(database,config);
+      try{
+        const repository=new PaymentsRepository(database,audit);
+        // Other phases have separate approval/revocation differential cases.
+        repository.pendingCardApprovals=repository.pendingApprovals=async()=>[];
+        const service=new PaymentsService(config,repository,database,audit,new PaymentClient(config));
+        const worker=new PaymentsWorker(config,service,repository),current=worker.run();
+        assert.equal(worker.run(),current);await current;await worker.run();
+      }finally{await audit.onModuleDestroy();await database.onModuleDestroy();}
+    };
     try {
-      for (const [db,runtime,mono] of [[reference,'./monolith-runtime',true],[databases.order,'../dist',false]]) {
+      for (const [db,mono] of [[reference,true],[databases.order,false]]) {
         await db.query("UPDATE order_payment_requests SET notification_status='SENDING',notification_attempted_at=clock_timestamp()-interval '46 seconds' WHERE payment_request_id=$1",[expired]);
-        const database={pool:db,async transaction(work) {
-          const client=await db.connect();
-          try {await client.query('BEGIN');const result=await work(client);await client.query('COMMIT');return result;}
-          catch(error){await client.query('ROLLBACK');throw error;}
-          finally{client.release();}
-        }};
-        const config={get(key){return {
-          ORDER_PAYMENTS_ENABLED:true, PAYMENT_PUBLIC_URL:'https://payments.example.test/api/payments',
-          PAYMENT_MATTERMOST_WEBHOOK_URL:'http://127.0.0.1:'+server.address().port+'/notice',
-        }[key];}};
-        const {PaymentsRepository}=require(runtime+'/payments/payments.repository');
-        const {PaymentsService}=require(runtime+'/payments/payments.service');
-        const {PaymentsWorker}=require(runtime+'/payments/payments.worker');
-        const {PaymentClient}=require(runtime+'/payments/payment.client');
-        const repository=new PaymentsRepository(database);
-        const client=new PaymentClient(config);
-        const service=mono
-          ? new PaymentsService(config,repository,client,new (require(runtime+'/orders/order-payments.repository').OrderPaymentsRepository)(undefined,database))
-          : new PaymentsService(config,repository,database,undefined,client);
-        const worker=new PaymentsWorker(config,service,repository);
         messages.length=0;
-        const current=worker.run();
-        assert.equal(worker.run(),current);
-        await current;
-        await worker.run();
+        await runWorker(mono);
         assert.equal(messages.length,2,'no automatic re-send of uncertain notification');
         assert.ok(messages[0].includes('/p/'+paid)&&messages[1].includes('/p/'+pending));
         outputs.push([...messages]);
@@ -784,6 +944,63 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
           {id:expired,initial:'UNKNOWN',completion:'WAITING',sent:false},
           {id:paid,initial:'SENT',completion:'UNKNOWN',sent:false},
         ]);
+      }
+      await compareNotifications();
+      const storage=[reference,databases.order],owners=[reference,databases.operations];
+      const previous=await Promise.all(storage.map(db=>db.query(`SELECT payment_request_id,notification_status,
+        notification_attempted_at::text,notification_sent_at::text,completion_notification_status,
+        completion_notification_attempted_at::text,completion_notification_sent_at::text
+        FROM order_payment_requests WHERE payment_request_id=ANY($1::uuid[])`,[[pending,paid,expired]])));
+      const resetStream=async completion=>{
+        for(const db of storage){
+          await db.query("UPDATE order_payment_requests SET notification_status='SENT',completion_notification_status='SENT' WHERE payment_request_id=ANY($1::uuid[])",[[pending,paid,expired]]);
+          const prefix=completion?'completion_':'';
+          await db.query(`UPDATE order_payment_requests SET ${prefix}notification_status='PENDING',
+            ${prefix}notification_attempted_at=NULL,${prefix}notification_sent_at=NULL WHERE payment_request_id=$1`,[completion?paid:pending]);
+        }
+      };
+      try{
+        for(const completion of [false,true]){
+          const prefix=completion?'completion_':'',target=completion?paid:pending;
+          for(const [http,status]of [[200,'SENT'],[400,'FAILED'],[503,'UNKNOWN']]){
+            forcedStatus=http;await resetStream(completion);
+            for(const [index,db]of storage.entries()){
+              messages.length=0;await runWorker(index===0);
+              assert.equal(messages.length,1,'terminal outcomes are not automatically resent');
+              const row=(await db.query(`SELECT ${prefix}notification_status AS status,
+                ${prefix}notification_sent_at IS NOT NULL AS sent FROM order_payment_requests WHERE payment_request_id=$1`,[target])).rows[0];
+              assert.deepEqual(row,{status,sent:status==='SENT'});
+            }
+            await compareNotifications();
+          }
+          forcedStatus=200;await resetStream(completion);
+          const action=`ORDER_PAYMENT_${completion?'COMPLETION_':''}NOTIFICATION_SENT`;
+          for(const db of owners)await db.query(`CREATE FUNCTION parity_notice_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+            IF NEW.action='${action}' THEN RAISE EXCEPTION 'test-only notice audit failure'; END IF;RETURN NEW;END $$;
+            CREATE TRIGGER parity_notice_failure BEFORE INSERT ON audit_logs FOR EACH ROW EXECUTE FUNCTION parity_notice_failure()`);
+          try{
+            for(const [index,db]of storage.entries()){
+              messages.length=0;await assert.rejects(runWorker(index===0));
+              assert.equal(messages.length,1,'the provider can accept before local audit failure');
+              assert.equal((await db.query(`SELECT ${prefix}notification_status AS status FROM order_payment_requests WHERE payment_request_id=$1`,[target])).rows[0].status,'SENDING');
+            }
+          }finally{for(const db of owners)await db.query('DROP TRIGGER IF EXISTS parity_notice_failure ON audit_logs;DROP FUNCTION IF EXISTS parity_notice_failure()');}
+          await compareNotifications();
+          for(const [index,db]of storage.entries()){
+            await db.query(`UPDATE order_payment_requests SET ${prefix}notification_attempted_at=clock_timestamp()-interval '46 seconds' WHERE payment_request_id=$1`,[target]);
+            messages.length=0;await runWorker(index===0);assert.equal(messages.length,0,'an uncertain delivered message is not resent');
+            assert.equal((await db.query(`SELECT ${prefix}notification_status AS status FROM order_payment_requests WHERE payment_request_id=$1`,[target])).rows[0].status,'UNKNOWN');
+          }
+          await compareNotifications();
+        }
+      }finally{
+        forcedStatus=undefined;
+        for(const [index,db]of storage.entries())for(const row of previous[index].rows)
+          await db.query(`UPDATE order_payment_requests SET notification_status=$2,notification_attempted_at=$3,
+            notification_sent_at=$4,completion_notification_status=$5,completion_notification_attempted_at=$6,
+            completion_notification_sent_at=$7 WHERE payment_request_id=$1`,[row.payment_request_id,row.notification_status,
+            row.notification_attempted_at,row.notification_sent_at,row.completion_notification_status,
+            row.completion_notification_attempted_at,row.completion_notification_sent_at]);
       }
     } finally { await new Promise((resolve,reject)=>server.close(error=>error?reject(error):resolve())); }
     assert.deepEqual(outputs[1],outputs[0],'identical Mattermost message payloads');
@@ -953,6 +1170,7 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
       try {
         await client.query('BEGIN');
         await client.query("SET LOCAL session_replication_role='replica'");
+        await client.query('UPDATE order_payment_requests SET payment_card_seq=NULL,card_payment_failed=false WHERE payment_request_id=$1', [pending]);
         await client.query("UPDATE order_parcels SET origin_name=COALESCE(origin_name,'발송인'),item_price=1000,notified_price=3500 WHERE order_seq=1002");
         await client.query('INSERT INTO orders(order_seq,customer_seq,payment_method_type,status,version,created_at,updated_at,creation_source,total_amount,payment_due_at,pickup_requested_at) '+
           'OVERRIDING SYSTEM VALUE SELECT 1051,customer_seq,payment_method_type,status,version,created_at,updated_at,creation_source,total_amount,payment_due_at,pickup_requested_at FROM orders WHERE order_seq=1002');
@@ -2084,6 +2302,8 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
       const normalize = (value, side, key = '') => {
         if (value === null) return null;
         if (value instanceof Date) value = value.toISOString();
+        const cardValue = cardPaymentValue(value, key, uuidMaps[side], started);
+        if (cardValue !== undefined) return cardValue;
         if (
           [
             'paymentRequestId',
@@ -2351,8 +2571,9 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
           "INSERT INTO departments(department_seq,organization_seq,name,group_billing_enabled) OVERRIDING SYSTEM VALUE VALUES(6500,6500,'접수 부서',true)",
         );
         await side.customers.query(
-          "INSERT INTO memberships(membership_seq,customer_seq,organization_seq,department_seq,employee_no,status) OVERRIDING SYSTEM VALUE VALUES(6500,6,6500,6500,'intake','ACTIVE')",
+          "INSERT INTO memberships(membership_seq,customer_seq,organization_seq,department_seq,employee_no,status,monthly_billing_enabled,group_billing_enabled) OVERRIDING SYSTEM VALUE VALUES(6500,6,6500,6500,'intake','ACTIVE',true,true)",
         );
+        await companyCardFixture(side.customers, 6500);
       }
       const group = await draft(53008);
       const grouped = await complete(53008, {
@@ -3178,6 +3399,8 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
       const normalize = (value, index, key = '') => {
         if (value === null) return null;
         if (value instanceof Date) value = value.toISOString();
+        const cardValue = cardPaymentValue(value, key, uuidMaps[index], started);
+        if (cardValue !== undefined) return cardValue;
         if (key === 'payment_request_id') {
           assert.match(value, /^[0-9a-f-]{36}$/i);
           const map = uuidMaps[index];
@@ -3435,8 +3658,9 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
           "INSERT INTO departments(department_seq,organization_seq,name,group_billing_enabled) OVERRIDING SYSTEM VALUE VALUES(9800,9800,'접수 부서',true)",
         );
         await side.customers.query(
-          "INSERT INTO memberships(membership_seq,customer_seq,organization_seq,department_seq,employee_no,status) OVERRIDING SYSTEM VALUE VALUES(9800,98004,9800,9800,'submit','ACTIVE')",
+          "INSERT INTO memberships(membership_seq,customer_seq,organization_seq,department_seq,employee_no,status,monthly_billing_enabled,group_billing_enabled) OVERRIDING SYSTEM VALUE VALUES(9800,98004,9800,9800,'submit','ACTIVE',true,true)",
         );
+        await companyCardFixture(side.customers, 9800);
         await side.customers.query(
           "SELECT setval(pg_get_serial_sequence('personal_pins','personal_pin_seq'),200000,true)",
         );
@@ -3728,6 +3952,8 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
       function normalize(value, index, key = '') {
         if (value === null) return null;
         if (value instanceof Date) value = value.toISOString();
+        const cardValue = cardPaymentValue(value, key, uuidMaps[index], started);
+        if (cardValue !== undefined) return cardValue;
         if (key === 'payment_request_id') {
           assert.match(value, /^[0-9a-f-]{36}$/i);
           const map = uuidMaps[index];
@@ -4004,6 +4230,8 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
       function normalize(value, index, key = '') {
         if (value === null) return null;
         if (value instanceof Date) value = value.toISOString();
+        const cardValue = cardPaymentValue(value, key, maps[index], started);
+        if (cardValue !== undefined) return cardValue;
         if (
           [
             'paymentRequestId',
@@ -4234,16 +4462,28 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
         paid,
       );
       const group = await create('그룹 수령인', 98004);
-      assert.equal(
-        (
-          await submit(group.draftSeq, {
-            expectedVersion: 1,
-            paymentMethodType: 'groupBilling',
-            pickupRequestedAt: '2035-02-01T00:00:00Z',
-          })
-        ).status,
-        'ACCEPTED',
-      );
+      const grouped = await submit(group.draftSeq, {
+        expectedVersion: 1,
+        paymentMethodType: 'groupBilling',
+        pickupRequestedAt: '2035-02-01T00:00:00Z',
+      });
+      assert.equal(grouped.status, 'notPaid');
+      const paymentRequestId = randomUUID();
+      requests.push(paymentRequestId);
+      for (const side of owners) {
+        const payment = (await side.orders.query('SELECT payment_request_id,payment_card_seq FROM order_payment_requests WHERE order_seq=$1 AND invalidated_at IS NULL', [grouped.orderSeq])).rows[0];
+        assert.equal(payment.payment_card_seq, 9800);
+        assert.equal((await side.orders.query('SELECT 1 FROM order_billing_charges WHERE order_seq=$1', [grouped.orderSeq])).rowCount, 0);
+        const response = await fetch(side.base + '/api/payments/requests/' + payment.payment_request_id + '/reconcile', {
+          method:'POST',signal:AbortSignal.timeout(30000),
+          headers:{Origin:'https://payments.example.test','Content-Type':'application/json','X-Request-Id':paymentRequestId},body:'{}',
+        });
+        const result = await response.json();
+        assert.equal(response.status,200,side.name+' deferred company card '+JSON.stringify(result));
+        assert.equal(result.data.status,'PAID');
+        assert.equal(result.data.orderStatus,'ACCEPTED');
+      }
+      pairs++;
       const ineligible = await create('일반 수령인', 98005);
       await submit(
         ineligible.draftSeq,
@@ -4266,8 +4506,8 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
       const deleted = await create('삭제 초안');
       await pair(
         'DELETE',
-        '/api/parcel-drafts/' + deleted.draftSeq,
-        undefined,
+        '/api/parcel-drafts',
+        { draftSeqs: [deleted.draftSeq] },
         204,
       );
       await submit(deleted.draftSeq, undefined, 404);
@@ -4860,7 +5100,7 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
       const destination = {
         ...origin,
         name: '주문 생성 수령인',
-        phoneNumber: '01033334444',
+        phoneNumber: '0212345678',
         roadAddress: '수령 도로',
       };
       const parcel = {
@@ -4977,9 +5217,12 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
       const uuidMaps = [new Map(), new Map()],
         requests = [];
       let pairs = 0;
+      let manualPairs = 0;
       function normalize(value, index, key = '') {
         if (value === null) return null;
         if (value instanceof Date) value = value.toISOString();
+        const cardValue = cardPaymentValue(value, key, uuidMaps[index], started);
+        if (cardValue !== undefined) return cardValue;
         if (['paymentRequestId', 'payment_request_id'].includes(key)) {
           assert.match(value, /^[0-9a-f-]{36}$/i);
           const map = uuidMaps[index];
@@ -5028,23 +5271,26 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
         return value;
       }
       async function send(side, input, status, key, requestId, options = {}) {
-        const response = await fetch(side.base + '/api/orders', {
-          method: 'POST',
-          signal: AbortSignal.timeout(30000),
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Request-Id': requestId,
-            'Idempotency-Key': key,
-            ...(options.ai
-              ? { Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN }
-              : {
-                  Cookie: 'dva_session=' + tokens[(options.admin ?? 1) - 1],
-                  Origin: 'http://localhost:5173',
-                }),
-            ...options.headers,
+        const response = await fetch(
+          side.base + (options.path ?? '/api/orders'),
+          {
+            method: 'POST',
+            signal: AbortSignal.timeout(30000),
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Request-Id': requestId,
+              'Idempotency-Key': key,
+              ...(options.ai
+                ? { Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN }
+                : {
+                    Cookie: 'dva_session=' + tokens[(options.admin ?? 1) - 1],
+                    Origin: 'http://localhost:5173',
+                  }),
+              ...options.headers,
+            },
+            body: JSON.stringify(input),
           },
-          body: JSON.stringify(input),
-        });
+        );
         const body = await response.json();
         assert.equal(
           response.status,
@@ -5052,6 +5298,11 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
           side.name + ' POST orders ' + JSON.stringify(body),
         );
         assert.equal(response.headers.get('cache-control'), 'no-store');
+        if (options.path === '/api/admin/orders' && [201, 202].includes(status))
+          assert.equal(
+            response.headers.get('location'),
+            '/api/orders/' + body.data.orderSeq,
+          );
         return envelope(body, requestId);
       }
       async function pair(input, status = 201, options = {}) {
@@ -5068,6 +5319,7 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
           );
         assert.deepEqual(bodies[1], bodies[0], 'POST orders ' + pairs);
         pairs++;
+        if (options.path === '/api/admin/orders') manualPairs++;
         return { key, data: bodies[0].data };
       }
       const legacy = (n) => identities.get(110000 + n);
@@ -5730,6 +5982,368 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
         );
       }
 
+      await pair(
+        { customer: { name: ' \ud800 ', phoneNumber: '01065656565' } },
+        201,
+      );
+      await creation.test(
+        'manual orders preserve administrator access, current replay, all payments and customer-pin recovery',
+        async () => {
+          const path = '/api/admin/orders',
+            begin = manualPairs;
+          assert.deepEqual(
+            schema(specs[1].paths[path].post, specs[1]),
+            schema(specs[0].paths[path].post, specs[0]),
+          );
+          await pair(complete, 401, {
+            path,
+            ai: true,
+            headers: { Origin: 'http://localhost:5173' },
+          });
+          await pair(complete, 403, { path, headers: { Origin: '' } });
+          await pair(complete, 400, { path, key: 'bad-key' });
+          await pair(complete, 400, {
+            path,
+            headers: { call_session_seq: '1' },
+          });
+          for (const input of [
+            {},
+            { ...complete, parcels: [] },
+            { ...complete, call: legacy(1) },
+            { ...complete, outcome: 'COMPLETE' },
+            {
+              ...complete,
+              customer: { name: '중복', phoneNumber: '01051515151' },
+            },
+            { ...complete, customerSeq: undefined },
+            { ...complete, parcels: [{ ...parcel, itemPrice: 0 }] },
+            { ...complete, parcels: [{ ...parcel, origin: { ...origin, phoneNumber: '0212345678' } }] },
+            { ...complete, parcels: [{ ...parcel, destination: { ...destination, phoneNumber: '01512345678' } }] },
+          ])
+            await pair(input, 400, { path });
+          await pair({ ...complete, customerSeq: 110002 }, 403, { path });
+          await pair({ ...complete, customerSeq: 110003 }, 404, { path });
+          await pair({ ...complete, paymentMethodType: undefined }, 422, {
+            path,
+          });
+          await pair({ ...complete, totalAmount: 6000 }, 422, { path });
+          await pair({ ...complete, paymentMethodType: 'credit' }, 403, {
+            path,
+          });
+          await pair(
+            {
+              ...complete,
+              parcels: [
+                { ...parcel, originPin: { scope: 'COMPANY', pinSeq: 1 } },
+              ],
+            },
+            400,
+            { path },
+          );
+          await pair(
+            {
+              ...complete,
+              parcels: [
+                {
+                  ...parcel,
+                  originPin: { scope: 'PERSONAL', pinSeq: 2147483647 },
+                },
+              ],
+            },
+            403,
+            { path },
+          );
+          const card = await pair(complete, 201, {
+            path,
+            key: randomUUID().toUpperCase(),
+          });
+          assert.equal(card.data.creationSource, 'ADMIN');
+          assert.equal(card.data.status, 'notPaid');
+          assert.ok(!Object.hasOwn(card.data, 'callSessionSeq'));
+          assert.deepEqual(
+            (
+              await pair({ ...complete, customerSeq: 110002 }, 201, {
+                path,
+                key: card.key,
+              })
+            ).data,
+            card.data,
+          );
+          await pair(complete, 403, { path, key: card.key, admin: 2 });
+          await pair(complete, 403, { path, key: done.key });
+          const adminAi = await pair(complete, 201, {
+            headers: { call_session_seq: '110027' },
+          });
+          await pair(complete, 409, { path, key: adminAi.key });
+          const current = await pair(complete, 201, { path, key: initial.key });
+          assert.equal(current.data.status, 'COLLECTING');
+          assert.equal(current.data.orderSeq, initial.data.orderSeq);
+          await pair(
+            {
+              ...complete,
+              parcels: [
+                { ...parcel, originPin: { scope: 'PERSONAL', pinSeq: 110501 } },
+              ],
+            },
+            201,
+            { path },
+          );
+          const credit = await pair(
+            {
+              ...complete,
+              customerSeq: 110004,
+              paymentMethodType: 'credit',
+              parcels: [
+                {
+                  ...parcel,
+                  destination: { ...destination, name: '수기 월결제' },
+                },
+              ],
+            },
+            201,
+            { path },
+          );
+          assert.equal(credit.data.status, 'ACCEPTED');
+          assert.equal(
+            (
+              await pair(
+                {
+                  ...complete,
+                  customerSeq: 98004,
+                  paymentMethodType: 'groupBilling',
+                  parcels: [
+                    {
+                      ...parcel,
+                      destination: { ...destination, name: '수기 그룹결제' },
+                    },
+                  ],
+                },
+                201,
+                { path },
+              )
+            ).data.status,
+            'ACCEPTED',
+          );
+          await pair(
+            {
+              ...complete,
+              customerSeq: undefined,
+              customer: {
+                phoneNumber: '01063636363',
+                name: '  수기 신규 고객  ',
+              },
+              parcels: [
+                {
+                  ...parcel,
+                  destination: { ...destination, name: '수기 신규 수령인' },
+                },
+              ],
+            },
+            201,
+            { path },
+          );
+          await pair(
+            { ...complete, totalAmount: 10000, parcels: [parcel, parcel] },
+            201,
+            { path },
+          );
+          const submissionReceipts = [];
+          for (const side of owners) {
+            submissionReceipts.push(
+              (
+                await side.orders.query(
+                  'SELECT parcel_no,dver_received_at FROM orders WHERE order_seq=$1',
+                  [credit.data.orderSeq],
+                )
+              ).rows[0],
+            );
+            await side.orders.query(
+              "UPDATE orders SET status='SUBMITTING',parcel_no=NULL,dver_received_at=NULL,submission_first_attempt_at=clock_timestamp(),submission_last_attempt_at=clock_timestamp() WHERE order_seq=$1",
+              [credit.data.orderSeq],
+            );
+          }
+          assert.equal(
+            (await pair(complete, 202, { path, key: credit.key })).data.status,
+            'SUBMITTING',
+          );
+          for (const [index, side] of owners.entries())
+            await side.orders.query(
+              "UPDATE orders SET status='ACCEPTED',parcel_no=$2,dver_received_at=$3 WHERE order_seq=$1",
+              [
+                credit.data.orderSeq,
+                submissionReceipts[index].parcel_no,
+                submissionReceipts[index].dver_received_at,
+              ],
+            );
+          const removed = await pair(
+            {
+              ...complete,
+              parcels: [
+                { ...parcel, destination: { ...destination, name: '삭제 키' } },
+              ],
+            },
+            201,
+            { path },
+          );
+          for (const side of owners)
+            await side.orders.query(
+              'UPDATE orders SET deleted_at=$2 WHERE order_seq=$1',
+              [removed.data.orderSeq, at],
+            );
+          await pair(complete, 409, { path, key: removed.key });
+          assert.deepEqual(
+            normalize(await stored(owners[1]), 1),
+            normalize(await stored(owners[0]), 0),
+          );
+          const pins = async (db) =>
+            (
+              await db.query(
+                'SELECT personal_pin_seq,customer_seq,label,address_data,version,deleted_at FROM personal_pins WHERE personal_pin_seq>501000 ORDER BY personal_pin_seq',
+              )
+            ).rows;
+          assert.deepEqual(
+            await pins(databases.customer),
+            await pins(reference),
+          );
+          const allOriginal = await logs(reference);
+          for (let n = 0; n < 100; n++) {
+            if (
+              (await logs(databases.operations)).length === allOriginal.length
+            )
+              break;
+            await pause(25);
+          }
+          assert.deepEqual(await logs(databases.operations), allOriginal);
+          const bundleKey = randomUUID(),
+            bundleRequest = randomUUID();
+          const bundleInput = {
+            ...complete,
+            customerSeq: undefined,
+            customer: {
+              name: '수기 준비 묶음 복구',
+              phoneNumber: '01064646464',
+            },
+            parcels: [
+              {
+                ...parcel,
+                destination: { ...destination, name: '복구 수기 수령인' },
+              },
+            ],
+          };
+          const first = normalize(
+            await send(owners[0], bundleInput, 201, bundleKey, bundleRequest, {
+              path,
+            }),
+            0,
+          );
+          await databases.customer.query(
+            "CREATE FUNCTION manual_customer_failure() RETURNS trigger LANGUAGE plpgsql AS $manual$ BEGIN IF NEW.event_type='OrderCustomerCreated' AND NEW.payload->'customer'->>'phoneNumber'='01064646464' THEN RAISE EXCEPTION 'test-only manual customer acknowledgement failure'; END IF; RETURN NEW; END $manual$",
+          );
+          await databases.customer.query(
+            'CREATE TRIGGER manual_customer_failure BEFORE INSERT ON inbox_events FOR EACH ROW EXECUTE FUNCTION manual_customer_failure()',
+          );
+          try {
+            await send(owners[1], bundleInput, 500, bundleKey, bundleRequest, {
+              path,
+            });
+            assert.equal(
+              (
+                await databases.customer.query(
+                  "SELECT 1 FROM customers WHERE phone_number='01064646464'",
+                )
+              ).rowCount,
+              0,
+            );
+            assert.equal(
+              (
+                await databases.customer.query(
+                  "SELECT 1 FROM personal_pins WHERE label='복구 수기 수령인'",
+                )
+              ).rowCount,
+              0,
+            );
+            assert.equal(
+              (
+                await databases.order.query(
+                  'SELECT 1 FROM orders WHERE creation_request_id=$1',
+                  [bundleKey],
+                )
+              ).rowCount,
+              1,
+            );
+          } finally {
+            await databases.customer.query(
+              'DROP TRIGGER manual_customer_failure ON inbox_events',
+            );
+            await databases.customer.query(
+              'DROP FUNCTION manual_customer_failure()',
+            );
+          }
+          assert.deepEqual(
+            (await pair(bundleInput, 201, { path, key: bundleKey })).data,
+            first.data,
+          );
+          assert.deepEqual(
+            normalize(await stored(owners[1]), 1),
+            normalize(await stored(owners[0]), 0),
+          );
+          assert.deepEqual(
+            await pins(databases.customer),
+            await pins(reference),
+          );
+          const audits = async (db) =>
+            (
+              await db.query(
+                "SELECT actor_type,actor_seq,action,target_type,target_seq,metadata FROM audit_logs WHERE request_id=$1 AND result='SUCCESS' ORDER BY action,target_seq",
+                [bundleRequest],
+              )
+            ).rows;
+          const expected = await audits(reference);
+          let actual;
+          for (let n = 0; n < 100; n++) {
+            actual = await audits(databases.operations);
+            if (actual.length === expected.length) break;
+            await pause(25);
+          }
+          assert.deepEqual(actual, expected);
+          assert.equal(
+            expected.filter((row) => row.action === 'CUSTOMER_CREATED').length,
+            1,
+          );
+          assert.equal(
+            expected.filter((row) => row.action === 'PERSONAL_PIN_CREATED')
+              .length,
+            1,
+          );
+          for (const [table, column, owner] of [
+            ['orders', 'order_seq', 'orders'],
+            ['order_parcels', 'order_parcel_seq', 'orders'],
+            ['customers', 'customer_seq', 'customers'],
+            ['personal_pins', 'personal_pin_seq', 'customers'],
+          ]) {
+            const values = [];
+            for (const side of owners)
+              values.push(
+                (
+                  await side[owner].query(
+                    'SELECT last_value FROM ' + table + '_' + column + '_seq',
+                  )
+                ).rows[0].last_value,
+              );
+            assert.equal(
+              values[1],
+              values[0],
+              table + ' sequence after manual recovery',
+            );
+          }
+          t.diagnostic(
+            'manual creation HTTP pairs: ' +
+              (manualPairs - begin) +
+              '; administrator-only validation, Location and 202, key replay/current state, payment branches, exact recipient pins and real customer/PIN rollback recovery',
+          );
+        },
+      );
+
       t.diagnostic(
         'order creation HTTP pairs: ' +
           pairs +
@@ -5737,5 +6351,869 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
       );
     },
   );
+  await t.test('company monthly defaults preserve submission results, group card waits and validation rollback', async () => {
+    const { envelope } = require('./final-parity.cjs');
+    const customerId = 700301, companyId = 700302, membershipId = 700303, cardId = 700304, departmentId = 700305;
+    const started = Date.now();
+    const cases = [
+      { name: 'eligible company default', status: 200, result: 'ACCEPTED' },
+      { name: 'explicit billing retained', method: 'billing', status: 200, result: 'notPaid' },
+      { name: 'company monthly disabled', companyMonthly: false, status: 422 },
+      { name: 'member monthly disabled', memberMonthly: false, status: 422 },
+      { name: 'inactive membership', memberStatus: 'INACTIVE', status: 422 },
+      { name: 'personal monthly alone', membership: false, status: 422 },
+      { name: 'invalid parcel rolls default back', invalidParcel: true, status: 422 },
+      { name: 'explicit credit denied', method: 'credit', memberMonthly: false, status: 403 },
+      { name: 'company card waits without a department', method: 'groupBilling', groupEnabled: true, status: 200, result: 'notPaid' },
+      { name: 'company card snapshots the department', method: 'groupBilling', groupEnabled: true, department: true, status: 200, result: 'notPaid' },
+      { name: 'group card independent of monthly billing', method: 'groupBilling', companyMonthly: false, memberMonthly: false, groupEnabled: true, status: 200, result: 'notPaid' },
+      { name: 'member group billing disabled', method: 'groupBilling', status: 403 },
+      { name: 'expired company card denied', method: 'groupBilling', groupEnabled: true, cardExpired: true, status: 403 },
+      { name: 'deleted company card denied', method: 'groupBilling', groupEnabled: true, cardDeleted: true, status: 403 },
+    ];
+    const owners = [
+      { ...sides[0], customers: reference, orders: reference, audit: reference },
+      { ...sides[1], customers: databases.customer, orders: databases.order, audit: databases.operations },
+    ];
+    for (const side of owners) {
+      await side.customers.query("INSERT INTO customers(customer_seq,name,phone_number,status,monthly_billing_enabled) OVERRIDING SYSTEM VALUE VALUES($1,'기본 월결제','01070000301','ACTIVE',true)", [customerId]);
+      await side.customers.query("INSERT INTO organizations(organization_seq,name,status,monthly_billing_enabled) OVERRIDING SYSTEM VALUE VALUES($1,'기본 월결제 기업','ACTIVE',true)", [companyId]);
+      await side.customers.query("INSERT INTO departments(department_seq,organization_seq,name,group_billing_enabled) OVERRIDING SYSTEM VALUE VALUES($1,$2,'접수 기업 부서',false)", [departmentId, companyId]);
+      await side.customers.query("INSERT INTO memberships(membership_seq,customer_seq,organization_seq,employee_no,status,monthly_billing_enabled) OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,'monthly-default','ACTIVE',true)", [membershipId, customerId, companyId]);
+      await side.customers.query(`INSERT INTO payment_cards(payment_card_seq,organization_seq,registration_key,request_hash,provider_customer_key,provider_environment,
+        encrypted_billing_key,expiration_year,expiration_month,masked_number,status)
+        OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,'group-wait-fixture',$4,'test','encrypted-group-wait-value',2099,12,'1234********5678','ACTIVE')`,
+      [cardId, companyId, randomUUID(), randomUUID()]);
+    }
+    for (const [index, entry] of cases.entries()) {
+      const state = { companyMonthly: true, memberMonthly: true, memberStatus: 'ACTIVE', membership: true, method: null,
+        groupEnabled: false, department: false, cardExpired: false, cardDeleted: false, ...entry };
+      const id = 700310 + index, requestId = randomUUID(), results = [], stored = [];
+      for (const side of owners) {
+        await side.customers.query('UPDATE organizations SET monthly_billing_enabled=$2 WHERE organization_seq=$1', [companyId, state.companyMonthly]);
+        await side.customers.query('UPDATE memberships SET monthly_billing_enabled=$2,status=$3,deleted_at=$4,group_billing_enabled=$5,department_seq=$6 WHERE membership_seq=$1', [membershipId, state.memberMonthly, state.memberStatus, state.membership ? null : '2025-01-01Z', state.groupEnabled, state.department ? departmentId : null]);
+        await side.customers.query('UPDATE payment_cards SET expiration_year=$2,deleted_at=$3 WHERE payment_card_seq=$1', [cardId, state.cardExpired ? 2000 : 2099, state.cardDeleted ? '2025-01-01Z' : null]);
+        await side.orders.query("INSERT INTO orders(order_seq,customer_seq,payment_method_type,status,total_amount,creation_source,version,pickup_requested_at) OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,'COLLECTING',7000,'AI',1,'2030-02-01Z')", [id, customerId, state.method]);
+        await side.orders.query(`INSERT INTO order_parcels OVERRIDING SYSTEM VALUE
+          SELECT (jsonb_populate_record(NULL::order_parcels,to_jsonb(p)||$1::jsonb)).*
+          FROM order_parcels p WHERE order_parcel_seq=20021`, [{
+          order_parcel_seq: id, order_seq: id, parcel_position: 1, origin_pin_scope: null, origin_pin_seq: null,
+          document_count: 1, small_box_count: 0, medium_box_count: 0, big_box_count: 0,
+          item_price: state.invalidParcel ? 0 : 1000, notified_price: 7000,
+        }]);
+        const version = (await side.orders.query('SELECT version FROM orders WHERE order_seq=$1', [id])).rows[0].version;
+        const response = await fetch(side.base + '/api/orders/' + id + '/submit', {
+          method: 'POST', signal: AbortSignal.timeout(30000),
+          headers: { ...headers, Origin: 'http://localhost:5173', 'Content-Type': 'application/json', 'X-Request-Id': requestId },
+          body: JSON.stringify({ expectedVersion: version }),
+        });
+        const body = await response.json();
+        assert.equal(response.status, state.status, side.name + ' ' + state.name + ' ' + JSON.stringify(body));
+        assert.equal(response.headers.get('cache-control'), 'no-store');
+        results.push(envelope(body, requestId));
+        const row = (await side.orders.query(`SELECT payment_method_type,status,total_amount,paid_at,payment_due_at,
+          billing_organization_seq,billing_department_seq,billing_organization_name,billing_department_name
+          FROM orders WHERE order_seq=$1`, [id])).rows[0];
+        assert.equal(row.payment_method_type, state.status === 200 && state.method === null ? 'credit' : state.method);
+        assert.equal(row.status, state.result ?? 'COLLECTING');
+        if (state.result === 'ACCEPTED') {
+          assert.ok(row.paid_at.getTime() >= started && row.paid_at.getTime() <= Date.now());
+          row.paid_at = '<generated payment time>';
+        }
+        if (state.result === 'notPaid') {
+          assert.ok(row.payment_due_at.getTime() >= started + 86400000 - 1000 && row.payment_due_at.getTime() <= Date.now() + 86400000 + 1000);
+          row.payment_due_at = '<24-hour deadline>';
+        }
+        stored.push({ order: row,
+          payments: (await side.orders.query('SELECT amount,payment_card_seq,card_payment_failed FROM order_payment_requests WHERE order_seq=$1', [id])).rows,
+          charges: (await side.orders.query('SELECT organization_seq,customer_seq,payment_method_type,amount FROM order_billing_charges WHERE order_seq=$1', [id])).rows,
+          audits: (await side.audit.query('SELECT actor_type,actor_seq,action,target_type,target_seq,result,metadata FROM audit_logs WHERE request_id=$1 ORDER BY audit_log_seq', [requestId])).rows,
+        });
+      }
+      assert.deepEqual(results[1], results[0], state.name + ' HTTP');
+      assert.deepEqual(stored[1], stored[0], state.name + ' stored payment, billing and audit');
+    }
+    t.diagnostic('company monthly/group submissions match ' + cases.length + ' HTTP pairs and persisted payment/billing/audit states');
+  });
+  await t.test('payment request replacements select the same current personal and company cards', async () => {
+    const { envelope } = require('./final-parity.cjs');
+    const { OrderPaymentsRepository } = require('./monolith-runtime/orders/order-payments.repository');
+    const { ParcelDraftWriteScope } = require('../dist/orders/parcel-draft-write-scope.service');
+    const customerId = 700401, companyId = 700402, cardId = 700403;
+    const config = { get: key => ({ CUSTOMER_URL: 'http://customer-app:3001', CUSTOMER_AUTH_TOKEN: process.env.CUSTOMER_AUTH_TOKEN })[key] };
+    const repositories = [new OrderPaymentsRepository(null, null, null),
+      new OrdersRepository(new ParcelDraftWriteScope(null, config, null))];
+    const cases = [
+      { name: 'personal card', method: 'billing' },
+      { name: 'company card', method: 'groupBilling', companyCard: true },
+      { name: 'other owner company card', method: 'billing', companyCard: true },
+      { name: 'other owner personal card', method: 'groupBilling' },
+      { name: 'failed personal card', method: 'billing', cardStatus: 'FAILED' },
+      { name: 'registering company card', method: 'groupBilling', companyCard: true, cardStatus: 'REGISTERING' },
+      { name: 'deleted personal card', method: 'billing', deleted: true },
+      { name: 'deleted company card', method: 'groupBilling', companyCard: true, deleted: true },
+      { name: 'expired personal card', method: 'billing', expired: true },
+      { name: 'expired company card', method: 'groupBilling', companyCard: true, expired: true },
+      { name: 'current Korean month personal card', method: 'billing', currentMonth: true },
+      { name: 'current Korean month company card', method: 'groupBilling', companyCard: true, currentMonth: true },
+      { name: 'missing company snapshot', method: 'groupBilling', companyCard: true, organization: null },
+      { name: 'legacy credit request', method: 'credit' },
+      { name: 'zero amount request', method: 'billing', amount: 0 },
+      { name: 'cancelled request', method: 'billing', status: 'CANCELLED' },
+    ];
+    for (const db of [reference, databases.customer]) {
+      await db.query("INSERT INTO customers(customer_seq,name,phone_number,status) OVERRIDING SYSTEM VALUE VALUES($1,'카드 연결','01070000401','ACTIVE')", [customerId]);
+      await db.query("INSERT INTO organizations(organization_seq,name,status) OVERRIDING SYSTEM VALUE VALUES($1,'카드 연결 기업','ACTIVE')", [companyId]);
+      await db.query(`INSERT INTO payment_cards(payment_card_seq,customer_seq,registration_key,request_hash,provider_customer_key,provider_environment,
+        encrypted_billing_key,expiration_year,expiration_month,masked_number,status)
+        OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,'selection-fixture',$4,'test','encrypted-owner-value',2099,12,'1234********5678','ACTIVE')`,
+      [cardId, customerId, randomUUID(), randomUUID()]);
+    }
+    const customerMessages = await snapshot(databases.customer, ['outbox_events', 'inbox_events']);
+    const providerHistory = async () => Promise.all(['monolith', 'order'].map(async side => {
+      const response = await fetch('http://' + side + '-app:8000/__requests', {
+        headers: { Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN },
+        signal: AbortSignal.timeout(10000),
+      });
+      assert.equal(response.status, 200);
+      return response.json();
+    }));
+    const beforeProvider = await providerHistory();
+    let guarded = 0;
+    for (const [index, entry] of cases.entries()) {
+      const state = { cardStatus: 'ACTIVE', companyCard: false, deleted: false, expired: false,
+        currentMonth: false, organization: companyId, amount: 7000, status: 'notPaid', ...entry };
+      const id = 700410 + index, requestId = randomUUID(), values = [], confirmations = [];
+      for (const [side, db] of [reference, databases.order].entries()) {
+        const customer = side === 0 ? reference : databases.customer;
+        const month = (await customer.query("SELECT extract(year FROM clock_timestamp() AT TIME ZONE 'Asia/Seoul')::int AS year_value,extract(month FROM clock_timestamp() AT TIME ZONE 'Asia/Seoul')::int AS month_value")).rows[0];
+        await customer.query(`UPDATE payment_cards SET customer_seq=$2,organization_seq=$3,status=$4,deleted_at=$5,
+          expiration_year=$6,expiration_month=$7 WHERE payment_card_seq=$1`,
+        [cardId, state.companyCard ? null : customerId, state.companyCard ? companyId : null, state.cardStatus,
+          state.deleted ? '2025-01-01Z' : null, state.expired ? 2000 : state.currentMonth ? month.year_value : 2099, state.currentMonth ? month.month_value : 12]);
+        await db.query("INSERT INTO orders(order_seq,customer_seq,payment_method_type,status,total_amount,payment_due_at,billing_organization_seq) OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,$4,$5,'2094-01-01Z',$6)",
+          [id, customerId, state.method, state.status, state.amount, state.organization]);
+        await db.query("INSERT INTO order_payment_requests(order_seq,amount,expires_at) VALUES($1,7000,'2094-01-01Z')", [id]);
+        const before = (await customer.query('SELECT to_jsonb(c) AS card FROM payment_cards c WHERE payment_card_seq=$1', [cardId])).rows;
+        await repositories[side].replaceRequest(db, id);
+        assert.deepEqual((await customer.query('SELECT to_jsonb(c) AS card FROM payment_cards c WHERE payment_card_seq=$1', [cardId])).rows, before, state.name + ' card unchanged');
+        const current = (await db.query('SELECT * FROM order_payment_requests WHERE order_seq=$1 AND invalidated_at IS NULL', [id])).rows[0];
+        if (current && current.payment_card_seq !== null) {
+          const response = await fetch(sides[side].base + '/api/payments/requests/' + current.payment_request_id + '/confirm', {
+            method: 'POST', headers: { Origin: 'https://payments.example.test', 'Content-Type': 'application/json', 'X-Request-Id': requestId },
+            body: JSON.stringify({ orderId: current.payment_request_id, amount: 7000, paymentKey: 'hosted-guard-key' }),
+          });
+          const body = await response.json();
+          assert.equal(response.status, 409, sides[side].name + ' card-bound hosted confirmation ' + JSON.stringify(body));
+          assert.equal(body.error.message, '등록 카드 결제는 기존 거래 결과를 확인해 주세요.');
+          confirmations.push(envelope(body, requestId));
+          assert.deepEqual((await db.query('SELECT * FROM order_payment_requests WHERE payment_request_id=$1', [current.payment_request_id])).rows[0], current);
+        }
+        values.push((await db.query(`SELECT amount,payment_card_seq,card_payment_failed,expires_at,
+          invalidated_at IS NOT NULL AS invalidated FROM order_payment_requests WHERE order_seq=$1
+          ORDER BY invalidated_at NULLS LAST`, [id])).rows);
+      }
+      assert.deepEqual(values[1], values[0], state.name);
+      assert.equal(values[1].length, state.amount > 0 && state.status === 'notPaid' ? 2 : 1);
+      assert.equal(values[1][0].invalidated, true);
+      if (confirmations.length) {
+        assert.equal(confirmations.length, 2);
+        assert.deepEqual(confirmations[1], confirmations[0]);
+        guarded++;
+      }
+    }
+    assert.deepEqual(await snapshot(databases.customer, ['outbox_events', 'inbox_events']), customerMessages);
+    assert.deepEqual(await providerHistory(), beforeProvider, 'card-bound hosted confirmations do not contact PG');
+    const blocker = await databases.customer.connect();
+    const pending = [];
+    try {
+      await blocker.query('BEGIN');
+      await blocker.query('LOCK TABLE customers IN ACCESS EXCLUSIVE MODE');
+      for (let index = 0; index < 5; index++)
+        pending.push(fetch('http://customer-app:3001/api/customers/1', {
+          headers, signal: AbortSignal.timeout(15000),
+        }));
+      for (let attempt = 0; ; attempt++) {
+        const waits = (await databases.customer.query("SELECT count(*)::int AS count FROM pg_locks WHERE relation='customers'::regclass AND mode='AccessShareLock' AND NOT granted")).rows[0].count;
+        if (waits === 5) break;
+        assert.ok(attempt < 100, 'five customer business reads reach the table lock');
+        await pause(20);
+      }
+      const eventId = randomUUID();
+      const response = await fetch('http://customer-app:3001/internal/call-read-references/parcel-draft-write/reference', {
+        method: 'POST', signal: AbortSignal.timeout(4000),
+        headers: { Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eventId, source: 'order', eventType: 'ParcelDraftWriteReferenceRequested',
+          payload: { operation: 'CustomerPaymentCardRead', input: { customerSeq: customerId, organizationSeq: null } } }),
+      });
+      assert.equal(response.status, 200, 'independent card selection finishes while all business connections are occupied');
+      assert.deepEqual(await response.json(), { eventId, status: 'processed', payload: cardId });
+    } finally {
+      await blocker.query('ROLLBACK');
+      blocker.release();
+      const responses = await Promise.all(pending);
+      for (const response of responses) assert.equal(response.status, 200, 'blocked business reads finish after release');
+    }
+    t.diagnostic('payment request card selection matches ' + cases.length + ' replacements and ' + guarded + ' hosted confirmation pairs without customer/event/PG mutations');
+  });
+  await t.test('card approval preparation preserves owner locks, durable claims and source recovery states', async caseTest => {
+    const { createServer } = require('node:http');
+    const { networkInterfaces } = require('node:os');
+    const { createCipheriv, randomBytes } = require('node:crypto');
+    const { PaymentsService } = require('../dist/payments/payments.service');
+    const { PaymentsRepository } = require('../dist/payments/payments.repository');
+    const { DatabaseService } = require('../dist/database/database.service');
+    const { ParcelDraftWriteScope } = require('../dist/orders/parcel-draft-write-scope.service');
+    const { CardPaymentScopeController } = require('../dist/payments/card-payment-scope.controller');
+    const customerId = 710001, companyId = 710002, departmentId = 710003, memberId = 710004;
+    const encryption = '11'.repeat(32), billingKey = 'native-card-claim-key';
+    const personal = 710005, company = 710006, nextPersonal = 710007, nextCompany = 710008;
+    const ip = Object.values(networkInterfaces()).flat().find(entry => entry.family === 'IPv4' && !entry.internal).address;
+    const acknowledgements = [];
+    let callback, heldRequestId, committed, releaseAcknowledgement;
+    const server = createServer(async (request, response) => {
+      if (request.method !== 'POST' || request.url !== '/internal/card-payment-scope' ||
+          request.headers.authorization !== 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN)
+        return response.writeHead(401).end();
+      try {
+        const parts = [];
+        for await (const part of request) parts.push(part);
+        const event = JSON.parse(Buffer.concat(parts).toString());
+        const result = await callback.execute(event);
+        acknowledgements.push(result);
+        if (event.payload.paymentRequestId === heldRequestId) {
+          committed();
+          await new Promise(resolve => { releaseAcknowledgement = resolve; });
+        }
+        response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(result));
+      } catch (error) {
+        const status = error.getStatus?.() ?? 500;
+        const body = error.getResponse?.() ?? { code: 'INTERNAL_ERROR', message: 'native callback failed', details: [] };
+        response.writeHead(status, { 'Content-Type': 'application/json' }).end(JSON.stringify({ error: body }));
+      }
+    });
+    await new Promise(resolve => server.listen(3002, '0.0.0.0', resolve));
+    const configurations = ['monolith', 'order'].map(side => ({
+      DB_HOST: side + '-db', DB_PORT: 5432, DB_USER: side + '_app', DB_PASSWORD: process.env.PGPASSWORD,
+      DB_NAME: 'dva_webhook_test', CUSTOMER_URL: 'http://customer-app:3001',
+      CUSTOMER_AUTH_TOKEN: process.env.CUSTOMER_AUTH_TOKEN, MSA_INSTANCE_IP: ip,
+      TOSS_BILLING_SECRET_KEY: 'test_sk_native_claim', PAYMENT_CARD_ENCRYPTION_KEY: encryption,
+    }));
+    const configs = configurations.map(values => ({ get: key => values[key] }));
+    const serviceDatabase = new DatabaseService(configs[1]);
+    const ownerScope = new ParcelDraftWriteScope(serviceDatabase, configs[1], null);
+    const services = [
+      { claimCardApproval: async id => {
+        const response = await fetch('http://monolith-app:8000/__card-claim', {
+          method: 'POST', signal: AbortSignal.timeout(30000),
+          headers: { Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id, config: {
+            TOSS_BILLING_SECRET_KEY: configurations[0].TOSS_BILLING_SECRET_KEY,
+            PAYMENT_CARD_ENCRYPTION_KEY: configurations[0].PAYMENT_CARD_ENCRYPTION_KEY,
+          } }),
+        });
+        const result = await response.json();
+        if (response.status !== 200) {
+          const error = new Error('Source card claim failed');
+          error.getStatus = () => response.status;
+          error.getResponse = () => result.error;
+          throw error;
+        }
+        return result.claim;
+      } },
+      new PaymentsService(configs[1], new PaymentsRepository(serviceDatabase), serviceDatabase, null, null,
+        new OrdersRepository(ownerScope), null, null, ownerScope),
+    ];
+    callback = new CardPaymentScopeController(services[1]);
+    caseTest.after(async () => {
+      releaseAcknowledgement?.();
+      await serviceDatabase.onModuleDestroy();
+      await new Promise(resolve => { server.closeAllConnections(); server.close(resolve); });
+    });
+    const cards = [personal, company, nextPersonal, nextCompany].map(id => {
+      const nonce = randomBytes(12), cipher = createCipheriv('aes-256-gcm', Buffer.from(encryption, 'hex'), nonce);
+      cipher.setAAD(Buffer.from(String(id)));
+      return { id, registration: randomUUID(), provider: randomUUID(), encrypted:
+        Buffer.concat([nonce, cipher.update(billingKey, 'utf8'), cipher.final(), cipher.getAuthTag()]).toString('base64') };
+    });
+    for (const db of [reference, databases.customer]) {
+      await db.query("INSERT INTO customers(customer_seq,name,phone_number,status) OVERRIDING SYSTEM VALUE VALUES($1,'승인 준비','01071000001','ACTIVE')", [customerId]);
+      await db.query("INSERT INTO organizations(organization_seq,name,status,monthly_billing_enabled) OVERRIDING SYSTEM VALUE VALUES($1,'승인 기업','ACTIVE',true)", [companyId]);
+      await db.query("INSERT INTO organizations(organization_seq,name,status) OVERRIDING SYSTEM VALUE VALUES($1,'이전 청구 기업','ACTIVE')", [companyId + 8]);
+      await db.query("INSERT INTO departments(department_seq,organization_seq,name) OVERRIDING SYSTEM VALUE VALUES($1,$2,'승인 부서')", [departmentId, companyId]);
+      await db.query("INSERT INTO memberships(membership_seq,customer_seq,organization_seq,department_seq,employee_no,status,monthly_billing_enabled,group_billing_enabled) OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,$4,'card-claim','ACTIVE',true,true)", [memberId, customerId, companyId, departmentId]);
+      for (const card of cards)
+        await db.query(`INSERT INTO payment_cards(payment_card_seq,customer_seq,organization_seq,registration_key,request_hash,provider_customer_key,provider_environment,
+          encrypted_billing_key,expiration_year,expiration_month,masked_number,status) OVERRIDING SYSTEM VALUE
+          VALUES($1,$2,$3,$4,'native-claim-fixture',$5,'test',$6,2099,12,'1234********5678',$7)`,
+        [card.id, [personal, nextPersonal].includes(card.id) ? customerId : null,
+          [company, nextCompany].includes(card.id) ? companyId : null, card.registration, card.provider,
+          card.encrypted, [personal, company].includes(card.id) ? 'ACTIVE' : 'FAILED']);
+    }
+    const cases = [
+      { name: 'personal card and owner commit boundary' },
+      { name: 'company card', group: true },
+      { name: 'company card without department', group: true, noDepartment: true },
+      { name: 'completed request', completed: true },
+      { name: 'lookup without customer availability', lookup: true, expired: true, withdrawn: true, cardDeleted: true, customerUnavailable: true },
+      { name: 'missing request', missing: true, status: 404 },
+      { name: 'expired retention', retention: true, status: 404 },
+      { name: 'invalidated request', invalidated: true, status: 409 },
+      { name: 'expired fresh request', expired: true, status: 409 },
+      { name: 'request without a card', noCard: true, status: 409 },
+      { name: 'cancelled order', cancelled: true, status: 409 },
+      { name: 'amount mismatch', wrongAmount: true, status: 409 },
+      { name: 'live claim', busy: true, status: 409 },
+      { name: 'expired claim', staleClaim: true },
+      { name: 'withdrawn customer', withdrawn: true, status: 403 },
+      { name: 'deleted customer', customerDeleted: true, status: 403 },
+      { name: 'missing customer', noCustomer: true, status: 403 },
+      { name: 'member group billing disabled', group: true, groupDisabled: true, status: 403 },
+      { name: 'different billing company', group: true, wrongCompany: true, status: 403 },
+      { name: 'inactive company', group: true, inactiveCompany: true, status: 403 },
+      { name: 'expired personal card', cardExpired: true, status: 409 },
+      { name: 'expired company card', group: true, cardExpired: true, status: 403 },
+      { name: 'same declined card', failed: true, status: 409 },
+      { name: 'changed personal card', failed: true, changedCard: true },
+      { name: 'changed company card', group: true, failed: true, changedCard: true },
+      { name: 'invalid item price', badPrice: true, status: 422 },
+      { name: 'changed card rolls back on invalid price', failed: true, changedCard: true, badPrice: true, status: 422 },
+      { name: 'different provider environment', liveEnvironment: true, status: 409 },
+      { name: 'missing encryption key', missingKey: true, status: 503 },
+      { name: 'invalid ciphertext key', badKey: true, status: 503 },
+      { name: 'missing billing configuration', missingSecret: true, status: 503 },
+    ];
+    const fixed = '2030-01-01T00:00:00Z', old = '2000-01-01T00:00:00Z';
+    const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    const claimedIds = [new Set(), new Set()];
+    const probe = { eventId: randomUUID(), source: 'customer', eventType: 'OrderCardApprovalRequested',
+      payload: { paymentRequestId: randomUUID(), orderAddress: null, customerAddress: null } };
+    for (const [url, input, authenticated, status] of [
+      ['http://order-app:3002/internal/card-payment-scope', probe, false, 403],
+      ['http://order-app:3002/internal/card-payment-scope', probe, true, 503],
+      ['http://order-app:3002/internal/card-payment-scope', { ...probe, source: 'order' }, true, 422],
+      ['http://customer-app:3001/internal/call-read-references/parcel-draft-write/card-approval', probe, false, 403],
+      ['http://customer-app:3001/internal/call-read-references/parcel-draft-write/card-approval', probe, true, 422],
+    ]) {
+      const response = await fetch(url, { method: 'POST', signal: AbortSignal.timeout(5000),
+        headers: { 'Content-Type': 'application/json', ...(authenticated ? { Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN } : {}) },
+        body: JSON.stringify(input) });
+      assert.equal(response.status, status, 'normal internal route, authentication and scope boundary ' + url);
+      assert.ok((await response.json()).error);
+    }
+    const eventHistory = async () => ({
+      order: await snapshot(databases.order, ['outbox_events', 'inbox_events']),
+      customer: await snapshot(databases.customer, ['outbox_events', 'inbox_events']),
+      operations: await snapshot(databases.operations, ['outbox_events', 'inbox_events', 'audit_logs']),
+    });
+    const beforeEvents = await eventHistory();
+    async function seedClaim(state, index) {
+      const id = 710100 + index, requestId = randomUUID(), transactionId = randomUUID();
+      const priorClaim = state.busy || state.staleClaim ? randomUUID() : null;
+      const busyUntil = new Date(Date.now() + 60000).toISOString();
+      for (const [side, db] of [reference, databases.order].entries()) {
+        const customer = side === 0 ? reference : databases.customer;
+        await customer.query('UPDATE customers SET status=$2,deleted_at=$3 WHERE customer_seq=$1',
+          [customerId, state.withdrawn ? 'WITHDRAWN' : 'ACTIVE', state.customerDeleted ? fixed : null]);
+        await customer.query('UPDATE organizations SET status=$2 WHERE organization_seq=$1',
+          [companyId, state.inactiveCompany ? 'INACTIVE' : 'ACTIVE']);
+        await customer.query('UPDATE memberships SET group_billing_enabled=$2,department_seq=$3,organization_seq=$4 WHERE membership_seq=$1',
+          [memberId, !state.groupDisabled, state.noDepartment ? null : departmentId, companyId]);
+        await customer.query("UPDATE payment_cards SET status='FAILED' WHERE payment_card_seq=ANY($1::int[])", [[personal, company, nextPersonal, nextCompany]]);
+        for (const card of cards) {
+          const previous = card.id === personal || card.id === company;
+          const selectedOwner = state.group ? [company, nextCompany] : [personal, nextPersonal];
+          const selected = selectedOwner.includes(card.id);
+          const active = selected && state.changedCard ? !previous : previous;
+          await customer.query('UPDATE payment_cards SET status=$2,deleted_at=$3,expiration_year=$4 WHERE payment_card_seq=$1',
+            [card.id, active ? 'ACTIVE' : 'FAILED', selected && (state.cardDeleted || state.changedCard && previous) ? fixed : null,
+              selected && state.cardExpired ? 2000 : 2099]);
+        }
+        const client = await db.connect();
+        try {
+          await client.query('BEGIN');
+          await client.query("SET LOCAL session_replication_role='replica'");
+          await client.query(`INSERT INTO orders OVERRIDING SYSTEM VALUE
+            SELECT (jsonb_populate_record(NULL::orders,to_jsonb(o)||$1::jsonb)).* FROM orders o WHERE order_seq=1002`, [{
+            order_seq: id, customer_seq: state.noCustomer ? null : customerId,
+            payment_method_type: state.group ? 'groupBilling' : 'billing',
+            status: state.cancelled ? 'CANCELLED' : state.completed ? 'PAID' : 'notPaid',
+            total_amount: 7000, creation_request_id: null, creation_source: 'AI', created_by_admin_user_seq: null,
+            version: 1, created_at: state.retention ? old : fixed, updated_at: fixed, deleted_at: null,
+            paid_at: state.completed ? fixed : null, payment_due_at: '2099-01-01T00:00:00Z',
+            closed_at: state.retention ? old : state.cancelled ? fixed : null,
+            parcel_no: null, dver_received_at: null, submission_first_attempt_at: null, submission_last_attempt_at: null,
+            billing_organization_seq: state.group ? companyId + (state.wrongCompany ? 8 : 0) : null,
+            billing_department_seq: state.group && !state.noDepartment ? departmentId : null,
+            billing_organization_name: state.group ? '접수 시 기업' : null,
+            billing_department_name: state.group && !state.noDepartment ? '접수 시 부서' : null,
+          }]);
+          await client.query(`INSERT INTO order_parcels OVERRIDING SYSTEM VALUE
+            SELECT (jsonb_populate_record(NULL::order_parcels,to_jsonb(p)||$1::jsonb)).* FROM order_parcels p WHERE order_parcel_seq=20021`, [{
+            order_parcel_seq: id, order_seq: id, parcel_position: 1, status: state.cancelled ? 'CANCELLED' : 'ACTIVE',
+            origin_pin_scope: null, origin_pin_seq: null, document_count: 1, small_box_count: 0,
+            medium_box_count: 0, big_box_count: 0, item_price: state.badPrice ? 0 : 1000, notified_price: 7000,
+            created_at: fixed, updated_at: fixed,
+          }]);
+          if (!state.missing)
+            await client.query(`INSERT INTO order_payment_requests(payment_request_id,order_seq,payment_card_seq,card_payment_order_id,card_payment_failed,
+              amount,expires_at,created_at,approval_started_at,approval_claim_id,approval_claimed_until,invalidated_at,completed_at,
+              provider_payment_key,provider_approved_at,provider_reference)
+              VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+            [requestId, id, state.noCard ? null : state.group ? company : personal, transactionId, !!state.failed,
+              state.wrongAmount ? 6000 : 7000, state.expired ? old : '2099-01-01T00:00:00Z', fixed,
+              state.lookup || state.completed ? fixed : null, priorClaim,
+              state.busy ? busyUntil : state.staleClaim ? old : null,
+              state.invalidated ? fixed : null, state.completed ? fixed : null,
+              state.completed ? 'completed-' + id : state.changedCard ? 'prior-' + id : null,
+              state.completed || state.changedCard ? fixed : null, state.completed ? 'completed-' + id : null]);
+          await client.query('COMMIT');
+        } catch (error) {
+          await client.query('ROLLBACK');
+          throw error;
+        } finally { client.release(); }
+      }
+      return { id, requestId, transactionId, priorClaim };
+    }
+    const requestsFor = async (db, id) => (await db.query('SELECT to_jsonb(r) AS data FROM order_payment_requests r WHERE payment_request_id=$1', [id])).rows;
+    const orderFor = async (db, id) => (await db.query('SELECT to_jsonb(o) AS data FROM orders o WHERE order_seq=$1', [id])).rows;
+    function generatedTime(value, start, offset) {
+      const time = Date.parse(value);
+      assert.ok(time >= start + offset - 1000 && time <= Date.now() + offset + 1000, 'claim timestamp ' + value);
+    }
+    for (const [index, state] of cases.entries()) {
+      const fixture = await seedClaim(state, index), results = [], stored = [], start = Date.now();
+      for (const [side, db] of [reference, databases.order].entries()) {
+        Object.assign(configurations[side], {
+          CUSTOMER_URL: state.customerUnavailable ? 'http://127.0.0.1:1' : 'http://customer-app:3001',
+          TOSS_BILLING_SECRET_KEY: state.missingSecret ? undefined : state.liveEnvironment ? 'live_sk_native_claim' : 'test_sk_native_claim',
+          PAYMENT_CARD_ENCRYPTION_KEY: state.missingKey ? undefined : state.badKey ? '22'.repeat(32) : encryption,
+        });
+        const before = await requestsFor(db, fixture.requestId), beforeOrder = await orderFor(db, fixture.id);
+        const customer = side === 0 ? reference : databases.customer;
+        const beforeCards = (await customer.query('SELECT to_jsonb(c) AS data FROM payment_cards c WHERE payment_card_seq=ANY($1::int[]) ORDER BY payment_card_seq', [[personal, company, nextPersonal, nextCompany]])).rows;
+        let claim, failure;
+        try {
+          if (index === 0 && side === 1) {
+            heldRequestId = fixture.requestId;
+            const gate = new Promise(resolve => { committed = resolve; });
+            const pending = services[side].claimCardApproval(fixture.requestId);
+            try {
+              await Promise.race([gate, pending.then(() => assert.fail('owner acknowledgement must follow local commit'))]);
+              assert.ok((await db.query('SELECT approval_started_at FROM order_payment_requests WHERE payment_request_id=$1', [fixture.requestId])).rows[0].approval_started_at);
+              const probe = await databases.customer.connect();
+              try {
+                await probe.query('BEGIN');
+                await assert.rejects(probe.query('SELECT 1 FROM payment_cards WHERE payment_card_seq=$1 FOR UPDATE NOWAIT', [personal]),
+                  error => error.code === '55P03');
+              } finally { await probe.query('ROLLBACK'); probe.release(); }
+            } finally { releaseAcknowledgement?.(); heldRequestId = null; }
+            claim = await pending;
+            assert.equal((await databases.customer.query('SELECT 1 FROM payment_cards WHERE payment_card_seq=$1 FOR UPDATE NOWAIT', [personal])).rowCount, 1);
+          } else claim = await services[side].claimCardApproval(fixture.requestId);
+          if (!claim.done) claim = { card: undefined, billingKey: undefined, ...claim };
+        } catch (error) {
+          failure = { status: error.getStatus?.() ?? 500, response: error.getResponse?.() ?? String(error) };
+        }
+        assert.equal(failure?.status ?? 200, state.status ?? 200, sides[side].name + ' ' + state.name + ' ' + JSON.stringify(failure));
+        const after = await requestsFor(db, fixture.requestId);
+        assert.deepEqual(await orderFor(db, fixture.id), beforeOrder, state.name + ' order immutable');
+        assert.deepEqual((await customer.query('SELECT to_jsonb(c) AS data FROM payment_cards c WHERE payment_card_seq=ANY($1::int[]) ORDER BY payment_card_seq', [[personal, company, nextPersonal, nextCompany]])).rows, beforeCards, state.name + ' card immutable');
+        if (failure || claim.done) assert.deepEqual(after, before, state.name + ' read or rejected claim leaves the request intact');
+        else {
+          const row = after[0].data;
+          assert.match(claim.claimId, uuidPattern);
+          assert.notEqual(claim.claimId, fixture.priorClaim);
+          assert.equal(claimedIds[side].has(claim.claimId), false);
+          claimedIds[side].add(claim.claimId);
+          assert.equal(row.approval_claim_id, claim.claimId);
+          generatedTime(row.approval_claimed_until, start, 90000);
+          generatedTime(row.approval_next_check_at, start, 60000);
+          row.approval_claim_id = '<new claim>';
+          row.approval_claimed_until = '<90-second lease>';
+          row.approval_next_check_at = '<one-minute check>';
+          if (!state.lookup) { generatedTime(row.approval_started_at, start, 0); row.approval_started_at = '<approval started>'; }
+          assert.equal(claim.lookupOnly, !!state.lookup);
+          assert.equal(claim.billingKey, state.lookup ? undefined : billingKey);
+          assert.equal(claim.card?.paymentCardSeq, state.lookup ? undefined : state.group ? state.changedCard ? nextCompany : company : state.changedCard ? nextPersonal : personal);
+          assert.equal(claim.orderId, row.card_payment_order_id);
+          if (state.changedCard) {
+            assert.match(claim.orderId, uuidPattern);
+            assert.notEqual(claim.orderId, fixture.transactionId);
+            row.card_payment_order_id = '<new card transaction>';
+            assert.equal(row.provider_payment_key, null);
+            assert.equal(row.provider_approved_at, null);
+          }
+          claim = { ...claim, claimId: '<new claim>', orderId: state.changedCard ? '<new card transaction>' : claim.orderId };
+        }
+        results.push(failure ? { failure } : { claim });
+        stored.push(after);
+      }
+      assert.deepEqual(results[1], results[0], state.name + ' claim/result');
+      assert.deepEqual(stored[1], stored[0], state.name + ' full stored request');
+    }
+    assert.deepEqual(await eventHistory(), beforeEvents, 'claim references do not journal card credentials or audits');
+    for (const acknowledgement of acknowledgements)
+      assert.deepEqual(acknowledgement, { eventId: acknowledgement.eventId, status: 'processed', payload: true });
+    assert.equal(JSON.stringify(acknowledgements).includes(billingKey), false);
+    t.diagnostic('card approval preparation matches ' + cases.length + ' source states, owner locks through local commit, encrypted AAD and customer-independent recovery');
+    await caseTest.test('public card reconciliation preserves PG history, payment, company charges and Dver completion', async () => {
+      const { envelope } = require('./final-parity.cjs');
+      const delivery = new Pool({ host: 'delivery-db', user: 'delivery_app' });
+      caseTest.after(() => delivery.end());
+      const owners = [
+        { ...sides[0], orders: reference, customers: reference, audit: reference, delivery: reference },
+        { ...sides[1], orders: databases.order, customers: databases.customer, audit: databases.operations, delivery },
+      ];
+      const paymentCases = [
+        { name: 'personal approval', key: 'card-success' },
+        { name: 'company approval', key: 'card-success', group: true },
+        { name: 'company snapshot changes while PG is pending', key: 'card-hold', group: true, hold: true },
+        { name: 'order submission approves its registered card', key: 'card-success', submit: true },
+        { name: 'unknown approval and lookup', key: 'card-unknown', first: 502 },
+        { name: 'lost approval acknowledgement', key: 'card-lost-ack', first: 502 },
+        { name: 'wrong result order', key: 'card-bad-order', first: 502 },
+        { name: 'wrong result amount', key: 'card-bad-amount', first: 502 },
+        { name: 'wrong result currency', key: 'card-bad-currency', first: 502 },
+        { name: 'wrong result date', key: 'card-bad-date', first: 502 },
+        { name: 'declined card and replacement', key: 'card-decline', first: 422, replace: true },
+      ];
+      function encrypt(id, value) {
+        const nonce = randomBytes(12), cipher = createCipheriv('aes-256-gcm', Buffer.from(encryption, 'hex'), nonce);
+        cipher.setAAD(Buffer.from(String(id)));
+        return Buffer.concat([nonce, cipher.update(value, 'utf8'), cipher.final(), cipher.getAuthTag()]).toString('base64');
+      }
+      const histories = async () => Promise.all(['monolith', 'order'].map(async side => {
+        const response = await fetch('http://' + side + '-app:8000/__requests', {
+          headers: { Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN }, signal: AbortSignal.timeout(5000),
+        });
+        assert.equal(response.status, 200);
+        return response.json();
+      }));
+      async function reconcile(fixture, status, label, options = {}) {
+        const requestId = randomUUID(), result = [];
+        for (const [sideIndex, side] of owners.entries()) {
+          const path = options.submit ? '/api/orders/' + fixture.id + '/submit'
+            : '/api/payments/requests/' + fixture.requestId + '/reconcile';
+          const pending = fetch(side.base + path, {
+            method: 'POST', signal: AbortSignal.timeout(30000),
+            headers: { Origin: 'https://payments.example.test', 'Content-Type': 'application/json', 'X-Request-Id': requestId,
+              ...(options.submit ? headers : {}) },
+            body: JSON.stringify(options.submit ? { expectedVersion: 1 } : {}),
+          });
+          if (options.hold) {
+            try {
+              for (let attempt = 0;; attempt++) {
+                const history = (await histories())[sideIndex];
+                if (history.some(value => value.path === '/v1/billing/card-hold' && value.body.orderId === fixture.transactionId)) break;
+                assert.ok(attempt < 100, side.name + ' approval reaches PG');
+                await pause(20);
+              }
+              for (const [database, table, field, value] of [
+                [side.orders, 'orders', 'order_seq', fixture.id],
+                [side.customers, 'payment_cards', 'payment_card_seq', company],
+              ]) {
+                const client = await database.connect();
+                try {
+                  await client.query('BEGIN');
+                  await client.query('SELECT 1 FROM ' + table + ' WHERE ' + field + '=$1 FOR UPDATE NOWAIT', [value]);
+                } finally { await client.query('ROLLBACK'); client.release(); }
+              }
+              await side.customers.query("UPDATE organizations SET name='승인 대기 중 변경 기업' WHERE organization_seq=$1", [companyId]);
+              await side.customers.query("UPDATE departments SET name='승인 대기 중 변경 부서' WHERE department_seq=$1", [departmentId]);
+              await side.customers.query('UPDATE memberships SET organization_seq=$2,department_seq=NULL WHERE membership_seq=$1', [memberId, companyId + 8]);
+            } finally {
+              const release = await fetch('http://' + (sideIndex === 0 ? 'monolith' : 'order') + '-app:8000/__card-release', {
+                method: 'POST', headers: { Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ key: fixture.transactionId }), signal: AbortSignal.timeout(5000),
+              });
+              assert.equal(release.status, 200);
+            }
+          }
+          const response = await pending;
+          const body = await response.json();
+          assert.equal(response.status, status, side.name + ' ' + label + ' ' + JSON.stringify(body));
+          result.push(envelope(body, requestId));
+        }
+        assert.deepEqual(result[1], result[0], label + ' public response');
+        return { requestId, data: result[0].data };
+      }
+      let pairs = 0;
+      for (const [index, state] of paymentCases.entries()) {
+        const fixture = await seedClaim(state, 100 + index), selected = state.group ? company : personal;
+        for (const side of owners)
+          await side.customers.query('UPDATE payment_cards SET encrypted_billing_key=$2 WHERE payment_card_seq=$1', [selected, encrypt(selected, state.key)]);
+        const beforeHistory = await histories(), started = Date.now();
+        const first = await reconcile(fixture, state.first ?? 200, state.name, state);
+        pairs++;
+        let completed = first;
+        if (state.submit) {
+          assert.equal(first.data.status, 'ACCEPTED');
+          completed = await reconcile(fixture, 200, state.name + ' payment view');
+          pairs++;
+        }
+        if (state.first) {
+          for (const side of owners) {
+            const request = (await side.orders.query('SELECT * FROM order_payment_requests WHERE payment_request_id=$1', [fixture.requestId])).rows[0];
+            assert.equal(request.completed_at, null);
+            assert.equal(request.card_payment_failed, !!state.replace);
+            assert.equal(request.approval_started_at !== null, !state.replace);
+            assert.equal(request.approval_claim_id, null);
+            assert.equal((await side.orders.query('SELECT 1 FROM order_billing_charges WHERE order_seq=$1', [fixture.id])).rowCount, 0);
+          }
+          if (state.replace) {
+            await reconcile(fixture, 409, 'same declined card is not charged again');
+            pairs++;
+            for (const side of owners) {
+              await side.customers.query("UPDATE payment_cards SET status='FAILED',deleted_at=$2 WHERE payment_card_seq=$1", [personal, fixed]);
+              await side.customers.query("UPDATE payment_cards SET status='ACTIVE',encrypted_billing_key=$2 WHERE payment_card_seq=$1", [nextPersonal, encrypt(nextPersonal, 'card-success')]);
+            }
+          }
+          completed = await reconcile(fixture, 200, state.name + ' recovered');
+          pairs++;
+        }
+        assert.equal(completed.data.status, 'PAID');
+        assert.equal(completed.data.orderStatus, 'ACCEPTED');
+        assert.equal(completed.data.autoCharge, true);
+        assert.equal(completed.data.cardPaymentFailed, false);
+        await reconcile(fixture, 200, state.name + ' completed replay');
+        pairs++;
+        const stored = [];
+        for (const [sideIndex, side] of owners.entries()) {
+          const order = (await side.orders.query('SELECT to_jsonb(o) AS data FROM orders o WHERE order_seq=$1', [fixture.id])).rows[0].data;
+          const request = (await requestsFor(side.orders, fixture.requestId))[0].data;
+          if (state.hold) {
+            assert.equal(order.billing_organization_seq, companyId);
+            assert.equal(order.billing_department_seq, departmentId);
+            assert.equal(order.billing_organization_name, '승인 대기 중 변경 기업');
+            assert.equal(order.billing_department_name, '승인 대기 중 변경 부서');
+          }
+          const transaction = request.card_payment_order_id;
+          assert.match(transaction, uuidPattern);
+          assert.equal(request.provider_reference, 'card-payment-' + transaction);
+          assert.equal(request.provider_payment_key, request.provider_reference);
+          assert.equal(request.approval_claim_id, null);
+          assert.equal(request.approval_claimed_until, null);
+          assert.equal(request.card_payment_failed, false);
+          assert.equal(request.provider_approved_at, '2030-03-02T00:01:00+00:00');
+          for (const field of ['updated_at', 'closed_at', 'submission_first_attempt_at', 'submission_last_attempt_at']) {
+            if (order[field] !== null) { generatedTime(order[field], started, 0); order[field] = '<generated ' + field + '>'; }
+          }
+          for (const field of ['completed_at', 'approval_started_at']) {
+            generatedTime(request[field], started, 0); request[field] = '<generated ' + field + '>';
+          }
+          generatedTime(request.approval_next_check_at, started, 60000);
+          request.approval_next_check_at = '<one-minute check>';
+          if (state.replace) {
+            assert.notEqual(transaction, fixture.transactionId);
+            request.card_payment_order_id = '<replacement transaction>';
+            request.provider_payment_key = '<replacement provider key>';
+            request.provider_reference = '<replacement provider key>';
+          }
+          const charges = (await side.orders.query('SELECT organization_seq,customer_seq,billing_month::text,payment_method_type,amount FROM order_billing_charges WHERE order_seq=$1', [fixture.id])).rows;
+          assert.equal(charges.length, state.group ? 1 : 0);
+          if (state.group) assert.deepEqual(charges[0], { organization_seq: companyId, customer_seq: null, billing_month: '2030-03-01', payment_method_type: 'groupBilling', amount: 7000 });
+          const shipments = (await side.delivery.query('SELECT order_parcel_seq,tracking_number,status FROM shipments WHERE order_parcel_seq=$1', [fixture.id])).rows;
+          assert.equal(shipments.length, 1);
+          assert.match(shipments[0].tracking_number, /^DVA-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+          assert.equal(shipments[0].order_parcel_seq, fixture.id);
+          assert.equal(shipments[0].status, 'paid');
+          shipments[0].tracking_number = '<generated DVA UUID>';
+          const audits = (await side.audit.query("SELECT action,actor_type,actor_seq,result,target_type,target_seq,metadata FROM audit_logs WHERE request_id=$1 AND target_type IN ('ORDER','COMPANY','ORDER_PARCEL') ORDER BY audit_log_seq", [completed.requestId])).rows;
+          stored.push({ order, request, charges, shipments, audits });
+          const requests = (await histories())[sideIndex].slice(beforeHistory[sideIndex].length);
+          const approvals = requests.filter(value => value.method === 'POST' && value.path.startsWith('/v1/billing/'));
+          assert.equal(approvals.length, state.replace ? 2 : 1);
+          assert.ok(approvals.every(value => value.body.amount === 7000 && value.body.orderName === 'DVA 택배 결제'));
+          assert.equal(requests.filter(value => value.path === '/parcel').length, 1);
+        }
+        assert.deepEqual(stored[1], stored[0], state.name + ' order/request/charge/shipment/audit');
+      }
+      t.diagnostic('registered card PG reconciliation matches ' + pairs + ' HTTP pairs, durable money and replay-safe Dver completion');
+    });
+    await caseTest.test('deleted card revocation preserves pending approvals, leases, PG results and audited keys', async () => {
+      const {DatabaseService:CustomerDatabase}=require('./customer-runtime/database/database.service');
+      const {PaymentCardsRepository}=require('./customer-runtime/payments/payment-cards.repository');
+      const {PaymentCardsService}=require('./customer-runtime/payments/payment-cards.service');
+      const {CardProviderClient}=require('./customer-runtime/payments/card-provider.client');
+      const {AuditService}=require('./customer-runtime/audit/audit.service');
+      const values={DB_HOST:'customer-db',DB_PORT:5432,DB_USER:'customer_app',DB_PASSWORD:process.env.PGPASSWORD,
+        DB_NAME:'dva_webhook_test',ORDER_URL:'http://order-app:3002',OPERATIONS_URL:'http://operations-app:3005',
+        CUSTOMER_AUTH_TOKEN:process.env.CUSTOMER_AUTH_TOKEN,TOSS_BILLING_SECRET_KEY:'test_sk_parity',
+        PAYMENT_CARD_ENCRYPTION_KEY:encryption,PAYMENT_TOSS_BASE_URL:'http://order-app:8000'};
+      const config={get:key=>values[key]}, database=new CustomerDatabase(config);
+      const audit=new AuditService(database,config);
+      const revocations=new PaymentCardsService(new PaymentCardsRepository(database),null,audit,database,new CardProviderClient(config),config);
+      caseTest.after(async()=>{await audit.onModuleDestroy();await database.onModuleDestroy();});
+      const owners=[{cards:reference,orders:reference,audit:reference,peer:'monolith'},
+        {cards:databases.customer,orders:databases.order,audit:databases.operations,peer:'order'}];
+      const cases=[
+        {name:'confirmed removal'}, {name:'already removed',pgStatus:404},
+        {name:'temporary PG failure',pgStatus:503}, {name:'provider refuses',pgStatus:400},
+        {name:'provider unauthorized',pgStatus:401}, {name:'provider forbidden',pgStatus:403},
+        {name:'unacknowledged PG removal',lost:true,error:502},
+        {name:'invalid PG response',badJson:true,error:502},
+        {name:'incorrect card AAD',badAad:true,error:503},
+        {name:'undeleted card',active:true}, {name:'key already cleared',empty:true},
+        {name:'live card lease',busy:true}, {name:'expired card lease',stale:true},
+        {name:'different provider environment',wrongEnvironment:true},
+        {name:'pending approval',pending:true,blocked:true},
+        {name:'invalidated approval remains protected',pending:true,invalidated:true,blocked:true},
+        {name:'expired approving request remains protected',pending:true,expired:true,blocked:true},
+        {name:'completed approval permits removal',pending:true,completed:true},
+        {name:'failed approval permits removal',pending:true,failed:true},
+        {name:'unstarted card request permits removal'},
+        {name:'missing billing secret',missingSecret:true}, {name:'missing encryption key',missingEncryption:true},
+      ];
+      const history=async side=>{
+        const response=await fetch('http://'+side.peer+'-app:8000/__requests',{
+          headers:{Authorization:'Bearer '+process.env.CUSTOMER_AUTH_TOKEN},signal:AbortSignal.timeout(5000)});
+        assert.equal(response.status,200);return response.json();
+      };
+      async function revoke(side,requestId) {
+        try {
+          if(side===owners[0]) {
+            const response=await fetch('http://monolith-app:8000/__card-revocation',{
+              method:'POST',signal:AbortSignal.timeout(30000),headers:{Authorization:'Bearer '+process.env.CUSTOMER_AUTH_TOKEN,'Content-Type':'application/json'},
+              body:JSON.stringify({requestId,config:{TOSS_BILLING_SECRET_KEY:values.TOSS_BILLING_SECRET_KEY,
+                PAYMENT_CARD_ENCRYPTION_KEY:values.PAYMENT_CARD_ENCRYPTION_KEY}})});
+            const body=await response.json();
+            return {status:response.status,code:body.error?.code};
+          }
+          await revocations.revokeDeleted(requestId);return {status:200,code:undefined};
+        } catch(error) {return {status:error.getStatus?.()??500,code:error.getResponse?.().code};}
+      }
+      function encrypted(id,key,badAad) {
+        const nonce=randomBytes(12),cipher=createCipheriv('aes-256-gcm',Buffer.from(encryption,'hex'),nonce);
+        cipher.setAAD(Buffer.from(String(badAad?id+1:id)));
+        return Buffer.concat([nonce,cipher.update(key,'utf8'),cipher.final(),cipher.getAuthTag()]).toString('base64');
+      }
+      async function seedRevocation(state,index,retain=false) {
+        const id=720000+index,requestId=randomUUID(),registration=randomUUID(),provider=randomUUID();
+        const key=state.pgStatus?'revoke-status-'+state.pgStatus+'-'+id:state.lost?'revoke-lost-ack-'+id:
+          state.badJson?'revoke-bad-json-'+id:state.hold?'revoke-hold-'+id:'revoke-success-'+id;
+        const ciphertext=state.empty?null:encrypted(id,key,state.badAad);
+        for(const side of owners) {
+          await side.cards.query("UPDATE payment_cards SET status='FAILED'");
+          for(const card of cards)
+            await side.cards.query('UPDATE payment_cards SET encrypted_billing_key=$2 WHERE payment_card_seq=$1',[card.id,card.encrypted]);
+        }
+        const fixture=await seedClaim({lookup:state.pending,completed:state.completed,failed:state.failed,
+          expired:state.expired,invalidated:state.invalidated},200+index);
+        for(const side of owners) {
+          await side.cards.query("UPDATE payment_cards SET encrypted_billing_key=NULL,status='FAILED' WHERE NOT $1::boolean OR payment_card_seq=ANY($2::int[])",
+            [retain,[personal,company,nextPersonal,nextCompany]]);
+          await side.cards.query(`INSERT INTO payment_cards(payment_card_seq,customer_seq,registration_key,request_hash,provider_customer_key,
+            provider_environment,encrypted_billing_key,expiration_year,expiration_month,masked_number,status,deleted_at,claimed_until,created_at,updated_at)
+            OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,'revocation-fixture',$4,$5,$6,2099,12,'1234********5678','ACTIVE',$7,$8,$9,$9)`,
+            [id,customerId,registration,provider,state.wrongEnvironment?'live':'test',ciphertext,state.active?null:fixed,
+              state.busy?'2099-01-01T00:00:00Z':state.stale?'2000-01-01T00:00:00Z':null,fixed]);
+          await side.orders.query('UPDATE order_payment_requests SET payment_card_seq=$2 WHERE payment_request_id=$1',[fixture.requestId,id]);
+        }
+        return {id,requestId,key,ciphertext};
+      }
+      for(const [index,state] of cases.entries()) {
+        const {id,requestId,key,ciphertext}=await seedRevocation(state,index);
+        values.TOSS_BILLING_SECRET_KEY=state.missingSecret?undefined:'test_sk_parity';
+        values.PAYMENT_CARD_ENCRYPTION_KEY=state.missingEncryption?undefined:encryption;
+        const eligible=!(state.active||state.empty||state.busy||state.wrongEnvironment||state.blocked||state.missingSecret||state.missingEncryption);
+        const requested=eligible&&!state.badAad;
+        const confirmed=requested&&!state.lost&&!state.badJson&&[200,404].includes(state.pgStatus??200);
+        const results=[],stored=[];
+        for(const side of owners) {
+          const before=await history(side),started=Date.now();
+          const result=await revoke(side,requestId);results.push(result);
+          assert.equal(result.status,state.error??200,state.name+' '+side.peer+' '+JSON.stringify(result));
+          const row=(await side.cards.query('SELECT to_jsonb(c) AS data FROM payment_cards c WHERE payment_card_seq=$1',[id])).rows[0].data;
+          assert.equal(row.encrypted_billing_key,confirmed?null:ciphertext,state.name+' stored key');
+          if(eligible&&!confirmed) {generatedTime(row.claimed_until,started,90000);row.claimed_until='<90-second card lease>';}
+          else assert.equal(row.claimed_until,state.busy?'2099-01-01T00:00:00+00:00':null);
+          const logs=(await side.audit.query("SELECT actor_type,actor_seq,action,result,target_type,target_seq,metadata FROM audit_logs WHERE request_id=$1 ORDER BY audit_log_seq",[requestId])).rows;
+          assert.equal(logs.length,confirmed?1:0);
+          if(confirmed) assert.deepEqual(logs[0],{actor_type:'SYSTEM',actor_seq:null,action:'PAYMENT_CARD_REVOKED',result:'SUCCESS',target_type:'PAYMENT_CARD',target_seq:id,metadata:{}});
+          const requests=(await history(side)).slice(before.length).filter(value=>value.method==='DELETE');
+          assert.equal(requests.length,requested?1:0,state.name+' PG request count');
+          if(requested) assert.deepEqual(requests[0],{method:'DELETE',path:'/v1/billing/'+encodeURIComponent(key),body:null});
+          stored.push({card:row,audits:logs});
+        }
+        assert.deepEqual(results[1],results[0],state.name+' result');
+        assert.deepEqual(stored[1],stored[0],state.name+' persisted card/audit');
+      }
+      values.TOSS_BILLING_SECRET_KEY='test_sk_parity';values.PAYMENT_CARD_ENCRYPTION_KEY=encryption;
+      const blocked=await seedRevocation({pending:true},100);
+      const held=await seedRevocation({hold:true},101,true);
+      for(const side of owners) {
+        const started=Date.now(),pending=revoke(side,held.requestId);
+        try {
+          for(let attempt=0;;attempt++) {
+            if((await history(side)).some(value=>value.method==='DELETE'&&value.path==='/v1/billing/'+held.key)) break;
+            assert.ok(attempt<100,side.peer+' revocation reaches PG');await pause(20);
+          }
+          const leased=(await side.cards.query('SELECT claimed_until FROM payment_cards WHERE payment_card_seq=$1',[held.id])).rows[0];
+          generatedTime(leased.claimed_until,started,90000);
+          assert.equal((await side.cards.query('SELECT claimed_until FROM payment_cards WHERE payment_card_seq=$1',[blocked.id])).rows[0].claimed_until,null);
+          const client=await side.cards.connect();
+          try {
+            await client.query('BEGIN');
+            assert.equal((await client.query('SELECT 1 FROM payment_cards WHERE payment_card_seq=ANY($1::int[]) FOR UPDATE NOWAIT',[[blocked.id,held.id]])).rowCount,2);
+          } finally {await client.query('ROLLBACK');client.release();}
+        } finally {
+          const response=await fetch('http://'+side.peer+'-app:8000/__card-release',{
+            method:'POST',signal:AbortSignal.timeout(5000),headers:{Authorization:'Bearer '+process.env.CUSTOMER_AUTH_TOKEN,'Content-Type':'application/json'},
+            body:JSON.stringify({key:held.key})});
+          assert.equal(response.status,200);
+        }
+        assert.equal((await pending).status,200);
+        assert.equal((await side.cards.query('SELECT encrypted_billing_key FROM payment_cards WHERE payment_card_seq=$1',[blocked.id])).rows[0].encrypted_billing_key,blocked.ciphertext);
+        assert.equal((await side.cards.query('SELECT encrypted_billing_key FROM payment_cards WHERE payment_card_seq=$1',[held.id])).rows[0].encrypted_billing_key,null);
+      }
+      const rollback=await seedRevocation({},102);
+      for(const side of owners) {
+        await side.audit.query("CREATE FUNCTION revocation_audit_fault() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.action='PAYMENT_CARD_REVOKED' THEN RAISE EXCEPTION 'test-only revocation audit failure'; END IF; RETURN NEW; END $$");
+        await side.audit.query('CREATE TRIGGER revocation_audit_fault BEFORE INSERT ON audit_logs FOR EACH ROW EXECUTE FUNCTION revocation_audit_fault()');
+        const started=Date.now();
+        try {
+          assert.ok((await revoke(side,rollback.requestId)).status>=500);
+          const row=(await side.cards.query('SELECT encrypted_billing_key,claimed_until FROM payment_cards WHERE payment_card_seq=$1',[rollback.id])).rows[0];
+          assert.equal(row.encrypted_billing_key,rollback.ciphertext);
+          generatedTime(row.claimed_until,started,90000);
+          assert.equal((await side.audit.query('SELECT 1 FROM audit_logs WHERE request_id=$1',[rollback.requestId])).rowCount,0);
+        } finally {
+          await side.audit.query('DROP TRIGGER revocation_audit_fault ON audit_logs');
+          await side.audit.query('DROP FUNCTION revocation_audit_fault()');
+        }
+        await side.cards.query("UPDATE payment_cards SET claimed_until=clock_timestamp()-interval '1 second' WHERE payment_card_seq=$1",[rollback.id]);
+        assert.equal((await revoke(side,rollback.requestId)).status,200);
+        const row=(await side.cards.query('SELECT encrypted_billing_key,claimed_until FROM payment_cards WHERE payment_card_seq=$1',[rollback.id])).rows[0];
+        assert.deepEqual(row,{encrypted_billing_key:null,claimed_until:null});
+        assert.equal((await side.audit.query('SELECT 1 FROM audit_logs WHERE request_id=$1',[rollback.requestId])).rowCount,1);
+        assert.equal((await history(side)).filter(value=>value.method==='DELETE'&&value.path==='/v1/billing/'+rollback.key).length,2);
+      }
+      const blocker=await databases.order.connect(),reads=[];
+      try {
+        await blocker.query('BEGIN');await blocker.query("SET LOCAL lock_timeout='2s'");
+        await blocker.query('LOCK TABLE order_parcels IN ACCESS EXCLUSIVE MODE');
+        for(let index=0;index<5;index++) reads.push(fetch('http://order-app:3002/api/orders/1002',{
+          headers,signal:AbortSignal.timeout(7000)}));
+        for(let attempt=0;;attempt++) {
+          // Long detail queries can exceed pg_stat_activity's query text limit.
+          const waiting=await databases.order.query("SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid() AND wait_event='relation'");
+          if(waiting.rows[0].n===5) break;
+          assert.ok(attempt<100,'five order business reads reach the fixture lock: '+waiting.rows[0].n);await pause(20);
+        }
+        const eventId=randomUUID(),response=await fetch('http://order-app:3002/internal/parcel-draft-write/reference',{
+          method:'POST',signal:AbortSignal.timeout(3000),headers:{Authorization:'Bearer '+process.env.CUSTOMER_AUTH_TOKEN,'Content-Type':'application/json'},
+          body:JSON.stringify({eventId,source:'customer',eventType:'ParcelDraftWriteReferenceRequested',
+            payload:{operation:'OrderPendingCardApprovalRead',input:{id:blocked.id}}})});
+        assert.equal(response.status,200);
+        assert.deepEqual(await response.json(),{eventId,status:'processed',payload:true});
+      } finally {
+        await blocker.query('ROLLBACK');blocker.release();
+        for(const response of await Promise.all(reads)) assert.equal(response.status,200);
+      }
+      t.diagnostic('revocation releases blocked candidate locks before PG, restores keys on audit failure, retries confirmed DELETE with 404 and reads through five occupied order connections');
+      t.diagnostic('card revocation matches '+cases.length+' source states, pending transaction protection, 90-second leases and confirmed key erasure');
+    });
+  });
   console.log('Compared HTTP requests: '+compared);
 });

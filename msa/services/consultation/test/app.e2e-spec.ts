@@ -124,24 +124,27 @@ describe('Consultation PBX and active calls (e2e)', () => {
           '/api/dashboard/response-wait',
           '/api/dashboard/stage-dropoffs',
           '/api/unanswered-questions',
-          '/api/unanswered-questions/{id}',
           '/api/unanswered-questions/{id}/faqs',
           '/consultation/health',
           '/consultation/health/ready',
           '/webhooks/pbx/call-ended',
         ]);
         expect(body.paths['/api/calls/{id}']).toHaveProperty('get');
-        expect(body.paths['/api/calls/{id}']).toHaveProperty('delete');
+        expect(body.paths['/api/calls']).toHaveProperty('delete');
+        expect(body.paths['/api/calls/{id}']).not.toHaveProperty('delete');
+        expect(body.paths['/api/unanswered-questions']).toHaveProperty(
+          'delete',
+        );
       });
     await request(app.getHttpServer()).get('/api/calls').expect(401);
     await request(app.getHttpServer())
-      .delete('/api/calls/1')
+      .delete('/api/calls')
       .set('Origin', 'http://localhost:5173')
       .expect(401);
   });
   it('requires allowed Origin on content deletion before authenticating the session', async () => {
     const previous = auth.authenticate.mock.calls.length;
-    for (const path of ['/api/calls/1', '/api/unanswered-questions/1']) {
+    for (const path of ['/api/calls', '/api/unanswered-questions']) {
       await request(app.getHttpServer()).delete(path).expect(403);
       await request(app.getHttpServer())
         .delete(path)
@@ -149,7 +152,7 @@ describe('Consultation PBX and active calls (e2e)', () => {
         .expect(403);
     }
     expect(auth.authenticate.mock.calls.length).toBe(previous);
-    for (const path of ['/api/calls/1', '/api/unanswered-questions/1'])
+    for (const path of ['/api/calls', '/api/unanswered-questions'])
       await request(app.getHttpServer())
         .delete(path)
         .set('Origin', 'http://localhost:5173')
@@ -182,6 +185,21 @@ describe('Consultation PBX and active calls (e2e)', () => {
       .set('Authorization', 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN)
       .send({})
       .expect(422);
+    expect(pool.query.mock.calls.length).toBe(previous);
+  });
+  it('authenticates card call scopes and rejects unexpected fields before DB access', async () => {
+    const previous = pool.query.mock.calls.length;
+    for (const path of [
+      '/internal/card-call-scope',
+      '/internal/card-call-scope/caller',
+    ]) {
+      await request(app.getHttpServer()).post(path).send({}).expect(403);
+      await request(app.getHttpServer())
+        .post(path)
+        .set('Authorization', 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN)
+        .send({})
+        .expect(422);
+    }
     expect(pool.query.mock.calls.length).toBe(previous);
   });
   it('preserves dedicated PBX authentication on direct and public proxy paths', async () => {

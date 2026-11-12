@@ -1,3 +1,4 @@
+import { DeleteCallsDto } from '../common/dto/delete-request.dto';
 import { ConsultationsService } from './consultations.service';
 import { CallIdParamsDto } from './dto/call-id-params.dto';
 import {
@@ -6,6 +7,7 @@ import {
 } from './dto/transcript.dto';
 import { AuditOperation } from '../audit/audit-operation';
 import {
+  Body,
   Controller,
   Delete,
   Get,
@@ -34,7 +36,7 @@ import {
 } from './dto/call-response.dto';
 @ApiTags('Calls')
 @ApiCookieAuth('adminSession')
-@Roles('OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN')
+@Roles('OPERATOR', 'SYSTEM_ADMIN')
 @ApiResponse({
   status: 400,
   description: '조회 조건 또는 통화 번호 형식 오류.',
@@ -57,12 +59,13 @@ export class ConsultationsController {
     private readonly consultations: ConsultationsService,
   ) {}
 
-  @Delete(':id')
+  @Delete()
   @HttpCode(204)
   @AuditOperation({
     action: 'CALL_DELETED',
     targetType: 'CALL_SESSION',
-    target: 'id',
+    target: 'ids',
+    idsField: 'callSessionSeqs',
   })
   @ApiOperation({
     summary: '통화 soft delete',
@@ -80,9 +83,9 @@ export class ConsultationsController {
     type: ErrorResponseDto,
     description: '통화 종료 전 또는 녹취 대기·실패·업로드 중.',
   })
-  delete(@Param() params: CallIdParamsDto, @Req() request: AuthRequest) {
+  delete(@Body() input: DeleteCallsDto, @Req() request: AuthRequest) {
     return this.consultations.delete(
-      params.id,
+      input.callSessionSeqs,
       request.admin.adminUserSeq,
       request.requestId,
     );

@@ -63,6 +63,18 @@ spec:
                 secretKeyRef: {name: msa-customer-auth, key: customer-token}
             - name: ORDER_URL
               value: http://order:3002
+            - name: TOSS_BILLING_SECRET_KEY
+              valueFrom:
+                secretKeyRef: {name: order-runtime, key: TOSS_BILLING_SECRET_KEY, optional: true}
+            - name: ORDER_PAYMENTS_ENABLED
+              valueFrom:
+                secretKeyRef: {name: order-runtime, key: ORDER_PAYMENTS_ENABLED, optional: true}
+            - name: PAYMENT_CARD_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef: {name: order-runtime, key: PAYMENT_CARD_ENCRYPTION_KEY, optional: true}
+            - name: PAYMENT_TOSS_BASE_URL
+              valueFrom:
+                secretKeyRef: {name: order-runtime, key: PAYMENT_TOSS_BASE_URL, optional: true}
             - name: CONSULTATION_URL
               value: http://consultation:3004
             - name: CONSULTATION_AUTH_TOKEN

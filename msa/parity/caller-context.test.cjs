@@ -153,8 +153,8 @@ test('customer context and call registration preserve HTTP, independent business
   }
  }
  await compare('ten concurrent registrations');
- await request('GET','/api/audit-logs?limit=100',undefined,403,{session:true});
- for(const side of sides)await side.identity.query("UPDATE admin_users SET role='SUPERVISOR' WHERE login_id='operator'");
+ await request('GET','/api/audit-logs?limit=100',undefined,200,{session:true});
+ for(const side of sides)await side.identity.query("UPDATE admin_users SET role='SYSTEM_ADMIN' WHERE login_id='operator'");
  await request('GET','/api/audit-logs?limit=100',undefined,200,{session:true});
  const docs=[];for(const side of sides)docs.push(await(await fetch(side.base+'/api/docs-json')).json());
  assert.deepEqual(docs[1].paths['/api/customers/context'],docs[0].paths['/api/customers/context']);

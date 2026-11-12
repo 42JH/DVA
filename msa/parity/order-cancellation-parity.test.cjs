@@ -29,7 +29,7 @@ test('both cancellation APIs preserve source HTTP, full order/payment/shipment r
   for(const [owner,forbidden] of [['delivery',['orders','order_parcels','customers','admin_users']],['order',['shipments','call_sessions','customers']]])
     for(const table of forbidden)assert.equal((await pools[owner].query('SELECT to_regclass($1) AS name',[table])).rows[0].name,null,owner+' owns only its tables');
   let next=8000,compared=0;
-  const generated=[new Map(),new Map()],times=[new Map(),new Map()];
+  const generated=[new Map(),new Map()],times=[new Map(),new Map()],cardOrderIds=[new Map(),new Map()];
   const rows=async(db,table)=>(await db.query(`SELECT to_jsonb(t) AS row FROM ${table} t ORDER BY to_jsonb(t)::text`)).rows.map(x=>x.row);
   async function state(side){const value={};for(const table of orderTables)value[table]=await rows(side.db,table);for(const table of ['shipments','shipment_status_history'])value[table]=await rows(side.delivery,table);return value;}
   function canonical(value,i){
@@ -37,6 +37,16 @@ test('both cancellation APIs preserve source HTTP, full order/payment/shipment r
     for(const [table,values] of Object.entries(result))for(const row of values){
       const key=table==='orders'?row.order_seq:table==='order_payment_requests'?row.payment_request_id:null;
       for(const col of ['updated_at','closed_at','created_at','invalidated_at'])if(times[i].has(table+':'+key+':'+col))row[col]=times[i].get(table+':'+key+':'+col);
+      if(table==='order_payment_requests') {
+        assert.match(row.card_payment_order_id,uuid);
+        const known=cardOrderIds[i].get(key);
+        if(known) assert.equal(row.card_payment_order_id,known,'cancellation preserves the card transaction identity');
+        else {
+          assert.ok(![...cardOrderIds[i].values()].includes(row.card_payment_order_id),'card transaction identities are unique');
+          cardOrderIds[i].set(key,row.card_payment_order_id);
+        }
+        row.card_payment_order_id='card-'+(generated[i].get(key)??key);
+      }
       if(table==='order_payment_requests'&&generated[i].has(row.payment_request_id))row.payment_request_id=generated[i].get(row.payment_request_id);
     }
     for(const values of Object.values(result))values.sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)));
@@ -124,7 +134,7 @@ test('both cancellation APIs preserve source HTTP, full order/payment/shipment r
     for(const [owner,port] of [['order',3002],['delivery',3003],['consultation',3004],['customer',3001]]){const doc=await(await fetch(`http://${owner}-app:${port}/${owner}/docs-json`)).json();assert.ok(Object.keys(doc.paths).every(path=>!path.includes('internal')));}
   });
   await t.test('all roles, bad cookies/Origin, invalid IDs/headers/DTOs retain failures and no writes',async()=>{
-    for(const [i,role] of ['OPERATOR','SUPERVISOR','SYSTEM_ADMIN'].entries()){
+    for(const [i,role] of ['OPERATOR','OPERATOR','SYSTEM_ADMIN'].entries()){
       const f=await seed();const result=await compare(f.id,204,{headers:{Origin:origin,Cookie:'dva_session='+['a','b','c'][i].repeat(64)}});assert.equal(result.audit[0].actor_seq,i+1,role);
     }
     const f=await seed();

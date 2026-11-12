@@ -1,3 +1,4 @@
+import { RetentionModule } from './retention/retention.module';
 import { FaqsModule } from './faqs/faqs.module';
 import { AiSettingsModule } from './ai-settings/ai-settings.module';
 import { Module } from '@nestjs/common';
@@ -9,7 +10,14 @@ import { DatabaseModule } from './database/database.module';
 import { AuthModule } from './auth/auth.module';
 
 @Module({
-  imports: [ApplicationConfigModule, DatabaseModule, AuthModule, AiSettingsModule, FaqsModule],
+  imports: [
+    ApplicationConfigModule,
+    DatabaseModule,
+    AuthModule,
+    AiSettingsModule,
+    FaqsModule,
+    RetentionModule,
+  ],
   controllers: [AppController, HealthController],
   providers: [HealthService],
 })

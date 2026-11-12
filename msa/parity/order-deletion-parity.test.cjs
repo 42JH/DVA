@@ -58,8 +58,8 @@ test('order DELETE preserves source HTTP, business rows, audit and owner boundar
             '01000000001','출발 도로','출발 지번','출발동','01234','01099999999','도착 도로','도착 지번','도착동','05678')`,[id*10,id,status==='CANCELLED'?'CANCELLED':'ACTIVE']);
         if(notification) await c.query(`INSERT INTO order_payment_requests(payment_request_id,order_seq,amount,created_at,expires_at,
           notification_status,completion_notification_status,notification_attempted_at,completion_notification_attempted_at,
-          approval_started_at,invalidated_at,completed_at,provider_reference,approval_next_check_at)
-          VALUES($1,$2,7000,'2020-01-01Z','2094-01-01Z',$3,$4,'2094-01-01Z','2094-01-01Z',$5,$6,$7,$8,'2094-01-01Z')`,
+          approval_started_at,invalidated_at,completed_at,provider_reference,approval_next_check_at,card_payment_order_id)
+          VALUES($1,$2,7000,'2020-01-01Z','2094-01-01Z',$3,$4,'2094-01-01Z','2094-01-01Z',$5,$6,$7,$8,'2094-01-01Z',$1)`,
           [paymentId,id,notification,completion,approval?'2030-01-01Z':null,invalid?'2030-01-02Z':null,
             completed?'2030-01-03Z':null,completed?'delete-reference-'+id:null]);
         await c.query('COMMIT');
@@ -75,8 +75,8 @@ test('order DELETE preserves source HTTP, business rows, audit and owner boundar
     return (await db.query(`SELECT to_jsonb(t) AS row FROM ${table} t ORDER BY to_jsonb(t)::text`)).rows.map(x=>x.row);
   }
   async function business(db) {const value={};for(const table of tables)value[table]=await rows(db,table);return value;}
-  async function request(side,id,headers,requestId) {
-    const response=await fetch(side.url+'/api/orders/'+id,{method:'DELETE',headers:{...headers,'X-Request-Id':requestId},signal:AbortSignal.timeout(25000)});
+  async function request(side,id,headers,requestId,body={orderSeqs:Array.isArray(id)?id:[id]}) {
+    const response=await fetch(side.url+'/api/orders',{method:'DELETE',headers:{...headers,'X-Request-Id':requestId,'Content-Type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(25000)});
     const text=await response.text();
     assert.equal(response.headers.get('x-request-id'),requestId);
     return {status:response.status,body:text?JSON.parse(text):null,cache:response.headers.get('cache-control')};
@@ -152,11 +152,12 @@ test('order DELETE preserves source HTTP, business rows, audit and owner boundar
       }
       Object.values(value).forEach(visit);
     }
-    for(const path of ['/api/orders/{id}','/api/parcel-drafts/{id}']) {
+    for(const path of ['/api/orders','/api/parcel-drafts']) {
       const source=docs[0].paths[path].delete;
       assert.deepEqual(docs[1].paths[path].delete,source,path);visit(source);
     }
     assert.ok(Object.keys(docs[1].paths).every(path=>!path.includes('internal')));
+    for(const doc of docs)for(const path of ['/api/orders/{id}','/api/parcel-drafts/{id}'])assert.equal(doc.paths[path].delete,undefined);
   });
 
   await t.test('administrator session, roles, Origin and ID errors keep failure/denied audits',async()=> {
@@ -167,7 +168,7 @@ test('order DELETE preserves source HTTP, business rows, audit and owner boundar
     await compare(id,403,{Cookie:cookie,Origin:'https://untrusted.invalid'});
     for(const value of ['0','-1','1.5','2147483648','abc'])await compare(value,400);
     await compare(2147483647,404);
-    for(const [n,role] of ['OPERATOR','SUPERVISOR','SYSTEM_ADMIN'].entries()) {
+    for(const [n,role] of ['OPERATOR','OPERATOR','SYSTEM_ADMIN'].entries()) {
       const row=await seed();
       const result=await compare(row,204,{Origin:origin,Cookie:'dva_session='+['a','b','c'][n].repeat(64)});
       assert.equal(result.audit[0].actor_seq,n+1,role);
@@ -250,6 +251,57 @@ test('order DELETE preserves source HTTP, business rows, audit and owner boundar
     await compare(id,204);
   });
 
+  await t.test('order arrays validate strictly, roll every target back and share sorted success audits',async()=> {
+    const ids=[await seed({notification:'PENDING'}),await seed({status:'CANCELLED'})];
+    const blocked=await seed({status:'PAID'}),headers={Origin:origin,Cookie:cookie};
+    async function attempt(selected,status,body) {
+      const before=await Promise.all(sides.map(side=>business(side.db)));
+      const requestId=randomUUID(),start=Date.now(),responses=[];
+      for(const side of sides)responses.push(await request(side,selected,headers,requestId,body));
+      for(const response of responses)assert.equal(response.status,status,JSON.stringify(response));
+      assert.deepEqual(responses[1],responses[0]);
+      const audit=await audits(requestId,start,Date.now());
+      if(status!==204) {
+        for(const [index,side] of sides.entries())assert.deepEqual(await business(side.db),before[index]);
+        assert.ok(audit.every(row=>row.result==='FAILED'));
+      } else {
+        assert.deepEqual(audit.map(row=>row.target_seq),ids);
+        assert.ok(audit.every(row=>row.result==='SUCCESS'));
+        for(const [index,side] of sides.entries()) {
+          const after=await business(side.db);
+          for(const id of ids) {
+            const old=before[index].orders.find(row=>row.order_seq===id),row=after.orders.find(row=>row.order_seq===id);
+            within(row.deleted_at,start,Date.now(),'batch deleted_at');
+            if(row.updated_at!==old.updated_at)within(row.updated_at,start,Date.now(),'batch updated_at');
+            assert.deepEqual({...row,deleted_at:old.deleted_at,updated_at:old.updated_at},old);
+          }
+          for(const table of tables.filter(table=>!['orders','order_payment_requests'].includes(table)))
+            assert.deepEqual(after[table],before[index][table]);
+          for(const payment of after.order_payment_requests) {
+            const old=before[index].order_payment_requests.find(row=>row.payment_request_id===payment.payment_request_id);
+            assert.deepEqual(payment,ids.includes(payment.order_seq)?{...old,
+              notification_status:old.notification_status==='PENDING'?'FAILED':old.notification_status,
+              completion_notification_status:['WAITING','PENDING'].includes(old.completion_notification_status)?'FAILED':old.completion_notification_status}:old);
+          }
+        }
+      }
+    }
+    for(const body of [{},{orderSeqs:[]},{orderSeqs:[ids[0],ids[0]]},{orderSeqs:['1']},
+      {orderSeqs:[0]},{orderSeqs:[1.5]},{orderSeqs:[2147483648]},{orderSeqs:ids,extra:true}])
+      await attempt(ids,400,body);
+    await attempt([ids[0],2147483647],404);
+    await attempt([blocked,ids[0]],409);
+    for(const side of sides)await side.audit.query(`CREATE FUNCTION reject_second_order_delete_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+      IF NEW.action='ORDER_DELETED' AND NEW.target_seq=${ids[1]} AND NEW.result='SUCCESS' THEN RAISE EXCEPTION 'private second order audit failure'; END IF;
+      RETURN NEW; END $$; CREATE TRIGGER reject_second_order_delete_audit BEFORE INSERT ON audit_logs FOR EACH ROW EXECUTE FUNCTION reject_second_order_delete_audit()`);
+    try {await attempt([...ids].reverse(),500);}
+    finally {for(const side of sides)await side.audit.query('DROP TRIGGER reject_second_order_delete_audit ON audit_logs; DROP FUNCTION reject_second_order_delete_audit()');}
+    await attempt([...ids].reverse(),204);
+    for(const side of sides)assert.equal((await fetch(side.url+'/api/orders/'+ids[0],{
+      method:'DELETE',headers:{...headers,'Content-Type':'application/json'},body:JSON.stringify({orderSeqs:ids}),
+    })).status,404);
+  });
+
   await t.test('private deletion checks authenticate, reject forged commands, reread same event and never persist a response',async()=> {
     const url='http://consultation-app:3004/internal/order-deletion-check';
     const event={eventId:randomUUID(),source:'order',eventType:'OrderDeletionCheckRequested',payload:{orderSeq:1001}};
@@ -303,8 +355,8 @@ test('order DELETE preserves source HTTP, business rows, audit and owner boundar
       }
       return id;
     }
-    async function send(side,id,headers,requestId){
-      const response=await fetch(side.url+'/api/parcel-drafts/'+id,{method:'DELETE',headers:{...headers,'X-Request-Id':requestId},signal:AbortSignal.timeout(25000)});
+    async function send(side,id,headers,requestId,input={draftSeqs:Array.isArray(id)?id:[id]}){
+      const response=await fetch(side.url+'/api/parcel-drafts',{method:'DELETE',headers:{...headers,'X-Request-Id':requestId,'Content-Type':'application/json'},body:JSON.stringify(input),signal:AbortSignal.timeout(25000)});
       const body=await response.text();assert.equal(response.headers.get('x-request-id'),requestId);
       return {status:response.status,body:body?JSON.parse(body):null,cache:response.headers.get('cache-control')};
     }
@@ -350,7 +402,7 @@ test('order DELETE preserves source HTTP, business rows, audit and owner boundar
       for(const headers of [{Origin:origin},{Origin:origin,Authorization:'Bearer '+process.env.CUSTOMER_AUTH_TOKEN},{Origin:origin,Cookie:'dva_session=bad'}])await compareDraft(await seedDraft(),401,headers);
       const guarded=await seedDraft();await compareDraft(guarded,403,{Cookie:cookie});await compareDraft(guarded,403,{...auth,Origin:'https://untrusted.invalid'});
       for(const id of ['0','-1','1.5','2147483648','abc'])await compareDraft(id,400);await compareDraft(2147483647,404);
-      for(const [n,role]of ['OPERATOR','SUPERVISOR','SYSTEM_ADMIN'].entries()){
+      for(const [n,role]of ['OPERATOR','OPERATOR','SYSTEM_ADMIN'].entries()){
         const result=await compareDraft(await seedDraft(),204,{Origin:origin,Cookie:'dva_session='+['a','b','c'][n].repeat(64)});
         assert.equal(result.audit[0].actor_seq,n+1,role);
       }
@@ -380,10 +432,79 @@ test('order DELETE preserves source HTTP, business rows, audit and owner boundar
       try{const result=await compareDraft(failed,500);assert.equal(result.audit[0].result,'FAILED');}
       finally{for(const side of sides)await side.audit.query('DROP TRIGGER reject_draft_delete_audit ON audit_logs; DROP FUNCTION reject_draft_delete_audit();');}
       await compareDraft(failed,204);
-      const command={id:failed,adminId:1,requestId:randomUUID()};
+      const batch=[await seedDraft({call:'finalized'}),await seedDraft({call:'finalized'})];
+      const blocked=await seedDraft({call:'active'});
+      async function rejectBatch(ids,status,input) {
+        const before=await Promise.all(sides.map(side=>business(side.db)));
+        const calls=await Promise.all(sides.map(side=>rows(side.calls,'call_sessions')));
+        const requestId=randomUUID(),start=Date.now(),responses=[];
+        for(const side of sides)responses.push(await send(side,ids,auth,requestId,input));
+        for(const response of responses)assert.equal(response.status,status,JSON.stringify(response));
+        assert.deepEqual(responses[1],responses[0]);
+        const audit=await audits(requestId,start,Date.now(),'PARCEL_DRAFT_DELETED','ORDER_PARCEL_DRAFT');
+        assert.ok(audit.every(row=>row.result==='FAILED'));
+        for(const [index,side] of sides.entries()) {
+          assert.deepEqual(await business(side.db),before[index]);
+          assert.deepEqual(await rows(side.calls,'call_sessions'),calls[index]);
+        }
+      }
+      for(const input of [{},{draftSeqs:[]},{draftSeqs:[batch[0],batch[0]]},{draftSeqs:['1']},
+        {draftSeqs:[0]},{draftSeqs:[1.5]},{draftSeqs:[2147483648]},{draftSeqs:batch,extra:true}])
+        await rejectBatch(batch,400,input);
+      await rejectBatch([batch[0],2147483647],404);
+      await rejectBatch([blocked,batch[0]],409);
+      for(const side of sides)await side.audit.query(`CREATE FUNCTION reject_second_draft_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+        IF NEW.action='PARCEL_DRAFT_DELETED' AND NEW.target_seq=${batch[1]} AND NEW.result='SUCCESS' THEN RAISE EXCEPTION 'private second draft audit failure'; END IF;
+        RETURN NEW; END $$; CREATE TRIGGER reject_second_draft_audit BEFORE INSERT ON audit_logs FOR EACH ROW EXECUTE FUNCTION reject_second_draft_audit()`);
+      try {await rejectBatch([...batch].reverse(),500);}
+      finally {for(const side of sides)await side.audit.query('DROP TRIGGER reject_second_draft_audit ON audit_logs; DROP FUNCTION reject_second_draft_audit()');}
+      const gates=[],inflight=[],before=await Promise.all(sides.map(side=>business(side.db)));
+      const beforeCalls=await Promise.all(sides.map(side=>rows(side.calls,'call_sessions')));
+      const batchRequestId=randomUUID(),started=Date.now();
+      let responses;
+      try {
+        for(const side of sides) {
+          await side.audit.query(`CREATE FUNCTION hold_second_draft_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+            IF NEW.action='PARCEL_DRAFT_DELETED' AND NEW.target_seq=${batch[1]} AND NEW.result='SUCCESS' THEN PERFORM pg_advisory_xact_lock(20261112,73); END IF;
+            RETURN NEW; END $$; CREATE TRIGGER hold_second_draft_audit BEFORE INSERT ON audit_logs FOR EACH ROW EXECUTE FUNCTION hold_second_draft_audit()`);
+          const gate=await side.audit.connect();gates.push(gate);await gate.query('SELECT pg_advisory_lock(20261112,73)');
+          inflight.push(send(side,[...batch].reverse(),auth,batchRequestId));
+        }
+        for(let retry=0;;retry++) {
+          const waiting=await Promise.all(sides.map(side=>side.audit.query(`SELECT EXISTS(SELECT 1 FROM pg_stat_activity
+            WHERE datname=current_database() AND wait_event='advisory' AND query LIKE '%INSERT INTO audit_logs%') waiting`)));
+          if(waiting.every(result=>result.rows[0].waiting))break;
+          assert.ok(retry<100,'both batch deletes must reach the second audit');await pause(50);
+        }
+        for(const side of sides)for(const id of batch)
+          await assert.rejects(side.calls.query('SELECT 1 FROM call_sessions WHERE call_session_seq=$1 FOR UPDATE NOWAIT',[id]),error=>error.code==='55P03');
+        for(const gate of gates)await gate.query('SELECT pg_advisory_unlock(20261112,73)');
+        responses=await Promise.all(inflight);
+      } finally {
+        for(const gate of gates){await gate.query('SELECT pg_advisory_unlock_all()');gate.release();}
+        await Promise.allSettled(inflight);
+        for(const side of sides)await side.audit.query('DROP TRIGGER IF EXISTS hold_second_draft_audit ON audit_logs; DROP FUNCTION IF EXISTS hold_second_draft_audit()');
+      }
+      for(const response of responses)assert.equal(response.status,204,JSON.stringify(response));
+      assert.deepEqual(responses[1],responses[0]);
+      const batchAudits=await audits(batchRequestId,started,Date.now(),'PARCEL_DRAFT_DELETED','ORDER_PARCEL_DRAFT');
+      assert.deepEqual(batchAudits.map(row=>row.target_seq),batch);
+      assert.ok(batchAudits.every(row=>row.result==='SUCCESS'));
+      for(const [index,side] of sides.entries()) {
+        const after=await business(side.db);
+        for(const id of batch) {
+          const old=before[index].order_parcel_drafts.find(row=>row.draft_seq===id),row=after.order_parcel_drafts.find(row=>row.draft_seq===id);
+          within(row.deleted_at,started,Date.now(),'batch draft deleted_at');within(row.updated_at,started,Date.now(),'batch draft updated_at');
+          assert.deepEqual(row,{...old,version:old.version+1,deleted_at:row.deleted_at,updated_at:row.updated_at});
+        }
+        for(const table of tables.filter(table=>table!=='order_parcel_drafts'))assert.deepEqual(after[table],before[index][table]);
+        assert.deepEqual(await rows(side.calls,'call_sessions'),beforeCalls[index]);
+        assert.equal((await fetch(side.url+'/api/parcel-drafts/'+batch[0],{method:'DELETE',headers:auth})).status,404);
+      }
+      const command={ids:[failed],adminId:1,requestId:randomUUID()};
       for(const [url,event]of [
         ['http://consultation-app:3004/internal/parcel-draft-delete',{eventId:randomUUID(),source:'order',eventType:'ParcelDraftDeletionRequested',payload:{command,orderAddress:null}}],
-        ['http://order-app:3002/internal/parcel-draft-delete',{eventId:randomUUID(),source:'consultation',eventType:'ParcelDraftDeletionRequested',payload:{command,phase:'delete',callFinalized:null,consultationAddress:null}}],
+        ['http://order-app:3002/internal/parcel-draft-delete',{eventId:randomUUID(),source:'consultation',eventType:'ParcelDraftDeletionRequested',payload:{command,phase:'delete',callFinalized:[{draftSeq:failed,callSessionSeq:null,finalized:null}],consultationAddress:null}}],
       ]){
         const sendPrivate=(value,token=process.env.CUSTOMER_AUTH_TOKEN)=>fetch(url,{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(value)});
         assert.equal((await sendPrivate(event,'wrong')).status,403);
