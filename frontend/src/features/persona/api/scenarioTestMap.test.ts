@@ -1,6 +1,6 @@
 // 실행: npx tsx src/features/persona/api/scenarioTestMap.test.ts  (프레임워크 없이 assert만)
 import assert from 'node:assert/strict'
-import { runsToTests, tagOf, unwrap, type RunDto } from './scenarioTestMap'
+import { runBody, runsToTests, tagOf, unwrap, type RunDto } from './scenarioTestMap'
 
 type Item = RunDto['items'][number]
 const item = (scenario: string, status: Item['status'], passed: boolean | null = null): Item => ({
@@ -91,4 +91,17 @@ const verdict = { scenario: 'F1', passed: false, checks: [] }
 assert.deepEqual(unwrap(verdict), verdict) // 감싸지 않은 객체
 const odd = { data: 1, other: 2 }
 assert.deepEqual(unwrap(odd), odd) // data 말고 다른 칸이 있으면 창구의 응답으로 봄
+// 시험 시작 본문 — 요금이 드는 요청이라 잘못된 입력은 보내지 않음
+const input = { personaSeq: 1, version: 7, promptText: '# 역할', voiceId: null, concurrency: 2 }
+assert.deepEqual(runBody(input), {
+  scenarios: undefined, // 안 보냄 = 전체 실행
+  promptText: '# 역할',
+  voiceId: undefined, // AI 기본 음성
+  tag: '1:7',
+  concurrency: 2,
+})
+assert.deepEqual(runBody({ ...input, voiceId: 'marin', scenarios: ['B1'] }).scenarios, ['B1'])
+assert.throws(() => runBody({ ...input, scenarios: [] })) // 빈 배열은 창구가 전체 실행으로 받음
+assert.throws(() => runBody({ ...input, promptText: '' })) // 글이 없으면 창구가 기본 페르소나로 걺
+assert.throws(() => runBody({ ...input, promptText: '   ' })) // 공백뿐인 글도 같음
 console.log('scenarioTestMap ok')
