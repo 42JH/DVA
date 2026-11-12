@@ -198,6 +198,11 @@ class Customer:
     origin_place: "Place | None" = None    # 출발지 후보: 고객 기본 주소(PROFILE), 없으면 이전 접수 출발지(HISTORY)
 
 
+# 통화로 주문을 마쳐 BE에 전송된 주문은 결제 여부와 상관없이 접수된 것으로 본다(사용자 결정 2026-11-12).
+# 제출 실패(SUBMITTING_FAILED·SUBMISSION_FAILED)는 넣지 않는다.
+ACCEPTED_STATUSES = ("ACCEPTED", "notPaid", "PAID", "SUBMITTING")
+
+
 @dataclass
 class ConversationState:
     customer: Customer = field(default_factory=Customer)
@@ -227,7 +232,7 @@ class ConversationState:
     origin_mentioned_in_greeting: bool = False  # 인사에서 발송 주소를 언급함(등록 주소와의 대조 결과와 별개)
     origin_answer: bool | None = None     # 그 출발지에서 보냄 = True, 다른 곳 = False
     origin_applied: bool = False          # 보내는 분 미리 채우기를 마침
-    result_accepted: bool = False          # 통화 결과가 ACCEPTED로 확정됨
+    result_accepted: bool = False          # 통화 결과가 ACCEPTED_STATUSES 중 하나로 확정됨
     cancel_done: bool = False              # 이번 통화에서 택배 취소가 완료됨
     _next_parcel: int = 1
 

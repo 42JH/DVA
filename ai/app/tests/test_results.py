@@ -47,7 +47,7 @@ def test_submit_complete_once_and_status_facts(tmp_path):
     st.customer.customer_seq = db.add_customer(CALLER, "김철수")
     s = session(st)
     data = run(rs.submit(s))
-    assert data["status"] == "notPaid" and not st.result_accepted  # 카드 결제 대기 ≠ 접수 성공
+    assert data["status"] == "notPaid" and st.result_accepted  # 결제 대기여도 BE에 전송된 주문은 접수
     body = db.results[-1]["body"]
     assert body["outcome"] == "COMPLETE" and body["paymentMethodType"] == "billing" and body["pickupRequestedAt"].endswith("+09:00")
     assert body["customerSeq"] == st.customer.customer_seq and "customer" not in body

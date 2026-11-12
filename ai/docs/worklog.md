@@ -1223,3 +1223,4 @@
 - `origin_confirmation`: 담은 택배가 있으면 발송 주소 확인을 묻지 않는다.
 - 사용자 결정: 백엔드에 전송된 주문은 접수 완료로 안내한다. `ORDER_STATUS_TEXT`의 notPaid·PAID·SUBMITTING → "접수 완료". ready 안내 문구를 "접수했습니다. 더 보내실 택배가 있거나 다른 도움이 필요하신가요?"로.
 - 테스트: 회귀 테스트 추가(수정 전 `address`로 실패 확인), 전체 575 passed.
+- 추가(사용자 결정): 통화로 주문을 마쳐 BE에 전송된 주문은 결제 여부와 상관없이 접수로 본다. `ACCEPTED_STATUSES`(ACCEPTED·notPaid·PAID·SUBMITTING)를 `domain/state.py`에 두고 `result_accepted`(intake·results), 조회 상태 문구, 조회 상세 "접수된 택배", 정책 `order` 안내에 적용. 제출 실패 상태는 제외. 테스트 575 passed.
