@@ -25,16 +25,10 @@ Jira: S15P31D109-111 · 브랜치: `ci/jenkins-lightsail` · MR 대상: `develop
 |---|---|---|
 | controller | 관리 화면·설정·빌드 이력, 실행 슬롯 0개 | 1GB / 0.5 CPU, JVM 최대 힙 512MB |
 | agent | Linux 빌드 에이전트 `linux-docker-builder`, 실행 슬롯 1개 | 1GB / 0.5 CPU |
-| docker | 빌드 전용 Docker daemon | 3GB / 1 CPU |
+| docker | 빌드 전용 Docker daemon | 2GB / 1 CPU |
 
 동일 서버이므로 Jenkins와 서비스가 하드웨어 자원을 공유한다. 별도 CI 서버로 분리한 것과 같은
 장애 격리나 성능 보장을 의미하지 않는다. 동시 빌드는 1개로 제한한다.
-
-`build-capacity.groovy`가 controller 시작 때 기존 Linux 노드도 실행 슬롯 1개로 맞춘다.
-최초 설치용 bootstrap은 기존 노드의 슬롯을 갱신하지 않으므로 이 정책을 별도 적용한다.
-MSA #57은 실제 슬롯이 2개인 상태에서 backend #137과 겹쳐 실행됐고, 같은 1 CPU·3GB
-Docker의 격리 대조는 주문 237단계를 통과했다. 이 슬롯 제한은 AI·프론트·백엔드·MSA가
-같은 Linux 노드를 사용할 때 공통 적용하며 대기 중인 Job은 앞 Job 종료 후 실행한다.
 
 모놀리식 파이프라인은 `workspace/${JOB_NAME}@build-${BUILD_NUMBER}`의 빌드별 작업 디렉터리를 사용한다. Checkout부터 검증·패키징·배포까지 같은 디렉터리에서 실행한다. #115의 공유 체크아웃 `.git/HEAD.lock` 충돌 이후 이전 디렉터리의 Git 잠금을 삭제하거나 중단된 체크아웃을 재사용하지 않도록 변경했다. 기존 공유 작업 디렉터리는 보존한다. 마지막 성공 커밋의 변경 비교와 Docker 캐시는 유지하고 Git 소스는 매 빌드 새로 가져온다.
 
