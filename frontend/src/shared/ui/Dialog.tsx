@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useExitGhost } from '@/shared/lib/useExitGhost'
 import { Button } from './Button'
-import { NewLook } from './newLook'
 
 // 오버레이 (와이어프레임 13 · 14 + 새 디자인 11/04~)
 // ConfirmDialog: 560 폭 · 제목(24/700) · 대상 한 줄(20 회색) · 안내 또는 빨간 경고 · [취소] [삭제/거절]. big = 새 디자인 버튼 · 글자
@@ -210,83 +209,6 @@ export function ConfirmDialog({
           </Button>
         </div>
       </div>
-    </Overlay>
-  )
-}
-
-/** ✕ — 32 칸 안 20 아이콘 → 아이콘 오른쪽이 안쪽 여백 선에 딱 */
-function CloseX({ onClose, className = '' }: { onClose: () => void; className?: string }) {
-  return (
-    <button
-      type="button"
-      onClick={onClose}
-      aria-label="닫기"
-      className={`-mr-1.5 grid size-8 shrink-0 place-items-center rounded-lg text-sub hover:bg-bg hover:text-ink ${className}`}
-    >
-      <svg
-        viewBox="0 0 20 20"
-        className="size-5"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={1.8}
-        strokeLinecap="round"
-        aria-hidden
-      >
-        <path d="M5 5l10 10M15 5L5 15" />
-      </svg>
-    </button>
-  )
-}
-
-/** 새 디자인 창 (11/04~ — 03 주문 상세 · 추가 · 수정 · 주소 검색). Figma에 없어 '주문' · '통화' 화면 말투로 만든 틀 (11/04 사용자)
- *  머리: 작은 회색 글(eyebrow) · 제목 24/700 + 옆(extra — 상태 칩) · 아래 회색 한 줄(sub) | ✕
- *  몸은 위 선 아래에서만 스크롤, 버튼 줄은 위 선 + 고정 (창 높이 = 화면 - 64까지). 안의 입력칸은 새 모양(newLook.ts) */
-export function Dialog({
-  label,
-  eyebrow,
-  title,
-  extra,
-  sub,
-  width = 920,
-  onClose,
-  children,
-  footer,
-}: {
-  label: string // 화면 읽기 이름 ('주문 상세')
-  eyebrow?: string // 제목 위 작은 글 ('주문번호')
-  title: ReactNode
-  extra?: ReactNode
-  sub?: string
-  width?: number // 920(주문) · 600(주소 검색 · 묻는 창)
-  onClose: () => void
-  children: ReactNode
-  footer: ReactNode // 왼쪽부터 — 오른쪽으로 보낼 첫 버튼에 ml-auto
-}) {
-  return (
-    <Overlay onClose={onClose} label={label} boxClass="py-7">
-      <NewLook.Provider value>
-        <div className="flex min-h-0 flex-col" style={{ width }}>
-          <header className="flex shrink-0 items-start gap-4 px-9">
-            <div className="min-w-0">
-              {eyebrow && <p className="text-label font-medium text-sub">{eyebrow}</p>}
-              <h2
-                className={`flex items-center gap-4 text-title font-bold break-words ${eyebrow ? 'mt-0.5' : ''}`}
-              >
-                {title}
-                {extra}
-              </h2>
-              {sub && <p className="mt-1 text-body text-sub">{sub}</p>}
-            </div>
-            <CloseX onClose={onClose} className="ml-auto" />
-          </header>
-          <div className="mt-5 min-h-0 [scrollbar-width:thin] overflow-y-auto border-t border-line px-9 pt-5">
-            {children}
-          </div>
-          <footer className="mt-4 flex shrink-0 items-center gap-3 border-t border-line px-9 pt-5">
-            {footer}
-          </footer>
-        </div>
-      </NewLook.Provider>
     </Overlay>
   )
 }

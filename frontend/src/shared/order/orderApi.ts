@@ -98,8 +98,7 @@ async function fetchOrder(id: number, signal?: AbortSignal): Promise<OrderDetail
         callSessionSeq: c.callSessionSeq,
         startedAt: c.startedAt,
         kind:
-          c.analysis?.result === 'CANCELLED' ||
-          (!!c.analysis?.cancelledParcelCount && !c.analysis.registeredParcelCount)
+          !!c.analysis?.cancelledParcelCount && !c.analysis.registeredParcelCount
             ? ('CANCEL' as const)
             : ('ACCEPT' as const),
         counts: countsOf(c.analysis),

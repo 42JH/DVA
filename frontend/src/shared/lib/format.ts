@@ -80,12 +80,6 @@ export function fmtPhone(digits: string): string {
   return digits
 }
 
-/** 날짜만 (10/30 연도 규칙): 올해 '10.02', 다른 해 '2025.12.29' — 07 버전 저장일 · 02 하루 범위. 'YYYY-MM-DD'를 받음 (Date 파싱 없음 → 시간대 무관) */
-export function fmtShortDate(ymd: string, now = new Date()): string {
-  const [y, m, d] = ymd.split('-')
-  return Number(y) === now.getFullYear() ? `${m}.${d}` : `${y}.${m}.${d}`
-}
-
 /** 버전 기록 시각 (07 AI 상담가 11/11, Notion 버전 기록처럼) — '오늘 오후 3:07' · '어제 오전 9:41' · '11월 9일 오후 3:07' · 다른 해 '2025년 12월 29일 오후 1:40' */
 export function fmtVersionTime(iso: string, now = new Date()): string {
   const d = new Date(iso)

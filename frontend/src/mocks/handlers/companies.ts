@@ -337,43 +337,6 @@ export const companyHandlers = [
       )
     return HttpResponse.json(page(rows, url))
   }),
-  // AI용 주소 검색(DIR-01) — 활성 사원 · 주소 있는 사원만, 기업명 · 이름 · 전화 · 주소에 낱말이 모두
-  http.get(`${API_BASE_URL}/companies/search`, ({ request }) => {
-    const url = new URL(request.url)
-    const terms = (url.searchParams.get('q') ?? '').trim().toLowerCase().split(/\s+/)
-    const rows = members
-      .filter((m) => m.membership.status === 'ACTIVE' && m.customer.address)
-      .map((m) => {
-        const o = orgOf(m.membership.organizationSeq)!
-        return {
-          organizationSeq: o.organizationSeq,
-          organizationName: o.name,
-          membershipSeq: m.membership.membershipSeq,
-          customerSeq: m.customer.customerSeq,
-          departmentSeq: m.membership.departmentSeq,
-          departmentName:
-            depts.find((d) => d.departmentSeq === m.membership.departmentSeq)?.name ?? null,
-          addressData: {
-            ...m.customer.address!,
-            name: m.customer.name,
-            phoneNumber: m.customer.phoneNumber,
-          },
-        }
-      })
-      .filter((r) => {
-        const all = [
-          r.organizationName,
-          r.addressData.name,
-          r.addressData.phoneNumber,
-          r.addressData.roadAddress,
-          r.addressData.jibunAddress,
-        ]
-          .join(' ')
-          .toLowerCase()
-        return terms.every((t) => all.includes(t))
-      })
-    return HttpResponse.json(page(rows, url))
-  }),
   http.get(`${API_BASE_URL}/companies`, ({ request }) => {
     const url = new URL(request.url)
     const q = url.searchParams.get('q')?.trim() ?? ''

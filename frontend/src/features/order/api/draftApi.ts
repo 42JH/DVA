@@ -8,8 +8,6 @@ import { orderNo } from '@/shared/order/labels'
 import type { OrderDetail, Party } from '@/shared/order/orderApi'
 import type { OrderInput, OrderListItem, PartyInput } from './orderApi'
 
-export { draftLabel }
-
 /** 목록 한 줄 — 주문 목록 줄과 같은 모양 (orderSeq = -draftSeq) */
 export const draftListItem = (d: ParcelDraftDto): OrderListItem & { label: string } => ({
   orderSeq: -d.draftSeq,

@@ -4,7 +4,6 @@ import type { UnansweredReason } from '@/shared/lib/unansweredReason'
 import { countsOf, type CallKind } from '../lib/callKind' // 값 import라 상대 경로 (위 주석: tsx로 바로 돌림)
 
 // ---------- 서버 DTO ----------
-type ResultDto = 'REGISTERED' | 'REGISTRATION_FAILED' | 'HANDOFF' | 'CANCELLED' | 'INQUIRY'
 export type ComplaintType =
   | 'REPEATED_QUESTION'
   | 'SPEAKING_TOO_FAST'
@@ -47,7 +46,6 @@ interface CallComplaintDto {
   level?: ComplaintLevel | null
 }
 export interface CallAnalysisDto {
-  result: ResultDto // 11/04 서버에서 빠짐 — 옛 화면(주문 상세 관련 통화)만 아직 읽음. 그 화면을 새 디자인으로 바꿀 때 지울 것
   aiPersonaVersionSeq: number | null
   personaName: string | null
   personaVersion: number | null
