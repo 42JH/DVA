@@ -260,18 +260,18 @@ test('mixed order and incomplete rows paginate together and use reservation numb
   assert.equal(before.data[0].draftSeq, older);
 });
 
-test('page and counts use the same snapshot when another connection inserts after the page query', async () => {
+test('page and counts use the same snapshot when another connection inserts before the page query', async () => {
   const q = randomUUID();
   await order(q, 'notPaid');
   const repository = f.app.get(OrdersRepository);
   const original = repository.adminList;
-  repository.adminList = async function (client, query) {
-    const result = await original.call(this, client, query);
+  repository.adminList = async function (client, query, knownTotal) {
     if (query.q === q) await order(q, 'notPaid');
-    return result;
+    return original.call(this, client, query, knownTotal);
   };
   try {
     const response = await json(await list({ q }));
+    assert.equal(response.data.length, 1);
     assert.equal(response.total_count, 1);
     assert.equal(response.statusCounts.all, 1);
     assert.equal(response.statusCounts.notPaid, 1);

@@ -14,18 +14,25 @@ export async function readPage<T extends QueryResultRow>(
   query: PaginationQueryDto,
   orderBy: string,
   pageSelect = 'page.*',
+  knownTotal?: number,
 ): Promise<PageRows<T>> {
   const limit = values.length + 1;
   const offset = values.length + 2;
+  const parameters = [...values, query.limit + 1, query.offset];
+  let totalSql = 'SELECT count(*) AS __total_count FROM matching';
+  if (knownTotal !== undefined) {
+    parameters.push(knownTotal);
+    totalSql = `SELECT $${parameters.length}::bigint AS __total_count`;
+  }
   const result = await database.query<T & { __page_ordinal: string | null; __total_count: string }>(
     `WITH matching AS NOT MATERIALIZED (${sql}),
      page AS (
        SELECT matching.*,row_number() OVER (ORDER BY ${orderBy}) AS __page_ordinal
        FROM matching ORDER BY ${orderBy} LIMIT $${limit} OFFSET $${offset}
      )
-     SELECT ${pageSelect},totals.__total_count FROM (SELECT count(*) AS __total_count FROM matching) totals
+     SELECT ${pageSelect},totals.__total_count FROM (${totalSql}) totals
      LEFT JOIN page ON true ORDER BY page.__page_ordinal`,
-    [...values, query.limit + 1, query.offset],
+    parameters,
   );
   const total_count = Number(result.rows[0]?.__total_count ?? NaN);
   if (!Number.isSafeInteger(total_count) || total_count < 0)

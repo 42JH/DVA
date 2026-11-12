@@ -65,7 +65,7 @@ export class DashboardRepository {
   }
 
   private stageDropoffsSql(shared = false): string {
-    return `WITH calls AS (
+    return `WITH calls AS ${shared ? 'NOT MATERIALIZED ' : ''}(
       ${shared ? 'SELECT is_new_customer,dropoff_stage FROM dashboard_calls' : `SELECT a.is_new_customer,m.dropoff_stage ${FROM_CALLS} LEFT JOIN call_dashboard_metrics m USING(call_session_seq) ${CALL_FILTER}`}
      ), summary AS (
       SELECT count(*) AS total,count(*) FILTER(WHERE is_new_customer IS NULL) AS unknown_customer,
@@ -88,7 +88,7 @@ export class DashboardRepository {
   }
 
   private registrationTimeSql(shared = false): string {
-    return `WITH calls AS (
+    return `WITH calls AS ${shared ? 'NOT MATERIALIZED ' : ''}(
       ${shared ? 'SELECT is_new_customer,ai_persona_version_seq,registered_parcel_count,duration_ms FROM dashboard_calls' : `SELECT a.is_new_customer,a.ai_persona_version_seq,a.registered_parcel_count,${CALL_DURATION_MS} AS duration_ms ${FROM_CALLS} ${CALL_FILTER}`}
      ), summary AS (
       SELECT count(*) AS total,count(*) FILTER(WHERE is_new_customer IS NULL) AS unknown_customer,
@@ -132,7 +132,7 @@ export class DashboardRepository {
 
   private complaintCallsSql(shared = false): string {
     const types = shared ? '$3' : '$2';
-    return `WITH calls AS (
+    return `WITH calls AS ${shared ? 'NOT MATERIALIZED ' : ''}(
       ${shared ? 'SELECT call_session_seq,is_new_customer,has_complaint,complaints FROM dashboard_calls' : `SELECT c.call_session_seq,a.is_new_customer,a.has_complaint,a.complaints ${FROM_CALLS} ${CALL_FILTER}`}
      ), call_types AS (
       SELECT DISTINCT c.call_session_seq,item->>'type' AS type,
@@ -164,7 +164,7 @@ export class DashboardRepository {
 
   private responseWaitSql(shared = false): string {
     const types = shared ? '$4' : '$2';
-    return `WITH calls AS (
+    return `WITH calls AS ${shared ? 'NOT MATERIALIZED ' : ''}(
       ${shared ? 'SELECT is_new_customer,duration_ms,total_wait_ms,latency_stats,response_wait_received_at FROM dashboard_calls' : `SELECT a.is_new_customer,${CALL_DURATION_MS} AS duration_ms,m.total_wait_ms,m.latency_stats,m.response_wait_received_at ${FROM_CALLS} LEFT JOIN call_dashboard_metrics m USING(call_session_seq) ${CALL_FILTER}`}
      ), measured AS (
       SELECT * FROM calls WHERE response_wait_received_at IS NOT NULL AND total_wait_ms<=duration_ms
@@ -187,15 +187,18 @@ export class DashboardRepository {
      FROM summary s CROSS JOIN totals t`;
   }
 
-  performance(
+  async performance(
     customerType: DashboardCustomerType,
     client: PoolClient,
   ): Promise<HomeAiPerformanceDto> {
+    await client.query("SET LOCAL work_mem = '16MB'");
     return this.read(
       `WITH dashboard_calls AS MATERIALIZED (
        SELECT c.call_session_seq,a.is_new_customer,a.ai_persona_version_seq,a.registered_parcel_count,
-        a.has_complaint,a.complaints,${CALL_DURATION_MS} AS duration_ms,
-        m.dropoff_stage,m.total_wait_ms,m.latency_stats,m.response_wait_received_at
+        a.has_complaint,CASE WHEN a.has_complaint IS TRUE THEN a.complaints END AS complaints,
+        ${CALL_DURATION_MS} AS duration_ms,m.dropoff_stage,m.total_wait_ms,
+        CASE WHEN m.response_wait_received_at IS NOT NULL THEN m.latency_stats END AS latency_stats,
+        m.response_wait_received_at
        ${FROM_CALLS} LEFT JOIN call_dashboard_metrics m USING(call_session_seq) ${CALL_FILTER}
       ) SELECT jsonb_build_object('stageDropoffs',(${this.stageDropoffsSql(true)}),
        'registrationTime',(${this.registrationTimeSql(true)}),
