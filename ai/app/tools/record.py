@@ -350,6 +350,8 @@ def _price_for_items(state: ConversationState, draft: ParcelDraft, old_items: It
 def _check_items(ctx: ToolContext, args: RecordArgs, counts: dict, facts: dict, needs: list[dict]) -> None:
     s, policy = ctx.state, ctx.policy.parcel_items
     utterance_id, text = ctx.item_utterance or (0, "")
+    denial_only = bool(re.fullmatch(r"(?:아|어|네)?(?:아니요|아니에요|아닙니다|없어요|없습니다|해당없어요|해당없습니다)",
+                                    re.sub(r"[\s,.!?…~]+", "", text)))
     evidence = [e for e in args.item_evidence or () if e.quote.strip()
                 and (ctx.item_utterance is None or e.quote.strip() in text)]
     issues = {key: replace(issue, utterance_id=utterance_id)
@@ -381,6 +383,8 @@ def _check_items(ctx: ToolContext, args: RecordArgs, counts: dict, facts: dict, 
         elif rule := policy.rules.get(e.rule):
             if excluded_evidence(rule, e.quote, text):
                 continue
+            if rule.kind == "prohibited" and (denial_only or e.status in ("condition_met", "condition_unmet")):
+                continue  # 부정 답변만으로 금지품을 추가하지 않는다. 실제 제한 언급의 보류는 유지한다.
             if rule.kind == "format":
                 unsupported = e.rule in mentions(policy, e.quote)
                 if e.status == "condition_met":
