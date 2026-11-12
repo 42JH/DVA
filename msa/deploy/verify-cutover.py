@@ -24,7 +24,7 @@ def docker(*args, data=None, source=None, output=None):
 
 
 def sql(db, statement):
-    return docker('exec', '-i', RUN, 'psql', '-X', '-At', '-v', 'ON_ERROR_STOP=1',
+    return docker('exec', '-i', RUN, 'psql', '-h', '127.0.0.1', '-X', '-At', '-v', 'ON_ERROR_STOP=1',
                   '-U', 'postgres', '-d', db, data=statement.encode('utf-8'))
 
 
@@ -37,7 +37,7 @@ def main():
                '--tmpfs', '/var/lib/postgresql/data', '-e', 'POSTGRES_HOST_AUTH_METHOD=trust', 'postgres:17.11-bookworm')
         container = True
         for _ in range(60):
-            if subprocess.run(['docker', 'exec', RUN, 'pg_isready', '-U', 'postgres'], capture_output=True).returncode == 0:
+            if subprocess.run(['docker', 'exec', RUN, 'pg_isready', '-h', '127.0.0.1', '-U', 'postgres'], capture_output=True).returncode == 0:
                 break
             time.sleep(1)
         else:

@@ -34,7 +34,7 @@ def main():
             '-e', 'POSTGRES_DB=postgres', 'postgres:17.11-bookworm')
         resources.append(('container', RUN))
         for _ in range(60):
-            ready = subprocess.run(['docker', 'exec', RUN, 'pg_isready', '-U', 'event_test'],
+            ready = subprocess.run(['docker', 'exec', RUN, 'pg_isready', '-h', '127.0.0.1', '-U', 'event_test'],
                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             if ready.returncode == 0:
                 break
@@ -42,7 +42,7 @@ def main():
         else:
             raise RuntimeError('Disposable event PostgreSQL did not become ready')
         for database in ('events_sender_test', 'events_receiver_test'):
-            run('docker', 'exec', RUN, 'psql', '-X', '-U', 'event_test', '-d', 'postgres',
+            run('docker', 'exec', '-e', 'PGPASSWORD=' + password, RUN, 'psql', '-h', '127.0.0.1', '-X', '-U', 'event_test', '-d', 'postgres',
                 '-v', 'ON_ERROR_STOP=1', '-c', 'CREATE DATABASE ' + database)
         test_container = RUN + '-test'
         # This private network has no published ports; only this test client can reach these DBs.

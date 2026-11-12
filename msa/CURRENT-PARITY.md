@@ -4,14 +4,14 @@
 
 ## 2026-11-12 최종 로컬 검증
 
-최신 원격 develop-backend 53c38b10을 병합했다. 이후 고객·기업 사원 목록 조회 최적화 두 파일은 요청대로 이식 범위에서 제외하며, API 동작 대조 원본은 fa0e4a2f의 backend(066/ce88b8e3)로 고정한다. 고객 보관에 이어 상담·주문·배송 보관과 복구를 작은 단위로 연결했고, 마지막 로컬 검증 근거와 패키징 결과는 99단위에 기록했다. 앞선 단위의 원본·실패·미완료 기록은 당시 이력으로 보존한다.
+최신 원격 develop-backend 100e050e에서 MR !603 병합을 확인했다. 고객·기업 사원 목록 조회 최적화 두 파일은 요청대로 이식 범위에서 제외하며, API 동작 대조 원본은 fa0e4a2f의 backend(066/ce88b8e3)로 고정한다. 병합 후 재대조에서 AI FAQ의 OpenAPI 인증 표기와 실제 Jenkins #62의 PostgreSQL 시작 경합을 보강했다. 수정 커밋 b076f559의 최종 로컬 CI·통합 대조·패키징은 103단위에 기록한다. 앞선 단위의 원본·실패·미완료 기록은 당시 이력으로 보존한다.
 
-- 아래 작업 단위를 순서대로 검증·커밋했다. 이번 보관 이식 묶음의 로컬 CI 진입점과 패키징 검증을 마쳤다. 실제 새 Jenkins 실행·운영 배포 성공과는 구분한다.
+- 아래 작업 단위를 순서대로 검증·커밋했다. 이번 이식·파이프라인 보강 묶음의 로컬 CI 진입점과 패키징 검증을 마쳤다. 실제 새 Jenkins 실행·운영 배포 성공과는 구분한다.
 - 현재 원본의 공개 선언 117개에 맞춰 9개 DELETE를 배열 형식으로 전환하고 기업 단건 DELETE를 제거했다. 원본 API 성능 최적화는 제외하며 실제 HTTP·DB·감사/이벤트·복구의 대조 범위와 한계는 각 작업 단위에 기록한다. 경로 연결이 전체 기능 동등성 완료를 뜻하지 않는다.
 - 공용 AI 인증, 소유 DB 확장, 고객/기업/개인 PIN 삭제·검색, 페르소나, 통화 분석·이벤트·조회/녹취, 미답변 조회/FAQ 전환, 통계·홈·metrics, 불만 판정 워커를 검증했다. 결제 조회/페이지·안내·승인·재조회·재접수, 초안 조회·생성·수정·삭제, 청구 조회와 주문용 참조·통화 접수 상태 조회도 포함한다.
-- 최종 서비스 검증 근거는 operations 198·고객 78·상담 172·주문 243, 총 691단계다. 변경 없는 세 서비스는 검증 입력·이미지 실행 내용의 일치를 확인해 재사용했고, 마지막 fixture 변경이 있는 주문은 정확히 같은 test/driver 입력으로 전체 재실행했다. 다섯 앱과 DB 패키징·이미지 ID·체크섬도 통과했다.
+- 최종 서비스 검증 근거는 operations 198·고객 78·상담 172·주문 243, 총 691단계다. 이번에는 네 서비스 모두 같은 수정 커밋의 CI 이미지로 새로 실행해 통과했다. 다섯 앱과 DB 패키징·이미지 ID·체크섬도 통과했다.
 - 테스트 파일 집합은 시작 시점과 동일한 69개다. 새 테스트 파일·외부 도구·Redis는 추가하지 않았다.
-- DB 236단계와 배포·선택·이력·롤백 130건은 변경 없는 입력을 확인해 재사용했다. 서비스 비교용 DB에는 스키마를 적용했다. 실제 Jenkins 설정·슬롯·Job에는 접근하지 않았다.
+- DB 236단계는 변경 없는 입력을 확인해 재사용했다. 배포·선택·이력·롤백 130건은 새로 통과했고 서비스 비교용 DB에는 스키마를 적용했다. 실제 Jenkins의 실패 로그·빌드 메타데이터만 읽었으며 설정·슬롯·Job을 변경하거나 새로 실행하지 않았다.
 - 실제 새 Jenkins/운영 배포와 운영 S3 객체 삭제는 미검증이다. 원본 API 성능 최적화는 범위에서 제외한다. Jenkins #51·!476 및 이후 빌드 복구의 과거 근거는 각 작업 단위에 남아 있다.
 
 ## 기준과 범위
@@ -975,3 +975,36 @@ MSA #55는 operations 실패 뒤의 실제 신규 이미지 전달·DB 전달·�
 - 계약 11건과 실제 PostgreSQL/HTTP 이벤트 16건을 실행해 통과했다. 공통 Node 37건은 입력이 같은 기존 성공 근거와 Docker 빌드 캐시를 확인했다. DDL/DB 검사 입력은 기존 ci_verification.reuse_database로 확인해 11cca4d7의 DB 236단계를 재사용했으며, 배포·선택·이력·롤백 입력도 같아 기존 130건을 재사용했다. 변경 없는 DB 전체 검사와 서비스 비교를 불필요하게 반복하지 않았다.
 - 다섯 앱과 DB, 총 여섯 패키지의 실제 package-app.sh/package.sh 실행이 통과했다. manifest 태그·image-id.txt가 새 이미지 목록과 같고 각 패키지의 SHA256SUMS 검사가 통과했다. 별도 최종 근거 대조도 passed=true이며 서비스별 단계 수·원본·공유 이미지·검증 입력·패키지 ID를 교차 확인했다. 기존 테스트 파일 경로 집합은 시작 시점과 같은 69개다.
 - 근거는 verification-logs/current-parity/retention-release-cli의 summary.json·final-evidence-audit.json·ci-images.json·서비스별 verification.json·release-manifests 및 실행 로그다. 이 후속 커밋은 보고서만 갱신하며 runtime과 검증 입력은 바꾸지 않는다. Jira S15P31D109-160에 같은 묶음의 MR을 연결한다. 실제 새 Jenkins·운영 배포·운영 S3 객체 삭제는 미검증이며 Jenkins 설정·슬롯·Job에는 접근하지 않았다.
+
+### 100. MR !603 병합 후 전체 계약과 자동 처리 재대조
+
+- 최신 원격 100e050e는 !603 병합이며, d718a843 이후 msa/infra 트리 변경은 없다. 깨끗한 작업 상태에서 feature/msa-final-equivalence를 만들었다. API·SQL·워커 목록과 기존 계약 검사 11건을 새로 실행해 통과했고 공개 선언은 원본과 같은 117/117개로 누락이 없다. 최초 테스트 파일 경로 집합 69개를 유지한다.
+- 원본의 7개 자동 처리 책임을 현재 모듈·타이머·복구 진입점과 대조했다. FAQ 알림·PBX 녹취·진행 통화 수·불만 판정 네 구현은 TypeScript를 실행 JavaScript로 변환한 AST/리터럴이 원본과 같다. 주문 유지보수는 초안/접수 복구·청구 월 전환·만료 취소·유료 주문 재접수로, 결제는 order의 결제/안내와 customer의 카드 해제로, 보관은 각 소유 DB 워커와 삭제 이벤트로 연결되어 있다. 새 워커나 도구를 추가하지 않는다.
+- !603에서 검증한 불변 이미지로 여섯 격리 DB와 전체 API를 한 번 종합 대조했다. 현재 인증·주소 계약에 맞춘 임시 진단 복사본만 사용하며 최초 052 검증 코드/기준/과거 로그는 바꾸지 않았다. 117개 경로의 순차 응답/계약 대조에서 AI FAQ의 OpenAPI가 Bearer 대신 인증 생략을 표기하는 차이를 확인했다. 실제 인증 응답은 같았다. 감사 생성 시각·홈 observedAt·프로세스별 metrics도 바이트 차이가 있어 업무 값과 구분해 확인한다.
+- 원본과 MSA 모두 신규 통화의 구형 주문 생성 fixture를 409로 거절하므로 과거 052의 201 기대를 현재 실행에 그대로 적용할 수 없다. 새 API 동작은 바꾸지 않고 현행 신규 통화 흐름과 legacy fixture를 구분해 나머지 종합 대조를 이어간다. 근거는 verification-logs/current-parity/current-global-second/differential.json과 worker-executable-audit.json이다. 이 커밋은 대조 기록만 추가하며 다음 단위는 확인된 FAQ 계약 차이 수정과 영향 서비스 실행 검증이다.
+
+### 101. AI FAQ의 실제 인증과 OpenAPI 계약 일치
+
+- 종합 HTTP/계약 대조에서 GET /api/ai/faqs의 원본 security는 관리자 세션 또는 Bearer인데 MSA는 관리자 세션 또는 인증 생략으로 표기했다. 실제 guard는 양쪽 모두 AI_BUSINESS_TOKEN 또는 관리자 세션을 요구했다. 기존 MSA 컨트롤러의 security와 안내 문구 세 곳만 원본대로 바꿨고 guard·업무 API·DTO는 유지했다.
+- 기존 FAQ 검사 안에 실제 양쪽 OpenAPI의 security 비교와 무토큰/잘못된 토큰 401·정상 관리자 세션 200을 추가했다. 변경 전 실제 응답의 인증 생략 배열을 같은 단언이 거절하는 것을 확인했다. 테스트 파일을 추가하지 않았다.
+- 새 operations checks·운영 이미지의 lint·Jest 10·Node/보안 21건과 실제 전체 operations 드라이버 198단계가 통과했다. 원본 fa0e4a2f와 기존의 다른 서비스/DB 이미지 ID를 재사용했고 로컬 1 CPU·3GB 조건이다. 원본 계약 검사 11건도 새로 통과했다. 근거는 faq-security-red.log·faq-security-build.log와 faq-security-native/verification.json·validated-inputs.json이다.
+- 이 단위는 FAQ 계약 보강이며 Jenkins #62 성공을 뜻하지 않는다. 사용자 실패 보고 후 실제 콘솔을 읽었고 공통 이벤트 검증의 PostgreSQL 시작 중 CREATE DATABASE 실패를 별도 단위로 추적한다. Jenkins 설정·슬롯·Job은 변경하지 않았다.
+
+### 102. 실제 Jenkins #62의 임시 PostgreSQL 준비 판정 수정
+
+- 기존 SSH 연결로 실제 dva-msa #62 콘솔을 읽었다. 100e050e 빌드는 Verify Event Transport에서 psql의 Unix 소켓 접속이 `FATAL: the database system is starting up`으로 실패했다. 이후 이미지·서비스 검증·배포는 실행되지 않았다. 다른 최신 완료 Job은 BE #141·FE #181·AI #178 성공이며 AI #179는 당시 실행 중이었다. Jenkins 설정·슬롯·Job은 수정하거나 새로 실행하지 않았다.
+- 공통 이벤트 검사만 pg_isready가 호스트를 지정하지 않아 Docker PostgreSQL 초기화용 임시 Unix 소켓 서버도 준비 완료로 판단했다. 초기화 스크립트의 대기를 고정한 실제 DB에서 수정 전 소켓 검사는 0을 반환하지만 실제 애플리케이션 TCP는 아직 응답하지 않음을 확인했다. 너무 이른 준비 완료를 거절하는 재현 단언이 수정 전 코드에서 실패했다. 운영 #62의 FATAL 자체는 실제 콘솔 근거이며 로컬에서는 그 원인이 되는 초기화 단계를 고정해 검증했다.
+- 이벤트 검사와 같은 패턴이 남은 수동 전환 검사의 준비 확인·psql을 모두 127.0.0.1 TCP로 맞췄다. 이벤트 DB에는 이미 생성한 임시 비밀번호를 해당 psql 프로세스에만 전달한다. 다른 MSA/DB 검사 진입점의 pg_isready는 이미 TCP를 명시했다. 제한 시간·DB/업무 기대값·재시도 횟수는 늘리지 않았다.
+- 동일한 초기화 게이트·DB 1 CPU/3GB 제한에서 수정 후에는 최종 TCP 서버까지 기다리고 공통 Node 37·실제 PostgreSQL/HTTP 16건을 모두 통과했다. 배포·선택·이력·롤백 130건, 실제 전환 fixture의 백업 두 개·업무 테이블 여섯 개 복원 비교·늦은 이벤트 차단도 통과했다. 배포/DB 셸 문법과 Python 30파일 문법을 확인했다. 테스트 파일 69개와 Jenkins 설정은 그대로다.
+- 근거는 jenkins-after-603-builds.jsonl·jenkins-62-console-clean.log·event-bootstrap-{old,fixed}.{log,json}·build62-deployment-tests.log·build62-cutover.log·build62-pipeline-checks.log다. 별도 로컬 격리 데몬의 외부 DNS 제한으로 시작하지 못한 첫 재현과 비결정적 전환 시도도 별도 로그로 보존했다. 이 단위는 공통 시작 경합과 전환 검사의 수정이며, 수정 커밋의 CI 진입점·서비스/이미지·패키징 최종 확인과 새 MR 제출을 이어간다. 실제 새 Jenkins/운영 배포는 아직 미검증이다.
+
+### 103. #62 수정 커밋의 전체 로컬 CI·통합 대조·패키징
+
+- 코드 커밋 b076f559fceb447cd318edfade54b784b372de4f의 깨끗한 작업 복사본과 실제 ci_workspace/ci_images 진입점으로 검증했다. 원본 fa0e4a2f/ce88b8e3와 snapshot·11개 이미지의 커밋/ID/소유 라벨이 일치한다. 최종 원격 확인도 100e050e이며 API 성능 최적화는 이식하지 않았다.
+- Jenkins와 같은 순서로 배포 검사 130건·계약 11건·이벤트 검증·이미지 준비·DB 검증 입력 확인을 실행했다. 수정한 PostgreSQL 준비 판정으로 이벤트 단계가 통과했고 공통 Node 37·실제 PostgreSQL/HTTP 16건의 성공을 확인했다. 실제 #62의 실패 단계 이후도 이어 검증했으며 운영 Jenkins의 새 빌드를 실행했다고 보고하지 않는다.
+- 로컬 1 CPU·3GB 격리 Docker에서 operations 198·고객 78·상담 172·주문 243, 총 691단계를 모두 새로 통과했다. 개별 FAQ 검증 이미지와 최종 CI 이미지의 내용이 완전히 같지 않아 이전 198단계를 승계하지 않고 operations도 다시 실행했다. 네 보고서의 원본 트리와 모든 공유 이미지 ID가 이번 CI 이미지 목록과 일치한다. 기존 정상 API·인증·감사·SSE·워커·재시작·실패/롤백·동시 접수·보관 이벤트를 포함한다.
+- DDL/DB 검사 입력은 그대로여서 기존 ci_verification.reuse_database가 11cca4d7의 DB 236단계 성공 근거를 재사용했다. 전체 DB 검사를 반복하지 않았고 각 서비스의 임시 비교 DB에는 필요한 스키마를 적용했다. 별도 실제 전환 검사는 백업 두 개·테이블 여섯 개 복원 비교와 늦은 이벤트 거절까지 통과했다.
+- 현재 계약의 종합 진단은 117개 경로·18개 정상/거절 업무 요청 쌍·전체 502개 대조를 끝까지 수집했다. 원본과 MSA의 소스 선언은 117/117개다. OpenAPI에서 보이지 않는 결제 HTML/asset 네 경로는 양쪽 모두 의도적으로 제외되어 있으며 정상 실행은 최종 주문 드라이버에서 검증했다. 이전 진단 원형의 OpenAPI 기반 누락 표기를 실제 기능 누락으로 세지 않는다.
+- 종합 진단의 원시 결과는 492개 일치·10개 차이다. 차이 전체가 새로 생성한 시각·SYSTEM 배송 이력/추적 UUID·프로세스별 HTTP/DB 지표임을 각 필드·타입·실행 시간 범위로 확인했다. 그 밖의 업무 값·상태·금액·ID·감사 필드는 그대로 대조했다. 지표 형식/유형과 업무 DB/주문 gauge도 일치한다. 원시 passed=false 및 원형 검증기의 미검증 테이블/분기 플래그는 보존하며 이를 전체 분기 검증 성공으로 바꾸지 않았다. 근거는 current-global-third/differential.json·classification.json이다.
+- 다섯 앱과 DB의 패키징 여섯 개가 모두 통과했다. manifest 태그·image-id.txt·CI 이미지 ID와 전체 SHA256SUMS를 확인했다. 최종 근거 대조도 passed=true이며 테스트 파일 경로 집합은 처음과 같은 69개다. 작성 변경은 msa의 기존 다섯 파일이며 backend·프론트·AI·infra/Jenkins 설정은 변경하지 않았다.
+- CI 근거는 verification-logs/current-parity/build62-final-cli의 summary.json·final-evidence-audit.json·ci-images.json·서비스별 verification.json·release-manifests와 실행 로그다. 이 후속 커밋은 보고서만 갱신한다. 같은 Jira S15P31D109-160에 후속 MR을 연결한다. 실제 새 Jenkins 실행·운영 배포·실제 S3/외부 공급자 결과와 모든 유효 분기의 형식적 동등성은 미검증이다.
