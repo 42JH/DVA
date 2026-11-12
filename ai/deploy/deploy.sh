@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 대상 서버에서 실행: AI 서버 릴리스를 띄우고, 실패하면 직전 릴리스로 되돌린다(백엔드 infra/deploy/deploy.sh와 같은 구조).
-# 배치: <root>/releases/<version>/{deploy.sh, release.env, compose.yaml, compose.deploy.yaml, config/, prompts/}, 비밀값 <root>/shared/.env
+# 배치: <root>/releases/<version>/{deploy.sh, release.env, compose.yaml, compose.deploy.yaml, compose.persona-check.yaml, config/, prompts/}, 비밀값 <root>/shared/.env
 # 이미지는 upload.sh가 대상 서버에서 미리 빌드해 둔다.
 set -euo pipefail
 umask 077
@@ -77,6 +77,21 @@ if apply_release "$release_dir"; then
     "${docker_cmd[@]}" image ls dva-ai-server --format '{{.Repository}}:{{.Tag}}' | grep -Evx "$keep" \
         | xargs -r "${docker_cmd[@]}" image rm >/dev/null || true
     echo "Deployment verified: $version"
+    # 시험 창구(persona_check, 페르소나 적용 전 시나리오 시험)는 운영 통화와 무관한 별도 컨테이너(프로젝트 dva-persona-check)다.
+    # 서버 설정에 PERSONA_CHECK_TOKEN이 있을 때만 띄우고, 실패해도 AI 서버 배포 결과는 바꾸지 않는다
+    check_file="$release_dir/compose.persona-check.yaml"
+    if [[ -f "$check_file" ]] && grep -q '^PERSONA_CHECK_TOKEN=.' "$secrets_file"; then
+        if "${docker_cmd[@]}" compose --project-name dva-persona-check --project-directory "$release_dir" \
+            --env-file "$secrets_file" --env-file "$release_dir/release.env" --file "$check_file" \
+            up -d --no-build --pull never --remove-orphans; then
+            echo "Persona check started: $version"
+            # 지금 릴리스의 이미지만 남긴다(AI 서버 이미지 위에 얹은 것이라 남겨 두면 지난 AI 서버 이미지 층이 지워지지 않는다)
+            "${docker_cmd[@]}" image ls dva-persona-check --format '{{.Repository}}:{{.Tag}}' | grep -Fvx "dva-persona-check:$version" \
+                | xargs -r "${docker_cmd[@]}" image rm >/dev/null || true
+        else
+            echo 'Persona check did not start. The AI server deployment is unaffected.' >&2
+        fi
+    fi
 else
     echo "Deployment failed: $version" >&2
     compose "$release_dir" logs --tail 100 ai >&2 || true

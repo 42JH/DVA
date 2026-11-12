@@ -146,3 +146,72 @@ def test_http_needs_the_token_and_serves_status(tmp_path, monkeypatch):
             assert (await http.get("/runs/없는묶음", headers=AUTH)).status_code == 404
 
     asyncio.run(go())
+
+
+def test_runs_carry_a_tag_and_are_listed_newest_first_by_it(tmp_path, monkeypatch):
+    monkeypatch.delenv("QDRANT_URL", raising=False)
+    monkeypatch.setenv("PERSONA_CHECK_TOKEN", TOKEN)
+
+    async def go():
+        runs, _ = fake_runs(tmp_path)
+        transport = httpx.ASGITransport(app=server.create_app(runs))
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as http:
+            ids = []
+            for body in ({"scenarios": ["A1"], "tag": "1:7"}, {"scenarios": ["H9"], "tag": "1:6"},
+                         {"scenarios": ["B3"], "tag": "1:7"}, {"scenarios": ["E1"]}):
+                made = await http.post("/runs", json=body, headers=AUTH)
+                assert made.status_code == 202
+                ids.append(made.json()["runId"])
+                await finish(runs)
+                await asyncio.sleep(0.005)                                        # createdAt(밀리초)이 겹치지 않게
+            assert (await http.get("/runs")).status_code == 401                    # 목록도 토큰이 있어야 한다
+            everything = (await http.get("/runs", headers=AUTH)).json()
+            assert [r["runId"] for r in everything] == ids[::-1]                   # 최신순
+            assert [r["tag"] for r in everything] == [None, "1:7", "1:6", "1:7"]   # 안 붙이면 None
+            mine = (await http.get("/runs", params={"tag": "1:7"}, headers=AUTH)).json()
+            assert [r["runId"] for r in mine] == [ids[2], ids[0]]
+            assert mine[0]["status"] == "done" and mine[0]["items"][0]["scenario"] == "B3"   # 묶음 상태와 같은 모양
+            assert (await http.get("/runs", params={"tag": "없는표시"}, headers=AUTH)).json() == []
+            assert (await http.post("/runs", json={"scenarios": ["A1"], "tag": "가" * 65}, headers=AUTH)).status_code == 422
+        return ids
+
+    ids = asyncio.run(go())
+    # 다시 띄운 뒤에도 목록에 남고, 돌던 중에 꺼진 묶음은 '중단'으로 보인다
+    stale = json.loads((tmp_path / ids[0] / "run.json").read_text("utf-8")) | {"status": "running"}
+    (tmp_path / ids[0] / "run.json").write_text(json.dumps(stale, ensure_ascii=False), "utf-8")
+    again = server.Runs(run_one=None, root=tmp_path)
+    assert [(r["runId"], r["status"]) for r in again.recent("1:7")] == [(ids[2], "done"), (ids[0], "interrupted")]
+    assert server.Runs(run_one=None, root=tmp_path / "아직없는폴더").recent() == []
+
+
+def test_a_scenario_shows_its_script_and_the_answers_the_judge_will_use(tmp_path, monkeypatch):
+    monkeypatch.delenv("QDRANT_URL", raising=False)
+    monkeypatch.setenv("PERSONA_CHECK_TOKEN", TOKEN)
+
+    async def go():
+        runs, _ = fake_runs(tmp_path)
+        transport = httpx.ASGITransport(app=server.create_app(runs))
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as http:
+            assert (await http.get("/scenarios/A1")).status_code == 401
+            assert (await http.get("/scenarios/없는것", headers=AUTH)).status_code == 404
+            return {i: (await http.get(f"/scenarios/{i}", headers=AUTH)).json() for i in ("A1", "E1", "F1", "G1")}
+
+    got = asyncio.run(go())
+    a1, source = got["A1"], judge.load_scenario("A1")
+    assert (a1["id"], a1["name"], a1["group"], a1["core"], a1["available"]) == ("A1", "신규 고객 기본 접수", "접수", True, True)
+    assert a1["caller"] == "신규 고객" and got["E1"]["caller"].startswith("등록 고객 ")
+    assert [line["text"] for line in a1["lines"]] == [line["text"] for line in source["lines"]]
+    assert a1["lines"][0]["optional"] is False and a1["lines"][-1]["optional"] is True
+    assert a1["checks"] == source["checks"]
+    names = [e["name"] for e in a1["expected"]]
+    assert "대본 진행" not in names and names[:2] == ["접수된 택배 수", "접수 확인된 초안 수"]
+    assert {"name": "받는 분 이름", "value": source["expect"]["parcel"]["receiver_name"]} in a1["expected"]
+    assert {"name": "보내는 분 번호", "value": source["caller"]} in a1["expected"]   # 정답에 안 적으면 발신번호
+    assert {"name": "조회 실행", "value": "1회 이상"} in got["E1"]["expected"]
+    assert next(e for e in got["F1"]["expected"] if e["name"] == "기존 주문 상태")["value"][source_cancel()] == "CANCELLED"
+    assert got["G1"]["available"] is False                                       # FAQ 검색 서버가 없는 환경
+
+
+def source_cancel() -> str:
+    """F1이 취소하기로 한 받는 분."""
+    return judge.load_scenario("F1")["expect"]["receiver"]
