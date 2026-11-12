@@ -1,0 +1,122 @@
+[
+  {
+    "name": "login",
+    "url": "https://dva-d109.duckdns.org/login",
+    "scores": [
+      98,
+      98,
+      98
+    ],
+    "score": 98,
+    "fcp": 802.685,
+    "lcp": 964.0274999999999,
+    "tbt": 0,
+    "cls": 0,
+    "si": 802.685
+  },
+  {
+    "name": "home",
+    "url": "https://dva-d109.duckdns.org/",
+    "scores": [
+      95,
+      96,
+      97
+    ],
+    "score": 96,
+    "fcp": 878.35725,
+    "lcp": 1237.3716000000002,
+    "tbt": 0,
+    "cls": 9.653270291568163e-7,
+    "si": 878.35725
+  },
+  {
+    "name": "calls",
+    "url": "https://dva-d109.duckdns.org/calls",
+    "scores": [
+      88,
+      95,
+      96
+    ],
+    "score": 95,
+    "fcp": 909.1764499999999,
+    "lcp": 1312.3528999999999,
+    "tbt": 0,
+    "cls": 0,
+    "si": 909.1764499999999
+  },
+  {
+    "name": "call-detail",
+    "url": "https://dva-d109.duckdns.org/calls/530",
+    "scores": [
+      94,
+      94,
+      95
+    ],
+    "score": 94,
+    "fcp": 956.1704,
+    "lcp": 1443.6719999999998,
+    "tbt": 0,
+    "cls": 0.04424172046808005,
+    "si": 956.1704
+  },
+  {
+    "name": "orders",
+    "url": "https://dva-d109.duckdns.org/orders",
+    "scores": [
+      81,
+      88,
+      93
+    ],
+    "score": 88,
+    "fcp": 1148.5812,
+    "lcp": 1858.3514999999998,
+    "tbt": 0,
+    "cls": 0.004435627353121443,
+    "si": 1562.9999524704108
+  },
+  {
+    "name": "faqs",
+    "url": "https://dva-d109.duckdns.org/faqs",
+    "scores": [
+      85,
+      85,
+      90
+    ],
+    "score": 85,
+    "fcp": 1219.6405,
+    "lcp": 1790.8539999999998,
+    "tbt": 5.5,
+    "cls": 0,
+    "si": 2209.4668270834445
+  },
+  {
+    "name": "stats",
+    "url": "https://dva-d109.duckdns.org/stats",
+    "scores": [
+      92,
+      93,
+      94
+    ],
+    "score": 93,
+    "fcp": 975.9445000000001,
+    "lcp": 1604.9075000000003,
+    "tbt": 0,
+    "cls": 0,
+    "si": 1111.5775584451412
+  },
+  {
+    "name": "personas",
+    "url": "https://dva-d109.duckdns.org/personas",
+    "scores": [
+      87,
+      92,
+      92
+    ],
+    "score": 92,
+    "fcp": 1006.53575,
+    "lcp": 1483.2572000000002,
+    "tbt": 0,
+    "cls": 0,
+    "si": 1489.5946699147366
+  }
+]

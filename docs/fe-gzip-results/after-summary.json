@@ -1,0 +1,122 @@
+[
+  {
+    "name": "login",
+    "url": "https://dva-d109.duckdns.org/login",
+    "scores": [
+      99,
+      99,
+      99
+    ],
+    "score": 99,
+    "fcp": 557.8512000000001,
+    "lcp": 736.7767999999999,
+    "tbt": 0,
+    "cls": 0,
+    "si": 557.8512000000001
+  },
+  {
+    "name": "home",
+    "url": "https://dva-d109.duckdns.org/",
+    "scores": [
+      98,
+      98,
+      99
+    ],
+    "score": 98,
+    "fcp": 641.8256999999999,
+    "lcp": 1142.0737,
+    "tbt": 0,
+    "cls": 9.653270291568163e-7,
+    "si": 641.8256999999999
+  },
+  {
+    "name": "calls",
+    "url": "https://dva-d109.duckdns.org/calls",
+    "scores": [
+      99,
+      99,
+      99
+    ],
+    "score": 99,
+    "fcp": 643.2982499999999,
+    "lcp": 997.9144,
+    "tbt": 0,
+    "cls": 0,
+    "si": 643.2982499999999
+  },
+  {
+    "name": "call-detail",
+    "url": "https://dva-d109.duckdns.org/calls/530",
+    "scores": [
+      98,
+      98,
+      98
+    ],
+    "score": 98,
+    "fcp": 652.40865,
+    "lcp": 1023.5181999999998,
+    "tbt": 0,
+    "cls": 0.012780473032133791,
+    "si": 652.40865
+  },
+  {
+    "name": "orders",
+    "url": "https://dva-d109.duckdns.org/orders",
+    "scores": [
+      98,
+      98,
+      98
+    ],
+    "score": 98,
+    "fcp": 660.462,
+    "lcp": 1112.3949,
+    "tbt": 0,
+    "cls": 0.0013147546916498845,
+    "si": 668.0319113618277
+  },
+  {
+    "name": "faqs",
+    "url": "https://dva-d109.duckdns.org/faqs",
+    "scores": [
+      90,
+      95,
+      98
+    ],
+    "score": 95,
+    "fcp": 804.6663,
+    "lcp": 1165.0837999999999,
+    "tbt": 0,
+    "cls": 0,
+    "si": 1555.4409232507226
+  },
+  {
+    "name": "stats",
+    "url": "https://dva-d109.duckdns.org/stats",
+    "scores": [
+      91,
+      98,
+      99
+    ],
+    "score": 98,
+    "fcp": 639.84175,
+    "lcp": 1008.922,
+    "tbt": 0,
+    "cls": 0,
+    "si": 639.84175
+  },
+  {
+    "name": "personas",
+    "url": "https://dva-d109.duckdns.org/personas",
+    "scores": [
+      87,
+      98,
+      98
+    ],
+    "score": 98,
+    "fcp": 712.54075,
+    "lcp": 1081.8745,
+    "tbt": 0,
+    "cls": 0,
+    "si": 712.54075
+  }
+]
