@@ -22,9 +22,9 @@ export class RetentionRepository {
     // A statement-stable expiry cutoff lets time indexes bound the scan.
     const candidates = await this.database.pool.query<{ id: number; phone: string | null }>(
       `SELECT call_session_seq AS id,caller_phone_number AS phone FROM call_sessions
-       WHERE incoming_at<=statement_timestamp()-interval '5 years'
+       WHERE deleted_at<=statement_timestamp()-interval '5 years'
         AND (purge_claimed_until IS NULL OR purge_claimed_until<=clock_timestamp())
-       ORDER BY incoming_at,call_session_seq LIMIT 10`,
+       ORDER BY deleted_at,call_session_seq LIMIT 10`,
     );
     for (const candidate of candidates.rows) {
       const claim = await this.database.transaction(async (client) => {
@@ -52,7 +52,7 @@ export class RetentionRepository {
         if (receipts.rows.length !== count || receipts.rows.some((row) => row.busy)) return;
         const call = await client.query(
           `SELECT 1 FROM call_sessions WHERE call_session_seq=$1
-          AND incoming_at<=statement_timestamp()-interval '5 years'
+          AND deleted_at<=statement_timestamp()-interval '5 years'
           AND (purge_claimed_until IS NULL OR purge_claimed_until<=clock_timestamp()) FOR UPDATE SKIP LOCKED`,
           [candidate.id],
         );
@@ -113,7 +113,7 @@ export class RetentionRepository {
         return false;
       const call = await client.query(
         `SELECT 1 FROM call_sessions WHERE call_session_seq=$1 AND purge_claim_id=$2
-        AND purge_claimed_until>clock_timestamp() AND incoming_at<=statement_timestamp()-interval '5 years' FOR UPDATE`,
+        AND purge_claimed_until>clock_timestamp() AND deleted_at<=statement_timestamp()-interval '5 years' FOR UPDATE`,
         [claim.id, claim.claimId],
       );
       if (!call.rowCount) return false;
@@ -154,8 +154,8 @@ export class RetentionRepository {
         return;
       await client.query("SET LOCAL lock_timeout='1s'");
       await client.query(`DELETE FROM order_parcel_drafts WHERE draft_seq IN (
-        SELECT draft_seq FROM order_parcel_drafts WHERE retention_started_at<=statement_timestamp()-interval '5 years'
-        ORDER BY retention_started_at,draft_seq LIMIT 100 FOR UPDATE SKIP LOCKED)`);
+        SELECT draft_seq FROM order_parcel_drafts WHERE deleted_at<=statement_timestamp()-interval '5 years'
+        ORDER BY deleted_at,draft_seq LIMIT 100 FOR UPDATE SKIP LOCKED)`);
       await client.query(`DELETE FROM audit_logs WHERE audit_log_seq IN (SELECT audit_log_seq FROM audit_logs
         WHERE occurred_at<=statement_timestamp()-interval '7 days' ORDER BY occurred_at,audit_log_seq LIMIT 1000 FOR UPDATE SKIP LOCKED)`);
       await client.query(`DELETE FROM faq_change_notifications WHERE faq_change_notification_seq IN (
@@ -165,12 +165,11 @@ export class RetentionRepository {
         SELECT ai_persona_version_seq FROM ai_persona_versions WHERE created_at<=statement_timestamp()-interval '5 years'
          AND created_by_admin_user_name IS NOT NULL LIMIT 100 FOR UPDATE SKIP LOCKED)`);
       const orders = await client.query<{ id: number }>(`SELECT o.order_seq AS id FROM orders o
-        WHERE COALESCE(o.closed_at,o.created_at)<=statement_timestamp()-interval '5 years'
+        WHERE o.deleted_at<=statement_timestamp()-interval '5 years'
          AND NOT(o.status='SUBMITTING' AND COALESCE(o.submission_last_attempt_at,o.updated_at)>clock_timestamp()-interval '10 seconds')
-         AND NOT EXISTS(SELECT 1 FROM call_sessions c WHERE c.order_seq=o.order_seq)
          AND NOT EXISTS(SELECT 1 FROM order_payment_requests r WHERE r.order_seq=o.order_seq
           AND ${ACTIVE_PAYMENT_WORK})
-        ORDER BY COALESCE(o.closed_at,o.created_at),o.order_seq LIMIT 10 FOR UPDATE OF o SKIP LOCKED`);
+        ORDER BY o.deleted_at,o.order_seq LIMIT 10 FOR UPDATE OF o SKIP LOCKED`);
       for (const order of orders.rows) {
         const requests = await client.query<{ busy: boolean }>(
           `SELECT
@@ -179,6 +178,9 @@ export class RetentionRepository {
           [order.id],
         );
         if (requests.rows.some((row) => row.busy)) continue;
+        await client.query('UPDATE call_sessions SET order_seq=NULL WHERE order_seq=$1', [
+          order.id,
+        ]);
         await client.query("SELECT set_config('dva.retention_order',$1,true)", [String(order.id)]);
         await client.query(
           `DELETE FROM shipment_status_history WHERE shipment_seq IN (
@@ -214,7 +216,7 @@ export class RetentionRepository {
         monthly_billing_enabled=false,anonymized_at=clock_timestamp() WHERE customer_seq IN (SELECT customer_seq FROM customers
          WHERE deleted_at<=statement_timestamp()-interval '5 years' AND anonymized_at IS NULL LIMIT 100 FOR UPDATE SKIP LOCKED)`);
       await client.query(`DELETE FROM customers WHERE customer_seq IN (SELECT c.customer_seq FROM customers c
-        WHERE c.deleted_at<=statement_timestamp()-interval '5 years'
+        WHERE c.deleted_at<=statement_timestamp()-interval '5 years' AND c.related_deletion_due_at IS NULL
          AND NOT EXISTS(SELECT 1 FROM orders o WHERE o.customer_seq=c.customer_seq)
          AND NOT EXISTS(SELECT 1 FROM personal_pins p WHERE p.customer_seq=c.customer_seq)
          AND NOT EXISTS(SELECT 1 FROM payment_cards pc WHERE pc.customer_seq=c.customer_seq)

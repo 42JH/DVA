@@ -80,7 +80,7 @@ export class OrdersRepository {
       await client.query<import('./dto/order-response.dto').OrderResultDto>(
         `SELECT order_seq AS "orderSeq",version,status,total_amount AS "totalAmount",parcel_no AS "parcelNo",$2::int AS "callSessionSeq",
         payment_due_at AS "paymentDueAt",${paymentRequestJson} AS "paymentRequest"
-       FROM orders o WHERE order_seq=$1 AND o.deleted_at IS NULL AND COALESCE(o.closed_at,o.created_at)>statement_timestamp()-interval '5 years'`,
+       FROM orders o WHERE order_seq=$1 AND o.deleted_at IS NULL`,
         [id, callId],
       )
     ).rows[0];
@@ -154,7 +154,6 @@ export class OrdersRepository {
         p.${side}_jibun_address AS __jibun,p.${side}_detail_address AS __detail,p.${side}_dong_name AS __dong,p.${side}_postal_code AS __postal
        FROM orders o JOIN order_parcels p ON p.order_seq=o.order_seq
        WHERE o.customer_seq=$1 AND o.status='ACCEPTED' AND p.status='ACTIVE' AND o.deleted_at IS NULL
-         AND COALESCE(o.closed_at,o.created_at)>clock_timestamp()-interval '5 years'
          AND ($2::timestamptz IS NULL OR o.created_at >= $2)
          AND ($3::timestamptz IS NULL OR o.created_at < $3)
          AND (NULLIF(btrim(p.${side}_road_address),'') IS NOT NULL
@@ -204,7 +203,8 @@ export class OrdersRepository {
        LEFT JOIN customers customer ON customer.customer_seq=o.customer_seq AND customer.deleted_at IS NULL
        LEFT JOIN memberships membership ON membership.customer_seq=customer.customer_seq AND membership.deleted_at IS NULL
        LEFT JOIN organizations company ON company.organization_seq=membership.organization_seq AND company.deleted_at IS NULL
-       WHERE o.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM order_parcel_drafts d WHERE d.legacy_order_seq=o.order_seq) AND COALESCE(o.closed_at,o.created_at)>transaction_timestamp()-interval '5 years'
+       WHERE o.deleted_at IS NULL AND NOT o.migrated_to_parcel_drafts
+        AND NOT EXISTS(SELECT 1 FROM order_parcel_drafts d WHERE d.legacy_order_seq=o.order_seq)
         AND ($1::text IS NULL OR EXISTS(SELECT 1 FROM order_parcels p WHERE p.order_seq=o.order_seq AND (
          EXISTS(SELECT 1 FROM unnest(ARRAY[p.origin_name,p.origin_phone_number,p.origin_road_address,p.origin_jibun_address,p.origin_detail_address,
            p.destination_name,p.destination_phone_number,p.destination_road_address,p.destination_jibun_address,p.destination_detail_address]) AS v(value)
@@ -289,8 +289,8 @@ export class OrdersRepository {
           o.payment_method_type AS "paymentMethodType", o.pickup_requested_at AS "pickupRequestedAt",
           o.created_at AS "createdAt"
          FROM orders o
-         WHERE o.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM order_parcel_drafts d WHERE d.legacy_order_seq=o.order_seq)
-           AND COALESCE(o.closed_at,o.created_at)>clock_timestamp()-interval '5 years'
+         WHERE o.deleted_at IS NULL AND NOT o.migrated_to_parcel_drafts
+           AND NOT EXISTS(SELECT 1 FROM order_parcel_drafts d WHERE d.legacy_order_seq=o.order_seq)
            AND ($1::int IS NULL OR o.customer_seq=$1)
            AND ($2::timestamptz IS NULL OR o.created_at >= $2)
            AND ($3::timestamptz IS NULL OR o.created_at < $3)
@@ -356,7 +356,7 @@ export class OrdersRepository {
             WHERE p.order_seq=o.order_seq
           ),'[]'::jsonb)
         ) AS detail FROM orders o
-        WHERE o.order_seq=$1 AND o.deleted_at IS NULL AND COALESCE(o.closed_at,o.created_at)>clock_timestamp()-interval '5 years'
+        WHERE o.order_seq=$1 AND o.deleted_at IS NULL
           AND ($2::int IS NULL OR o.customer_seq=$2)`,
         [id, customerId],
       )
@@ -378,7 +378,7 @@ export class OrdersRepository {
         }
       >(
         `SELECT o.order_seq AS "orderSeq", o.version,o.creation_source AS "creationSource",
-          (o.deleted_at IS NOT NULL OR COALESCE(o.closed_at,o.created_at)<=clock_timestamp()-interval '5 years') AS deleted,
+          (o.deleted_at IS NOT NULL) AS deleted,
           CASE WHEN $2::int IS NULL THEN EXISTS(
             SELECT 1 FROM call_sessions c WHERE c.call_session_seq=$3 AND c.order_seq=o.order_seq AND c.deleted_at IS NULL)
           ELSE o.created_by_admin_user_seq=$2
@@ -416,9 +416,11 @@ export class OrdersRepository {
 
   async hasMigratedDrafts(client: PoolClient, id: number): Promise<boolean> {
     return !!(
-      await client.query('SELECT 1 FROM order_parcel_drafts WHERE legacy_order_seq=$1 LIMIT 1', [
-        id,
-      ])
+      await client.query(
+        `SELECT 1 FROM orders o WHERE o.order_seq=$1 AND (o.migrated_to_parcel_drafts
+         OR EXISTS(SELECT 1 FROM order_parcel_drafts d WHERE d.legacy_order_seq=o.order_seq))`,
+        [id],
+      )
     ).rowCount;
   }
 
@@ -491,7 +493,7 @@ export class OrdersRepository {
         totalAmount: number | null;
         paymentMethodType: string | null;
       }>(
-        'SELECT customer_seq AS "customerSeq",status,version,total_amount AS "totalAmount",payment_method_type AS "paymentMethodType" FROM orders WHERE order_seq=$1 AND deleted_at IS NULL AND COALESCE(closed_at,created_at)>clock_timestamp()-interval \'5 years\' FOR UPDATE',
+        'SELECT customer_seq AS "customerSeq",status,version,total_amount AS "totalAmount",payment_method_type AS "paymentMethodType" FROM orders WHERE order_seq=$1 AND deleted_at IS NULL FOR UPDATE',
         [id],
       )
     ).rows[0];

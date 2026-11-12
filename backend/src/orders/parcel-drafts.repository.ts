@@ -12,7 +12,7 @@ const columns = `draft_seq AS "draftSeq",reserved_order_seq AS "reservedOrderSeq
  legacy_order_seq AS "legacyOrderSeq",legacy_order_parcel_seq AS "legacyOrderParcelSeq",
  created_at AS "createdAt",updated_at AS "updatedAt",retention_started_at AS "retentionStartedAt"`;
 // A deleted newer call must not revive the older incomplete parcels it superseded.
-const available = `d.deleted_at IS NULL AND d.retention_started_at>transaction_timestamp()-interval '5 years'
+const available = `d.deleted_at IS NULL
  AND (NOT(d.status='INCOMPLETE' OR (d.source_draft_seq IS NOT NULL AND d.status IN('READY','EDITING')))
  OR (d.retention_started_at>transaction_timestamp()-interval '24 hours' AND NOT EXISTS(
    SELECT 1 FROM call_sessions newer

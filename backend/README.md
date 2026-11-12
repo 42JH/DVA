@@ -64,7 +64,7 @@ AI 고객 기본 주소 PATCH는 `call_session_seq`로 진행 중 본인 통화�
 
 디버 접수는 [10초 응답 제한·10분 자동 재시도 계약](docs/order-submission-retry.md)을 따른다. 새 앱 전에 migration 046을 적용한다. SUBMITTING_FAILED는 최초 전송 후 10분 안의 자동 재시도 중 실패, SUBMISSION_FAILED는 자동 재시도가 끝난 최종 실패다. AI·프론트의 상태 분기와 실패 탭 표시는 이 계약을 따른다.
 
-업무 데이터 삭제·보관은 새 migration 045와 [작업 명세](docs/data-retention.md), [API·AI 전달 사항](docs/data-retention-handoff.md)을 따른다. 기존 업무 DELETE는 soft delete로 바꾸고 주문·통화 DELETE를 추가한다. 통화 전체(녹취·STT·AI 이벤트)는 최초 incoming_at부터 5년, 주문은 최초 완료/취소(미완료는 생성)부터 5년 후 실제 폐기한다. 감사 로그와 전송 완료 알림은 7일 정리한다. 045 한 번 적용 후 새 앱으로 전환하며 [인프라 후속 항목](docs/data-retention-infra-follow-up.md)의 S3 권한·외부 로그·백업 폐기를 함께 확인한다. 외부 문서의 과거 물리 삭제 설명보다 이 계약을 우선한다.
+업무 데이터 삭제·보관은 067과 [작업 명세](docs/data-retention.md)를 따른다. 고객 삭제·탈퇴는 연결된 주문·통화·배송 초안까지 soft delete하며 진행 중인 통화·녹취·결제·접수는 409로 보호한다. 미삭제 주문·통화·초안은 보관하고 삭제된 건은 삭제일로부터 5년 뒤 폐기한다. 067 적용 전 구버전 워커를 중지한다. 새 앱의 워커는 이미 삭제된 고객의 확인된 연관 이력에도 같은 규칙을 적용한다. [인프라 후속 항목](docs/data-retention-infra-follow-up.md)의 S3 권한·외부 로그·백업 폐기는 별도로 확인한다.
 
 진행 통화 수는 `GET /api/calls/active-count`, 변경 구독은 `GET /api/calls/active-count/stream`으로 제공한다. 새 앱 전에 044 migration을 적용한다. 과거 종료 미확인 통화는 제외하고 새 등록부터 집계하며 PBX 종료를 녹취 업로드 전에 반영한다. 관리자 쿠키·부하별 전송 묶기·세션 재검증과 양쪽 nginx 설정·운영 적용 순서는 [실시간 통화 수 계약](docs/active-call-count.md)을 따른다. nginx 설정은 저장소에 반영했으며 실제 서버 적용은 별도다.
 

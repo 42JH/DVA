@@ -242,7 +242,9 @@ export class OrderPaymentsRepository {
           OR (o.payment_method_type='groupBilling' AND c.organization_seq=o.billing_organization_seq))
         AND c.expiration_year*12+c.expiration_month>=extract(year FROM clock_timestamp() AT TIME ZONE 'Asia/Seoul')*12+extract(month FROM clock_timestamp() AT TIME ZONE 'Asia/Seoul')
        LIMIT 1
-      ) c ON true WHERE o.order_seq=$1 AND o.status='notPaid' AND o.total_amount>0`,
+      ) c ON true WHERE o.order_seq=$1 AND o.status='notPaid' AND o.total_amount>0
+       AND EXISTS (SELECT 1 FROM customers u WHERE u.customer_seq=o.customer_seq
+        AND u.status='ACTIVE' AND u.deleted_at IS NULL)`,
       [id],
     );
   }
@@ -255,6 +257,16 @@ export class OrderPaymentsRepository {
         )
       ).rowCount !== 0
     );
+  }
+
+  async lockActivePaymentCustomer(client: PoolClient, id: string): Promise<boolean> {
+    const result = await client.query(
+      `SELECT 1 FROM order_payment_requests r JOIN orders o USING(order_seq)
+       JOIN customers c USING(customer_seq)
+       WHERE r.payment_request_id=$1 AND c.status='ACTIVE' AND c.deleted_at IS NULL FOR SHARE OF c`,
+      [id],
+    );
+    return result.rowCount === 1;
   }
   async billed(
     client: PoolClient,
@@ -359,6 +371,7 @@ export class OrderPaymentsRepository {
         }>(`SELECT r.payment_request_id AS id FROM order_payment_requests r
         JOIN orders o USING(order_seq) WHERE r.notification_status='PENDING' AND r.invalidated_at IS NULL AND r.payment_card_seq IS NULL AND o.payment_method_type='billing'
         AND r.completed_at IS NULL AND r.approval_started_at IS NULL AND r.expires_at>clock_timestamp() AND o.status='notPaid' AND o.deleted_at IS NULL
+        AND EXISTS (SELECT 1 FROM customers c WHERE c.customer_seq=o.customer_seq AND c.status='ACTIVE' AND c.deleted_at IS NULL)
         ORDER BY r.created_at LIMIT 1 FOR UPDATE OF r SKIP LOCKED`)
       ).rows[0];
       if (!row) return;

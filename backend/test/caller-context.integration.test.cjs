@@ -231,6 +231,10 @@ test('withdrawn callers remain distinct but expose no profile, membership or pin
   await member(c.customerSeq, org, 'ACTIVE', 'ORG_ADMIN');
   await pin(c.customerSeq);
   assert.deepEqual(await context(c.phoneNumber), emptyContext('WITHDRAWN'));
+  await pool.query('UPDATE customers SET deleted_at=clock_timestamp() WHERE customer_seq=$1', [
+    c.customerSeq,
+  ]);
+  assert.deepEqual(await context(c.phoneNumber), emptyContext('WITHDRAWN'));
   assert.equal(
     (await pool.query('SELECT status FROM customers WHERE customer_seq=$1', [c.customerSeq]))
       .rows[0].status,

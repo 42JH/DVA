@@ -21,7 +21,7 @@ export class UnansweredQuestionsRepository {
         `SELECT status,faq_entry_seq AS "faqId",faq_conversion_hash AS "conversionHash"
        FROM unanswered_questions WHERE unanswered_question_seq=$1
        AND EXISTS(SELECT 1 FROM call_sessions c WHERE c.call_session_seq=unanswered_questions.call_session_seq
-        AND c.deleted_at IS NULL AND (c.incoming_at IS NULL OR c.incoming_at>clock_timestamp()-interval '5 years') FOR SHARE)
+        AND c.deleted_at IS NULL FOR SHARE)
        FOR UPDATE`,
         [id],
       )
@@ -72,7 +72,6 @@ export class UnansweredQuestionsRepository {
          LEFT JOIN customers customer ON customer.customer_seq=COALESCE(o.customer_seq,c.customer_seq) AND customer.deleted_at IS NULL
          LEFT JOIN faq_entries f ON f.faq_entry_seq=u.faq_entry_seq AND f.deleted_at IS NULL
          WHERE u.status IN ('OPEN','REGISTERED') AND ($1::text='ALL' OR u.status=$1) AND c.deleted_at IS NULL
-           AND (c.incoming_at IS NULL OR c.incoming_at>transaction_timestamp()-interval '5 years')
            AND ($2::integer IS NULL OR u.unanswered_question_seq=$2)
            AND ($3::integer IS NULL OR u.call_session_seq=$3)
            AND ($4::integer IS NULL OR a.ai_persona_version_seq=$4)

@@ -308,7 +308,7 @@ test('expired order references reject AI events atomically while a current custo
       [customer],
     )
   ).rows[0].order_seq;
-  await f.error(await f.get('/api/orders/' + expired), 404, 'NOT_FOUND');
+  assert.equal((await f.get('/api/orders/' + expired)).status, 200);
   const event = (orderSeq, eventOrder = 1, eventId = randomUUID()) => ({
     eventId,
     eventOrder,

@@ -97,7 +97,9 @@ export class CallSessionRepository {
     const phone = callerPhone(input.callerPhoneNumber);
     const inserted = await client.query(
       `INSERT INTO call_sessions(provider_call_id,caller_phone_number,incoming_at,customer_seq)
-       SELECT $1,$2,$3,(SELECT customer_seq FROM customers WHERE phone_number=$2 AND deleted_at IS NULL)
+       SELECT $1,$2,$3,(SELECT customer_seq FROM customers WHERE phone_number=$2
+         AND (deleted_at IS NULL OR status='WITHDRAWN')
+         ORDER BY deleted_at NULLS FIRST,customer_seq DESC LIMIT 1 FOR SHARE)
        WHERE $3::timestamptz>clock_timestamp()-interval '5 years'
        ON CONFLICT(provider_call_id) DO NOTHING`,
       [input.providerCallId, phone, input.incomingAt],

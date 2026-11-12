@@ -180,7 +180,9 @@ export class MembersRepository {
       `SELECT c.customer_seq AS "customerSeq",c.name,c.phone_number AS "phoneNumber",c.status AS "customerStatus",
        m.membership_seq AS "membershipSeq",m.organization_seq AS "organizationSeq",m.employee_no AS "employeeNo"
        FROM customers c LEFT JOIN memberships m ON m.customer_seq=c.customer_seq AND m.deleted_at IS NULL
-       WHERE c.deleted_at IS NULL AND (c.phone_number=ANY($1::text[]) OR (m.organization_seq=$2 AND m.employee_no=ANY($3::text[])))`,
+       WHERE (c.deleted_at IS NULL OR c.status='WITHDRAWN')
+        AND (c.phone_number=ANY($1::text[]) OR (m.organization_seq=$2 AND m.employee_no=ANY($3::text[])))
+       ORDER BY c.deleted_at DESC NULLS LAST,c.customer_seq`,
       [rows.map((row) => row.phoneNumber), companyId, rows.map((row) => row.employeeNo)],
     );
     return result.rows;
