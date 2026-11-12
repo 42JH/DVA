@@ -36,14 +36,15 @@ export function testOf(
   const mine = tests.find((t) => same(t, me))
   if (mine) {
     if (mine.status === 'running') return { state: 'running', shown: mine }
-    const ended = (id: string) => {
+    // 끝남 = 통과 · 실패 판정이 났음. 연결 실패는 시험을 못 한 것 → 다시 시험해야 전체 시험이 끝남
+    const judged = (id: string) => {
       const c = cellOf(
         mine.items.find((i) => i.scenario === id),
         false,
       )
-      return c !== 'none'
+      return c === 'pass' || c === 'fail'
     }
-    return { state: scenarios.every((s) => ended(s.id)) ? 'done' : 'partial', shown: mine }
+    return { state: scenarios.every((s) => judged(s.id)) ? 'done' : 'partial', shown: mine }
   }
   const before = me.isHead
     ? tests

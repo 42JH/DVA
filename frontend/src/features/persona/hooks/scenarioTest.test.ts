@@ -47,7 +47,7 @@ assert.deepEqual(testOf([v6, v7], scenarios, head, active), { state: 'stale', sh
 // 지난 버전을 볼 때는 다른 버전 결과를 빌려 오지 않음
 assert.equal(testOf([v6, v7], scenarios, { ...head, isHead: false }, active).state, 'none')
 
-// 핵심만 돌렸으면 partial, 전부 끝나면(연결 실패 포함) done, 도는 중이면 running
+// 일부만 돌렸으면 partial, 전부 통과 · 실패로 판정나면 done, 도는 중이면 running
 const some = test(8, 'done', [item('A1', 'done', true)])
 assert.equal(testOf([some], scenarios, head, active).state, 'partial')
 const all = test(8, 'done', [
@@ -55,7 +55,20 @@ const all = test(8, 'done', [
   item('B3', 'error', null),
   item('E1', 'done', true),
 ])
-assert.equal(testOf([all], scenarios, head, active).state, 'done')
+// 연결 실패가 하나라도 남으면 끝난 게 아님 — 창구 고장으로 전부 연결 실패여도 [통화에 사용하기]가 열리면 안 됨
+assert.equal(testOf([all], scenarios, head, active).state, 'partial')
+const broken = test(
+  8,
+  'done',
+  scenarios.map((s) => item(s.id, 'error', null)),
+)
+assert.equal(testOf([broken], scenarios, head, active).state, 'partial')
+const judged = test(8, 'done', [
+  item('A1', 'done', false),
+  item('B3', 'done', true),
+  item('E1', 'done', true),
+])
+assert.equal(testOf([judged], scenarios, head, active).state, 'done') // 실패가 있어도 판정이 났으면 끝남
 assert.equal(testOf([{ ...all, status: 'running' }], scenarios, head, active).state, 'running')
 // 돌다가 꺼진 묶음 — 못 끝낸 것은 결과 없음 → 전체 시험이 끝난 게 아님
 const cut = test(8, 'interrupted', [
