@@ -19,11 +19,10 @@ def raw() -> dict:
 
 
 def test_receive_order_matches_call_flow_rule():
-    """README '반드시 지킬 것' 1(2026-11-09): 보내는 분 성함 → 받는 분 성함 → 연락처 → 발송 주소 → 상세 → 받는 곳 주소 → 상세
-    → 물품 → 가액 → 수거 일시."""
+    """발송 정보를 마친 뒤 받는 분 성함·연락처·주소를 받는다."""
     order = [n for s in POLICY.collect_stages() for n in s.required]
     # 수거 일시는 묻지 않는다(사용자 결정 2026-11-03, BE가 결제 완료 + 1시간으로 정함)
-    assert order == ["sender_name", "receiver_name", "receiver_phone", "sender_address", "sender_address_detail",
+    assert order == ["sender_name", "sender_address", "sender_address_detail", "receiver_name", "receiver_phone",
                      "receiver_address", "receiver_address_detail", "items", "item_price"]
     assert POLICY.fields["sender_phone"].kind == "auto" and "sender_phone" not in order  # 발신번호, 묻지 않음
 

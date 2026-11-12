@@ -1351,12 +1351,13 @@ def test_flow_complete_without_result_reminds_until_full_greeting():
     assert client.hangups == ["live_1"] and hung[0] - said_t >= 1.0
 
 
-@pytest.mark.parametrize(("text", "more", "switch", "notice"), [
-    ("택배 하나 더 보낼게요", "more", "none", ("next_parcel_field", "receiver_name")),
-    ("네", "clarify", "none", ("followup_help", "clarify")),
-    ("더 보낼 건 없고 접수 조회해 주세요", "no_more", "lookup", ("intent", "lookup")),
+@pytest.mark.parametrize(("text", "more", "switch", "notice", "origin_reply"), [
+    ("택배 하나 더 보낼게요", "more", "none", ("origin_confirm", "previous_parcel"), "yes"),
+    ("택배 하나 더 보낼게요", "more", "none", ("origin_confirm", "previous_parcel"), "no"),
+    ("네", "clarify", "none", ("followup_help", "clarify"), None),
+    ("더 보낼 건 없고 접수 조회해 주세요", "no_more", "lookup", ("intent", "lookup"), None),
 ])
-def test_intake_followup_routes_additional_requests(text, more, switch, notice):
+def test_intake_followup_routes_additional_requests(text, more, switch, notice, origin_reply):
     from app.tests.test_domain import confirm_once, filled
 
     svc, client = flow()
@@ -1379,6 +1380,21 @@ def test_intake_followup_routes_additional_requests(text, more, switch, notice):
         await until(lambda: any(f'"{key}": "{expected}"' in e.get("content", "") for e in conn.sent))
         assert s.phase == Phase.ACTIVE and not st.no_more_parcels and len(st.parcels) == 1
         assert st.intent == ("lookup" if switch == "lookup" else "order")
+        if origin_reply:
+            previous = st.parcels[0].confirmed_snapshot
+            assert not st.current["sender_address"].valid
+            client.decisions.create.return_value = SimpleNamespace(answers=[choice("origin", origin_reply)])
+            await ai(conn, "이번 택배도 직전 택배와 같은 발송 주소에서 보내실까요?", 2500)
+            await say(conn, "네" if origin_reply == "yes" else "아니요", 4000)
+            expected = ('"next_field": "receiver_name"' if origin_reply == "yes"
+                        else '"sender_change_next": "sender_address"')
+            await until(lambda: any(expected in e.get("content", "") for e in conn.sent))
+            assert st.current["sender_address"].valid == (origin_reply == "yes")
+            if origin_reply == "yes":
+                assert st.current["sender_address"].value == previous["sender_address"]
+                assert st.current["sender_address_detail"].value == previous["sender_address_detail"]
+                assert st.current.sender_geo == previous["sender_geo"]
+            assert not st.current["receiver_name"].valid
         conn.push({"type": "session.closed", "reason": "remote_hangup"})
         await task
 

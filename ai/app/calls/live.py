@@ -17,7 +17,7 @@ from app.address.matcher import sido_aliases
 from app.address.parse import clean_text, parse, split_gil, unlink_gil
 from app.calls.session import CallSession, Phase
 from app.domain.rules import KST, restore_phone_ending
-from app.domain.address_book import (begin_sender_name_change, origin_confirmation, prefill_sender,
+from app.domain.address_book import (begin_sender_name_change, origin_confirmation, origin_place, prefill_sender,
                                      receiver_questions_deferred, request_sender_address_change, save_offer, sender_change_available,
                                      sender_change_next)
 from app.domain.assess import area_label, assess, readback_facts
@@ -27,7 +27,7 @@ from app.domain.claims import unverified_values
 from app.domain.confirm import (ConfirmAnswer, Utterance, asks, asks_parcel_confirmation, check_gate, commit_parcel,
                                 explicitly_requests_parcel, issue_cancel_confirmation, issue_parcel_confirmation,
                                 release, take_cancel)
-from app.domain.state import BOX_SIZE_NAMES, BoxProposal, CandidateSet, ConversationState, ParcelDraft
+from app.domain.state import BOX_SIZE_NAMES, BoxProposal, CandidateSet, ConversationState, ParcelDraft, Place, Source
 from app.domain.store import hold_unclassified_items, item_issues_pending, receiver_phone_pending
 from app.observability.trace import span
 from app.policy.render import decision_questions
@@ -299,7 +299,7 @@ class LiveFlow:
                 not (current and current.sender_name_for_parcel) or sender_change_next(s.state) == "sender_name")
             origin = s.state.origin_offered and (sender_change or
                                                   s.state.origin_answer is None and not s.state.origin_applied)
-            name_scope = bool(s.state.customer.customer_seq and stage in ("intent", "sender", "receiver", "address",
+            name_scope = bool(s.state.customer.customer_seq and stage in ("intent", "sender", "receiver",
                                                                            "item", "readback"))
             box = current.box_proposal if current and s.state.intent == "order" and not pending else None
             cancel_current = s.tools.draft_intake and current is not None and not current.empty()
@@ -419,9 +419,8 @@ class LiveFlow:
             change = answers.get("sender_change")
             next_sender = sender_change_next(st)
             draft = st.current
-            expecting_receiver_name = (st.intent == "order" and draft and draft["sender_name"].valid
-                                       and not draft["receiver_name"].valid and not next_sender
-                                       and not origin_confirmation(st))
+            expecting_receiver_name = (st.intent == "order" and draft
+                                       and state_summary(st, self.policy).get("next_field") == "receiver_name")
             receiver_name_answer = (prev and _asked_receiver_name(prev.text, bool(expecting_receiver_name))
                                     and not SENDER_NAME_REFERENCE.search(utt.text))
             if receiver_name_answer and change and change[0] in ("name", "both"):
@@ -832,11 +831,21 @@ class LiveFlow:
         elif what == "more_help":
             answer, utterance = value
             async with s.lock:
-                if assess(st, self.policy).stage != "more_parcels":
+                if (assess(st, self.policy).stage != "more_parcels"
+                        or self.rt(s).customer_turns[-1:] != [utterance]):
                     return
                 if answer == "more":
-                    first = "receiver_name" if st.field_of("sender_name").valid else "sender_name"
-                    facts = {"next_parcel_field": first}
+                    st.field_of("sender_name")
+                    previous = next((p.confirmed_snapshot for p in reversed(st.parcels) if p.confirmed_snapshot), None)
+                    if previous:
+                        st.current.previous_parcel_origin = Place(
+                            previous["sender_name"], previous.get("sender_phone", ""), previous["sender_address"],
+                            previous["sender_address_detail"], previous.get("sender_geo"), Source.HISTORY)
+                        st.origin_answer = None
+                        st.origin_applied = False
+                        facts = self._origin_step(st)
+                    else:
+                        facts = {"next_parcel_field": assess(st, self.policy).stages["sender"].missing[0]}
                 else:
                     facts = {"followup_help": "clarify"}
             s.spawn(self.notify(s, "N2", facts, again=True, unless_tool_turn=utterance), "more_help")
@@ -992,11 +1001,11 @@ class LiveFlow:
         return {"edit_parcel": "choose", "labels": list(labels)}
 
     def _origin_step(self, st) -> dict:
-        """잠금 안. 등록 고객의 발송 주소 확인과 자동 입력을 안내한다."""
-        c = st.customer
-        if st.origin_applied or not c.customer_seq:
+        """잠금 안. 등록 주소나 직전 택배의 발송 주소 확인과 자동 입력을 안내한다."""
+        place = origin_place(st)
+        if st.origin_applied or not (st.customer.customer_seq or st.current and st.current.previous_parcel_origin):
             return {}
-        if st.origin_answer is None and c.origin_place and not st.field_of("sender_address").valid:
+        if st.origin_answer is None and place and not st.field_of("sender_address").valid:
             st.origin_offered = True
             return {"origin_confirm": origin} if (origin := origin_confirmation(st)) else {}
         done = prefill_sender(st, full=st.origin_answer is True)
@@ -1474,6 +1483,8 @@ def _asked_pending_origin(state: ConversationState, text: str) -> bool:
         return False
     if origin == "registered" and REGISTERED_ORIGIN_QUESTION.search("".join(_last_question(text).split())):
         return True
+    if origin == "previous_parcel":
+        return "".join(_last_question(text).split()) == "이번택배도직전택배와같은발송주소에서보내실까요"
     return _greeting_offer(state, text) == "registered_origin"
 
 

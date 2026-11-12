@@ -135,7 +135,7 @@ def test_record_normalizes_reports_and_summarizes():
     assert out["facts"]["receiver_phone_readback"] == "01098765432"
     assert s.field_of("sender_phone").source == Source.CALLER_ID  # 발신번호는 서버가 채운다
     assert out["fields"]["receiver_name"] == "valid" and "sender_phone" not in out["fields"]
-    assert out["missing"][0] == "sender_address" and out["stage"] == "address"  # 등록 고객 성함은 이미 채워짐
+    assert out["missing"][0] == "sender_address" and out["stage"] == "sender"  # 등록 고객 성함은 이미 채워짐
 
 
 def test_bad_phone_and_pickup_not_saved_other_values_are():
@@ -312,7 +312,7 @@ def test_sender_address_change_finishes_before_receiver_questions(address, has_p
     assert out["origin_confirm"] == "registered" and out["missing"] == []
     request_sender_address_change(c.state)
     out = call(c, "get_state", {})
-    assert out["stage"] == "address" and out["missing"] == ["sender_address"]
+    assert out["stage"] == "sender" and out["missing"] == ["sender_address"]
 
     out = call(c, "record_fields", {"sender_address": "서울 강남구 없는로 12"})
     assert out["code"] == "ADDRESS_NOT_FOUND" and out["missing"] == ["sender_address"]
