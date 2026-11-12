@@ -218,7 +218,8 @@ def test_confirmation_reports_missing_requirements_instead_of_ready(tmp_path):
         await lf.commit(s, issue_parcel_confirmation(s.state, P, 100).id)
         [draft] = db.drafts.values()
         assert draft["status"] == "EDITING"
-        assert any(e.get("data", {}).get("content", {}).get("draft_intake") == "not_ready" for e in s.events)
+        sent = [e["data"]["content"] for e in s.events if e.get("data", {}).get("content", {}).get("draft_intake")]
+        assert sent and all(c["draft_intake"] == "not_ready" and "followup_help" not in c for c in sent)
 
     run(scenario())
 
