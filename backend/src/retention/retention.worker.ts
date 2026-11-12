@@ -2,6 +2,7 @@ import { Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy } from '@ne
 import { ConfigService } from '@nestjs/config';
 import { RecordingStorage } from '../webhooks/pbx/recording-storage';
 import { RetentionRepository } from './retention.repository';
+import { CustomersService } from '../customers/customers.service';
 
 @Injectable()
 export class RetentionWorker implements OnApplicationBootstrap, OnModuleDestroy {
@@ -14,6 +15,7 @@ export class RetentionWorker implements OnApplicationBootstrap, OnModuleDestroy 
     private readonly repository: RetentionRepository,
     private readonly storage: RecordingStorage,
     private readonly config: ConfigService,
+    private readonly customers: CustomersService,
   ) {}
 
   onApplicationBootstrap(): void {
@@ -52,7 +54,10 @@ export class RetentionWorker implements OnApplicationBootstrap, OnModuleDestroy 
         this.logger.error({ event: 'retention_recording_deferred' });
       }
     }
-    if (!this.stopped) await this.repository.purgeDatabase();
+    if (!this.stopped) {
+      await this.customers.backfillRelatedDeletion();
+      await this.repository.purgeDatabase();
+    }
   }
 
   async onModuleDestroy(): Promise<void> {

@@ -18,7 +18,7 @@ import {
 const FROM_CALLS = 'FROM call_sessions c LEFT JOIN call_analyses a USING(call_session_seq)';
 const CALL_DURATION_MS =
   '(extract(epoch FROM (COALESCE(c.ended_at,a.ai_ended_at)-COALESCE(c.started_at,a.ai_started_at)))*1000)';
-const CALL_FILTER = `WHERE c.deleted_at IS NULL AND (c.incoming_at IS NULL OR c.incoming_at>transaction_timestamp()-interval '5 years')
+const CALL_FILTER = `WHERE c.deleted_at IS NULL
  AND COALESCE(c.ended_at,a.ai_ended_at) IS NOT NULL
  AND ($1::text='ALL' OR ($1='NEW' AND a.is_new_customer IS TRUE) OR ($1='EXISTING' AND a.is_new_customer IS FALSE))`;
 
@@ -41,13 +41,12 @@ export class DashboardRepository {
        SELECT jsonb_build_object('todayOrderCount',(
         SELECT count(*) FROM orders o CROSS JOIN bounds b
         WHERE o.created_at>=b.from_at AND o.created_at<b.to_at AND o.deleted_at IS NULL
-         AND COALESCE(o.closed_at,o.created_at)>transaction_timestamp()-interval '5 years'
+         AND NOT o.migrated_to_parcel_drafts
          AND NOT EXISTS(SELECT 1 FROM order_parcel_drafts d WHERE d.legacy_order_seq=o.order_seq)
        ),'todayCallCount',(
         SELECT count(*) ${FROM_CALLS} CROSS JOIN bounds b
         WHERE COALESCE(c.started_at,a.ai_started_at,c.incoming_at)>=b.from_at
          AND COALESCE(c.started_at,a.ai_started_at,c.incoming_at)<b.to_at AND c.deleted_at IS NULL
-         AND (c.incoming_at IS NULL OR c.incoming_at>transaction_timestamp()-interval '5 years')
        )) AS data`,
       [observedAt],
       client,

@@ -287,7 +287,13 @@ BEGIN
   OR NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='public.ai_persona_versions'::regclass
    AND conname='ai_persona_deleted_inactive_check' AND convalidated) THEN
   RAISE EXCEPTION 'Persona soft deletion schema or migration missing'; END IF;
- RAISE NOTICE 'PASS: 31 public tables, 28 FKs, 10 triggers including employee policy, registered cards and persona soft deletion';
+ IF NOT EXISTS(SELECT 1 FROM db_migrations.applied_versions WHERE version='067-customer-cascade-retention.sql')
+  OR to_regclass('public.customers_related_deletion_due_idx') IS NULL
+  OR to_regclass('public.orders_deleted_retention_idx') IS NULL
+  OR to_regclass('public.calls_deleted_retention_idx') IS NULL
+  OR to_regclass('public.parcel_drafts_deleted_retention_idx') IS NULL THEN
+  RAISE EXCEPTION 'Customer cascade deletion or retention migration missing'; END IF;
+ RAISE NOTICE 'PASS: 31 public tables, 28 FKs, 10 triggers including employee policy, registered cards and customer cascade retention';
 END $$;
 SELECT version,sha256,applied_at FROM db_migrations.applied_versions ORDER BY version;
 SELECT schemaname,tablename FROM pg_tables

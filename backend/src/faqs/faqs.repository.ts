@@ -46,7 +46,7 @@ export class FaqsRepository {
              ORDER BY occurred_at DESC,faq_question_example_seq DESC LIMIT 10) e
            LEFT JOIN call_insight_events source_event ON source_event.event_id=e.event_id
            LEFT JOIN call_sessions c ON c.call_session_seq=source_event.call_session_seq
-             AND c.deleted_at IS NULL AND (c.incoming_at IS NULL OR c.incoming_at>clock_timestamp()-interval '5 years')
+             AND c.deleted_at IS NULL
          ),'[]'::jsonb) AS "recentQuestions"
          FROM faq_entries f WHERE faq_entry_seq=$1 AND deleted_at IS NULL`,
         [id],

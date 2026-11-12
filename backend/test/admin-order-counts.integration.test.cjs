@@ -200,7 +200,7 @@ test('draft counts and the incomplete list share search, date, current company, 
   assert.deepEqual((await json(await list(query))).statusCounts, empty);
 });
 
-test('migrated originals, deleted and expired orders do not contribute to actual-order counts', async () => {
+test('actual-order counts include old undeleted orders and exclude migrated originals and deleted orders', async () => {
   const q = randomUUID();
   const migrated = await order(q);
   const migratedDraft = await draft(q);
@@ -215,8 +215,14 @@ test('migrated originals, deleted and expired orders do not contribute to actual
     expired,
   ]);
   const response = await json(await list({ q }));
-  assert.deepEqual(response.statusCounts, { ...empty, all: 1, incomplete: 1 });
-  assert.equal(response.total_count, 1);
+  assert.deepEqual(response.statusCounts, { ...empty, all: 2, incomplete: 1 });
+  assert.equal(response.total_count, 2);
+  await f.pool.query('UPDATE orders SET migrated_to_parcel_drafts=true WHERE order_seq=$1', [
+    migrated,
+  ]);
+  await f.pool.query('DELETE FROM order_parcel_drafts WHERE draft_seq=$1', [migratedDraft]);
+  assert.deepEqual((await json(await list({ q }))).statusCounts, { ...empty, all: 1 });
+  await f.error(await f.write('POST', `/api/orders/${migrated}/cancel`, {}), 409, 'INVALID_STATE');
 });
 
 test('mixed order and incomplete rows paginate together and use reservation numbers without leaking snapshots', async () => {

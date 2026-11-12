@@ -5,6 +5,7 @@ import { PoolClient } from 'pg';
 import { Environment } from '../config/environment';
 import { DatabaseService } from '../database/database.service';
 import { AuditService } from '../audit/audit.service';
+import { AuditActorType } from '../audit/audit.types';
 import { ApiException } from '../common/errors/api.exception';
 import { ConsultationsService } from '../consultations/consultations.service';
 import { CardOwner, PaymentCardsRepository, StoredPaymentCard } from './payment-cards.repository';
@@ -250,12 +251,13 @@ export class PaymentCardsService {
     actor: number | null,
     requestId: string,
     except?: number,
+    actorType: AuditActorType = actor === null ? 'AI' : 'ADMIN',
   ) {
     for (const row of await this.repository.remove(client, kind, ids, except))
       await this.audit.recordSuccess(
         {
           actorId: actor,
-          actorType: actor === null ? 'AI' : 'ADMIN',
+          actorType,
           targetType: 'PAYMENT_CARD',
           targetId: row.id,
           action: 'PAYMENT_CARD_DELETED',

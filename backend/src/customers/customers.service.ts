@@ -1,5 +1,6 @@
 import { PaymentCardsService } from '../payments/payment-cards.service';
 import { Injectable } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { PoolClient } from 'pg';
 import { AuditService } from '../audit/audit.service';
 import { DatabaseService } from '../database/database.service';
@@ -15,6 +16,15 @@ import {
   ListCustomersQueryDto,
   UpdateCustomerDto,
 } from './dto/customer-request.dto';
+
+function deletionLockConflict(error: unknown): boolean {
+  return (
+    !!error &&
+    typeof error === 'object' &&
+    'code' in error &&
+    ['55P03', '40P01'].includes(String(error.code))
+  );
+}
 
 @Injectable()
 export class CustomersService {
@@ -46,12 +56,7 @@ export class CustomersService {
         await this.softDelete(client, sorted, actorId, requestId);
       });
     } catch (error) {
-      if (
-        error &&
-        typeof error === 'object' &&
-        'code' in error &&
-        ['55P03', '40P01'].includes(String(error.code))
-      )
+      if (deletionLockConflict(error))
         throw new ApiException(
           409,
           'REQUEST_IN_PROGRESS',
@@ -67,25 +72,78 @@ export class CustomersService {
     actorId: number,
     requestId: string,
   ): Promise<void> {
-    const closedOrders = await this.repository.invalidateUnstartedPayments(client, ids);
+    await this.deleteRelatedData(client, ids, actorId, requestId, null);
     await this.cards.softDelete(client, 'CUSTOMER', ids, actorId, requestId);
     await this.repository.removeMany(client, ids);
-    for (const orderId of closedOrders)
-      await this.audit.recordSuccess(
-        {
-          actorId,
-          targetId: orderId,
-          targetType: 'ORDER',
-          action: 'ORDER_PAYMENT_REQUEST_INVALIDATED',
-          requestId,
-        },
-        client,
-      );
     for (const id of ids)
       await this.audit.recordSuccess(
         { actorId, targetId: id, targetType: 'CUSTOMER', action: 'CUSTOMER_DELETED', requestId },
         client,
       );
+  }
+
+  private async deleteRelatedData(
+    client: PoolClient,
+    ids: number[],
+    actorId: number | null,
+    requestId: string,
+    cutoff: string | null,
+  ) {
+    const { orderIds, callIds } = await this.repository.lockRelatedData(client, ids, cutoff);
+    if (await this.repository.relatedDataInProgress(client, orderIds, callIds, ids))
+      throw new ApiException(
+        409,
+        'INVALID_STATE',
+        '통화·녹취·결제·접수 처리가 완료된 뒤 고객을 삭제해 주세요.',
+      );
+    const closedOrders = await this.repository.invalidateUnstartedPayments(client, orderIds);
+    const removed = await this.repository.removeRelatedData(client, ids, orderIds, callIds, cutoff);
+    for (const { rows, targetType, action } of [
+      {
+        rows: closedOrders.map((id) => ({ id })),
+        targetType: 'ORDER',
+        action: 'ORDER_PAYMENT_REQUEST_INVALIDATED',
+      },
+      { rows: removed.orders, targetType: 'ORDER', action: 'ORDER_DELETED' },
+      { rows: removed.calls, targetType: 'CALL_SESSION', action: 'CALL_DELETED' },
+      { rows: removed.drafts, targetType: 'ORDER_PARCEL_DRAFT', action: 'PARCEL_DRAFT_DELETED' },
+    ])
+      for (const { id: targetId } of rows)
+        await this.audit.recordSuccess(
+          {
+            actorId,
+            actorType: actorId === null ? 'SYSTEM' : 'ADMIN',
+            targetId,
+            targetType,
+            action,
+            requestId,
+          },
+          client,
+        );
+  }
+
+  async backfillRelatedDeletion() {
+    const id = await this.repository.claimRelatedDeletion();
+    if (id === undefined) return;
+    try {
+      await this.database.transaction(async (client) => {
+        await client.query("SET LOCAL lock_timeout='2s'");
+        const cutoff = await this.repository.lockRelatedDeletion(client, id);
+        if (cutoff === undefined) return;
+        const requestId = randomUUID();
+        await this.deleteRelatedData(client, [id], null, requestId, cutoff);
+        await this.cards.softDelete(client, 'CUSTOMER', [id], null, requestId, undefined, 'SYSTEM');
+        await this.repository.removeMany(client, [id]);
+        await this.repository.finishRelatedDeletion(client, id);
+      });
+    } catch (error) {
+      // A protected customer remains queued with its next attempt already reserved.
+      if (
+        !deletionLockConflict(error) &&
+        !(error instanceof ApiException && error.getStatus() === 409)
+      )
+        throw error;
+    }
   }
 
   // 소속 충돌 검증과 고객 잠금을 마친 호출자의 같은 트랜잭션에 참여한다.

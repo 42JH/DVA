@@ -70,7 +70,7 @@ export class AdminParcelDraftsController {
   @ApiOperation({
     summary: '배송 초안 soft delete',
     description:
-      '관리자 전용. 통화 확정 전 READY/EDITING은 삭제 불가. 초안만 일반 조회에서 숨기며 원본/재개/실제 주문과 텍스트를 연쇄 삭제하지 않습니다. 최초 보관 시작부터 5년 후 실제 폐기하며 삭제일로 연장하지 않습니다.',
+      '관리자 전용. 통화 확정 전 READY/EDITING은 삭제 불가. 초안을 일반 조회에서 숨기며 원본·재개·실제 주문은 독립적으로 보관합니다. 실제 폐기는 삭제일부터 5년 후 수행합니다.',
   })
   @ApiNoContentResponse()
   delete(@Body() input: DeleteDraftsDto, @Req() request: AuthRequest) {

@@ -488,6 +488,18 @@ test('withdrawn and deleted customer links close and never request a new provide
         204,
       );
     } else if (change === 'delete') {
+      await pool.query(
+        'UPDATE order_payment_requests SET approval_started_at=clock_timestamp(),provider_payment_key=$2 WHERE payment_request_id=$1',
+        [id, randomUUID()],
+      );
+      assert.equal(
+        (await request('/customers', { customerSeqs: [customer] }, true, 'DELETE')).status,
+        409,
+      );
+      await pool.query(
+        'UPDATE order_payment_requests SET approval_started_at=NULL,provider_payment_key=NULL WHERE payment_request_id=$1',
+        [id],
+      );
       assert.equal(
         (await request('/customers', { customerSeqs: [customer] }, true, 'DELETE')).status,
         204,
@@ -501,9 +513,10 @@ test('withdrawn and deleted customer links close and never request a new provide
       );
     }
     const current = await request(`/payments/requests/${id}`, undefined, false, 'GET');
-    assert.equal(current.status, 200);
-    assert.equal(current.body.data.status, 'CANCELLED');
-    assert.equal((await confirm(order)).status, change.startsWith('legacy-') ? 403 : 409);
+    const legacy = change.startsWith('legacy-');
+    assert.equal(current.status, legacy ? 200 : 404);
+    if (legacy) assert.equal(current.body.data.status, 'CANCELLED');
+    assert.equal((await confirm(order)).status, legacy ? 403 : 404);
     assert.ok(!calls.some((call) => call.body?.orderId === id));
     const stored = (
       await pool.query(

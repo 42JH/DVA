@@ -283,7 +283,7 @@ test('today counts use KST midnight, actual orders, call start precedence and ex
     const repository = f.app.get(DashboardRepository);
     assert.deepEqual(await repository.todayCounts(new Date(last), client), {
       todayOrderCount: 3,
-      todayCallCount: 4,
+      todayCallCount: 5,
     });
     assert.deepEqual(await repository.todayCounts(new Date(next), client), {
       todayOrderCount: 1,

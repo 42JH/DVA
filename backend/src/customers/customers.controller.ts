@@ -71,7 +71,7 @@ export class CustomersController {
   @ApiOperation({
     summary: '고객 단건·다건 soft delete',
     description:
-      '모든 ACTIVE 관리자 세션·허용 Origin 전용. customerSeqs 배열 1~100개. 고객과 소속·개인 PIN을 soft delete하며 주문·통화·결제 이력은 보존합니다. 미존재·기삭제가 있거나 감사 저장에 실패하면 전체 롤백합니다. 잠금 경합은 409입니다.',
+      '모든 ACTIVE 관리자 세션·허용 Origin 전용. customerSeqs 배열 1~100개. 고객·소속·개인 PIN·등록 카드·연결된 주문·통화·배송 초안을 소프트 삭제합니다. 진행 중인 통화·녹취·결제·접수 또는 잠금 경합은 409이며 전체 요청을 롤백합니다.',
   })
   @ApiNoContentResponse({ description: '전체 삭제 완료. 응답 본문 없음.' })
   removeMany(@Body() input: DeleteCustomersDto, @Req() request: AuthRequest) {
@@ -143,7 +143,7 @@ export class CustomersController {
     summary: '고객 이름·상태 변경',
     security: [{ adminSession: [] }, { bearer: [] }],
     description:
-      'AI는 AI_BUSINESS_TOKEN의 Bearer 인증이 필요합니다. 내 주소 수정·삭제는 call_session_seq로 진행 중인 본인 통화도 확인합니다. 관리자는 통화 헤더 없이 기존 세션과 허용 Origin으로 수정합니다. status·월결제 자격은 관리자 전용입니다. WITHDRAWN을 지정하면 고객과 소속·주소록·등록 카드를 소프트 삭제하고 승인 전 결제 링크를 닫습니다.',
+      'AI는 AI_BUSINESS_TOKEN의 Bearer 인증이 필요합니다. 내 주소 수정·삭제는 call_session_seq로 진행 중인 본인 통화도 확인합니다. 관리자는 통화 헤더 없이 기존 세션과 허용 Origin으로 수정합니다. status·월결제 자격은 관리자 전용입니다. WITHDRAWN은 고객 삭제와 같은 보호 조건으로 주문·통화·배송 초안까지 소프트 삭제합니다.',
   })
   @ApiHeader({
     name: 'call_session_seq',

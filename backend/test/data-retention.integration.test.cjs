@@ -3,6 +3,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID, randomInt, randomBytes, createHash } = require('node:crypto');
 const { ConfigService } = require('@nestjs/config');
+const { CustomersService } = require('../dist/customers/customers.service');
 const { RetentionWorker } = require('../dist/retention/retention.worker');
 const { RetentionRepository } = require('../dist/retention/retention.repository');
 const { PaymentsRepository } = require('../dist/payments/payments.repository');
@@ -12,15 +13,15 @@ const { RecordingStorage } = require('../dist/webhooks/pbx/recording-storage');
 process.env.PBX_WEBHOOK_TOKEN = randomBytes(32).toString('hex');
 const { applicationFixture, businessHeaders } = require('./helpers/application.cjs');
 const f = applicationFixture();
-async function oldCall(age = '6 years') {
+async function oldCall(age = '6 years', deletedAge = age) {
   const providerCallId = randomUUID(),
     phone = '017' + randomInt(10000000, 99999999);
   const row = (
     await f.pool.query(
-      `INSERT INTO call_sessions(provider_call_id,caller_phone_number,incoming_at,started_at,ended_at)
-    SELECT $1,$2,clock_timestamp()-$3::interval,clock_timestamp()-$3::interval,clock_timestamp()-$3::interval+interval '1 minute'
+      `INSERT INTO call_sessions(provider_call_id,caller_phone_number,incoming_at,started_at,ended_at,deleted_at)
+    SELECT $1,$2,clock_timestamp()-$3::interval,clock_timestamp()-$3::interval,clock_timestamp()-$3::interval+interval '1 minute',clock_timestamp()-$4::interval
     RETURNING call_session_seq AS id,incoming_at`,
-      [providerCallId, phone, age],
+      [providerCallId, phone, age, deletedAge],
     )
   ).rows[0];
   return { ...row, providerCallId, phone };
@@ -37,9 +38,9 @@ async function failedOrder(age = '6 years') {
     await client.query('BEGIN');
     const id = (
       await client.query(
-        `INSERT INTO orders(status,payment_method_type,total_amount,created_at,paid_at,pickup_requested_at)
+        `INSERT INTO orders(status,payment_method_type,total_amount,created_at,paid_at,pickup_requested_at,deleted_at)
       VALUES('SUBMISSION_FAILED','credit',3500,clock_timestamp()-$1::interval,
-        clock_timestamp()-$1::interval,clock_timestamp()-$1::interval) RETURNING order_seq`,
+        clock_timestamp()-$1::interval,clock_timestamp()-$1::interval,clock_timestamp()-$1::interval) RETURNING order_seq`,
         [age],
       )
     ).rows[0].order_seq;
@@ -168,6 +169,7 @@ test('S3 failures retain keys for retry, release DB locks before external reques
     repository(),
     storage(),
     new ConfigService({ NODE_ENV: 'test' }),
+    f.app.get(CustomersService),
   );
   await Promise.all([worker().run(), other.run()]);
   assert.equal(calls, 2);
@@ -198,8 +200,9 @@ test('an active PBX upload lease blocks expiry until release and cannot be recla
   assert.equal(await exists('call_sessions', 'call_session_seq', c.id), false);
 });
 
-test('incoming_at is the sole call retention clock; 7-day cleanup preserves business AI events and pending notifications', async () => {
-  const c = await oldCall('4 years');
+test('old undeleted calls and recently deleted calls survive; 7-day cleanup preserves business events', async () => {
+  const c = await oldCall('6 years', null);
+  const recentlyDeleted = await oldCall('6 years', '1 day');
   await f.pool.query(
     "INSERT INTO call_insight_events(event_id,call_session_seq,event_order,kind,occurred_at,payload,payload_hash,received_at) VALUES(gen_random_uuid(),$1,1,'AI_ACTION',clock_timestamp(),'{}',repeat('a',64),clock_timestamp()-interval '8 days')",
     [c.id],
@@ -231,6 +234,9 @@ test('incoming_at is the sole call retention clock; 7-day cleanup preserves busi
   await worker().run();
   assert.equal(await exists('call_sessions', 'call_session_seq', c.id), true);
   assert.equal(await exists('call_insight_events', 'call_session_seq', c.id), true);
+  assert.equal(await exists('call_sessions', 'call_session_seq', recentlyDeleted.id), true);
+  assert.equal((await f.get('/api/calls/' + c.id)).status, 200);
+  await f.error(await f.get('/api/calls/' + recentlyDeleted.id), 404, 'NOT_FOUND');
   assert.equal(await exists('audit_logs', 'audit_log_seq', auditIds[0]), false);
   assert.equal(await exists('audit_logs', 'audit_log_seq', auditIds[1]), true);
   assert.equal(
@@ -255,8 +261,8 @@ test('expired accepted orders purge finalized parcels, shipments, payments and c
     await client.query('BEGIN');
     id = (
       await client.query(
-        `INSERT INTO orders(status,payment_method_type,total_amount,created_at,closed_at,paid_at,pickup_requested_at,parcel_no,dver_received_at,billing_organization_seq)
-      VALUES('ACCEPTED','credit',5000,clock_timestamp()-interval '6 years',clock_timestamp()-interval '6 years',clock_timestamp()-interval '6 years',clock_timestamp()-interval '6 years','OLD00157',clock_timestamp()-interval '6 years',$1) RETURNING order_seq`,
+        `INSERT INTO orders(status,payment_method_type,total_amount,created_at,closed_at,paid_at,pickup_requested_at,parcel_no,dver_received_at,billing_organization_seq,deleted_at)
+      VALUES('ACCEPTED','credit',5000,clock_timestamp()-interval '6 years',clock_timestamp()-interval '6 years',clock_timestamp()-interval '6 years',clock_timestamp()-interval '6 years','OLD00157',clock_timestamp()-interval '6 years',$1,clock_timestamp()-interval '6 years') RETURNING order_seq`,
         [org],
       )
     ).rows[0].order_seq;
@@ -340,15 +346,29 @@ test('expired final submission failures purge their snapshots and completed paym
   assert.equal(await exists('order_parcels', 'order_seq', newer), true);
 });
 
-test('expired final submission failures retain active payment, notification and linked-call protections', async (t) => {
+test('expired final submission failures retain active payment, notification protections while keeping an independent linked call', async (t) => {
   for (const reason of ['approval', 'notification', 'completion', 'call']) {
     await t.test(reason, async () => {
       const id = await failedOrder();
       if (reason === 'call') {
-        await f.pool.query(
-          'INSERT INTO call_sessions(provider_call_id,order_seq,incoming_at) VALUES($1,$2,clock_timestamp())',
-          [randomUUID(), id],
+        const callId = (
+          await f.pool.query(
+            'INSERT INTO call_sessions(provider_call_id,order_seq,incoming_at) VALUES($1,$2,clock_timestamp()) RETURNING call_session_seq',
+            [randomUUID(), id],
+          )
+        ).rows[0].call_session_seq;
+        await repository().purgeDatabase();
+        assert.equal(await exists('orders', 'order_seq', id), false);
+        assert.equal(await exists('call_sessions', 'call_session_seq', callId), true);
+        assert.equal(
+          (
+            await f.pool.query('SELECT order_seq FROM call_sessions WHERE call_session_seq=$1', [
+              callId,
+            ])
+          ).rows[0].order_seq,
+          null,
         );
+        return;
       } else {
         await f.pool.query(
           `INSERT INTO order_payment_requests(order_seq,amount,expires_at,
@@ -373,9 +393,7 @@ test('expired final submission failures retain active payment, notification and 
       assert.equal(await exists('orders', 'order_seq', id), true);
       assert.equal(await exists('order_parcels', 'order_seq', id), true);
       // Release only this fixture's blocker and verify that expiry then removes it.
-      if (reason === 'call') {
-        await f.pool.query('UPDATE call_sessions SET order_seq=NULL WHERE order_seq=$1', [id]);
-      } else if (reason === 'approval') {
+      if (reason === 'approval') {
         await f.pool.query(
           'UPDATE order_payment_requests SET approval_claim_id=NULL,approval_claimed_until=NULL WHERE order_seq=$1',
           [id],
@@ -400,9 +418,10 @@ test('expired abandoned payment and submission states purge while current work r
     for (const age of ['6 years', '4 years']) {
       const row = (
         await f.pool.query(
-          `INSERT INTO orders(status,payment_method_type,total_amount,created_at,paid_at,pickup_requested_at,updated_at)
+          `INSERT INTO orders(status,payment_method_type,total_amount,created_at,paid_at,pickup_requested_at,updated_at,deleted_at)
       VALUES($1,'credit',3500,clock_timestamp()-$2::interval,
-        clock_timestamp()-$2::interval,clock_timestamp()-$2::interval,clock_timestamp()-$2::interval) RETURNING order_seq`,
+        clock_timestamp()-$2::interval,clock_timestamp()-$2::interval,clock_timestamp()-$2::interval,
+        CASE WHEN $2::interval=interval '6 years' THEN clock_timestamp()-$2::interval END) RETURNING order_seq`,
           [status, age],
         )
       ).rows[0];
@@ -465,6 +484,12 @@ test('expired unresolved payments leave recovery and purge without releasing ret
   await assert.rejects(
     f.app.get(OrderPaymentsService).claimApproval(expired.id, 3500, expired.key),
     (error) => error.getStatus() === 404,
+  );
+  await repository().purgeDatabase();
+  assert.equal(await exists('orders', 'order_seq', expired.orderId), true);
+  await f.pool.query(
+    "UPDATE orders SET deleted_at=clock_timestamp()-interval '6 years' WHERE order_seq=$1",
+    [expired.orderId],
   );
   await repository().purgeDatabase();
   assert.equal(await exists('orders', 'order_seq', expired.orderId), false);
@@ -610,8 +635,8 @@ test('expiry queries use time index bounds instead of filtering growing unexpire
     for (const [prefix, index] of [
       ['DELETE FROM audit_logs', 'audit_logs_retention_idx'],
       ['DELETE FROM faq_change_notifications', 'faq_notifications_retention_idx'],
-      ['SELECT call_session_seq AS id', 'call_sessions_retention_idx'],
-      ['SELECT o.order_seq AS id', 'orders_retention_idx'],
+      ['SELECT call_session_seq AS id', 'calls_deleted_retention_idx'],
+      ['SELECT o.order_seq AS id', 'orders_deleted_retention_idx'],
     ]) {
       const sql = statements.find((sql) => sql.startsWith(prefix));
       assert.ok(sql, prefix);

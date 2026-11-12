@@ -41,7 +41,7 @@ export class ConsultationsController {
   @ApiOperation({
     summary: '통화 soft delete',
     description:
-      '허용 Origin 필수. 통화와 분석·AI 이벤트·STT·녹취를 일반 조회에서 숨깁니다. 실제 폐기는 최초 incomingAt부터 5년 후 수행하며 주문은 별도로 유지합니다.',
+      '허용 Origin 필수. 통화와 분석·AI 이벤트·STT·녹취를 일반 조회에서 숨깁니다. 실제 폐기는 삭제일부터 5년 후 수행하며 주문은 별도로 유지합니다.',
   })
   @ApiResponse({ status: 204, description: '삭제 처리 완료.' })
   @ApiResponse({ status: 404, type: ErrorResponseDto, description: '없거나 삭제·만료된 통화.' })
