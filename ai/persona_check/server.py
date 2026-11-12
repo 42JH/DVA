@@ -32,7 +32,7 @@ from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
 from persona_check import judge, try_call
@@ -148,12 +148,17 @@ class Runs:
                 run["finished"] += 1
                 self._save(run)
 
+        # 운영 FAQ 저장 파일을 묶음마다 한 번 복사해 이 묶음의 통화가 함께 쓴다(시작 시점의 FAQ로 시험)
+        faq = self.root / run["runId"] / try_call.FAQ_SNAPSHOT
+        if source := os.environ.get("PERSONA_CHECK_FAQ_DB"):
+            await asyncio.to_thread(try_call.snapshot_faq, Path(source), faq)
         try:
             await asyncio.gather(*(one(item) for item in run["items"]))
             run["status"] = "done"
         finally:  # 종료로 취소되면 run.json은 running으로 남고, 다음에 읽을 때 interrupted로 보인다
             self._save(run)
             self.live.pop(run["runId"], None)
+            faq.unlink(missing_ok=True)
 
     async def stop(self) -> None:
         """돌고 있는 통화를 취소하고 끝날 때까지 기다린다(통화마다 세션을 끊고 나온다)."""
@@ -219,9 +224,15 @@ def create_app(runs: Runs, monitor: APIRouter | None = None) -> FastAPI:
         return run
 
     @api.get("/runs/{run_id}/{scenario}/{kind}")
-    async def result(run_id: str, scenario: str, kind: str) -> FileResponse:
+    async def result(run_id: str, scenario: str, kind: str) -> Response:
         if (path := runs.file(run_id, scenario, kind)) is None:
             raise HTTPException(404, "없는 결과")
+        log_path = path.with_name("call.json")
+        if kind == "record" and log_path.is_file():
+            # AI 통화 로그(call.json — 운영 AI가 통화마다 남기는 JSON 로그와 같은 모양)를 callLog로 붙인다.
+            # 백엔드 중계는 record까지만 넘겨서, AI 파트가 브라우저로 …/record 주소를 열면 로그까지 보게(11/12). 화면은 이 칸을 안 씀
+            record = json.loads(path.read_text("utf-8"))
+            return JSONResponse(record | {"callLog": json.loads(log_path.read_text("utf-8"))})
         return FileResponse(path, media_type=MEDIA[kind])
 
     app = FastAPI(title="persona check", lifespan=lifespan)

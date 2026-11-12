@@ -2,11 +2,12 @@
 
 import asyncio
 import json
+import sqlite3
 
 import httpx
 import pytest
 
-from persona_check import judge, server
+from persona_check import judge, server, try_call
 
 TOKEN = "시험용-토큰".encode().hex()
 AUTH = {"Authorization": f"Bearer {TOKEN}"}
@@ -144,6 +145,9 @@ def test_http_needs_the_token_and_serves_status(tmp_path, monkeypatch):
             assert (await http.get(f"/runs/{run_id}/A1/record", headers=AUTH)).json()["customer"]["lines"][0][1] == "AI"
             assert (await http.get(f"/runs/{run_id}/A1/audio", headers=AUTH)).status_code == 404
             (tmp_path / run_id / "A1" / "call.wav").write_bytes(b"RIFF\0\0\0\0WAVE")
+            (tmp_path / run_id / "A1" / "call.json").write_text(json.dumps({"events": [{"kind": "turn"}]}), "utf-8")
+            rec = (await http.get(f"/runs/{run_id}/A1/record", headers=AUTH)).json()
+            assert rec["callLog"] == {"events": [{"kind": "turn"}]} and rec["customer"]["lines"][0][1] == "AI"   # AI 통화 로그를 붙여 줌
             audio = await http.get(f"/runs/{run_id}/A1/audio", headers=AUTH)
             assert audio.headers["content-type"] == "audio/wav"   # 백엔드 중계가 받는 형식(Python 3.14 짐작값 audio/vnd.wave 아님)
             assert (await http.get("/runs/없는묶음", headers=AUTH)).status_code == 404
@@ -207,6 +211,35 @@ def test_a_tag_that_is_still_running_is_refused_and_an_empty_list_is_not_everyth
         assert len(seen["personas"]) == 4
 
     asyncio.run(go())
+
+
+def test_each_run_copies_the_live_faq_file_once_and_removes_it_after(tmp_path, monkeypatch):
+    source = tmp_path / "live" / "faq-events.sqlite3"
+    source.parent.mkdir()
+    db = sqlite3.connect(source)
+    db.execute("CREATE TABLE faq(x)")
+    db.execute("INSERT INTO faq VALUES (1)")
+    db.commit()
+    db.close()
+    monkeypatch.setenv("PERSONA_CHECK_FAQ_DB", str(source))
+    seen = []
+
+    async def run_one(scenario, persona, folder):
+        copy = folder.parent / try_call.FAQ_SNAPSHOT
+        db = sqlite3.connect(copy)
+        seen.append(db.execute("SELECT x FROM faq").fetchall())
+        db.close()
+        return {"passed": True, "summary": "", "checks": []}
+
+    async def go():
+        runs = server.Runs(run_one=run_one, root=tmp_path / "runs", max_concurrency=2)
+        run = runs.start(server.RunRequest(scenarios=["A1", "B3"]))
+        await finish(runs)
+        return run["runId"]
+
+    run_id = asyncio.run(go())
+    assert seen == [[(1,)], [(1,)]]                                          # 두 통화가 같은 복사본을 봄
+    assert not (tmp_path / "runs" / run_id / try_call.FAQ_SNAPSHOT).exists()   # 묶음이 끝나면 지움
 
 
 def test_a_scenario_shows_its_script_and_the_answers_the_judge_will_use(tmp_path, monkeypatch):

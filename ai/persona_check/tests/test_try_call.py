@@ -2,6 +2,7 @@
 실행기는 app/ 내부(CallService · LiveFlow · ResultService · MockBackend)를 불러다 쓴다. 그쪽이 바뀌어 조립이 깨지면 여기서 드러난다."""
 
 import asyncio
+import sqlite3
 from types import SimpleNamespace
 
 import pytest
@@ -127,3 +128,22 @@ def test_fake_geo_names_the_district_and_the_key_is_required(monkeypatch):
     monkeypatch.delenv("PERSONA_CHECK_OPENAI_API_KEY", raising=False)
     with pytest.raises(RuntimeError):
         try_call.api_key()                                                       # 운영 키(OPENAI_API_KEY)를 대신 쓰지 않는다
+
+
+def test_the_live_faq_file_is_copied_read_only_including_recent_wal_writes(tmp_path):
+    # 운영 AI는 이 파일을 WAL로 쓰며 열어 둔다 → 아직 본 파일에 옮기지 않은(WAL에만 있는) 변경까지 복사돼야 한다
+    source, target = tmp_path / "faq-events.sqlite3", tmp_path / "copy.sqlite3"
+    live = sqlite3.connect(source)
+    live.execute("PRAGMA journal_mode=WAL")
+    live.execute("PRAGMA wal_autocheckpoint=0")
+    live.execute("CREATE TABLE faq(x)")
+    live.execute("INSERT INTO faq VALUES (1), (2)")
+    live.commit()
+    before = source.read_bytes()
+    assert try_call.snapshot_faq(source, target)
+    copy = sqlite3.connect(target)
+    assert copy.execute("SELECT count(*) FROM faq").fetchone() == (2,)
+    copy.close()
+    assert source.read_bytes() == before                                     # 원본은 그대로
+    live.close()
+    assert not try_call.snapshot_faq(tmp_path / "없음.sqlite3", tmp_path / "x.sqlite3")
