@@ -99,7 +99,7 @@ export function decodeCsv(bytes: ArrayBuffer): string {
 //   하이픈 · 공백은 있어도 없어도 받고, 서버엔 숫자 11자리로 보냄 = 백엔드 사원 전화(MOBILE_PHONE_PATTERN '휴대전화 번호 11자리 문자열, 선행 0 유지')
 export const phoneDigits = (v: string) => v.replace(/[-\s]/g, '')
 const isPhone = (digits: string) => /^0\d{10}$/.test(digits)
-const PHONE_RULE = '전화번호는 010-1234-5678 형식(숫자 11자리)으로 넣어 주세요.'
+const PHONE_RULE = '전화번호는 숫자 11자리로 넣어 주세요.'
 /** 전화번호 오류 문구 (없으면 null) */
 export const phoneError = (digits: string): string | null => (isPhone(digits) ? null : PHONE_RULE)
 /** 화면에 보이는 전화번호 형식 — 치는 대로 3-4-4로 하이픈 (사원 추가 창 입력 칸). 숫자 11자리까지만 */
