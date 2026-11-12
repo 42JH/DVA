@@ -278,9 +278,8 @@ class LiveFlow:
             rt = self.rt(s)
             stage = assess(s.state, self.policy).stage
             heard_question = prev and utt.start_ms >= prev.end_ms - self.policy.confirm.answer_after_readback_tolerance_ms
-            greeting_text = (_greeting_question(rt, prev)
-                             if stage == "intent" and heard_question and rt.customer_turns[-1:] == [utt] else "")
-            greeting = _greeting_offer(s.state, greeting_text, allow_short_address=True) if greeting_text else None
+            greeting = (_greeting_offer(s.state, prev.text)
+                        if stage == "intent" and heard_question and rt.customer_turns == [utt] else None)
             origin_question = bool(heard_question and _asked_pending_origin(s.state, prev.text))
             if greeting in ("registered_origin", "origin_mentioned"):
                 s.state.origin_mentioned_in_greeting = True
@@ -324,8 +323,7 @@ class LiveFlow:
         if not questions:
             return  # 선택형 판단이 없는 단계: 부르지 않는다
         s.stats["Decision 호출"] += 1
-        previous_text = greeting_text if greeting else prev.text if prev else "(없음)"
-        text = f"직전 AI 발화: {previous_text.strip()}\n고객 발화: {utt.text.strip()}"
+        text = f"직전 AI 발화: {prev.text.strip() if prev else '(없음)'}\n고객 발화: {utt.text.strip()}"
         started = time.monotonic()
         call = asyncio.ensure_future(self.svc.d.client.decisions.create(
             model="gpt-6-luna", input=text, questions=questions))
@@ -365,10 +363,9 @@ class LiveFlow:
 
     async def _clarify_greeting(self, s: CallSession, utt: Spoken) -> None:
         async with s.lock:
-            if s.phase != Phase.ACTIVE or s.state.intent is not None or self.rt(s).customer_turns[-1:] != [utt]:
+            if s.phase != Phase.ACTIVE or s.state.intent is not None or self.rt(s).customer_turns != [utt]:
                 return
-        s.spawn(self.notify(s, "N2", {"greeting_confirmation": "ask_intent"}, again=True,
-                            unless_tool_turn=utt), "clarify_greeting")
+        s.spawn(self.notify(s, "N2", {"greeting_confirmation": "ask_intent"}), "clarify_greeting")
 
     async def apply(self, s: CallSession, utt: Spoken, prev: Spoken | None, answers: dict, pending_id: str | None,
                     *, box: BoxProposal | None = None, candidates: CandidateSet | None = None,
@@ -379,7 +376,7 @@ class LiveFlow:
             if s.closed or utt.utterance_id < rt.latest_applied:
                 s.note("Decision", "DECISION_STALE")
                 return
-            if greeting and (rt.customer_turns[-1:] != [utt] or st.intent is not None):
+            if greeting and (rt.customer_turns != [utt] or st.intent is not None):
                 return
             rt.latest_applied = utt.utterance_id
             switch = answers.get("switch")
@@ -1246,10 +1243,7 @@ class LiveFlow:
                                    wait_delegations=not parcel_added)
             if parcel_added and (s.closing_requested_t or s.closed or assess(s.state, self.policy).stage != "more_parcels"):
                 return
-            if facts.get("greeting_confirmation") == "ask_intent":
-                if s.phase != Phase.ACTIVE or s.state.intent is not None or rt.customer_turns[-1:] != [unless_tool_turn]:
-                    return
-            elif unless_tool_turn:
+            if unless_tool_turn:
                 turn = unless_tool_turn
                 if not rt.customer_turns or rt.customer_turns[-1] != turn or s.state.intent != "order":
                     return
@@ -1263,6 +1257,9 @@ class LiveFlow:
                     facts.pop("origin_confirm", None)
                 content = json.dumps(facts, ensure_ascii=False, sort_keys=True)
             if readback_id and not self._mark_readback(s, readback_id, readback_turn):
+                return
+            if facts.get("greeting_confirmation") == "ask_intent" and (
+                    s.state.intent is not None or len(rt.customer_turns) != 1):
                 return
             waited = time.monotonic() - t0
             s.timing("N2 대기(AI 발화 끝)", waited * 1000)
@@ -1418,20 +1415,7 @@ def _explicit_destination_reply(candidates: CandidateSet, question: str, text: s
     return None
 
 
-def _greeting_question(rt: Runtime, last: Spoken) -> str:
-    """한 인사가 여러 전사 조각으로 들어오면 직전 고객 발화나 완료된 질문까지 이어 읽는다."""
-    boundary = next((u.t_start for u in reversed(rt.customer_turns) if u.t_start < last.t_start), 0.0)
-    parts = [last.text]
-    for part in reversed(rt.ai):
-        if part.t_start >= last.t_start:
-            continue
-        if part.t_start <= boundary or asks(part.text):
-            break
-        parts.append(part.text)
-    return " ".join(reversed(parts))
-
-
-def _greeting_offer(state: ConversationState, text: str, *, allow_short_address: bool = False) -> str | None:
+def _greeting_offer(state: ConversationState, text: str) -> str | None:
     """첫 인사에서 실제로 들려준 접수 질문과 등록 주소를 대조한다."""
     question = _last_question(text)
     place = state.customer.origin_place
@@ -1447,17 +1431,13 @@ def _greeting_offer(state: ConversationState, text: str, *, allow_short_address:
     for expected, branch, number in parse(clean_text(place.address)):
         if not number:
             continue
-        has_sido = expected[0].endswith(("특별시", "광역시", "도", "특별자치시", "특별자치도"))
         for heard, heard_branch, heard_number in heard_parts:
-            same_road = (heard == expected or has_sido and heard[1:] == expected[1:]
-                         and heard[0] in sido_aliases(expected[0]))
-            if same_road and (heard_branch, heard_number) == (branch, number):
+            if (heard_branch, heard_number) != (branch, number):
+                continue
+            if heard == expected:
                 return "registered_origin"
-            # 인사에서는 시·도와 번호를 생략할 수 있다. 말한 지역·도로와 길 번호는 등록 값과 일치해야 한다.
-            if (allow_short_address and not heard_number and heard_branch in (None, branch)
-                    and len(heard) >= 2 and heard[-2].endswith(("시", "군", "구"))
-                    and (heard_branch or heard[-1].endswith(("로", "길")))
-                    and (same_road or has_sido and heard == expected[1:])):
+            if expected[0].endswith(("특별시", "광역시", "도", "특별자치시")) and heard[1:] == expected[1:] \
+                    and heard[0] in sido_aliases(expected[0]):
                 return "registered_origin"
     return "origin_mentioned"
 
