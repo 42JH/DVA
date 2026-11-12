@@ -15,7 +15,7 @@ ponytail: 매뉴얼 검색(Qdrant)은 붙이지 않는다 — FAQ 시나리오�
 
 통화마다 폴더 하나(기본 logs/persona_check/<날짜_시각>/):
     backend.json  가짜 백엔드가 받은 것 + 고객이 한 말(판정기 입력)      verdict.json  판정
-    call.wav      녹음(왼쪽 고객, 오른쪽 AI)      call.json  운영 통화 기록과 같은 내용      report.html  한 장 보기
+    call.wav      녹음(고객과 AI를 섞은 모노)      call.json  운영 통화 기록과 같은 내용      report.html  한 장 보기
 """
 
 import asyncio
@@ -239,7 +239,8 @@ def all_calls() -> list[dict]:
 
 
 def save_wav(path: Path, mic: CustomerTrack, ai: list) -> None:
-    """통화 녹음: 왼쪽 = 고객, 오른쪽 = AI (24kHz). ai = [(받은 시각, 소리)] — 받은 시각 자리에 놓는다."""
+    """통화 녹음: 고객과 AI를 한 소리로 섞은 모노(24kHz). ai = [(받은 시각, 소리)] — 받은 시각 자리에 놓는다.
+    좌우로 나눠 저장했더니 한쪽 귀에서만 들려 헷갈렸다(11/11 사용자)."""
     if mic.t0 is None:
         return
     left = np.frombuffer(bytes(mic.sent), dtype=np.int16)
@@ -248,12 +249,13 @@ def save_wav(path: Path, mic: CustomerTrack, ai: list) -> None:
         start = max(cursor, int((at - mic.t0) * RATE))
         placed.append((start, pcm))
         cursor = start + len(pcm)
-    out = np.zeros((max(len(left), cursor), 2), dtype=np.int16)
-    out[:len(left), 0] = left
+    out = np.zeros(max(len(left), cursor), dtype=np.int32)
+    out[:len(left)] += left
     for start, pcm in placed:
-        out[start:start + len(pcm), 1] = pcm
+        out[start:start + len(pcm)] += pcm
+    out = np.clip(out, -32768, 32767).astype(np.int16)
     with wave.open(str(path), "wb") as f:
-        f.setnchannels(2)
+        f.setnchannels(1)
         f.setsampwidth(2)
         f.setframerate(RATE)
         f.writeframes(out.tobytes())
@@ -271,7 +273,7 @@ def save_report(path: Path, title: str, record: dict, verdict: dict) -> None:
 td{{padding:4px 10px;border-bottom:1px solid #ddd;vertical-align:top}}
 td:first-child{{white-space:nowrap;color:#666}}pre{{background:#f5f5f5;padding:10px;white-space:pre-wrap;word-break:break-all}}</style>
 <h1>{html.escape(title)}</h1><p>판정: {'통과' if verdict['passed'] else '실패'} ({html.escape(verdict['summary'])})</p>
-<p>녹음(왼쪽 고객, 오른쪽 AI) <audio controls src="call.wav"></audio></p>
+<p>녹음 <audio controls src="call.wav"></audio></p>
 <table>{rows}</table>{block("판정", verdict["checks"])}{block("고객이 고른 행동", record["customer"]["choices"])}
 {block("백엔드가 받은 것", {k: record["received"][k] for k in ("drafts", "intakes", "analyses")})}""", encoding="utf-8")
 

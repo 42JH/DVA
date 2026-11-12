@@ -87,6 +87,21 @@ def test_sideband_gets_session_started_first_and_only_once():
     assert got == [captured_started, b'{"type":"session.delegation.created"}', b'{"type":"session.closed"}']
 
 
+def test_recording_mixes_customer_and_ai_into_one_channel(tmp_path):
+    pytest.importorskip("aiortc")   # 통화용 라이브러리가 없는 곳(CI)에서는 건너뛴다
+    np = pytest.importorskip("numpy")
+    import wave
+    mic = try_call.CustomerTrack()
+    mic.t0 = 100.0
+    mic.sent.extend(np.full(24000, 1000, dtype=np.int16).tobytes())                 # 고객 1초
+    ai = [(100.5, np.full(12000, 2000, dtype=np.int16)), (100.6, np.full(12000, 32000, dtype=np.int16))]  # 둘째는 앞 조각 뒤에 붙는다
+    try_call.save_wav(tmp_path / "call.wav", mic, ai)
+    with wave.open(str(tmp_path / "call.wav")) as f:
+        assert (f.getnchannels(), f.getframerate()) == (1, 24000)
+        got = np.frombuffer(f.readframes(f.getnframes()), dtype=np.int16)
+    assert len(got) == 36000 and got[0] == 1000 and got[12000] == 3000 and got[30000] == 32000   # 겹친 구간은 더한다
+
+
 def test_fake_geo_names_the_district_and_the_key_is_required(monkeypatch):
     assert try_call.fake_geo("부산광역시 해운대구 센텀중앙로 칠십구").dong_name == "해운대구"
     assert try_call.fake_geo("어딘가 길").dong_name == "시험동" and try_call.fake_geo("") is None

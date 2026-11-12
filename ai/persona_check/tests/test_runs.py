@@ -33,6 +33,7 @@ def fake_runs(tmp_path, max_concurrency=2, fail=(), seconds=0.05):
         verdict = {"scenario": scenario, "passed": scenario != "H9", "summary": "통과 2 · 실패 0 · 제외 0", "checks": [],
                    "liveSeconds": 12.0}
         (folder / "verdict.json").write_text(json.dumps(verdict, ensure_ascii=False), "utf-8")
+        (folder / "backend.json").write_text(json.dumps({"scenario": scenario, "customer": {"lines": [[1.0, "AI", "안녕하세요."]]}}), "utf-8")
         return verdict
 
     return server.Runs(run_one=run_one, root=tmp_path, max_concurrency=max_concurrency), seen
@@ -120,6 +121,7 @@ def test_http_needs_the_token_and_serves_status(tmp_path, monkeypatch):
             status = (await http.get(f"/runs/{run_id}", headers=AUTH)).json()
             assert status["status"] == "done" and status["items"][0]["passed"] is True
             assert (await http.get(f"/runs/{run_id}/A1/verdict", headers=AUTH)).json()["scenario"] == "A1"
+            assert (await http.get(f"/runs/{run_id}/A1/record", headers=AUTH)).json()["customer"]["lines"][0][1] == "AI"
             assert (await http.get(f"/runs/{run_id}/A1/audio", headers=AUTH)).status_code == 404
             assert (await http.get("/runs/없는묶음", headers=AUTH)).status_code == 404
 
