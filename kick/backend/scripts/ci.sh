@@ -19,7 +19,12 @@ cleanup() {
 
 trap cleanup EXIT
 password=$(openssl rand -hex 32)
-printf 'POSTGRES_PASSWORD=%s\n' "$password" > "$env_file"
+first_token=$(openssl rand -hex 32)
+second_token=$(openssl rand -hex 32)
+printf 'POSTGRES_PASSWORD=%s\nKICK_TEST_ACCOUNT_1_TOKEN=%s\nKICK_TEST_ACCOUNT_2_TOKEN=%s\n' \
+  "$password" "$first_token" "$second_token" > "$env_file"
 
 docker build --tag "$KICK_BACKEND_IMAGE" .
 docker compose -p "$project" --env-file "$env_file" up -d --no-build --wait --wait-timeout 90
+docker compose -p "$project" --env-file "$env_file" exec -T backend \
+  node --input-type=module < test/calls.integration.mjs

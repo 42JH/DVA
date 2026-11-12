@@ -14,6 +14,24 @@ docker compose down
 PostgreSQL은 Compose 내부 네트워크에서 접근합니다. DB 볼륨은 일반적인 `docker compose down` 후에도
 보존됩니다. 로컬 포트가 겹치면 `.env`의 `KICK_BACKEND_PORT`를 바꿉니다.
 
+## 테스트 계정과 발신
+
+앱이 시작될 때 PostgreSQL 마이그레이션을 적용하고 서로 친구인 `kick-test-1`, `kick-test-2`를
+한 번 생성합니다. 로컬 `.env`의 `KICK_TEST_ACCOUNT_1_TOKEN`과 `KICK_TEST_ACCOUNT_2_TOKEN`에
+각각 `openssl rand -hex 32`로 만든 값을 넣습니다. Lightsail 배포는 Jenkins 홈 아래
+`kick-backend/test-accounts.env`에 토큰을 한 번 생성해 재사용합니다.
+
+두 API는 계정의 토큰을 `Authorization: Bearer <token>`으로 받습니다.
+
+| 요청 | 동작 |
+| --- | --- |
+| `GET /api/friends` | 내 친구의 `id`, `displayName` 목록 |
+| `POST /api/calls` | `{"calleeId":"kick-test-2","requestId":"<클라이언트가 생성한 UUID>"}`를 받아 `REQUESTED` 상태로 저장 |
+
+발신 성공 시 `id`, `callerId`, `calleeId`, `status`, `requestedAt`을 반환합니다. 같은 발신자가
+동일한 `requestId`와 수신자로 재시도하면 기존 요청을 반환하고, 같은 ID를 다른 수신자에게 사용하면
+409를 반환합니다. 친구가 아닌 대상은 404, 잘못된 입력은 400, 토큰이 없거나 틀리면 401입니다.
+
 Jenkins Pipeline Job은 GitLab의 배포 대상 브랜치에서 `kick/backend/Jenkinsfile`을 읽습니다.
 Jenkins가 브랜치 변경을 주기적으로 확인하고 CI를 실행합니다.
 빌드는 린트, 포맷 검사, 컴파일을 실행하고 별도 Compose 프로젝트에서 앱과 PostgreSQL을 띄워 검증합니다.

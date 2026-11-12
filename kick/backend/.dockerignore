@@ -6,3 +6,5 @@
 !.prettierrc.json
 !src
 !src/**
+!migrations
+!migrations/**
