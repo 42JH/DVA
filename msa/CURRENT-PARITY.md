@@ -1008,3 +1008,10 @@ MSA #55는 operations 실패 뒤의 실제 신규 이미지 전달·DB 전달·�
 - 종합 진단의 원시 결과는 492개 일치·10개 차이다. 차이 전체가 새로 생성한 시각·SYSTEM 배송 이력/추적 UUID·프로세스별 HTTP/DB 지표임을 각 필드·타입·실행 시간 범위로 확인했다. 그 밖의 업무 값·상태·금액·ID·감사 필드는 그대로 대조했다. 지표 형식/유형과 업무 DB/주문 gauge도 일치한다. 원시 passed=false 및 원형 검증기의 미검증 테이블/분기 플래그는 보존하며 이를 전체 분기 검증 성공으로 바꾸지 않았다. 근거는 current-global-third/differential.json·classification.json이다.
 - 다섯 앱과 DB의 패키징 여섯 개가 모두 통과했다. manifest 태그·image-id.txt·CI 이미지 ID와 전체 SHA256SUMS를 확인했다. 최종 근거 대조도 passed=true이며 테스트 파일 경로 집합은 처음과 같은 69개다. 작성 변경은 msa의 기존 다섯 파일이며 backend·프론트·AI·infra/Jenkins 설정은 변경하지 않았다.
 - CI 근거는 verification-logs/current-parity/build62-final-cli의 summary.json·final-evidence-audit.json·ci-images.json·서비스별 verification.json·release-manifests와 실행 로그다. 이 후속 커밋은 보고서만 갱신한다. 같은 Jira S15P31D109-160에 후속 MR을 연결한다. 실제 새 Jenkins 실행·운영 배포·실제 S3/외부 공급자 결과와 모든 유효 분기의 형식적 동등성은 미검증이다.
+
+### 104. 실제 Jenkins #63에서 상담 조회 검증과 주문 보관 워커가 겹친 원인 수정
+
+- 실제 #63의 소스는 `f9773ef7`(!607 병합)이다. 배포 스크립트·공통 이벤트·이미지 준비와 운영 198·고객 78단계는 통과했다. 상담 검증의 읽기 전후 DB 비교에서 6년 된 주문 `9100104`가 누락되어 실패했고, 후속 주문 검증·패키징·배포는 실행되지 않았다.
+- 원본과 MSA를 생산 모드로 실행하고 조회 전 스냅샷 직후 12.5초를 기다려 실제 10초 주기의 보관 워커를 겹치게 했다. 수정 전에는 #63과 같은 주문이 누락되었고 상담 95단계에서 종료됐다. 수정 후 같은 조건에서 해당 Node 검증 4/4와 상담 전체 172단계가 통과했다.
+- 상담의 두 비교에서 6년 된 주문을 만들기 전에 두 임시 DB의 보관 작업과 같은 트랜잭션 자문 잠금을 잡고 검증 뒤 해제한다. 주문 행에는 잠금을 추가하지 않아 소유 서비스의 행 잠금 및 무변경 단언을 계속 검증한다. 운영 API, 보관 주기와 삭제 로직, DB 스키마, 테스트 파일 수(69개)는 그대로다.
+- 근거는 `verification-logs/current-parity/jenkins-63-analysis-failure.log`, `jenkins-63-scopes.json`, `build63-{old,fixed}-consultation/verification.json`과 해당 `call-analysis-run.log`다. 이 재현에서 넣은 대기는 추적 파일에 포함되지 않는다.
