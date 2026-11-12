@@ -72,7 +72,7 @@
 
 ## 3. 배송비와 결제 방식
 
-- **배송비**: 백엔드는 계산하지 않고 접수 때 검사만 한다. AI가 `config/server.toml` `[fare]`(규격 하나당 요금, 방문수거는 유인 지점 요금)로 택배별 `notifiedPrice` = 규격별 개수 × 요금의 합, `totalAmount` = 합계를 만든다(`Call.parcel_fare`). 요금이 없는 규격·기타 물품이 있으면 배송비를 모르는 것으로 보고 금액을 말하지도 보내지도 않으며 결과는 미완료(INCOMPLETE)로 보낸다. `itemPrice`(물품 가액)는 배송비와 합치지 않는다.
+- **배송비**: AI가 `config/server.toml` `[fare]`의 방문수거 요금으로 택배별 `notifiedPrice`와 주문 합계 `totalAmount`를 계산한다(`app/domain/fare.py`). 택배마다 서류는 1~10개를 한 단위, 11~20개를 두 단위로 계산하며, `documentCount`에는 실제 개수를 보낸다. 박스는 개당 부과한다. 백엔드는 접수 때 배송비를 검사한다. 요금이 없는 규격·기타 물품이 있으면 배송비를 모르는 것으로 보고 금액을 말하지도 보내지도 않으며 결과는 미완료(INCOMPLETE)로 보낸다. `itemPrice`(물품 가액)는 배송비와 합치지 않는다.
 - **결제 방식**(`app/domain/assess.auto_payment`, 2026-11-05 사용자 결정): 고객에게 묻지 않는다. `availablePaymentMethods`에 `groupBilling`이 있으면 그것, 없고 `credit`이 있으면 그것, 방식이 하나뿐이면 그것(보통 `billing`). 빈 배열(미등록·탈퇴, 통화 중 등록 실패)이면 `paymentMethodType`을 빼고 INCOMPLETE(`PAYMENT_UNKNOWN`) — 기본 billing을 넣지 않는다. 백엔드가 접수 때 자격을 다시 검사한다(403이면 실패). 자격을 켜거나 우회하는 값(`monthlyBillingEnabled` 등)은 보내지 않는다.
 - **안내**: 결제 방식·결제 안내는 말하지 않는다(2026-11-05). 결제 완료·결제 요청 발송도 말하지 않는다. notPaid 결과는 "담당자가 확인 후 안내"로 마무리한다.
 
