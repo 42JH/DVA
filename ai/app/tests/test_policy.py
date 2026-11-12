@@ -27,11 +27,15 @@ def test_receive_order_matches_call_flow_rule():
     assert POLICY.fields["sender_phone"].kind == "auto" and "sender_phone" not in order  # 발신번호, 묻지 않음
 
 
-def test_waiting_words_are_generated_not_fixed():
-    """대기 중 채우는 말은 고정 문장 없이 Live가 짓는다(2026-11-05). 끼어들기 원칙은 페르소나와 무관하게 항상 들어간다."""
+def test_waiting_guidance_limits_speech_to_one_allowed_phrase():
+    """기본·운영 페르소나 모두 같은 대기 안내와 끼어들기 규칙을 적용한다."""
     for text in (render_live(None, POLICY), render_live("운영 페르소나", POLICY)):
-        assert "정해진 문장 없이" in text and "고객이 말을 시작하면 하던 말을 바로 멈추고" in text
-        assert "대기 안내만" not in text
+        for phrase in ("네, 잠시만요.", "확인해 보겠습니다.", "잠시만 기다려 주세요."):
+            assert phrase in text
+        assert "중 하나를 골라 그 문장만 한 번 말합니다" in text
+        assert "확인 질문이나 다음 접수 질문을 덧붙이지 않습니다" in text
+        assert "고객이 말을 시작하면 하던 말을 바로 멈추고" in text
+        assert "그때그때 짓습니다" not in text
     assert "## 대기 안내" not in default_persona() and "네 고객님" not in default_persona()
 
 
