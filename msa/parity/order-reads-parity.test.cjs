@@ -872,6 +872,27 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
       assert.deepEqual(await post(event),{status:200,body:{eventId:event.eventId,status:'duplicate'}});assert.equal((await post({...event,payload:{ids:[29703]}})).status,409);assert.deepEqual(await rows(databases.order),await rows(reference));
     }finally{for(const db of [reference,databases.order])await db.query('DELETE FROM empty_ai_order_results WHERE call_session_seq=ANY($1::int[])',[ids]);}
   });
+  await t.test('the production consultation timer delivers committed call expiry to the real order owner',async()=>{
+    const id=29801,phone='01098889999',guard=await databases.consultation.connect();retention.push(guard);
+    let locked=true;
+    await guard.query("SELECT pg_advisory_lock(hashtextextended('call-end:'||$1,0))",[phone]);
+    try{
+      for(const db of [reference,databases.consultation])await db.query("INSERT INTO call_sessions(call_session_seq,provider_call_id,caller_phone_number,incoming_at,started_at,ended_at) OVERRIDING SYSTEM VALUE VALUES($1,'retention-live-owner',$2,'1980-01-01Z','1980-01-01Z','1980-01-02Z')",[id,phone]);
+      for(const db of [reference,databases.order])await db.query("INSERT INTO empty_ai_order_results(request_id,call_session_seq,received_at) VALUES('20000000-0000-4000-8000-000000029801',$1,'1980-01-01Z')",[id]);
+      const claimId=randomUUID();await reference.query("UPDATE call_sessions SET purge_claim_id=$2,purge_claimed_until=clock_timestamp()+interval '5 minutes' WHERE call_session_seq=$1",[id,claimId]);
+      const {RetentionRepository}=require('./monolith-runtime/retention/retention.repository');
+      const transaction=async work=>{const client=await reference.connect();try{await client.query('BEGIN');const value=await work(client);await client.query('COMMIT');return value;}catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}};
+      assert.equal(await new RetentionRepository({transaction}).finishCall({id,phone,claimId,keys:[]}),true);
+      await guard.query("SELECT pg_advisory_unlock(hashtextextended('call-end:'||$1,0))",[phone]);
+      locked=false;
+      const deadline=Date.now()+20000;for(;;){const call=(await databases.consultation.query('SELECT 1 FROM call_sessions WHERE call_session_seq=$1',[id])).rowCount,result=(await databases.order.query('SELECT 1 FROM empty_ai_order_results WHERE call_session_seq=$1',[id])).rowCount;if(!call&&!result)break;assert.ok(Date.now()<deadline,'production retention must erase the call and deliver its committed cleanup');await pause(100);}
+      const events=(await databases.consultation.query("SELECT event_id,delivered_at FROM outbox_events WHERE event_type='ConsultationCallsPurged' AND payload->'ids'=$1::jsonb",[JSON.stringify([id])])).rows;assert.equal(events.length,1);assert.ok(events[0].delivered_at);
+      assert.equal((await databases.order.query("SELECT 1 FROM inbox_events WHERE event_id=$1 AND source='consultation' AND event_type='ConsultationCallsPurged'",[events[0].event_id])).rowCount,1);
+      assert.equal((await reference.query('SELECT 1 FROM call_sessions WHERE call_session_seq=$1',[id])).rowCount,0);assert.equal((await reference.query('SELECT 1 FROM empty_ai_order_results WHERE call_session_seq=$1',[id])).rowCount,0);
+    }finally{
+      try{for(const db of [reference,databases.order])await db.query('DELETE FROM empty_ai_order_results WHERE call_session_seq=$1',[id]);for(const db of [reference,databases.consultation])await db.query('DELETE FROM call_sessions WHERE call_session_seq=$1',[id]);}finally{if(locked)await guard.query("SELECT pg_advisory_unlock(hashtextextended('call-end:'||$1,0))",[phone]);retention.splice(retention.indexOf(guard),1);guard.release();}
+    }
+  });
   await t.test('private queries reject forged tokens/sources and replay reads current state without writes',async()=> {
     const command={operation:'OrdersListed',id:null,callSessionSeq:1011,query:{limit:20,offset:0}};
     const event={eventId:randomUUID(),source:'order',eventType:'OrderReadRequested',payload:{command}};

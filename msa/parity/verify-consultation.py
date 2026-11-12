@@ -243,9 +243,11 @@ def main():
                 except ValueError:continue
                 if 'retentionClaims' in value:claims[side]['claims']=value
                 if 'retentionFinish' in value:claims[side]['finish']=value
-            assert set(claims[side])=={'claims','finish'}
+                if 'retentionWorker' in value:claims[side]['worker']=value
+                if 'retentionLifecycle' in value:claims[side]['lifecycle']=value
+            assert set(claims[side])=={'claims','finish','worker','lifecycle'}
         assert len(claims)==2 and claims['monolith']==claims['consultation']
-        report['retentionClaims']={'matched':True,'finishAndOutbox':True,'workerConnected':False}
+        report['retentionClaims']={'matched':True,'finishAndOutbox':True,'workerConnected':True}
         report['passed'] = True
     finally:
         for kind, name in reversed(resources):
