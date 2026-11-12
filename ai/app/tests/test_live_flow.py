@@ -1104,6 +1104,53 @@ def test_late_sender_name_uses_scope_from_the_correct_turn(scope_case):
     run(scenario())
 
 
+@pytest.mark.parametrize("scope_case", ["confirm", "save"])
+def test_registered_name_change_is_patched_as_soon_as_customer_agrees(tmp_path, scope_case):
+    """등록 이름 변경 동의 즉시(택배를 담기 전) PATCH /api/customers/{id}로 이름을 갱신한다."""
+    svc, client = flow(tmp_path)
+    api = svc.d.backend.api
+    api.add_customer(CALLER, "김철수")
+    client.decisions.create = AsyncMock(return_value=SimpleNamespace(
+        answers=[choice("sender_name_scope", "not_answer" if scope_case == "confirm" else "save"),
+                 choice("switch", "none")]))
+
+    async def scenario():
+        task = asyncio.create_task(svc.on_incoming(incoming()))
+        await until(lambda: client.conns)
+        conn = client.conns[0]
+        conn.push(started())
+        await until(lambda: svc.registry.calls["live_1"].phase == Phase.ACTIVE)
+        s = svc.registry.calls["live_1"]
+        async with s.lock:
+            s.state.intent = "order"
+            s.state.record("receiver_name", "이영희")
+        text = "보내는 분은 박영희로 할게요" if scope_case == "confirm" else "등록 이름도 박영희로 바꿔 주세요"
+        customer = asyncio.create_task(say(conn, text, 1500))
+        await until(lambda: s.rt.cust is not None)
+        conn.push({"type": "session.delegation.created", "delegation": {"id": "name"}, "offset_ms": 1500})
+        conn.push({"type": "response.event", "delegation_id": "name", "event": {
+            "type": "response.output_item.done", "item": {"type": "function_call", "call_id": "name",
+                                                         "name": "record_fields",
+                                                         "arguments": json.dumps({"sender_name": "박영희"})}}})
+        conn.push({"type": "response.event", "delegation_id": "name", "event": {"type": "response.completed"}})
+        await customer
+        await until(lambda: any(e.get("item", {}).get("call_id") == "name" for e in conn.sent))
+        if scope_case == "confirm":
+            assert api.customers[CALLER]["name"] == "김철수"  # 동의 전에는 저장하지 않는다
+            await until(lambda: "response.create" in sent_types(conn))
+            conn.push({"type": "response.event", "delegation_id": "name", "event": {"type": "response.completed"}})
+            client.decisions.create.return_value = SimpleNamespace(
+                answers=[choice("sender_name_scope", "confirm_save"), choice("switch", "none")])
+            await ai(conn, "등록 이름도 바꿔드릴까요?", 3200)
+            await say(conn, "네", 4200)
+        await until(lambda: api.customers[CALLER]["name"] == "박영희")
+        assert s.state.customer.name == "박영희" and not s.state.parcels
+        conn.push({"type": "session.closed", "reason": "remote_hangup"})
+        await task
+
+    run(scenario())
+
+
 def test_unclear_greeting_timeout_asks_only_for_intent():
     svc, client = flow()
 

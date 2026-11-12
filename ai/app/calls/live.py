@@ -111,6 +111,7 @@ class Runtime:
     confirm_t: float = 0.0                            # 관제: 확인 "네" 발화 끝(→ 담기)
     # 서버 질문(후보·확인·출발지·박스·콜백)에 답하는 발화의 Decision 반영 대기. 같은 턴의 Backend 도구 호출이 기다린다
     deciding: asyncio.Event | None = None
+    name_saving: str | None = None                    # 동의 즉시 PATCH를 보낸 등록 이름(중복 전송 방지)
 
     def cancel(self) -> None:
         for h in (self.endpoint, self.ai_end, self.commit):
@@ -458,6 +459,7 @@ class LiveFlow:
             if scope_resolved:
                 st.current.ask_customer_name_save = False
                 st.current.save_sender_name = scope_choice in ("save", "confirm_save")
+                self._maybe_save_name(s)
                 if st.pending and st.pending.kind == "parcel":
                     st.address_offer = save_offer(st) or None
             if (og := origin_answer) and og[1] >= th and og[0] in ("yes", "no") \
@@ -1075,6 +1077,20 @@ class LiveFlow:
             s.tools.ops["register"] = {"status": "running"}
             s.spawn(results.register(s, self.svc.call_session_seq), "register")
 
+    def _maybe_save_name(self, s: CallSession) -> None:
+        """등록 고객이 등록 이름 변경에 동의하면 택배를 담기 전이라도 바로 PATCH한다(사용자 결정 2026-11-12).
+        실패하면 담을 때 저장 경로(save_offer)가 다시 시도한다."""
+        results, c, draft = getattr(self.svc, "results", None), s.state.customer, s.state.current
+        if results is None or not c.customer_seq or draft is None or not draft.save_sender_name:
+            return
+        name = (draft["sender_name"].value or "").strip() if draft["sender_name"].valid else ""
+        rt = self.rt(s)
+        if not name or name == (c.name or "").strip() or name == rt.name_saving:
+            return
+        rt.name_saving = name
+        s.spawn(results.save_addresses(s, self.svc.call_session_seq, {"sender_name": name}, {"name": True}),
+                "name_save")
+
     def _maybe_submit(self, s: CallSession, force: bool = False) -> None:
         """더 없음 + 결제 방식을 알면(또는 고객이 끝낼 때) 결과 전송을 백그라운드로 시작한다(결제는 묻지 않는다)."""
         results = getattr(self.svc, "results", None)
@@ -1232,6 +1248,7 @@ class LiveFlow:
         s.note("도구", f"{name} {out.get('code') or out['status']}")
         if name == "record_fields":
             self._maybe_register(s)
+            self._maybe_save_name(s)
             if out.get("code") == "ITEM_PARCEL_UNCLEAR":
                 async with s.lock:
                     selection = self._edit(s, use_lookup=False) if s.state.unassigned_item_issues else {}
