@@ -223,6 +223,10 @@ def judge(scenario: dict, record: dict) -> dict:
             checks.append(_check("조회 실행", "1회 이상", f"{found}회", lambda _, __: found >= 1))
     else:
         raise ValueError(f"모르는 정답 종류: {want.get('outcome')!r}")
+    if want.get("faq_answers"):  # 검색 근거로 답한 횟수(통화 분석의 faqAnswerCount)
+        need = want["faq_answers"]
+        answered = sum(a.get("faqAnswerCount") or 0 for a in (got.get("analyses") or {}).values())
+        checks.append(_check("FAQ 답변", f"{need}회 이상", f"{answered}회", lambda _, __: answered >= need))
     if scenario.get("orders"):  # 심어 둔 기존 주문: 취소하기로 한 건만 취소되고 나머지는 그대로여야 한다
         cancel = want.get("receiver") if want.get("outcome") == "cancelled" else None
         expected = {o["receiver"]: "CANCELLED" if o["receiver"] == cancel else o["status"] for o in scenario["orders"]}

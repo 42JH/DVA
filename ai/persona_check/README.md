@@ -52,6 +52,7 @@ python -m pytest persona_check -q
 | `PERSONA_CHECK_MAX_CONCURRENCY` | 동시에 거는 통화 수(묶음 전체 합) | 1 |
 | `PERSONA_CHECK_HOST`, `PERSONA_CHECK_PORT` | 창구 주소 | `127.0.0.1`, `8765` |
 | `BACKEND_MODEL`, `BACKEND_EFFORT` | 위임 Backend 모델. 운영과 같은 값으로 둔다 | `gpt-6-luna`, `low` |
+| `QDRANT_URL`, `QDRANT_API_KEY`, `RAG_RERANKER_URL`, `RAG_RERANKER_API_KEY` | FAQ 검색 서버. 운영 AI 서버와 같은 값을 넣으면 FAQ 시나리오(G1)가 돈다. `QDRANT_URL`이 없으면 G1은 빠진다 | 없음 |
 | `ADDRESS_DB`, `KAKAO_REST_API_KEY` | 주소DB와 카카오 키. 둘 다 없으면 주소 정보를 고정값으로 채운다(아래 한계) | 없음 |
 | `MONITOR_USER`, `MONITOR_PASSWORD` | 주면 운영 관제 화면(`/monitor`)에 시험 통화를 띄운다. 개발 확인용 | 없음 |
 
@@ -59,7 +60,7 @@ python -m pytest persona_check -q
 
 | 요청 | 내용 |
 |---|---|
-| `GET /scenarios` | 시나리오 목록 `[{id, name, group, core}]` |
+| `GET /scenarios` | 시나리오 목록 `[{id, name, group, core, available}]`. `available`이 false면 이 환경에서 돌릴 수 없다(FAQ 검색 서버 미연결). 전체 · 핵심 묶음에서 빠지고, 골라서 요청하면 422 |
 | `POST /runs` | `{scenarios?: [ID], core?: bool, promptText?: 후보 페르소나 글, voiceId?, concurrency?}` → `202 {runId}`. 시나리오를 안 주면 전체, `core`면 핵심 묶음 |
 | `GET /runs/{runId}` | `{status: running/done/interrupted, total, finished, items: [{scenario, name, group, status: queued/running/done/error, passed, summary, error, seconds, liveSeconds}]}` |
 | `GET /runs/{runId}/{scenario}/verdict` | 판정 전체 `{passed, summary, checks: [{name, status: pass/fail/skip, expected, actual, note}]}` |
@@ -73,7 +74,7 @@ python -m pytest persona_check -q
 
 ## 시나리오와 판정
 
-시나리오 ID, 고객 발화, 공통 테스트 데이터는 AI 파트 문서 "AI 상담원 테스트 시나리오"에서 가져왔다. 지금 9개가 들어 있다: A1, A2, A4, B1, B3, E1, F1, H9, H10. 핵심 묶음은 A1, B3, E1, F1, H10이다.
+시나리오 ID, 고객 발화, 공통 테스트 데이터는 AI 파트 문서 "AI 상담원 테스트 시나리오"에서 가져왔다. 지금 10개가 들어 있다: A1, A2, A4, B1, B3, E1, F1, G1, H9, H10. 핵심 묶음은 A1, B3, E1, F1, G1, H10이다. G1(접수 중 FAQ 질문 후 복귀)은 FAQ 검색 서버가 연결된 환경에서만 돌고, **아직 실제 통화로 돌려 보지 못했다.**
 
 실제 통화로 돌려 본 것: develop-ai 4484076b(11/12 00:11)에서 E1과 H10은 통과했다. A1은 끝까지 갔고 가액만 틀렸다(아래 관찰 6). B3는 AI가 전화번호를 거절해 멈췄다(관찰 1). F1은 AI가 취소 확인을 되풀이해 취소되지 않았다(관찰 7). 6e79326e(11/12 09:09)에서 A2, A4, B1, H9를 돌렸고 네 통 모두 도중에 멈췄다(관찰 8). A2 ~ H9는 아직 통과한 적이 없어, 시나리오 정의가 맞는지 확인되지 않았다.
 
@@ -92,7 +93,7 @@ python -m pytest persona_check -q
 
 1. **입구를 우회한다.** 전화(SIP)는 걸려 온 세션을 `accept`로 설정하는데, 여기서는 `sessions.accept`를 바꿔 끼워 운영이 만든 세션 설정을 가로챈 뒤 같은 설정으로 WebRTC 세션을 만든다. 그래서 통화마다 로그에 `accept 실패 persona-check-config`가 한 줄 찍힌다. 또 WebRTC 세션은 sideband가 붙기 전에 시작돼 운영 로직이 `session.started`를 놓칠 수 있어, 데이터 채널로 받은 같은 이벤트를 sideband 맨 앞에 넣어 준다(`try_call.Sideband`). 기본 WebSocket으로 만든 세션에는 sideband가 붙지 않아(503) WebRTC를 쓴다. 전화망 구간(SIP, 8kHz 코덱, PBX 종료 웹훅)은 타지 않는다.
 2. **주소DB와 카카오 키가 없으면 주소를 검증하지 못한다.** 운영 코드는 지번 · 우편번호가 없으면 주문을 미완료로 처리하므로 고정값으로 채운다. 이때 주소와 상세주소가 갈리지 않고 들은 말 그대로 저장되어, 판정은 지역(구 · 군)만 비교하고 상세주소는 제외한다. 주소DB나 키가 있으면 전부 비교한다.
-3. **매뉴얼 검색을 붙이지 않았다.** FAQ 시나리오(G)는 돌릴 수 없다.
+3. **FAQ 시나리오는 검색 서버가 있어야 돈다.** `QDRANT_URL`이 있으면 운영과 같은 `RagService`를 붙인다. 시험 통화의 FAQ 질문이 운영과 같은 검색 서버로 간다. 검색 서버가 없는 PC에서는 확인하지 못해, G1과 이 연결은 통화 없는 테스트만 거쳤다. G2 ~ G9는 넣지 않았다.
 4. **상담원 연결, 수거 시각 시나리오는 넣지 않았다.** 결과가 통화 시각과 서버 설정에 따라 달라진다.
 5. **전화번호 문장 하나를 다르게 읽는다.** 대본의 "010-7777-8888이요"는 "…입니다"로 읽게 해 두었다(`scenarios.toml`의 `say`). AI가 "…이요"로 끝나는 번호를 거절해서 둔 임시 조치다(관찰 1). 고쳐지면 `say`를 지운다.
 6. **가짜 고객은 사람보다 늦게 대답한다.** AI 말이 끝났는지 1.5~4초 기다린 뒤 대사를 고른다(중간값 2.5초). 끼어들기와 잡음은 넣지 않았다.
@@ -105,6 +106,7 @@ python -m pytest persona_check -q
 
 - 운영 AI 서버와 **별도 프로그램**으로 띄운다. 동시 통화 상한과 OpenAI 계정 한도를 운영과 나눠 쓰지 않도록 시험 전용 키를 쓴다.
 - 서버의 주소DB(`data/address.db`)와 카카오 키를 연결하면 주소까지 검증된다.
+- FAQ 검색 서버 설정값 네 개를 넣으면 G1이 돈다.
 - WebRTC는 밖으로 나가는 UDP가 열려 있어야 한다.
 - 화면이 쓰려면 백엔드가 이 창구를 부르고 결과를 저장해야 한다.
 

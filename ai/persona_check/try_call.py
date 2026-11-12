@@ -8,7 +8,7 @@
 가로챈 뒤(intercept · capture) 같은 설정으로 WebRTC 세션을 직접 만들고 accept를 통과시킨다.
 기본 WebSocket으로 만든 세션에는 sideband가 붙지 않는다(503, 11/11 확인) — 그래서 WebRTC다(aiortc 필요).
 주소: 주소DB · 카카오 키가 없는 환경에서는 지번 · 우편번호를 고정값으로 채운다(fake_geo) — 없으면 운영 코드가 주문을 미완료로 처리한다.
-ponytail: 매뉴얼 검색(Qdrant)은 붙이지 않는다 — FAQ 시나리오를 넣을 때 더한다.
+매뉴얼 검색: QDRANT_URL이 있으면 운영과 같은 RagService를 붙인다. 없으면 붙이지 않고, FAQ가 필요한 시나리오(needs = "faq")는 돌리지 않는다.
 
     # ai/ 폴더에서 한 통(여러 통 · 화면 연동 창구는 persona_check/server.py)
     PYTHONPATH=.pydeps PERSONA_CHECK_OPENAI_API_KEY=키 python -m persona_check.try_call [시나리오ID] [페르소나.md]
@@ -199,15 +199,25 @@ def api_key() -> str:
     return key
 
 
+def faq_connected() -> bool:
+    """FAQ 검색 서버가 설정된 환경인가(운영 서버와 같은 QDRANT_URL · RAG_RERANKER_URL을 쓴다)."""
+    return bool(os.environ.get("QDRANT_URL"))
+
+
 def build(client, mock: MockBackend, workdir: Path):
-    """app/main.py lifespan과 같은 조립(관제 · FAQ · 미답변 검토 제외). workdir = 결과 아웃박스를 둘 임시 폴더."""
+    """app/main.py lifespan과 같은 조립(관제 · FAQ 동기화 · 미답변 검토 제외). workdir = 결과 아웃박스를 둘 임시 폴더.
+    FAQ 검색은 app.main.build_rag의 기본 경로(RagService(cfg.rag), 첫 검색 때 연결)와 같다."""
     cfg = load_server_config()
     backend = BackendGateway(mock, cfg.backend.max_concurrency, cfg.backend.read_budget_sec, cfg.backend.write_budget_sec)
     policy, fare_of = load_policy(), partial(parcel_fare, table=cfg.fare.model_dump())
     address = AddressService(open_db(Path(os.environ.get("ADDRESS_DB", ROOT / "data" / "address.db"))))
+    rag = None
+    if faq_connected():
+        from app.rag.service import RagService
+        rag = RagService(cfg.rag)
     calls = CallService(CallDeps(client=client, backend=backend, policy=policy, cfg=cfg.call,
                                  backend_model=os.environ.get("BACKEND_MODEL", "gpt-6-luna"),
-                                 backend_effort=os.environ.get("BACKEND_EFFORT", "low"), address=address, rag=None,
+                                 backend_effort=os.environ.get("BACKEND_EFFORT", "low"), address=address, rag=rag,
                                  rag_min_score=cfg.rag.min_score, rag_budget_sec=cfg.rag.timeout_sec))
     LiveFlow(calls)
     outbox = Outbox(workdir / "outbox.sqlite3")
@@ -296,6 +306,8 @@ async def run_call(scenario_id: str = "A1", persona: dict | None = None, bus=Non
         raise RuntimeError("통화를 걸려면 aiortc가 필요합니다(uv pip install --target .pydeps aiortc numpy)")
     persona = persona or {}
     scenario = judge.load_scenario(scenario_id)
+    if scenario.get("needs") == "faq" and not faq_connected():
+        raise RuntimeError("FAQ 검색 서버(QDRANT_URL)가 연결되지 않아 이 시나리오를 돌릴 수 없음")
     script = [line["text"] for line in scenario["lines"]]
     says = [line.get("say") or customer.spoken(line["text"]) for line in scenario["lines"]]  # 숫자는 한글 읽기로
     caller, who = scenario["caller"], scenario.get("customer")
@@ -496,6 +508,8 @@ async def run_call(scenario_id: str = "A1", persona: dict | None = None, bus=Non
     await asyncio.to_thread(save_wav, out_dir / "call.wav", mic, ai_audio)  # 큰 파일: 다른 통화의 음성 박자를 막지 않게
     await calls.results.drain()
     await address.close()
+    if calls.d.rag is not None:
+        await calls.d.rag.close()
     shutil.rmtree(workdir, ignore_errors=True)
     if calls in LIVE:
         LIVE.remove(calls)

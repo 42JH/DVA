@@ -103,6 +103,14 @@ def test_lookup_and_cancel_outcomes_watch_the_seeded_orders():
     assert not judge.judge(cancel, wrong)["passed"] and not judge.judge(lookup, wrong)["passed"]                          # 엉뚱한 주문을 취소
 
 
+def test_faq_answers_are_counted_from_the_call_analysis():
+    faq = NEW | {"expect": NEW["expect"] | {"faq_answers": 1}}
+    assert statuses(judge.judge(faq, RECORD))["FAQ 답변"] == "fail"               # 그 통화에는 FAQ 답변이 없었다
+    record = copy.deepcopy(RECORD)
+    next(iter(record["received"]["analyses"].values()))["faqAnswerCount"] = 2
+    assert statuses(judge.judge(faq, record))["FAQ 답변"] == "pass" and "FAQ 답변" not in statuses(judge.judge(NEW, record))
+
+
 def events(*rows):
     out = {}
     for order, row in enumerate(rows, 1):

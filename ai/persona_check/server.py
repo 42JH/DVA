@@ -7,7 +7,7 @@
     GET  /runs/{runId}/{scenario}/record    통화 기록: 고객이 한 말 · 고른 행동(customer), 백엔드가 받은 통화 이벤트 · 초안 · 분석(received)
     GET  /runs/{runId}/{scenario}/audio     통화 녹음(wav, 고객과 AI를 섞은 모노)
     GET  /runs/{runId}/{scenario}/report    한 장 보기(html)
-    GET  /scenarios                      시나리오 목록
+    GET  /scenarios                      시나리오 목록(available = 이 환경에서 돌릴 수 있는가)
 
 인증: Authorization: Bearer <PERSONA_CHECK_TOKEN>. 토큰이 없으면 창구를 닫는다(503).
 동시 실행: 요청의 concurrency와 PERSONA_CHECK_MAX_CONCURRENCY(기본 1) 중 작은 값. 운영과 OpenAI 계정 한도를 나눠 쓰면 1로 둔다.
@@ -52,6 +52,11 @@ class RunRequest(BaseModel):
     concurrency: int = Field(1, ge=1)
 
 
+def available(scenario: dict) -> bool:
+    """이 환경에서 돌릴 수 있는 시나리오인가. FAQ가 필요한 시나리오는 검색 서버가 연결돼 있어야 한다."""
+    return scenario.get("needs") != "faq" or try_call.faq_connected()
+
+
 class Runs:
     """시험 묶음들. run_one(시나리오ID, persona, 폴더) → 판정. 테스트는 가짜 run_one을 넣는다."""
 
@@ -65,9 +70,11 @@ class Runs:
 
     def start(self, req: RunRequest) -> dict:
         known = {s["id"]: s for s in judge.load_scenarios()}
-        ids = req.scenarios or [i for i, s in known.items() if s.get("core") or not req.core]
+        ids = req.scenarios or [i for i, s in known.items() if (s.get("core") or not req.core) and available(s)]
         if unknown := [i for i in ids if i not in known]:
             raise ValueError(f"모르는 시나리오: {unknown}")
+        if blocked := [i for i in ids if not available(known[i])]:
+            raise ValueError(f"이 환경에서 돌릴 수 없는 시나리오(FAQ 검색 서버 미연결): {blocked}")
         run = {"runId": f"{datetime.now():%m%d_%H%M%S}_{uuid.uuid4().hex[:6]}", "createdAt": datetime.now().isoformat(timespec="seconds"),
                "status": "running", "candidate": bool(req.promptText), "voiceId": req.voiceId,
                "concurrency": min(req.concurrency, self.max_concurrency), "total": len(ids), "finished": 0,
@@ -157,8 +164,8 @@ def create_app(runs: Runs, monitor: APIRouter | None = None) -> FastAPI:
 
     @api.get("/scenarios")
     async def list_scenarios() -> list[dict]:
-        return [{"id": s["id"], "name": s.get("name"), "group": s.get("group"), "core": bool(s.get("core"))}
-                for s in judge.load_scenarios()]
+        return [{"id": s["id"], "name": s.get("name"), "group": s.get("group"), "core": bool(s.get("core")),
+                 "available": available(s)} for s in judge.load_scenarios()]
 
     @api.post("/runs", status_code=202)
     async def start(req: RunRequest) -> dict:

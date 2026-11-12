@@ -61,6 +61,25 @@ def test_every_scenario_is_runnable_and_judgeable():
         assert judge.judge(s, {"received": {}})["checks"], s["id"]               # 정답이 판정기가 읽는 모양
 
 
+def test_faq_search_is_attached_only_where_the_search_server_is_configured(tmp_path, monkeypatch):
+    def rag_of():
+        client, _ = try_call.intercept(SimpleNamespace(live=SimpleNamespace(sessions=SimpleNamespace(), sideband=SimpleNamespace())))
+        calls, address = try_call.build(client, MockBackend(), tmp_path)
+
+        async def close():
+            await address.close()
+            if calls.d.rag is not None:
+                await calls.d.rag.close()                                        # 한 번도 검색하지 않았어도 닫힌다
+
+        asyncio.run(close())
+        return calls.d.rag
+
+    monkeypatch.delenv("QDRANT_URL", raising=False)
+    assert rag_of() is None and not try_call.faq_connected()
+    monkeypatch.setenv("QDRANT_URL", "http://127.0.0.1:6333")                    # 연결은 첫 검색 때 한다 — 여기서는 붙기만 한다
+    assert type(rag_of()).__name__ == "RagService" and try_call.faq_connected()
+
+
 def test_sideband_gets_session_started_first_and_only_once():
     # WebRTC 세션은 sideband가 붙기 전에 시작돼 session.started를 놓칠 수 있다 → 데이터 채널로 받은 것을 맨 앞에 넣는다
     real = b'{"event_id":"e2","type":"session.started","session":{"id":"live_x"}}'
