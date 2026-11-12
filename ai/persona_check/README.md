@@ -115,7 +115,7 @@ python -m pytest persona_check -q
 배포는 AI 서버 배포에 얹혀 있다(`deploy/upload.sh`, `deploy/deploy.sh`, `deploy/compose.persona-check.yaml`, `persona_check/Dockerfile`).
 
 - 이미지는 그 릴리스의 AI 서버 이미지 위에 `persona_check`와 WebRTC 라이브러리를 얹어 만든다. 통화 코드가 늘 운영과 같은 커밋이다.
-- 서버 설정(Jenkins 비밀 파일 `dva-ai`)에 `PERSONA_CHECK_TOKEN`이 있을 때만 뜬다. 함께 `PERSONA_CHECK_OPENAI_API_KEY`(시험 전용 키)가 있어야 한다. 동시 통화 수는 `PERSONA_CHECK_MAX_CONCURRENCY`(배포 기본 2).
+- 비밀값은 운영 비밀 파일(`dva-ai`)과 따로 둔다: Jenkins Secret file `dva-persona-check`(선택) → 서버의 `shared/persona-check.env`. 이 파일이 있을 때만 뜬다. 내용은 `PERSONA_CHECK_TOKEN`과 `PERSONA_CHECK_OPENAI_API_KEY`(시험 전용 키) 두 줄. 동시 통화 수는 `PERSONA_CHECK_MAX_CONCURRENCY`(배포 기본 2).
 - AI 서버 배포를 확인한 뒤에 띄우고, 빌드나 기동이 실패해도 AI 서버 배포는 성공으로 둔다.
 - 결과 폴더는 볼륨 `dva-persona-check_persona_check_runs`에 남는다. 릴리스가 바뀌어도 지난 결과가 조회된다.
 - 백엔드는 `http://persona-check:8765`로 부른다(네트워크 `dva-prod_ai_net`). 호스트 포트는 열지 않는다.

@@ -33,6 +33,10 @@ if [[ "$mode" == --verify-only ]]; then
 fi
 
 ssh "${options[@]}" "$server" "umask 077 && cat > $remote_root/shared/.env.tmp && mv $remote_root/shared/.env.tmp $remote_root/shared/.env" < "$AI_ENV_FILE"
+# 시험 창구(persona_check)의 비밀값은 운영 .env와 따로 둔다(Jenkins Secret file 'dva-persona-check', 선택). 없으면 올리지 않는다
+if [[ -s "${PERSONA_CHECK_ENV_FILE:-}" ]]; then
+ ssh "${options[@]}" "$server" "umask 077 && cat > $remote_root/shared/persona-check.env.tmp && mv $remote_root/shared/persona-check.env.tmp $remote_root/shared/persona-check.env" < "$PERSONA_CHECK_ENV_FILE"
+fi
 
 docker image inspect "$image" >/dev/null
 ssh "${options[@]}" "$server" "test ! -e $remote_root/releases/$version && mkdir -p $remote_root/releases/$version $remote_root/shared/data" </dev/null
