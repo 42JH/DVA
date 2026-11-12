@@ -1421,7 +1421,8 @@ def test_tool_call_on_answer_to_candidates_waits_for_pick():
             s.state.record("sender_address", "서울특별시 강남구 테헤란로 211")
             s.state.record("sender_address_detail", "")
             s.state.record("receiver_name", "현수민")
-            pin = Place("현수민", "01055556666", "부산광역시 서구 대신공원로 1", "201호", Geo("x", "y", "00000"), Source.PIN)
+            pin = Place("현수민", "01055556666", "부산광역시 서구 대신공원로 1", "201호",
+                        Geo("x", "서대신동3가", "00000"), Source.PIN)
             offer(s.state, "destination", (label,), (pin,))
         await ai(conn, f"{label}로 보내시나요?", 0)
         await say(conn, "네 서대신동이요", 1500)
@@ -1435,6 +1436,11 @@ def test_tool_call_on_answer_to_candidates_waits_for_pick():
         return conn
 
     conn = run(scenario())
+    selection = next(e["content"] for e in conn.sent
+                     if e["type"] == "session.thinking.append" and '"destination_selected"' in e["content"])
+    facts = json.loads(selection.removeprefix("[서버 결과] "))
+    assert facts["destination_selected"] == {"receiver_name": "현수민", "receiver_area": "서대신동3가"}
+    assert "picked" not in facts
     out = json.loads(next(e for e in conn.sent if e["type"] == "response.item.create")["item"]["output"])
     assert out["fields"]["receiver_phone"] == "valid" and "receiver_phone" not in out["missing"]
 

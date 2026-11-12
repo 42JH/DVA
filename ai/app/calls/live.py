@@ -20,7 +20,7 @@ from app.domain.rules import KST
 from app.domain.address_book import (begin_sender_name_change, origin_confirmation, prefill_sender,
                                      receiver_questions_deferred, request_sender_address_change, save_offer, sender_change_available,
                                      sender_change_next)
-from app.domain.assess import assess, readback_facts
+from app.domain.assess import area_label, assess, readback_facts
 from app.domain.candidates import (DESTINATION_CHANGE_FIELDS, DESTINATION_CLARIFICATIONS, apply_destination_change, apply_pick,
                                    destination_changes, offer, reject_candidates)
 from app.domain.claims import unverified_values
@@ -489,8 +489,14 @@ class LiveFlow:
                                      and (not switch or switch[1] < th or switch[0] in ("none", "lookup")))
                     if picked_lookup:
                         followups.append(("lookup_picked", lookup_order_facts(st.selected_order)))
+                    elif kind == "destination":
+                        draft = st.current
+                        followups.append(("picked", {"destination_selected": {
+                            "receiver_name": draft["receiver_name"].value,
+                            "receiver_area": area_label(draft["receiver_address"].value, draft.receiver_geo),
+                        }}))
                     else:
-                        followups.append(("picked", p[0]))
+                        followups.append(("picked", {"picked": p[0]}))
             if task and task[1] >= th and task[0] in BUSINESS + ("end",):
                 followups.append(("greeting_order", utt) if greeting and task[0] == "order" else ("intent", task[0]))
             elif greeting:
@@ -756,7 +762,7 @@ class LiveFlow:
             async with s.lock:
                 issued = issue_cancel_confirmation(st, s.tools.clock()) if st.intent == "cancel" else None
                 summary = state_summary(st, self.policy)
-            await self.notify(s, "N1'", {"picked": value, "summary": summary}
+            await self.notify(s, "N1'", value | {"summary": summary}
                               | ({"cancel_target": _order_facts(issued.snapshot)} if issued else {}))
         elif what in ("origin", "sender_change", "sender_name_scope"):
             async with s.lock:

@@ -227,6 +227,7 @@ greeting_confirmation = "confirmed면 첫 인사에 대한 접수 의사를 확�
 sender_change_next = "보내는 분 정보 변경 중 지금 할 질문. sender_name이면 새 성함만, sender_address이면 새 발송 기본주소만 묻는다. sender_address_detail이면 일반 접수와 같은 address_detail_question을 따른다. 이미 들은 값은 다시 묻지 않고 서버 기록 결과를 기다린다. 발송 기본주소와 상세주소가 기록될 때까지 받는 분 질문을 보류한다. ask_address_change이면 sender_change_question만 말한다. ask_name_save이면 '다음에도 이 이름으로 보내실 수 있게 등록 이름도 바꿔드릴까요?'라고 묻는다"
 address_detail_question = "일반 접수와 주소 변경에서 공통으로 쓰는 첫 상세주소 질문. 처음에는 예시 없이 질문만 한다. 고객이 뜻을 되묻거나 답할 내용을 몰라 할 때만 예로 설명한다"
 destination_choices = "발송 기본주소와 상세주소 기록이 끝난 뒤 서버가 지금 확인하라고 준 받는 곳 후보 이름표. 상세주소가 없다는 답도 기록 완료로 본다"
+destination_selected = "선택한 받는 곳. receiver_name은 받는 분 이름, receiver_area는 받는 지역이다. 이름을 말할 때는 'OO님께 보내시는군요'나 '받는 분은 OO님'처럼 받는 분으로 표현한다. 이미 확인한 내용은 생략해도 된다. 이어서 최신 서버 결과에 따라 다음 항목을 묻는다"
 destination_change_question = "주소록 후보에서 유지할 받는 분이나 주소가 불분명할 때 그대로 말할 확인 질문. 다른 질문은 덧붙이지 않는다"
 destination_partial_change = "받는 곳에서 새로 받는 항목. address면 기존 받는 분 성함·연락처를 쓰고, recipient면 기존 기본주소·상세주소를 쓴다. 새 값은 기록을 요청하고 missing의 첫 항목만 묻는다"
 sender_change_question = "그대로 말할 보내는 분 정보 변경 질문. 발송 주소나 다른 질문을 덧붙이지 않는다"
