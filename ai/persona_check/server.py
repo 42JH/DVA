@@ -45,12 +45,16 @@ MAX_PROMPT_CHARS = 20000  # 운영 페르소나 글 상한(config/server.toml pe
 
 
 class RunRequest(BaseModel):
-    scenarios: list[str] | None = Field(None, max_length=200)                 # 없으면 전체(core = true면 핵심만)
+    scenarios: list[str] | None = Field(None, min_length=1, max_length=200)   # 없으면 전체(core = true면 핵심만). 빈 목록은 422
     core: bool = False
     promptText: str | None = Field(None, min_length=1, max_length=MAX_PROMPT_CHARS)  # 후보 페르소나 글. 없으면 서버 기본 페르소나
     voiceId: str | None = Field(None, max_length=64)                          # promptText와 함께 줄 때만 쓰인다
     concurrency: int = Field(1, ge=1)
     tag: str | None = Field(None, min_length=1, max_length=64)                # 화면이 붙이는 표시(어느 상담가 버전의 시험인지). 창구는 뜻을 모르고 저장 · 조회만 한다
+
+
+class Busy(Exception):
+    """같은 표시(tag)의 묶음이 아직 돌고 있다. 받으면 같은 통화가 두 번 걸려 요금이 두 번 나간다."""
 
 
 def available(scenario: dict) -> bool:
@@ -70,6 +74,8 @@ class Runs:
         self.gate: asyncio.Semaphore | None = None  # 묶음이 여러 개여도 동시 통화는 max_concurrency까지
 
     def start(self, req: RunRequest) -> dict:
+        if req.tag and any(r.get("tag") == req.tag for r in self.live.values()):
+            raise Busy(f"이 표시의 시험이 이미 돌고 있음: {req.tag}")
         known = {s["id"]: s for s in judge.load_scenarios()}
         ids = req.scenarios or [i for i, s in known.items() if (s.get("core") or not req.core) and available(s)]
         if unknown := [i for i in ids if i not in known]:
@@ -201,6 +207,8 @@ def create_app(runs: Runs, monitor: APIRouter | None = None) -> FastAPI:
             return {"runId": runs.start(req)["runId"]}
         except ValueError as e:
             raise HTTPException(422, str(e)) from None
+        except Busy as e:
+            raise HTTPException(409, str(e)) from None
 
     @api.get("/runs/{run_id}")
     async def status(run_id: str) -> dict:
