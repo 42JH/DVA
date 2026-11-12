@@ -1024,3 +1024,11 @@ MSA #55는 operations 실패 뒤의 실제 신규 이미지 전달·DB 전달·�
 - DB 입력이 동일해 전체 DB 검사를 반복하지 않았다. Jenkins #59의 성공 기록을 기존 가드로 확인했고, 동일 입력으로 보존한 로컬 DB 검증은 236단계다. 앱 5개와 DB의 패키지 6개를 검증한 이미지 ID로 만들고 태그·배포 명세·전체 SHA256SUMS를 대조했다. DB 패키지는 향후 DB 배포 경로 검증용이다.
 - 실제 Jenkins의 앱 준비·적용 셸을 기존 SSH fixture로 실행했고 실패 전파도 확인했다. 격리 PostgreSQL에서 DB 백업 2개를 복원해 업무 테이블 6개를 비교하고 늦은 이벤트 차단을 확인했다. 동일한 상담 이미지로 로컬 k3s에서 정상 교체 2회와 의도적 실패 후 복원 1회를 실행했으며 그동안 health 요청 456/456건이 성공했다.
 - 결과는 `verification-logs/current-parity/build63-final-cli/`의 `summary.json`, `final-evidence-audit.json`, 서비스별 `verification.json`, `release-manifests` 및 `build63-rollout.log`에 남겼다. 검증 뒤 커밋은 이 보고서만 갱신한다. 테스트 파일 경로 69개, 운영 코드와 Jenkins 설정은 그대로다. 수정본의 실제 운영 Jenkins 실행과 운영 배포는 미검증이다. 작업은 [Jira S15P31D109-160](https://ssafy.atlassian.net/browse/S15P31D109-160)에 연결한다.
+
+### 106. Jenkins #65 주문 취소 검증의 원본 커밋 동기화
+
+- !614 병합의 Jenkins #64는 성공했고 운영 앱 5개를 배포했다. 뒤이어 원격 `develop-backend`의 `5eeacbcc`로 실행한 #65는 운영 198·고객 78·상담 172단계를 통과한 뒤 `Verify Order Parity`에서 실패했다. #65의 패키징과 배포는 실행되지 않았고, 운영 k3s의 앱 5개가 #64 이미지로 Ready임을 직접 확인했다. [Jenkins #65 콘솔](https://13.209.59.180/jenkins/job/dva-msa/65/console)
+- #65의 `reference.json`은 새 통화의 본인 결제 대기 주문 취소 수정 이전인 `fa0e4a2f`를 가리켰다. 주문 `8066`의 새 통화 부분 취소에서 비교용 모놀리스가 `409`를 반환했고 기존 검사는 `204`를 기대했다. 두 취소 API의 OpenAPI 설명도 달랐고, 첫 요청으로 달라진 저장 상태가 후속 행 비교에 영향을 줬다.
+- CI 비교 원본을 새 취소 동작이 포함된 `5eeacbcc`로 고정했다. 변경 범위는 비교 기준과 문서다. 별도 고객·기업 사원 목록 최적화는 비교용 원본에만 포함된다. 공개 선언 117개, 마이그레이션 해시, 취소 테스트 내용과 기존 테스트 파일 경로 69개가 동일하다.
+- 수정 커밋 `172ca83e`의 Linux 체크아웃에서 실제 CI 명령을 실행했다. 주문 취소 검사 13건과 서비스 비교 691단계, 배포 스크립트 130건, 계약 11건, 이벤트 단위 37건·통합 16건이 통과했다. DB 입력 동일성으로 기존 #59 검증을 재사용했다. 패키지 6개와 체크섬, 격리 DB 백업 2개 복원 및 업무 테이블 6개 비교를 통과했다. 같은 주문 이미지의 로컬 k3s 교체·실패 복원 중 readiness 요청은 419/419 성공했다.
+- 근거는 `verification-logs/current-parity/build65-final-cli/summary.json`과 `final-evidence-audit.json`, 주문 취소 실행 로그, `verification-logs/current-parity/build65-rollout.log`다. 이 보고서 커밋에는 검증한 코드 이후 실행 입력 변경이 없다. 수정본의 실제 Jenkins 실행과 운영 배포는 병합 후 확인한다.
