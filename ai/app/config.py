@@ -113,7 +113,7 @@ class CallConfig(_Strict):
     finalize_wait_sec: float = Field(5.0, gt=0)      # 정리 때 진행 작업 대기 상한
     # S5: 발화 끝 Decision·확정·전달(delegation.md §3·§6)
     utterance_gap_ms: int = Field(800, gt=0)         # 마지막 입력 delta 뒤 무 delta → 발화 끝(S0c·S0d)
-    decision_budget_sec: float = Field(1.0, gt=0)    # S0d API p95 943ms — 넘으면 판단 없음
+    decision_budget_sec: float = Field(1.5, gt=0)    # Decision 응답 예산 — 넘으면 판단 없음
     decision_min_confidence: float = Field(0.6, gt=0, le=1)  # task·switch·pick·pay 적용 하한
     unanswered_agent_after: int = Field(3, gt=0)     # 매뉴얼 검색 연속 미답변 → 상담원 권유(업무 규칙 h)
     # 상담원 연결(업무 규칙 e). 전환 대상 SIP URI가 비면 전환하지 않는다(미준비). 근무 시간 밖이면 콜백 제안
