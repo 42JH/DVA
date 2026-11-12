@@ -1,8 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { useLocation } from 'react-router'
-import { fmtMonthDay, fmtVersionTime } from '@/shared/lib/format'
-import { ymd } from '@/shared/lib/dateRange'
+import { fmtVersionTime } from '@/shared/lib/format'
 import { ApiError } from '@/shared/api/client'
 import { useSession } from '@/shared/auth/useSession'
 import type { Tone } from '@/shared/ui'
@@ -12,7 +11,6 @@ import {
   unsupportedText,
   VERSION_BADGE,
 } from '@/features/persona/labels'
-import type { TestCallTarget } from '@/features/persona/hooks/useTestCall'
 import type { EditTarget } from '@/features/persona/hooks/usePromptEditor'
 import { inlineDiff, type Part } from '@/features/persona/hooks/lineDiff'
 import { useVoiceOptions } from '@/features/persona/hooks/useVoiceOptions'
@@ -81,10 +79,9 @@ type Confirming =
   | { kind: 'delete'; personaSeq: number }
   | null
 
-// 시나리오 상세에 다녀오거나 새로고침해도 보던 상담가 · 버전 · 탭 그대로 — 기록(location.key)마다 세션 저장소에 기억
-// (메모리에만 두면 새로고침 때 프롬프트 탭으로 돌아감, 11/12 사용자). 사이드바로 새로 들어오면 새 기록이라 처음 화면
-type Tab = 'prompt' | 'test'
-type Kept = { personaSeq: number | null; historyOpen: boolean; version: number | null; tab: Tab }
+// 시나리오 시험에 다녀오거나 새로고침해도 보던 상담가 · 버전 그대로 — 기록(location.key)마다 세션 저장소에 기억
+// (메모리에만 두면 새로고침 때 처음 화면으로 돌아감, 11/12 사용자). 사이드바로 새로 들어오면 새 기록이라 처음 화면
+type Kept = { personaSeq: number | null; historyOpen: boolean; version: number | null }
 const KEEP = 'personas:view:'
 const kept = (key: string): Kept | null => {
   try {
@@ -100,14 +97,14 @@ const keep = (key: string, v: Kept) => {
     // 못 쓰면 기억하지 않을 뿐
   }
 }
-/** 시나리오 상세의 ‹ 가 넘겨 준 상담가 (새로고침 뒤라 뒤로가기가 아닌 링크로 왔을 때) → 그 상담가의 시험 탭 */
-const fromDetail = (state: unknown): Kept | null => {
-  const seq = (state as { testOf?: number } | null)?.testOf
-  return typeof seq === 'number'
-    ? { personaSeq: seq, historyOpen: false, version: null, tab: 'test' }
-    : null
+/** 시나리오 시험의 ‹ 가 넘겨 준 상담가 · 버전 (새로고침 뒤라 뒤로가기가 아닌 링크로 왔을 때) → 시험하던 버전을 가운데에
+ *  version = 지난 버전일 때만 (현재 버전이면 없음 → 상담가 유형 화면 그대로) */
+const fromTest = (state: unknown): Kept | null => {
+  const s = state as { testOf?: number; version?: number } | null
+  if (typeof s?.testOf !== 'number') return null
+  const version = typeof s.version === 'number' ? s.version : null
+  return { personaSeq: s.testOf, historyOpen: version !== null, version }
 }
-const monthDay = (iso: string) => fmtMonthDay(ymd(new Date(iso)))
 
 const POLL_MS = 2000 // 적용 대기 중일 때만 다시 받는 간격 (AI 확인으로 서버 상태가 바뀌므로)
 // '친절 안내형을' · '빠른 접수형을' — 이름 끝 글자의 받침으로 을/를
@@ -123,20 +120,18 @@ const conflictText =
 /** 07 AI 상담가 훅 (11/11 — 저장 = 새 버전, [적용] 없음)
  * 가운데 = 고른 상담가의 현재 버전(확정된 최신). 오른쪽 위 탭 [버전 히스토리] → 오른쪽이 고른 상담가의 버전 기록, 고른 버전이 가운데
  * 지난 버전: 현재 버전 기준 차이 표시 · [이 버전 다시 쓰기](그 내용을 새 버전으로 저장)
- * 통화 상담가 바꾸기 · 새 버전 반영은 [통화에 사용하기]로만. 시험 통화는 따로 (안 해도 사용 가능, 11/11 사용자) */
+ * 통화 상담가 바꾸기 · 새 버전 반영은 [통화에 사용하기]로만. 시나리오 시험은 따로 화면 (가짜 모드에서만) */
 export function usePersonaPage() {
   const { key, state } = useLocation()
-  const [back] = useState(() => (SCENARIO_TEST ? (kept(key) ?? fromDetail(state)) : null))
+  const [back] = useState(() => (SCENARIO_TEST ? (kept(key) ?? fromTest(state)) : null))
   const [personaSeq, setPersonaSeq] = useState<number | null>(back?.personaSeq ?? null) // null = 통화에 사용 중인 상담가
   const [historyOpen, setHistoryOpen] = useState(back?.historyOpen ?? false) // 오른쪽 = 버전 기록
   const [version, setVersion] = useState<number | null>(back?.version ?? null) // 기록에서 고른 버전 (null = 현재 버전)
-  const [tab, setTab] = useState<Tab>(back?.tab ?? 'prompt') // 가운데 카드 [프롬프트 | 시나리오 시험]
   useEffect(() => {
-    if (SCENARIO_TEST) keep(key, { personaSeq, historyOpen, version, tab })
-  }, [key, personaSeq, historyOpen, version, tab])
+    if (SCENARIO_TEST) keep(key, { personaSeq, historyOpen, version })
+  }, [key, personaSeq, historyOpen, version])
   const gate = useTestGate() // 전체 시나리오 시험이 끝나야 [통화에 사용하기] (가짜 모드에서만, 아니면 null)
   const [editing, setEditing] = useState(false) // 수정 화면
-  const [testing, setTesting] = useState<number | null>(null) // 시험 통화 중인 버전
   const [confirming, setConfirming] = useState<Confirming>(null)
   const [adding, setAdding] = useState(false)
   const qc = useQueryClient()
@@ -265,20 +260,6 @@ export function usePersonaPage() {
       : null
 
   const diff = viewing ? promptSections(viewing) : null
-
-  const testingVersion = all.find((v) => v.version === testing) ?? null
-  const testCall: TestCallTarget | null =
-    persona && testingVersion
-      ? {
-          personaSeq: persona.personaSeq,
-          version: testingVersion.version,
-          subtitle: [
-            persona.name,
-            fmtVersionTime(testingVersion.savedAt),
-            voiceName(testingVersion.voice.voice),
-          ].join(' · '),
-        }
-      : null
 
   const confirmView = ((): {
     title: string
@@ -422,22 +403,11 @@ export function usePersonaPage() {
       setHistoryOpen(false)
     },
 
-    // 가운데 카드 탭 — 가짜 모드가 아니면 null (탭 없이 프롬프트만)
-    tab: SCENARIO_TEST ? tab : null,
-    setTab,
-    testTarget:
-      persona && viewing
-        ? { personaSeq: persona.personaSeq, version: viewing.version, isHead: viewing === head }
+    // [시나리오 시험] — 가운데에서 보고 있는 버전의 시험 화면으로 (지난 버전도). 가짜 모드가 아니면 null (버튼 없음)
+    testTo:
+      SCENARIO_TEST && persona && viewing
+        ? `/personas/${persona.personaSeq}/tests/${viewing.version}`
         : null,
-    versionDate: (v: number) => {
-      const x = all.find((y) => y.version === v)
-      return x ? monthDay(x.savedAt) : ''
-    },
-
-    testCall,
-    // [시험 통화] — 가운데에서 보고 있는 버전으로 (지난 버전도 가능). 통화에 사용하기와는 별개 (11/11)
-    startTestCall: () => viewing && setTesting(viewing.version),
-    endTestCall: () => setTesting(null),
 
     editing,
     editTarget,

@@ -1,8 +1,8 @@
-// 시나리오 시험 상세 (11/12, Figma 1941:5457) — 통화 상세와 같은 한 화면. AI 상담가의 [시나리오 시험] 표에서 줄을 눌러 옴
+// 시나리오 시험 상세 (11/12, Figma 1941:5457) — 통화 상세와 같은 한 화면. 시나리오 시험 화면의 표에서 줄을 눌러 옴
 // 위: ‹ 시나리오 이름 · 탭 [이 버전] [통화에 사용 중] [시나리오] · 시험 시각. [시나리오] = 고객 대본 | 정답 · 행동 확인 (보기만)
 // 왼쪽 대화(누르면 그 말부터 듣기) | 오른쪽 결과표 | 맨 아래 녹음 재생
 import { useRef, type ReactNode } from 'react'
-import { Navigate, useParams } from 'react-router'
+import { Navigate, useLocation, useParams } from 'react-router'
 import { Badge, PageHead } from '@/shared/ui'
 import { Talk } from '@/shared/call/AiSteps'
 import { Player } from '@/shared/call/Player'
@@ -30,12 +30,17 @@ export function ScenarioDetailPage() {
 
 function Detail(p: { personaSeq: number; version: number; scenario: string }) {
   const vm = useScenarioDetail(p.personaSeq, p.version, p.scenario)
+  // 온 곳(시나리오 시험 화면)으로 — 주소로 바로 왔으면 이 결과의 버전 화면으로
+  const from = (useLocation().state as { from?: string } | null)?.from
   const cur = vm.current
   return (
     <>
       <PageHead
         title={vm.title}
-        back={{ to: '/personas', label: 'AI 상담가로', state: { testOf: p.personaSeq } }}
+        back={{
+          to: from ?? `/personas/${p.personaSeq}/tests/${p.version}`,
+          label: '시나리오 시험으로',
+        }}
       >
         <span className="truncate text-[13px] text-ops-sub">{vm.sub}</span>
       </PageHead>
