@@ -280,7 +280,7 @@ class LiveFlow:
             heard_question = prev and utt.start_ms >= prev.end_ms - self.policy.confirm.answer_after_readback_tolerance_ms
             greeting_text = (_greeting_question(rt, prev)
                              if stage == "intent" and heard_question and rt.customer_turns[-1:] == [utt] else "")
-            greeting = _greeting_offer(s.state, greeting_text) if greeting_text else None
+            greeting = _greeting_offer(s.state, greeting_text, allow_short_address=True) if greeting_text else None
             origin_question = bool(heard_question and _asked_pending_origin(s.state, prev.text))
             if greeting in ("registered_origin", "origin_mentioned"):
                 s.state.origin_mentioned_in_greeting = True
@@ -1431,7 +1431,7 @@ def _greeting_question(rt: Runtime, last: Spoken) -> str:
     return " ".join(reversed(parts))
 
 
-def _greeting_offer(state: ConversationState, text: str) -> str | None:
+def _greeting_offer(state: ConversationState, text: str, *, allow_short_address: bool = False) -> str | None:
     """첫 인사에서 실제로 들려준 접수 질문과 등록 주소를 대조한다."""
     question = _last_question(text)
     place = state.customer.origin_place
@@ -1447,13 +1447,17 @@ def _greeting_offer(state: ConversationState, text: str) -> str | None:
     for expected, branch, number in parse(clean_text(place.address)):
         if not number:
             continue
+        has_sido = expected[0].endswith(("특별시", "광역시", "도", "특별자치시", "특별자치도"))
         for heard, heard_branch, heard_number in heard_parts:
-            if (heard_branch, heard_number) != (branch, number):
-                continue
-            if heard == expected:
+            same_road = (heard == expected or has_sido and heard[1:] == expected[1:]
+                         and heard[0] in sido_aliases(expected[0]))
+            if same_road and (heard_branch, heard_number) == (branch, number):
                 return "registered_origin"
-            if expected[0].endswith(("특별시", "광역시", "도", "특별자치시")) and heard[1:] == expected[1:] \
-                    and heard[0] in sido_aliases(expected[0]):
+            # 인사에서는 시·도와 번호를 생략할 수 있다. 말한 지역·도로와 길 번호는 등록 값과 일치해야 한다.
+            if (allow_short_address and not heard_number and heard_branch in (None, branch)
+                    and len(heard) >= 2 and heard[-2].endswith(("시", "군", "구"))
+                    and (heard_branch or heard[-1].endswith(("로", "길")))
+                    and (same_road or has_sido and heard == expected[1:])):
                 return "registered_origin"
     return "origin_mentioned"
 
