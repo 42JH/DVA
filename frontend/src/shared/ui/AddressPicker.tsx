@@ -23,7 +23,9 @@ export function AddressPicker({
         </Btn>
       </div>
       {/* 테두리는 border로 — 안쪽 ring(inset)은 iframe에 가려 안 보였음 (11/13 사용자: 테두리 · 회색 빈 칸) */}
-      <div className="overflow-hidden rounded-md border border-ops-line">
+      {/* 카카오 글자가 화면 글자(14)보다 커서(약 17) 틀째 0.9배로 — iframe 안은 글꼴 · 크기를 못 바꿈 (11/13 사용자: 폰트 · 크기 아쉬움)
+          높이 620 × 0.9 = 보이는 높이 약 560 */}
+      <div className="overflow-hidden rounded-md border border-ops-line [zoom:0.9]">
         <KakaoPostcodeEmbed
           defaultQuery={query || undefined}
           onComplete={(a) =>
@@ -34,7 +36,7 @@ export function AddressPicker({
               postalCode: a.zonecode,
             })
           }
-          style={{ height: 480 }}
+          style={{ height: 620 }}
           // 카카오 기본 회색 바탕 → 흰 바탕 · 선은 화면 선 색. 지도 · 영문 버튼은 관리 화면에 안 씀
           theme={{ bgColor: '#FFFFFF', pageBgColor: '#FFFFFF', outlineColor: '#e3e6eb' }}
           hideMapBtn
