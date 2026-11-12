@@ -1,0 +1,28 @@
+groups:
+  - name: dva-msa
+    rules:
+      - alert: DvaMsaNoScrape
+        expr: >-
+          absent(up{job="dva-msa-app",service="operations"} == 1)
+          or absent(up{job="dva-msa-app",service="customer"} == 1)
+          or absent(up{job="dva-msa-app",service="consultation"} == 1)
+          or absent(up{job="dva-msa-app",service="delivery"} == 1)
+          or absent(up{job="dva-msa-app",service="order"} == 1)
+        for: 1m
+        annotations:
+          summary: "{{ $labels.service }} has no reachable metrics target"
+      - alert: DvaMsaDatabaseUnavailable
+        expr: dva_database_up{job="dva-msa-app"} == 0
+        for: 1m
+        annotations:
+          summary: "{{ $labels.service }} cannot connect to its database"
+      - alert: DvaMsaOutboxDelayed
+        expr: dva_outbox_oldest_pending_seconds{job="dva-msa-app"} > 300
+        for: 1m
+        annotations:
+          summary: "{{ $labels.service }} has an undelivered event older than 5m"
+      - alert: DvaMsaOutboxMetricsUnavailable
+        expr: dva_outbox_metrics_success{job="dva-msa-app"} == 0
+        for: 1m
+        annotations:
+          summary: "{{ $labels.service }} cannot read outbox metrics"
