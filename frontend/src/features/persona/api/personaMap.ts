@@ -64,7 +64,7 @@ export interface PersonaDto {
 }
 
 /** 화면의 버전 상태: 저장됨(초안 · 또는 확정만 되고 적용 안 된 HEAD) · 적용 대기 · 적용 중 · 마지막 적용(통화에 안 쓰는 페르소나의 적용본) · 지난 버전 */
-export type VersionStatus = 'SAVED' | 'PENDING' | 'ACTIVE' | 'APPLIED' | 'PAST'
+type VersionStatus = 'SAVED' | 'PENDING' | 'ACTIVE' | 'APPLIED' | 'PAST'
 
 export interface PersonaVersion {
   seq: number // aiPersonaVersionSeq — 적용 요청에 씀
@@ -83,7 +83,7 @@ export interface PersonaVersion {
 }
 
 /** 바로 앞 버전 대비 바뀐 것 — 첫 버전은 { first: true } */
-export interface VersionChange {
+interface VersionChange {
   first: boolean
   prompt: boolean
   voice: [string, string] | null

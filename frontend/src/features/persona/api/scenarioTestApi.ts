@@ -17,7 +17,7 @@ import {
 export type { TestItem, VersionTest }
 
 /** 화면을 켜는 스위치. 가짜 모드(개발 서버 + VITE_USE_MOCK)에서는 늘 켜지고,
- *  실제 창구에 붙일 때는 VITE_SCENARIO_TEST=true (백엔드 중계가 생긴 환경에서만 켬 — 없으면 요청이 404) */
+ *  실제 백엔드에 붙일 때는 VITE_SCENARIO_TEST=true (배포 빌드는 .env.production) */
 export const SCENARIO_TEST =
   import.meta.env.VITE_SCENARIO_TEST === 'true' ||
   (import.meta.env.DEV && import.meta.env.VITE_USE_MOCK === 'true')
@@ -26,7 +26,6 @@ export interface Scenario {
   id: string // 'A1' — AI 파트 문서의 번호
   name: string
   group: string // 업무 (접수 · 조회 · 취소 …)
-  core: boolean // 창구의 핵심 묶음 표시 — 화면에서는 안 씀
   available?: boolean // false = 이 환경에서 돌릴 수 없음(FAQ 검색 서버 미연결). 목록에서 뺌
 }
 

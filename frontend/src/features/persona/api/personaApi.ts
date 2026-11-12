@@ -28,17 +28,7 @@ import {
 export { PERSONA_DEMO }
 export { PROMPT_KEYS } from './personaMap'
 
-export type {
-  Persona,
-  PersonaVersion,
-  PromptFields,
-  PromptKey,
-  Speed,
-  VersionChange,
-  VersionStatus,
-  VoiceSettings,
-  WaitTime,
-} from './personaMap'
+export type { PersonaVersion, PromptFields, PromptKey, VoiceSettings } from './personaMap'
 
 export const DEFAULT_VOICE: VoiceSettings = { voice: '', speed: 'NORMAL', waitTime: 'NORMAL' } // '' = AI 기본 음성
 

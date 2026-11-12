@@ -5,7 +5,6 @@ export const SCRIPTS = {
     id: 'A1',
     name: '신규 고객 기본 접수',
     group: '접수',
-    core: true,
     caller: '신규 고객',
     lines: [
       {
@@ -112,7 +111,6 @@ export const SCRIPTS = {
     id: 'A2',
     name: '등록 고객, 주소록 1건 매칭',
     group: '접수',
-    core: false,
     caller: '등록 고객 김민수',
     lines: [
       {
@@ -184,7 +182,6 @@ export const SCRIPTS = {
     id: 'A4',
     name: '등록 고객, 주소록에 없는 새 받는 분',
     group: '접수',
-    core: false,
     caller: '등록 고객 김민수',
     lines: [
       {
@@ -260,7 +257,6 @@ export const SCRIPTS = {
     id: 'B1',
     name: '한 번에 여러 정보 말하기',
     group: '정보 수집',
-    core: false,
     caller: '등록 고객 김민수',
     lines: [
       {
@@ -316,7 +312,6 @@ export const SCRIPTS = {
     id: 'B3',
     name: '앞 항목 정정',
     group: '정보 수집',
-    core: true,
     caller: '등록 고객 김민수',
     lines: [
       {
@@ -395,7 +390,6 @@ export const SCRIPTS = {
     id: 'E1',
     name: '1건 조회',
     group: '조회',
-    core: true,
     caller: '등록 고객 김민수',
     lines: [
       {
@@ -434,7 +428,6 @@ export const SCRIPTS = {
     id: 'F1',
     name: '취소 가능한 택배 취소',
     group: '취소',
-    core: true,
     caller: '등록 고객 김민수',
     lines: [
       {
@@ -477,7 +470,6 @@ export const SCRIPTS = {
     id: 'G1',
     name: '접수 중 FAQ 질문 후 복귀',
     group: '문의',
-    core: true,
     caller: '등록 고객 김민수',
     lines: [
       {
@@ -553,7 +545,6 @@ export const SCRIPTS = {
     id: 'H9',
     name: '접수 중 중도 포기',
     group: '종료',
-    core: false,
     caller: '등록 고객 김민수',
     lines: [
       {
@@ -585,7 +576,6 @@ export const SCRIPTS = {
     id: 'H10',
     name: '무응답',
     group: '종료',
-    core: true,
     caller: '등록 고객 김민수',
     lines: [
       {
