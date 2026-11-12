@@ -1,4 +1,4 @@
-import { createBrowserRouter, Navigate, redirect } from 'react-router'
+import { createBrowserRouter, Navigate } from 'react-router'
 import { LoginPage } from '@/features/auth/components/LoginPage'
 import { PendingPage } from '@/features/auth/components/PendingPage'
 import { SignupPage } from '@/features/auth/components/SignupPage'
@@ -143,14 +143,6 @@ export const router = createBrowserRouter([
               import('@/features/me/components/MePage').then((m) => ({ Component: m.MePage })),
           },
         ],
-      },
-      // 11/09 전 주소(/v2/...) 즐겨찾기 · 공유 링크 → 같은 화면 새 주소로
-      {
-        path: '/v2/*',
-        loader: ({ request }) => {
-          const u = new URL(request.url)
-          return redirect((u.pathname.replace(/^\/v2/, '') || '/') + u.search)
-        },
       },
       { path: '*', element: <Navigate to="/" replace /> },
     ],
