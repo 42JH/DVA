@@ -24,7 +24,7 @@ class ToolContext:
     now: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
     clock: Callable[[], float] = time.time       # 서버 수신 시계(확인 발급 issued_t)
     # 설정(기존 값: tools/context.py·config)
-    tool_budget_sec: float = 3.0                  # error-recovery.md §3 읽기 도구
+    tool_budget_sec: float = 3.5                  # error-recovery.md §3 읽기 도구. 주소 예산(3초)보다 길어야 record_fields가 들은 값이라도 기록한다
     rag_budget_sec: float = 12.0                  # 원본 [rag] timeout_sec(RAG 담당 설정을 따른다)
     rag_min_score: float | None = None
     pin_recent_count: int = 5

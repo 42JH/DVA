@@ -329,7 +329,7 @@ MARGIN = 1.0       # 1등과 이만큼 이상 차이 나야 확정. 안 나면 �
 
 
 RETRY_GROUPS = 8     # 다시 볼 표기 묶음 상한(묶음당 표기 1~2개)
-RETRY_SEC = 1.0      # 다시 보기 시간 상한. 넘으면 못 찾음 — AddressService 예산(2.5초) 초과는 "장애"로 들은 값을 기록하게 되므로
+RETRY_SEC = 1.0      # 다시 보기 시간 상한. 넘으면 못 찾음 — AddressService 예산(3초) 초과는 "장애"로 들은 값을 기록하게 되므로
 
 
 def resolve(db, heard: str, clock=time.monotonic, deadline: float | None = None,

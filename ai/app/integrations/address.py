@@ -2,7 +2,7 @@
 
 - 보정은 전용 스레드풀에서 돈다(concurrency.md §6.2 "주소 보정 실행기", 이벤트 루프를 막지 않음).
 - 카카오는 공유 클라이언트 1개 + 세마포어(호출 한도 [미확인]).
-- 예산 2.5초(error-recovery.md §3). 장애·초과는 status="error" — 호출자는 들은 값으로 진행하고 geo 없음으로 둔다.
+- 예산 3초(error-recovery.md §3). 장애·초과는 status="error" — 호출자는 들은 값으로 진행하고 geo 없음으로 둔다.
 - 주소DB가 없으면(db=None) status="off": 들은 그대로 기록하고 geo만 찾는다.
 """
 
@@ -36,7 +36,7 @@ class AddressResult:
 
 class AddressService:
     def __init__(self, db: AddressDB | None = None, workers: int = 2, kakao_concurrency: int = 8,
-                 kakao_timeout_sec: float = 3.0, budget_sec: float = 2.5, http: httpx2.AsyncClient | None = None):
+                 kakao_timeout_sec: float = 3.0, budget_sec: float = 3.0, http: httpx2.AsyncClient | None = None):
         self.db = db
         self.pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="address")
         self.kakao_sem = asyncio.Semaphore(kakao_concurrency)
