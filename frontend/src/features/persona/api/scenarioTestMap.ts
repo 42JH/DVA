@@ -82,3 +82,25 @@ export function unwrap<T>(body: unknown): T {
   }
   return body as T
 }
+
+/** 시험 시작 요청의 본문. 통화 요금이 드는 요청이라 잘못된 입력은 보내지 않고 던짐
+ *  - 글이 비면 창구가 자기 기본 페르소나로 통화를 걸고, 그 결과에 이 버전의 표시(tag)가 붙어 버림
+ *  - scenarios가 빈 배열이면 창구가 '전체 실행'으로 받음 (전체는 scenarios를 아예 안 보낼 때만) */
+export function runBody(input: {
+  personaSeq: number
+  version: number
+  promptText: string
+  voiceId: string | null
+  scenarios?: string[]
+  concurrency: number
+}) {
+  if (!input.promptText.trim()) throw new Error('promptText is empty')
+  if (input.scenarios && input.scenarios.length === 0) throw new Error('scenarios is empty')
+  return {
+    scenarios: input.scenarios,
+    promptText: input.promptText,
+    voiceId: input.voiceId ?? undefined,
+    tag: tagOf(input.personaSeq, input.version),
+    concurrency: input.concurrency,
+  }
+}

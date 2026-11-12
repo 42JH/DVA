@@ -97,11 +97,24 @@ export function useScenarioTest(me: TestTarget, dateOf: (version: number) => str
   const qc = useQueryClient()
   // 시험은 실제 통화라 요금이 듦 → 누르면 한 번 묻고 시작 (11/12 사용자: 실수로 눌러도 바로 걸리면 안 됨)
   const [asking, setAsking] = useState<{ title: string; scenarios?: string[] } | null>(null)
+  const testsKey = scenarioTestQueries.tests().queryKey
   const start = useMutation({
     mutationFn: startTest,
     onSuccess: () => {
       setAsking(null)
-      return qc.invalidateQueries({ queryKey: scenarioTestQueries.tests().queryKey })
+      return qc.invalidateQueries({ queryKey: testsKey })
+    },
+    // 응답을 못 받아도(시간 초과 등) 창구는 이미 통화를 걸기 시작했을 수 있음 → 다시 보내지 않고 묶음 목록으로 확인.
+    // 이 버전이 시험 중이면 시작된 것이므로 창을 닫음 (다시 누르면 통화가 두 번 걸려 요금이 두 번 나감)
+    onError: async () => {
+      await qc.invalidateQueries({ queryKey: testsKey })
+      const running = qc
+        .getQueryData(testsKey)
+        ?.some(
+          (t) =>
+            t.personaSeq === me.personaSeq && t.version === me.version && t.status === 'running',
+        )
+      if (running) setAsking(null)
     },
   })
   const r = d.read(me)
@@ -159,7 +172,9 @@ export function useScenarioTest(me: TestTarget, dateOf: (version: number) => str
     confirm: asking && {
       title: asking.title,
       busy: start.isPending,
-      error: start.isError ? '시험을 시작하지 못했습니다. 다시 시도해 주세요.' : null,
+      error: start.isError
+        ? '시작을 확인하지 못했습니다. 표에 시험 중이 없을 때만 다시 시작해 주세요.'
+        : null,
       ok: () =>
         start.mutate({
           personaSeq: me.personaSeq,

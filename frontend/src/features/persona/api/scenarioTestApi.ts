@@ -7,7 +7,7 @@ import { queryOptions } from '@tanstack/react-query'
 import { api, API_BASE_URL } from '@/shared/api/client'
 import {
   runsToTests,
-  tagOf,
+  runBody,
   unwrap,
   type RunDto,
   type TestItem,
@@ -112,20 +112,14 @@ export const scenarioTestQueries = {
 const CONCURRENCY = 2 // 동시에 거는 통화 수 — 창구가 자기 상한(PERSONA_CHECK_MAX_CONCURRENCY)까지로 줄임
 
 /** 시험 시작 — 그 버전의 페르소나 글로 통화를 걺. scenarios를 주면 그것만(연결 실패 다시 시험), 없으면 전체
- *  voiceId null = AI 기본 음성. 묶음에 '상담가 번호:버전' 표시를 붙여 나중에 버전별로 모음 */
-export const startTest = (input: {
+ *  voiceId null = AI 기본 음성. 묶음에 '상담가 번호:버전' 표시를 붙여 나중에 버전별로 모음
+ *  요금이 드는 요청: 글이 비었거나 scenarios가 빈 배열이면 보내지 않고 실패(runBody). 실패해도 자동으로 다시 보내지 않음 */
+export const startTest = async (input: {
   personaSeq: number
   version: number
   promptText: string
   voiceId: string | null
   scenarios?: string[]
-}): Promise<void> =>
-  api.post('/persona-check/runs', {
-    body: {
-      scenarios: input.scenarios,
-      promptText: input.promptText,
-      voiceId: input.voiceId ?? undefined,
-      tag: tagOf(input.personaSeq, input.version),
-      concurrency: CONCURRENCY,
-    },
-  })
+}): Promise<void> => {
+  await api.post('/persona-check/runs', { body: runBody({ ...input, concurrency: CONCURRENCY }) })
+}
