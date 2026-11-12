@@ -897,3 +897,10 @@ MSA #55는 operations 실패 뒤의 실제 신규 이미지 전달·DB 전달·�
 - DDL/DB 검사 입력이 같음을 기존 ci_verification.reuse_database가 확인해 11cca4d7의 실제 DB 236단계 성공 근거를 재사용했다. DB 전체 검사를 반복하지 않았다. 변경 없는 배포·선택·이력·롤백 130건도 검증 입력의 바이트 일치를 확인해 재사용했다. 서비스별 비교용 격리 DB에는 스키마를 적용했다.
 - 다섯 앱과 DB 패키징·이미지 ID·manifest 태그 치환·전체 SHA256SUMS가 통과했다. 로컬 검증 보조 스크립트의 이미지 전송 경로 오류는 기존 읽기 전용 전송 마운트로 바로잡았고, 이미 성공한 동일 커밋의 이미지/공통 검증을 확인한 뒤 재생성 없이 나머지 서비스와 패키징부터 이어 실행했다. 운영 Jenkins 설정·슬롯·Job에는 접근하거나 변경하지 않았다.
 - 근거는 verification-logs/current-parity/customer-retention-cli/summary.json·ci-images.json·서비스별 verification.json·release-manifests와 실행 로그다. 테스트 파일 경로는 최초와 같은 69개다. 최신 원격은 여전히 fcf482bc/원본 ce88b8e3이며 이 후속 커밋은 검증 보고만 추가한다. 고객 보관 묶음을 MR로 제출하고 상담 보관 이식을 이어간다. 실제 새 Jenkins 실행·운영 배포와 전체 MSA 동등성 완료는 미검증이다.
+
+### 88. 상담 보관의 만료 작업 임대와 녹취 키 준비
+
+- 고객 보관은 MR !589/049838ca와 Jira S15P31D109-160에 연결했다. 이후 feature/msa-call-retention에서 원본의 claimCall·renew·defer를 consultation 소유 DB에 이식했다. 원본의 incoming_at 5년 기준·후보 10건·전화번호 advisory lock·수신함/통화 행 잠금·5분 임대·1분 지연·UUID fencing과 업로드 후 INSERT 전 객체 키까지 포함한 중복 없는 키 목록을 유지한다. 모듈과 자동 삭제 워커는 아직 연결하지 않았다.
+- 기존 consultation-pbx 검증 파일에 임대 대조를 넣고 별도 test 환경에서 원본/분리 DB를 각각 실행했다. 최근 incoming_at과 시각 없는 legacy 통화는 제외되고, 전화번호·수신함·통화 잠금과 살아 있는 PBX 업로드 임대는 만료 처리를 막았다. 동시 작업자 둘 중 하나만 임대를 얻고 임대 후 DB 잠금은 해제됐다. 잘못된 UUID의 갱신, 만료 뒤 갱신과 재임대 이후 이전 작업자의 지연 처리는 상태를 바꾸지 않았다. 녹취 행과 미저장 업로드의 두 키가 원본과 일치했다.
+- 원본 운영 이미지에 test 디렉터리가 없어 개별 파일 복사가 실패하는 조건을 실제 확인했다. 원본에는 검증 디렉터리 전체를 만들며 복사하고 기존 MSA checks 이미지의 복사 동작은 유지했다. 최종 실제 두 DB의 집중 드라이버 30단계가 통과했다. 상담 checks의 Jest 10·보안 9·Node 37건도 통과했다. 근거는 call-retention-claims-native/verification.json과 call-retention-claims-native-final.log다.
+- 새로운 테스트 파일과 DDL은 없다. 이 단계의 성공은 상담 전체 보관 완료나 실제 S3 객체 삭제/운영 배포를 뜻하지 않는다. 다음 단위에서 통화 자식 삭제·order의 empty 결과 정리·S3 실패 재시도와 워커를 연결한다. MR !589에는 이 후속 변경을 포함하지 않는다.
