@@ -120,8 +120,14 @@ export function useCallDetail(callId: number, fromFaq?: number) {
     void detail.refetch()
   })
   const says = withLead(call?.utterances ?? []) // 듣기 시각이 보정된 말들 (아래 전부 이걸 씀)
+  // 녹취는 통화 시작보다 늦게 시작함 — 발화 시각(통화 시작부터)과 녹취 위치가 그만큼 어긋나 줄을 누르면 그 말을 놓침 (11/13 사용자)
+  // 실서버 #596 · #590: 빈 칸이 녹취 앞쪽에 있고 크기 = 통화 길이 − 녹취 길이(2.2초 · 1.8초). 녹취 위치 = 통화 시각 − shift
+  const shift =
+    player.length && call?.durationSec ? Math.max(0, call.durationSec - player.length) : 0
+  const callNow = player.now > 0 ? player.now + shift : 0 // 재생 위치를 통화 시각으로
+  const seekCall = (sec: number) => player.seek(Math.max(0, sec - shift))
   // 지금 짚은 줄: 녹취가 돌면 재생 위치, 아니면 누른 시각 (11/01 사용자: AI 동작을 누르면 왼쪽 그 부분 + 그 부분 음성)
-  const at = player.now > 0 ? player.now : cursor
+  const at = callNow > 0 ? callNow : cursor
   const pinEnd = pin && says.find((u) => u.atSec !== null && u.atSec > pin.sec)?.atSec
   const pinned = pin && at !== null && at >= pin.sec && (pinEnd == null || at < pinEnd)
   const focusKey = pinned ? pin.key : at === null ? null : (utteranceAt(says, at)?.order ?? null)
@@ -132,13 +138,13 @@ export function useCallDetail(callId: number, fromFaq?: number) {
     setCursor(at)
     setPin(line ? { key: line.order, sec: at } : null)
     if (line) setJump((j) => ({ key: line.order, n: (j?.n ?? 0) + 1 }))
-    player.seek(at)
+    seekCall(at)
   }
   /** 그 줄부터 듣기 (스크립트 줄을 누름 · ⏮ ⏭) — 스크롤은 부른 쪽이 */
   const listenFrom = (key: number, sec: number) => {
     setCursor(sec)
     setPin({ key, sec })
-    player.seek(sec)
+    seekCall(sec)
   }
 
   // 404는 받은 게 있어도 '통화 없음'(삭제된 통화 — 반복 조회도 멈춤). 그 밖의 오류 화면은 아무것도 못 받았을 때만,
@@ -226,8 +232,8 @@ export function useCallDetail(callId: number, fromFaq?: number) {
     player: {
       state: player.state,
       playing: player.playing,
-      now: fmtClock(Math.floor(player.now)),
-      length: fmtClock(Math.floor(player.length || call?.durationSec || 0)),
+      now: fmtClock(Math.floor(callNow)), // 대화 줄 시각과 같은 통화 시각
+      length: fmtClock(Math.floor(lengthSec + shift)),
       progress: player.progress,
       toggle: player.toggle,
       scrub: player.scrub, // 진행 바 드래그 (11/01)
@@ -250,7 +256,7 @@ export function useCallDetail(callId: number, fromFaq?: number) {
             return [
               {
                 key: i,
-                at: Math.min(1, sec / lengthSec),
+                at: Math.min(1, Math.max(0, (sec - shift) / lengthSec)),
                 tone: cust ? ('stop' as const) : ('wait' as const),
                 title: `${cust ? TARGET_LABEL[c.target] : COMPLAINT_LABEL[c.type]} ${fmtClock(Math.floor(sec))}`,
                 onClick: () => goComplaint(c),
