@@ -52,3 +52,20 @@
 운영에서는 k3s·PostgreSQL 현황을 읽어 연결 예산을 계산했다. 새 수집 스택 설치, 운영 HPA 적용과 운영 부하 시험은 적용 후 확인 항목이다. 보존 기간은 설정으로 검증했다. 장기간 데이터 삭제 주기는 별도 운영 관찰 대상이다.
 
 로컬 근거는 `msa/liquibase/verification-logs/observability-128/`의 `collect.json`, `dashboard-queries.json`, `scale.json`, `pod-recovery.json`, `internal-recovery.json`, `event-recovery.json`, `alert-promtool.log`와 `rollout.log`에 있다. 원격 `61876001`과 작업 기준 사이의 `msa/` 변경은 없었다.
+
+## 최신 develop-backend 기준 파이프라인
+
+`9afee323`을 반영한 `38751663`의 깨끗한 Linux 체크아웃에서 Jenkins 단계와 같은 명령을 실행했다. 동등성 비교 기준은 기존 파이프라인이 고정한 `5eeacbcc`다. 검증 중 원격 `develop-backend`가 `cdaec806`으로 갱신돼 `91f5c261`에 반영했다. 최신 통합본에서 MSA 소스, 고정된 backend 스냅샷, 검사 범위, 이미지 11개의 파일시스템 계층과 실행 설정이 동일함을 확인하고 패키징을 다시 실행했다.
+
+| 단계 | 결과 |
+| --- | --- |
+| 검증 및 배포 범위 | 운영 앱·DB 적용 커밋과 Jenkins 성공 이력으로 판정. 앱 5개, 동등성 4개 묶음, DB 적용 0건 |
+| 빌드와 회귀 검사 | CI 이미지 11개, API 계약 11건, 이벤트 단위 37건과 PostgreSQL·HTTP 통합 16건, 배포 스크립트 130건 통과 |
+| 동등성 | operations 198, customer 78, consultation 172, order 243개 확인 항목 통과 |
+| DB 검증 | 입력 동일성을 확인하고 Jenkins #59 검증 재사용. 동일 입력으로 수행한 로컬 DB 검사 근거 236개 |
+| 패키지와 DB 복구 | 앱 패키지 5개와 DB 패키지의 SHA-256 확인. 합성 DB 백업 2개 복원, 테이블 6개 대조, 늦게 도착한 이벤트 거부 확인 |
+| 배포와 롤백 | 동일 주문 CI 이미지로 로컬 k3s에서 교체 2회와 readiness 실패 후 복원. health 요청 439건 모두 HTTP 200 |
+
+이전 수집·확장·장애 복구 시험의 MSA 소스와 이번 빌드의 MSA 소스가 동일하다. MR 변경은 `msa/`의 21개 파일이고, 기존 테스트 파일 69개를 유지했다. 세부 로그와 검증 근거는 로컬 `msa/liquibase/verification-logs/observability-128/`의 `mr-final-cli/`와 `mr-latest-release/`에 있다.
+
+운영 Jenkins 잡 `dva-msa`는 대상 브랜치 병합 후 실제 빌드와 앱 배포를 실행한다. 운영 관측 스택과 주문 HPA는 런북에 따라 적용한다.
