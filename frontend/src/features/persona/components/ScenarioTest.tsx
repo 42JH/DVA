@@ -1,13 +1,51 @@
-// AI 상담가 가운데 카드의 [시나리오 시험] 탭 (11/12, Figma 1919:7975) — 가짜 모드에서만
-// 위: 상태(시험 전 · 시험 중 진행 · 끝난 뒤 요약) + [전체 시험] (핵심 묶음은 화면에서 뺌, 11/12 사용자: 기준이 헷갈림). 아래: 업무 · 시나리오 · 통화에 사용 중 · 이 버전 · 변화
-// 줄을 누르면 그 통화의 상세(대화 · 결과표 · 녹음). 시험 뒤 글을 고쳤으면 고치기 전 결과를 흐리게 + 안내 한 줄
-import { Link, useNavigate } from 'react-router'
-import { Badge, Btn } from '@/shared/ui'
+// 시나리오 시험 (11/12, Figma 1990:7976) — AI 상담가 가운데 카드의 [시나리오 시험]을 눌러 오는 한 화면. 가짜 모드에서만
+// (처음엔 가운데 카드의 탭이었음 → 11/12 사용자: 탭 대신 버튼 + 더 크게. 주소 /personas/:personaSeq/tests/:version)
+// 위 줄: ‹ 시나리오 시험 + 상담가 이름 · 버전 저장 시각. 카드 위: 상태(시험 전 · 시험 중 진행 · 끝난 뒤 요약) + [전체 시험]
+// 표: 업무 · 시나리오 · 통화에 사용 중 · 이 버전 · 변화. 줄을 누르면 그 통화의 상세(대화 · 결과표 · 녹음)
+// 시험 뒤 글을 고쳤으면 고치기 전 결과를 흐리게 + 안내 한 줄
+import { Link, Navigate, useNavigate, useParams } from 'react-router'
+import { Badge, Btn, PageHead } from '@/shared/ui'
 import { Confirm } from '@/shared/ui/Modal'
 import type { Cell } from '@/features/persona/hooks/scenarioTest'
-import { useScenarioTest } from '@/features/persona/hooks/useScenarioTest'
+import {
+  SCENARIO_TEST,
+  useScenarioTest,
+  useScenarioTestPage,
+} from '@/features/persona/hooks/useScenarioTest'
 
-export function ScenarioTest({
+export function ScenarioTestPage() {
+  const { personaSeq, version } = useParams()
+  if (!SCENARIO_TEST) return <Navigate to="/personas" replace /> // 가짜 모드에서만 있는 화면
+  return (
+    <Page
+      key={`${personaSeq}-${version}`}
+      personaSeq={Number(personaSeq)}
+      version={Number(version)}
+    />
+  )
+}
+
+function Page(p: { personaSeq: number; version: number }) {
+  const vm = useScenarioTestPage(p.personaSeq, p.version)
+  return (
+    <>
+      <PageHead title="시나리오 시험" back={vm.back}>
+        <span className="truncate text-[13px] text-ops-sub">{vm.sub}</span>
+      </PageHead>
+      <div className="flex min-h-0 flex-1 flex-col px-6 py-4">
+        <article className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-ops-line bg-white">
+          {vm.me ? <ScenarioTest me={vm.me} dateOf={vm.dateOf} /> : <Note>{vm.note}</Note>}
+        </article>
+      </div>
+    </>
+  )
+}
+
+const Note = ({ children }: { children: string | null }) => (
+  <p className="flex flex-1 items-center justify-center text-[14px] text-ops-sub">{children}</p>
+)
+
+function ScenarioTest({
   me,
   dateOf,
 }: {
@@ -16,10 +54,7 @@ export function ScenarioTest({
 }) {
   const vm = useScenarioTest(me, dateOf)
   const navigate = useNavigate()
-  if (vm.note)
-    return (
-      <p className="flex flex-1 items-center justify-center text-[14px] text-ops-sub">{vm.note}</p>
-    )
+  if (vm.note) return <Note>{vm.note}</Note>
   const dim = vm.state === 'stale' ? 'opacity-50' : ''
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -34,17 +69,17 @@ export function ScenarioTest({
         />
       )}
       {vm.state === 'stale' && (
-        <p role="status" className="shrink-0 bg-ops-wait-soft px-5 py-2 text-[13px] text-ops-wait">
+        <p role="status" className="shrink-0 bg-ops-wait-soft px-6 py-2 text-[13px] text-ops-wait">
           시험 뒤에 프롬프트를 고쳤습니다. 아래는 고치기 전 글의 결과입니다.
         </p>
       )}
-      <div className="flex min-h-[68px] shrink-0 flex-wrap items-center gap-x-10 gap-y-2 px-5 py-3">
+      <div className="flex min-h-24 shrink-0 flex-wrap items-center gap-x-14 gap-y-2 px-6 py-5">
         {vm.state === 'none' && (
-          <p className="text-[15px] font-bold">이 버전은 아직 시험하지 않았습니다</p>
+          <p className="text-[16px] font-bold">이 버전은 아직 시험하지 않았습니다</p>
         )}
         {vm.progress && (
           <div className="flex flex-col gap-2">
-            <p className="text-[15px] font-bold">
+            <p className="text-[16px] font-bold">
               {vm.progress.text}
               <span className="ml-2 text-[13px] font-normal text-ops-sub">
                 {vm.progress.started}
@@ -53,14 +88,14 @@ export function ScenarioTest({
             <progress
               value={vm.progress.value}
               max={vm.progress.max}
-              className="h-1.5 w-80 appearance-none overflow-hidden rounded-full [&::-webkit-progress-bar]:bg-ops-line [&::-webkit-progress-value]:bg-ops-route"
+              className="h-2 w-[480px] appearance-none overflow-hidden rounded-full [&::-webkit-progress-bar]:bg-ops-line [&::-webkit-progress-value]:bg-ops-route"
             />
           </div>
         )}
         {vm.summary?.map((s) => (
           <dl key={s.label} className={dim}>
-            <dt className="text-[12px] text-ops-sub">{s.label}</dt>
-            <dd className={`text-[20px] leading-7 font-bold tabular-nums ${s.tone}`}>{s.value}</dd>
+            <dt className="text-[13px] text-ops-sub">{s.label}</dt>
+            <dd className={`text-[28px] leading-9 font-bold tabular-nums ${s.tone}`}>{s.value}</dd>
           </dl>
         ))}
         <span className="ml-auto flex flex-wrap items-center gap-2">
@@ -68,11 +103,11 @@ export function ScenarioTest({
           {vm.canRun && (
             <>
               {vm.retryLabel && (
-                <Btn kind="plainBadge" onClick={vm.retry}>
+                <Btn kind="plain" onClick={vm.retry}>
                   {vm.retryLabel}
                 </Btn>
               )}
-              <Btn kind="lineBadge" onClick={vm.runAll}>
+              <Btn kind="line" onClick={vm.runAll}>
                 {vm.allLabel}
               </Btn>
             </>
@@ -80,20 +115,20 @@ export function ScenarioTest({
         </span>
       </div>
       <div className="min-h-0 flex-1 [scrollbar-width:thin] overflow-y-auto">
-        <table className={`w-full table-fixed text-[13px] ${dim}`}>
+        <table className={`w-full table-fixed text-[14px] ${dim}`}>
           <thead className="sticky top-0 bg-ops-paper text-left text-ops-sub">
-            <tr className="h-9 [&>th]:text-left! [&>th]:font-medium">
-              <th scope="col" className="w-28 pl-5">
+            <tr className="h-10 [&>th]:text-left! [&>th]:font-medium">
+              <th scope="col" className="w-40 pl-6">
                 업무
               </th>
               <th scope="col">시나리오</th>
-              <th scope="col" className="w-44">
+              <th scope="col" className="w-55">
                 통화에 사용 중 <Date_>{vm.baseDate}</Date_>
               </th>
-              <th scope="col" className="w-44">
+              <th scope="col" className="w-55">
                 이 버전 <Date_>{vm.nowDate}</Date_>
               </th>
-              <th scope="col" className="w-24">
+              <th scope="col" className="w-40">
                 변화
               </th>
             </tr>
@@ -102,14 +137,15 @@ export function ScenarioTest({
             {vm.rows.map((r) => (
               <tr
                 key={r.id}
-                onClick={() => void navigate(r.to)}
-                className={`h-9 border-t ${r.firstOfGroup ? 'border-ops-line' : 'border-ops-line/50'} cursor-pointer hover:bg-ops-paper`}
+                onClick={() => void navigate(r.to, { state: vm.from })}
+                className={`h-11 border-t ${r.firstOfGroup ? 'border-ops-line' : 'border-ops-line/50'} cursor-pointer hover:bg-ops-paper`}
               >
-                <td className="pl-5 text-ops-sub">{r.firstOfGroup && r.group}</td>
+                <td className="pl-6 text-ops-sub">{r.firstOfGroup && r.group}</td>
                 <td className="truncate pr-3">
                   {/* 줄 전체가 눌리지만 키보드로는 이 링크로 (줄의 onClick과 겹쳐 두 번 이동하지 않게 막음) */}
                   <Link
                     to={r.to}
+                    state={vm.from}
                     onClick={(e) => e.stopPropagation()}
                     className="outline-none focus-visible:underline"
                   >

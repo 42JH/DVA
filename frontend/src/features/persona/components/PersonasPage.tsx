@@ -1,12 +1,10 @@
 // AI 상담가 (11/06) — 가운데 시스템 프롬프트 | 오른쪽 상담가 카드
 // 11/11: 저장 = 새 버전, [적용] 없음. 오른쪽 위 탭([AI 상담가 유형] · [버전 히스토리]) → 버전 히스토리는 고른 상담가의 버전 기록(저장 시각 · 수정한 사람), 고른 버전이 가운데
-// 데이터 · 규칙은 usePersonaPage. 등록 · 수정 · 시험 통화 창은 기존 부품을 그대로 씀
-import { useLocation } from 'react-router'
+// 데이터 · 규칙은 usePersonaPage. 등록 · 수정 창은 기존 부품을 그대로 씀. [시나리오 시험]은 따로 화면 (ScenarioTest)
+import { useLocation, useNavigate } from 'react-router'
 import { usePersonaPage, type PersonaItem } from '@/features/persona/hooks/usePersonaPage'
 import { AddPersona } from './AddPersona'
 import { PromptEditor } from './PromptEditor'
-import { ScenarioTest } from './ScenarioTest'
-import { TestCallModal } from './TestCallModal'
 import { PageHead } from '@/shared/ui'
 import { Badge, Btn, Icon } from '@/shared/ui'
 import { Confirm } from '@/shared/ui/Modal'
@@ -99,13 +97,6 @@ function PersonasView() {
           {vm.confirm.note}
         </Confirm>
       )}
-      {vm.testCall && (
-        <TestCallModal
-          key={`${vm.testCall.personaSeq}-${vm.testCall.version}`}
-          target={vm.testCall}
-          onEnd={vm.endTestCall}
-        />
-      )}
     </>
   )
 }
@@ -128,7 +119,7 @@ function PanelTabs({ vm }: { vm: Vm }) {
   )
 }
 
-// 밑줄이 따라다니는 탭 (11/11 사용자 시안) — 오른쪽 패널 · 가운데 카드. 이 화면에서만 써서 shared/ui엔 안 올림
+// 밑줄이 따라다니는 탭 (11/11 사용자 시안) — 오른쪽 패널. 이 화면에서만 써서 shared/ui엔 안 올림
 function LineTabs({
   label,
   tabs,
@@ -249,6 +240,7 @@ function History({ vm }: { vm: Vm }) {
 
 function Prompt({ vm }: { vm: Vm }) {
   const p = vm.prompt!
+  const navigate = useNavigate()
   return (
     <article className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-ops-line bg-white">
       <header className="flex flex-wrap items-center gap-3 border-b border-ops-line px-5 py-3">
@@ -273,26 +265,15 @@ function Prompt({ vm }: { vm: Vm }) {
               프롬프트 수정
             </Btn>
           )}
-          <Btn kind="plainBadge" onClick={vm.startTestCall}>
-            시험 통화
-          </Btn>
+          {vm.testTo && (
+            // 보고 있는 버전의 시험 화면으로 (11/12 사용자: 탭 대신 버튼 + 전체 화면, 가짜 시험 통화는 없앰)
+            <Btn kind="plainBadge" onClick={() => void navigate(vm.testTo!)}>
+              시나리오 시험
+            </Btn>
+          )}
         </span>
       </header>
-      {vm.tab && (
-        <LineTabs
-          label="버전 내용"
-          className="px-5 pt-2"
-          tabs={[
-            { label: '프롬프트', on: vm.tab === 'prompt', pick: () => vm.setTab('prompt') },
-            { label: '시나리오 시험', on: vm.tab === 'test', pick: () => vm.setTab('test') },
-          ]}
-        />
-      )}
-      {vm.tab === 'test' && vm.testTarget ? (
-        <ScenarioTest me={vm.testTarget} dateOf={vm.versionDate} />
-      ) : (
-        <PromptBody p={p} />
-      )}
+      <PromptBody p={p} />
     </article>
   )
 }

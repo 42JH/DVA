@@ -29,7 +29,7 @@ const newCode = () => `persona-${crypto.randomUUID()}`
 /** 07 상담가 등록 훅 — 이름 · 프롬프트 → v1 저장(아직 적용 안 함, Swagger POST /api/personas)
  * 수정 화면과 같은 넓은 화면(PersonaForm)이라 반환 모양도 usePromptEditor와 같게 (11/11)
  * 음성은 기본값에서 시작, 수정 화면처럼 이름 아래 드롭다운에서 고름 (11/11 사용자)
- * 만든 뒤엔 그 페르소나를 골라 보여 줌. 통화에 쓰려면 시험 통화 → [적용] 또는 [사용하기] */
+ * 만든 뒤엔 그 페르소나를 골라 보여 줌. 통화에 쓰려면 [통화에 사용하기] */
 export function useAddPersona(onDone: (personaSeq: number) => void, onClose: () => void) {
   const qc = useQueryClient()
   const [name, setName] = useState('')
@@ -68,7 +68,7 @@ export function useAddPersona(onDone: (personaSeq: number) => void, onClose: () 
 
   return {
     tag: DRAFT_TAG,
-    subtitle: '새 상담가 · 통화에 쓰려면 등록 뒤 시험 통화를 하고 적용하세요',
+    subtitle: '새 상담가',
     name,
     setName,
     sections: PROMPT_SECTIONS.map((s) => ({

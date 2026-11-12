@@ -106,6 +106,13 @@ export const router = createBrowserRouter([
               })),
           },
           {
+            path: 'personas/:personaSeq/tests/:version', // 시나리오 시험 (가짜 모드에서만 — 아니면 AI 상담가로)
+            lazy: () =>
+              import('@/features/persona/components/ScenarioTest').then((m) => ({
+                Component: m.ScenarioTestPage,
+              })),
+          },
+          {
             path: 'personas/:personaSeq/tests/:version/:scenario', // 시나리오 시험 상세 (가짜 모드에서만 — 아니면 AI 상담가로)
             lazy: () =>
               import('@/features/persona/components/ScenarioDetailPage').then((m) => ({

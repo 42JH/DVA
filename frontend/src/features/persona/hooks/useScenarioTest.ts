@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { fmtVersionTime } from '@/shared/lib/format'
+import { fmtMonthDay, fmtVersionTime } from '@/shared/lib/format'
+import { ymd } from '@/shared/lib/dateRange'
 import { personaQueries } from '@/features/persona/api/personaApi'
 import {
   SCENARIO_TEST,
@@ -51,7 +52,36 @@ export function useTestGate() {
   }
 }
 
-/** [시나리오 시험] 탭 — 가운데에서 보고 있는 버전의 결과 표. dateOf = 이 상담가의 버전 번호 → '10월 29일' */
+/** 시나리오 시험 화면의 위 줄 — 주소의 상담가 · 버전이 무엇인가 (이름 · 저장 시각 · 현재 버전인가) */
+export function useScenarioTestPage(personaSeq: number, version: number) {
+  const personas = useQuery(personaQueries.list())
+  const versions = useQuery(personaQueries.versions(personaSeq))
+  const persona = personas.data?.find((p) => p.personaSeq === personaSeq)
+  const all = versions.data ?? []
+  const v = all.find((x) => x.version === version && !x.isDraft)
+  return {
+    sub: persona && v ? `${persona.name} ${fmtVersionTime(v.savedAt)}` : '',
+    // ‹ — 바로 전이 AI 상담가면 뒤로가기(보던 그대로), 아니면(새로고침 · 주소로 옴) 이 상담가 · 지난 버전이면 그 버전을 넘겨 줌
+    back: {
+      to: '/personas',
+      label: 'AI 상담가로',
+      state: { testOf: personaSeq, ...(v && !v.isHead && { version }) },
+    },
+    me: v ? { personaSeq, version, isHead: v.isHead } : null,
+    dateOf: (n: number) => {
+      const x = all.find((y) => y.version === n)
+      return x ? fmtMonthDay(ymd(new Date(x.savedAt))) : ''
+    },
+    note:
+      personas.isError || versions.isError
+        ? '불러오지 못했습니다. 다시 시도해 주세요.'
+        : personas.isPending || versions.isPending
+          ? '불러오는 중…'
+          : '없는 버전입니다.',
+  }
+}
+
+/** 시나리오 시험 화면의 결과 표 — 주소에서 고른 버전. dateOf = 이 상담가의 버전 번호 → '10월 29일' */
 export function useScenarioTest(me: Me, dateOf: (version: number) => string) {
   const d = useTestData()
   const qc = useQueryClient()
@@ -99,6 +129,8 @@ export function useScenarioTest(me: Me, dateOf: (version: number) => string) {
     // 표 머리 날짜 — 통화에 사용 중인 버전이 다른 상담가 것이면 날짜를 모름
     baseDate: d.active?.personaSeq === me.personaSeq ? dateOf(d.active.version) : '',
     nowDate: dateOf(shownVersion),
+    // 상세의 ‹ 가 돌아올 곳 — 고치기 전 결과를 보여 줄 땐 줄의 주소(그 결과의 버전)와 이 화면의 버전이 다름
+    from: { from: `/personas/${me.personaSeq}/tests/${me.version}` },
     rows: r.rows.map((x, i) => ({
       ...x,
       firstOfGroup: r.rows[i - 1]?.group !== x.group,
