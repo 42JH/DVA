@@ -82,13 +82,16 @@ export function Modal({
           <Icon name="x" />
         </button>
       </div>
-      <div className="min-h-0 flex-1 [scrollbar-width:thin] overflow-y-auto px-6 py-5">
-        {children}
-      </div>
+      {/* 몸이 없는 창(제목만 묻는 확인 창)은 빈 칸을 두지 않음 — 제목 줄 아래 선 하나, 바로 버튼 줄 (11/12 사용자) */}
+      {children && (
+        <div className="min-h-0 flex-1 [scrollbar-width:thin] overflow-y-auto px-6 py-5">
+          {children}
+        </div>
+      )}
       {footer && (
         <div
           data-foot
-          className="flex shrink-0 items-center gap-2 border-t border-ops-line px-6 py-3"
+          className={`flex shrink-0 items-center gap-2 px-6 py-3 ${children ? 'border-t border-ops-line' : ''}`}
         >
           {footer}
         </div>
