@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useId, type ReactNode } from 'react'
 import { axisTicks } from '@/features/stats/format'
 
 // 02 대시보드 그래프 — 라이브러리 없이 (Figma 'AI 상담 성능' · '통계 · 그래프 보기' 11/04)
@@ -170,6 +170,7 @@ export function Donut({
 }) {
   const sum = slices.reduce((a, s) => a + s.value, 0)
   const start = slices.map((_, i) => slices.slice(0, i).reduce((a, s) => a + s.value, 0))
+  const mask = useId() // 도넛이 여러 개여도 가림막 id가 겹치지 않게
   return (
     <div className="@container relative aspect-square h-full max-h-[166px]">
       <svg viewBox="0 0 166 166" className="absolute inset-0 size-full -rotate-90" aria-hidden>
@@ -183,21 +184,36 @@ export function Donut({
             className="stroke-ops-idle-soft"
           />
         ) : (
-          slices.map((s, i) =>
-            s.value > 0 ? (
+          // 11/13 사용자: 조각마다 따로 채우지 말고 12시부터 한 바퀴 한 번에 — 흰 고리 가림막 하나가 시계 방향으로 열림
+          <g mask={`url(#${CSS.escape(mask)})`}>
+            <mask id={mask}>
               <circle
-                key={s.key}
                 cx={83}
                 cy={83}
                 r={R}
                 fill="none"
-                strokeWidth={SW}
-                className={`motion-safe:animate-donut-in ${s.stroke}`}
-                strokeDasharray={`${Math.max((s.value / sum) * C - GAP, 0.5)} ${C}`}
-                strokeDashoffset={-(start[i] / sum) * C}
+                stroke="white"
+                strokeWidth={SW + 2}
+                strokeDasharray={`${C} ${C}`}
+                className="motion-safe:animate-donut-in"
               />
-            ) : null,
-          )
+            </mask>
+            {slices.map((s, i) =>
+              s.value > 0 ? (
+                <circle
+                  key={s.key}
+                  cx={83}
+                  cy={83}
+                  r={R}
+                  fill="none"
+                  strokeWidth={SW}
+                  className={s.stroke}
+                  strokeDasharray={`${Math.max((s.value / sum) * C - GAP, 0.5)} ${C}`}
+                  strokeDashoffset={-(start[i] / sum) * C}
+                />
+              ) : null,
+            )}
+          </g>
         )}
       </svg>
       {/* 도넛이 작아지면(낮은 화면) 작은 글자는 고리에 걸려서 숫자만 */}
