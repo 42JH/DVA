@@ -45,6 +45,21 @@ def asks_parcel_confirmation(text: str) -> bool:
     return bool(PARCEL_CONFIRM_QUESTION.search("".join(text.split())))
 
 
+def cancel_question(target: dict) -> str:
+    name = target.get("receiver_name")
+    area = target.get("receiver_area")
+    recipient = f"{name}님" if name else None
+    if recipient:
+        destination = f"{area}의 {recipient}" if area else recipient
+        parcel = f"{destination}께 보내는 택배"
+    else:
+        parcel = f"{area}로 보내는 택배" if area else "이 택배"
+    if target.get("whole_order"):
+        order = f"{parcel}가 속한 주문" if recipient or area else "이 주문"
+        return f"{order}의 택배를 전부 취소할까요?"
+    return f"{parcel}를 취소할까요?"
+
+
 def explicitly_requests_parcel(text: str) -> bool:
     compact = re.sub(r"[\s,，]", "", text)
     return not REQUEST_CONFLICT.search(compact) and bool(PARCEL_REQUEST.search(compact))
@@ -125,7 +140,11 @@ def check_gate(state: ConversationState, policy: Policy, pending_id: str, answer
     heard_to_end = customer.start_ms >= prev_ai.end_ms - policy.confirm.answer_after_readback_tolerance_ms
     explicit_during_readback = (p.kind == "parcel" and prev_ai.readback_id == p.id and bool(prev_ai.text.strip())
                                 and (answer.choice == "proceed" or explicitly_requests_parcel(customer.text)))
-    if answer.choice == "proceed":
+    if p.kind == "cancel":
+        question = "".join(prev_ai.text.split()).rstrip(".?!…~")
+        expected = "".join(cancel_question(p.snapshot).split()).rstrip("?")
+        valid = heard_to_end and question.endswith(expected)
+    elif answer.choice == "proceed":
         valid = p.kind == "parcel" and (explicit_during_readback
                                        or heard_to_end and asks_parcel_confirmation(prev_ai.text))
     else:
@@ -163,7 +182,10 @@ def release(state: ConversationState, pending_id: str) -> bool:
     """no·change: 확인 대기를 즉시 해제(확정 지연 없이, delegation.md §4.1 R3)."""
     if state.pending is None or state.pending.id != pending_id:
         return False
+    if state.pending.kind == "cancel":
+        state.selected_order = None
+    else:
+        state.awaiting_fix = True  # 고친 값이 기록될 때까지 되읽기를 다시 열지 않는다(record_fields가 푼다)
     state.pending = None
-    state.awaiting_fix = True  # 고친 값이 기록될 때까지 되읽기를 다시 열지 않는다(record_fields가 푼다)
     state.bump()
     return True

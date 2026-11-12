@@ -983,6 +983,24 @@ def _order(db, status="COLLECTING"):
     return cust, order_seq, db.orders[-1]["parcels"][0]["orderParcelSeq"]
 
 
+def test_cancel_lookup_respects_call_scope_and_rejected_lookup_discards_target():
+    db = MockBackend()
+    customer = registered(db)
+    db.add_order(CALLER, "notPaid", [("홍길동", "주소"), ("김민지", "다른 주소")])
+    c = ctx(db, customer=customer)
+    c.state.intent = "cancel"
+    c.draft_intake = True
+    result = call(c, "lookup_orders", {"scope": "current_call"})
+    assert result["facts"]["found"] == 0 and c.state.pending is None
+
+    result = call(c, "lookup_orders", {"scope": "previous_call", "receiver_name": "김민지", "whole_order": True})
+    assert result["facts"]["found"] == 1 and result["facts"]["cancel_target"]["parcel_count"] == 2
+    assert c.state.pending.snapshot["whole_order"]
+    denied = call(c, "lookup_orders", {"other_customer": True})
+    assert denied["code"] == "ORDER_OTHER_CUSTOMER" and "cancel_target" not in denied["facts"]
+    assert c.state.pending is None and c.state.selected_order is None
+
+
 def test_cancel_done_then_duplicate_is_noop():
     db = MockBackend()
     cust, o, p = _order(db)

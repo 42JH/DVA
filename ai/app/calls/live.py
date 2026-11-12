@@ -22,7 +22,7 @@ from app.domain.address_book import (begin_sender_name_change, origin_confirmati
                                      sender_change_next)
 from app.domain.assess import area_label, assess, readback_facts
 from app.domain.candidates import (DESTINATION_CHANGE_FIELDS, DESTINATION_CLARIFICATIONS, apply_destination_change, apply_pick,
-                                   destination_changes, offer, reject_candidates)
+                                   clear_order_lookup, destination_changes, offer, reject_candidates)
 from app.domain.claims import unverified_values
 from app.domain.confirm import (ConfirmAnswer, Utterance, asks, asks_parcel_confirmation, check_gate, commit_parcel,
                                 explicitly_requests_parcel, issue_cancel_confirmation, issue_parcel_confirmation,
@@ -32,13 +32,14 @@ from app.domain.store import hold_unclassified_items, item_issues_pending, recei
 from app.observability.trace import span
 from app.policy.render import decision_questions
 from app.tools import MODEL_TOOLS, run_tool
-from app.tools.cancel import cancel_parcel
-from app.tools.lookup import lookup_order_facts, resume_destination, status_text
+from app.tools.cancel import cancel_order, cancel_parcel
+from app.tools.lookup import cancel_target_facts, lookup_order_facts, resume_destination
 from app.tools.outcome import destination_change_question, state_summary
 from app.tools.record import PHONE_INPUT_MAX_LENGTH, RecordArgs, record_fields
 
 log = logging.getLogger(__name__)
 BUSINESS = ("order", "lookup", "cancel", "inquiry", "agent")
+CANCEL_INTENTS = ("cancel", "cancel_current", "cancel_selected", "cancel_selected_order")
 TOOL_INTENT = {"record_fields": "order", "find_destination": "order", "lookup_orders": "lookup",
                "search_manual": "inquiry"}
 # 도구 → 대시보드 processType(ai-dashboard-ai-integration.md §4). 받는 곳 후보 찾기는 주소 조회로 센다
@@ -48,6 +49,8 @@ GREETING_ORDER = re.compile(
     r"(?:택배)?접수(?:를)?(?:도와드릴까요|도와드려도될까요|해드릴까요|하시겠어요|하실까요|할까요|하시는건가요)$"
 )
 SHORT_YES = re.compile(r"(?:아|어|음)?(?:네|예|응|맞아요|맞습니다|그렇습니다)+")
+CANCEL_SELECTED_REQUEST = re.compile(
+    r"(?:그거|그택배|그건|방금조회한택배)(?:를|을|만)?취소(?:해줘(?:요)?|해주세요|할게요|부탁드려요)[.?!~…]*")
 DESTINATION_ADDRESS_ONLY = re.compile(r"(?:주소|배송지|받는곳)만(?:바꾸|바꿀|바꿔|변경|다르게|달라)")
 DESTINATION_OTHER_ADDRESS = re.compile(
     r"(?:다른|새로운|새|딴)(?:주소|배송지|받는곳|곳|데|장소)|(?:주소|배송지|받는곳)(?:가|는)?(?:다르|달라|말고)"
@@ -76,9 +79,10 @@ class Spoken:
     t_last: float
     readback_id: str | None = None
     sender_name_scope: str | None = None
-    scope_decided: asyncio.Event | None = None
+    decision_done: asyncio.Event | None = None
     buffered_destination_address: bool = False
     parcel_confirmation_id: str | None = None
+    cancel_confirmation_id: str | None = None
     lookup_selection: dict | None = None
 
     def utterance(self) -> Utterance:
@@ -198,8 +202,7 @@ class LiveFlow:
             gate = asyncio.Event() if self._awaiting_answer(s) else None
             candidates = s.state.candidates
             utt.buffered_destination_address = bool(candidates and "receiver_address" in candidates.destination_buffer)
-            if s.state.customer.customer_seq and s.state.intent in (None, "order"):
-                utt.scope_decided = gate or asyncio.Event()
+            utt.decision_done = gate or asyncio.Event()
             # 위임은 OpenAI 쪽에서 Live가 시작해 서버가 늦출 수 없다. 대신 이 턴의 도구 호출이 반영을 기다린다(최근 발화 기준)
             rt.deciding = gate
             s.spawn(self._judge_customer(s, utt, prev, gate), "decision")
@@ -237,8 +240,8 @@ class LiveFlow:
         finally:
             if gate is not None:
                 gate.set()
-            if utt.scope_decided is not None:
-                utt.scope_decided.set()
+            if utt.decision_done is not None and utt.decision_done is not gate:
+                utt.decision_done.set()
 
     async def _judge_customer_inner(self, s: CallSession, utt: Spoken, prev: Spoken | None) -> None:
         judge_first = s.state.intent != "order"
@@ -299,6 +302,7 @@ class LiveFlow:
                                                                            "item", "readback"))
             box = current.box_proposal if current and s.state.intent == "order" and not pending else None
             cancel_current = s.tools.draft_intake and current is not None and not current.empty()
+            selected = s.state.selected_order if s.state.intent in ("lookup", "cancel") and not pending else None
         reply = re.sub(r"[\s,.!?…~]+", "", utt.text) if greeting or origin_question else ""
         other_origin = GREETING_OTHER_ORIGIN.fullmatch(reply)
         if greeting and (other_origin or SHORT_YES.fullmatch(reply)):
@@ -319,7 +323,9 @@ class LiveFlow:
                                        pick_labels=pick, callback=callback, origin=origin,
                                        destination_candidates=candidates if pick else None,
                                        sender_change=sender_change, sender_name_scope=name_scope,
-                                       cancel_current=cancel_current,
+                                       cancel_current=cancel_current, cancel_selected=bool(selected),
+                                       cancel_selected_order=bool(selected and selected.get("order_seq")),
+                                       cancel_confirmation=bool(pending and pending.kind == "cancel"),
                                        box_label=box.label if box else None)
         if not questions:
             return  # 선택형 판단이 없는 단계: 부르지 않는다
@@ -380,7 +386,17 @@ class LiveFlow:
             if greeting and (rt.customer_turns != [utt] or st.intent is not None):
                 return
             rt.latest_applied = utt.utterance_id
+            pending_cancel = bool(st.pending and st.pending.kind == "cancel" and st.pending.id == pending_id)
             switch = answers.get("switch")
+            confirm = answers.get("confirm")
+            cancelling = switch and switch[1] >= th and switch[0] in CANCEL_INTENTS
+            confirming_cancel = pending_cancel and confirm and confirm[0] in ("yes", "proceed", "no")
+            if cancelling and confirming_cancel and switch[0] == "cancel":
+                answers.pop("switch")
+                switch = None
+            elif cancelling or (st.pending and st.pending.kind == "cancel" and switch
+                                 and switch[1] >= th and switch[0] != "none"):
+                answers.pop("confirm", None)
             if switch and switch[1] >= th and switch[0] in ("agent", "end", "cancel_current"):
                 # 연결·종료·현재 택배 취소 요청이 섞인 "네"는 접수 확인으로 처리하지 않는다.
                 answers = {"switch": switch}
@@ -476,6 +492,7 @@ class LiveFlow:
             elif c and c[0] in ("no", "change") and c[1] >= th:
                 st.awaiting_fix = True  # 고친 값이 올 때까지 되읽기를 다시 열지 않는다
             picked_lookup = False
+            picked_cancel = False
             active_candidates = st.candidates
             if ((p := answers.get("pick")) and p[1] >= th
                     and active_candidates and (candidates is None or active_candidates is candidates)
@@ -486,6 +503,7 @@ class LiveFlow:
                     reject_candidates(st)
                 elif p[0] != "not_answer" and apply_pick(st, p[0]):
                     self._sync_intake(s)
+                    picked_cancel = kind == "order" and switch and switch[1] >= th and switch[0] == "cancel"
                     picked_lookup = (kind == "order" and st.intent == "lookup"
                                      and (not switch or switch[1] < th or switch[0] in ("none", "lookup")))
                     if picked_lookup:
@@ -500,7 +518,7 @@ class LiveFlow:
                         if pid := self._reissue(s):
                             facts |= {"readback": readback_facts(st.pending.snapshot), "readback_id": pid}
                         followups.append(("order_question", (utt, facts)))
-                    else:
+                    elif not picked_cancel:
                         followups.append(("picked", {"picked": p[0]}))
             if task and task[1] >= th and task[0] in BUSINESS + ("end",):
                 followups.append(("start_order", (utt, greeting)) if task[0] == "order" else ("intent", task[0]))
@@ -510,7 +528,11 @@ class LiveFlow:
                          and not ((origin_change or destination_reply is not None) and w[0] == "edit_parcel")
                          and not (picked_lookup and w[0] == "lookup"))
             if switching:
-                followups.append(("intent", w[0]))
+                intent = w[0]
+                if intent == "cancel" and (picked_cancel or st.intent == "lookup" and st.selected_order
+                                            and CANCEL_SELECTED_REQUEST.fullmatch("".join(utt.text.split()))):
+                    intent = "cancel_selected"
+                followups.append(("intent", intent))
             if (not switching and (m := answers.get("more")) and m[1] >= th
                     and assess(st, self.policy).stage == "more_parcels" and m[0] in ("more", "no_more", "clarify")):
                 followups.append(("no_more", utt) if m[0] == "no_more" else ("more_help", (m[0], utt)))
@@ -520,9 +542,10 @@ class LiveFlow:
                 followups.append(("callback", cb[0]))
         for f in followups:
             if f:
-                if f[0] == "hold" and utt.parcel_confirmation_id:
+                if (f[0] == "hold" and (utt.parcel_confirmation_id or utt.cancel_confirmation_id)
+                        or pending_cancel and f[0] == "ask_confirm_after_delegation"):
                     # 도구는 판단까지만 기다리고, 확정은 같은 발화의 도구가 끝난 뒤 검증한다.
-                    s.spawn(self._follow(s, *f), "parcel_confirmation_hold")
+                    s.spawn(self._follow(s, *f), "confirmation_hold")
                 else:
                     await self._follow(s, *f)
 
@@ -584,6 +607,8 @@ class LiveFlow:
             return None
         if st.pending.kind == "parcel":
             utt.parcel_confirmation_id = pending_id
+        elif st.pending.kind == "cancel":
+            utt.cancel_confirmation_id = pending_id
         if delegations := self._delegations_for(s, utt):  # G6: 같은 발화의 위임이 끝난 뒤 다시 본다
             s.note("확인 관문", "COMMIT_HELD_FOR_DELEGATION")
             rt.confirm_t = utt.t_last
@@ -646,7 +671,7 @@ class LiveFlow:
                     draft_save = self._sync_intake(s)
                 target = None
             else:
-                target = take_cancel(s.state, self.policy, pending_id)
+                target = take_cancel(s.state, self.policy, pending_id) if s.state.intent == "cancel" else None
                 is_draft_cancel = bool(target and ("draft_seq" in target or "client_parcel_id" in target))
                 if is_draft_cancel:
                     draft_cancel = self.svc.intake.cancel(s, target)
@@ -685,7 +710,11 @@ class LiveFlow:
                                                        "facts": {"outcome": "done" if cancelled else "unknown"}},
                                              "summary": state_summary(s.state, self.policy)})
                 return
-            out = await cancel_parcel(s.tools, target["order_seq"], target["order_parcel_seq"])
+            if target.get("whole_order"):
+                out = await cancel_order(s.tools, target["order_seq"])
+                out.facts["scope"] = "whole_order"
+            else:
+                out = await cancel_parcel(s.tools, target["order_seq"], target["order_parcel_seq"])
             s.measure("ORDER_CANCEL", (time.monotonic() - t0) * 1000)
             s.note("취소", out.code or out.facts.get("outcome", out.status))
             await self.notify(s, "N2", {"cancel": out.to_output()})
@@ -724,13 +753,14 @@ class LiveFlow:
                 pending = st.pending if st.pending and st.pending.id == value else None
                 facts = None
                 if pending and pending.kind == "cancel":
-                    facts = {"confirmation": "ask_again", "cancel_target": _order_facts(pending.snapshot)}
+                    facts = {"confirmation": "ask_again", "cancel_target": cancel_target_facts(pending.snapshot)}
                 elif pending and st.current is not None:
                     facts = {"confirmation": "ask_again", "readback": readback_facts(pending.snapshot),
                              "readback_id": pending.id}
             if facts:
                 s.note("확인 다시 묻기", value)
-                await self.notify(s, "N2", facts, again=True)  # 두 번째 애매한 답에도 다시 묻는다(같은 내용 중복 제거 무시)
+                await self.notify(s, "N2", facts, again=True,
+                                  cancel_confirmation_id=value if pending.kind == "cancel" else None)
         elif what == "released":
             await self.notify(s, "N1'", {"confirmation": "cancelled_by_customer", "answer": value,
                                          "summary": state_summary(st, self.policy)})
@@ -775,8 +805,11 @@ class LiveFlow:
             async with s.lock:
                 issued = issue_cancel_confirmation(st, s.tools.clock()) if st.intent == "cancel" else None
                 summary = state_summary(st, self.policy)
-            await self.notify(s, "N1'", value | {"summary": summary}
-                              | ({"cancel_target": _order_facts(issued.snapshot)} if issued else {}))
+            if issued:
+                self._queue_cancel_confirmation(s, issued.id, value | {"summary": summary,
+                                                "cancel_target": cancel_target_facts(issued.snapshot)})
+            else:
+                await self.notify(s, "N1'", value | {"summary": summary})
         elif what in ("origin", "sender_change", "sender_name_scope"):
             async with s.lock:
                 facts = self._origin_step(st) if what != "sender_name_scope" else {}
@@ -844,11 +877,15 @@ class LiveFlow:
         # 같은 발화의 도구가 먼저 질문을 전달할 수 있도록 Decision 작업 밖에서 보낸다.
         s.spawn(self.notify(s, "N2", facts, again=True, unless_tool_turn=turn), "order_question")
 
+    def _queue_cancel_confirmation(self, s: CallSession, pending_id: str, facts: dict) -> None:
+        s.spawn(self.notify(s, "N2", facts, again=True, cancel_confirmation_id=pending_id), "cancel_confirmation")
+
     async def _on_intent(self, s: CallSession, intent: str, *, order_turn: Spoken | None = None,
                          greeting: bool = False) -> None:
         st = s.state
-        if intent in BUSINESS:
-            self._business(s, intent)
+        if intent in BUSINESS or intent in CANCEL_INTENTS:
+            self._business(s, "cancel" if intent in CANCEL_INTENTS else intent)
+        issued = None
         async with s.lock:
             if intent == "end":
                 if st.parcels and not st.no_more_parcels and assess(st, self.policy).stage == "more_parcels":
@@ -858,19 +895,36 @@ class LiveFlow:
                     facts = {"closing": True}
             elif intent == "edit_parcel":
                 facts = self._edit(s)
-            elif intent == "cancel_current" and s.tools.draft_intake:
-                target = self.svc.intake.current_target(s)
+            elif intent in CANCEL_INTENTS:
+                target = None
+                if intent == "cancel_current" and s.tools.draft_intake:
+                    target = self.svc.intake.current_target(s)
+                elif intent in ("cancel_selected", "cancel_selected_order") and st.intent in ("lookup", "cancel"):
+                    target = st.selected_order
+                    if target and not (target.get("order_parcel_seq") or target.get("draft_seq")):
+                        target = None
+                    if intent == "cancel_selected_order":
+                        target = target | {"whole_order": True} if target and target.get("order_seq") else None
+                clear_order_lookup(st)
+                if st.pending and st.pending.kind == "parcel":
+                    st.pending = st.address_offer = None
+                st.candidates = None
+                st.intent = "cancel"
+                st.cancel_done = False
                 if target:
-                    st.selected_order, st.candidates = target, None
-                    st.intent = "cancel"
+                    st.selected_order = target
                     issued = issue_cancel_confirmation(st, s.tools.clock())
-                    facts = {"cancel_target": _order_facts(issued.snapshot)}
-                else:
+                    facts = {"cancel_target": cancel_target_facts(issued.snapshot)}
+                elif intent == "cancel_current":
                     facts = {"cancel_current": "none"}
+                else:
+                    facts = {"intent": "cancel", "cancel_lookup": True}
             elif intent == "agent":
                 facts = self._agent_route(s)
             else:  # 조회·취소로 전환(받던 택배는 state.current에 그대로), 문의는 하던 업무를 바꾸지 않는다
-                if intent in ("lookup", "cancel") or st.intent is None:
+                if intent == "lookup" and st.intent == "cancel":
+                    clear_order_lookup(st)
+                if intent == "lookup" or st.intent is None:
                     st.intent = intent
                 facts = {"intent": st.intent}
                 if st.intent == "order":
@@ -884,6 +938,8 @@ class LiveFlow:
             self._maybe_submit(s, force=True)
         if order_turn:
             self._queue_order_question(s, order_turn, facts)
+        elif issued:
+            self._queue_cancel_confirmation(s, issued.id, facts)
         else:
             await self.notify(s, "N2" if facts.get("closing") or "agent" in facts or "cancel_target" in facts else "N1'", facts)
         if facts.get("closing"):
@@ -1046,6 +1102,8 @@ class LiveFlow:
         elif intent == "order" and s.state.intent != "order":
             # 문의·조회 뒤 접수 도구를 부르면 접수로 바꾼다(그대로 두면 '더 없음'·마무리를 못 들음, 운영 통화 8df5dd7f)
             s.note("업무 전환", f"{s.state.intent}→order")
+            if s.state.intent == "cancel":
+                clear_order_lookup(s.state)
             s.state.intent = "order"
         if not rt.intent_started:
             rt.intent_started = True
@@ -1109,13 +1167,19 @@ class LiveFlow:
         st = s.state
         arguments = _args(item.get("arguments"))
         records_sender_name = name == "record_fields" and isinstance(arguments, dict) and bool(arguments.get("sender_name"))
-        if ((st.origin_offered and st.origin_answer is None and not st.origin_applied) or sender_change_available(st)
+        if (name == "lookup_orders" or (st.origin_offered and st.origin_answer is None and not st.origin_applied) or sender_change_available(st)
                 or name in ("record_fields", "find_destination", "get_state")
                 and st.candidates and st.candidates.kind == "destination"
                 or name == "get_state" and st.pending and st.pending.kind == "parcel"
                 or records_sender_name and st.customer.customer_seq):
             await self._customer_quiet(s)  # 고객 발화 끝에 보내는 분 변경을 판단한 뒤 그 발화의 값을 기록한다.
-        await self._decided(s)
+        turns = self.rt(s).customer_turns
+        offset = d0["offset_ms"]
+        utterance = next((u for u in reversed(turns) if offset is not None
+                          and u.start_ms <= offset <= u.end_ms + self.cfg.utterance_gap_ms), None)
+        if not utterance and offset is None and len(turns) == 1:
+            utterance = turns[0]
+        await self._decided(s, utterance.decision_done if name == "lookup_orders" and utterance else None)
         if name in TOOL_INTENT:
             self._business(s, TOOL_INTENT[name])
         if name == "lookup_orders":
@@ -1127,13 +1191,7 @@ class LiveFlow:
         s.tool_calls.append(view)
         s.stats["도구"] += 1
         ctx = s.tools
-        turns = self.rt(s).customer_turns
         readback_turn = turns[-1].utterance_id if turns else 0
-        offset = d0["offset_ms"]
-        utterance = next((u for u in reversed(turns) if offset is not None
-                          and u.start_ms <= offset <= u.end_ms + self.cfg.utterance_gap_ms), None)
-        if not utterance and offset is None and len(turns) == 1:
-            utterance = turns[0]
         tool_arguments = item.get("arguments") or "{}"
         if (name == "lookup_orders" and utterance and utterance.lookup_selection is not None
                 and st.selected_order is utterance.lookup_selection and isinstance(arguments, dict)
@@ -1142,8 +1200,8 @@ class LiveFlow:
         if name == "record_fields":
             if utterance:
                 readback_turn = utterance.utterance_id
-                if records_sender_name and utterance.scope_decided is not None:
-                    await self._decided(s, utterance.scope_decided)
+                if records_sender_name and utterance.decision_done is not None:
+                    await self._decided(s, utterance.decision_done)
                 if (offset is not None and utterance is turns[-1] and isinstance(arguments, dict)
                         and isinstance(phone := arguments.get("receiver_phone"), str)):
                     heard_phone = restore_phone_ending(phone, utterance.text)
@@ -1156,6 +1214,10 @@ class LiveFlow:
                     and arguments.get("include_values", False) is False and utterance is not None
                     and utterance is turns[-1] and st.pending and utterance.parcel_confirmation_id == st.pending.id):
                 ctx.outputs.setdefault(call_id, {"status": "ok", "confirmation": "await_server"})
+            elif (name == "lookup_orders" and isinstance(arguments, dict) and not arguments.get("other_customer")
+                  and utterance is not None and utterance is turns[-1] and st.pending
+                  and utterance.cancel_confirmation_id == st.pending.id):
+                ctx.outputs.setdefault(call_id, {"status": "ok", "facts": {"cancel_confirmation_pending": True}})
             out = await run_tool(ctx, name, tool_arguments, call_id, allowed=MODEL_TOOLS)
         readback_id = (out.get("facts") or {}).get("readback_id")
         if readback_id:
@@ -1181,12 +1243,6 @@ class LiveFlow:
                     self._sync_intake(s)
         if name == "search_manual":
             out = self._count_unanswered(s, out)
-        if name == "lookup_orders" and s.state.selected_order:  # 1건이면 바로 취소 확인 대기(의도가 취소일 때)
-            async with s.lock:
-                if s.state.intent == "cancel":
-                    issued = issue_cancel_confirmation(s.state, s.tools.clock())
-                    if issued:
-                        out = out | {"facts": out.get("facts", {}) | {"cancel_target": _order_facts(issued.snapshot)}}
         view["output"] = out  # Live에 실제로 넘긴 결과(매뉴얼 미답변 집계·취소 대상이 덧붙은 것)
         s.changed()
         delivered = await self.send(s, {"type": "response.item.create", "item": {
@@ -1251,7 +1307,7 @@ class LiveFlow:
 
     # ------------------------------------------------------------------ 전달(N1'/N2)
     async def notify(self, s: CallSession, level: str, facts: dict, again: bool = False,
-                     *, unless_tool_turn: Spoken | None = None) -> None:
+                     *, unless_tool_turn: Spoken | None = None, cancel_confirmation_id: str | None = None) -> None:
         """N1' thinking(무음) · N2 commentary(말할 것, AI 발화가 멈춘 뒤·진행 위임 뒤).
         again: 같은 내용이라도 다시 보낸다(마무리 인사 재요청)."""
         rt = self.rt(s)
@@ -1270,6 +1326,8 @@ class LiveFlow:
             t0 = time.monotonic()
             await self._wait_quiet(s, min_quiet_ms=self.cfg.utterance_gap_ms if receipt_pid else 0,
                                    wait_delegations=not parcel_added)
+            if cancel_confirmation_id and (not s.state.pending or s.state.pending.id != cancel_confirmation_id):
+                return
             if parcel_added and (s.closing_requested_t or s.closed or assess(s.state, self.policy).stage != "more_parcels"):
                 return
             if unless_tool_turn:
@@ -1474,10 +1532,3 @@ def _greeting_offer(state: ConversationState, text: str) -> str | None:
                     and heard[0] in sido_aliases(expected[0]):
                 return "registered_origin"
     return "origin_mentioned"
-
-
-def _order_facts(order: dict) -> dict:
-    """취소 확인 때 읽을 것: 받는 분·상태만(주소는 시·구 수준으로 Live가 읽는다)."""
-    return {"receiver_name": order.get("receiver_name"), "status": order.get("status"),
-            "status_text": status_text(order.get("status"))}
-

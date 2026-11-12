@@ -66,6 +66,7 @@ def render_delegation(policy: Policy, tools: tuple[tuple[str, str], ...] = ()) -
               "기록 성공은 서버 결과로만 안내합니다.",
               "- 고객이 진행 중인 택배에 기록된 값(받는 분·주소·상세주소·연락처·물품 등)이나 안내한 받는 곳 후보의 "
               "주소·상세주소·연락처를 물을 때. 대화에서 들은 기억으로 답하지 않고 서버 결과의 값으로 답합니다.",
+              "- 기존 주문의 취소 대상을 새로 찾아야 할 때 lookup_orders로 조회합니다. 이번 통화와 직전 통화 구분도 함께 전달합니다.",
               "- 받는 곳 후보에 답하면서 새 주소나 새 받는 분 정보를 같이 말하면 새 값의 기록을 요청합니다. "
               "후보 답변만 했으면 서버 결과를 기다린 뒤 그 결과가 정한 질문을 합니다."]
     if tools:
@@ -73,6 +74,7 @@ def render_delegation(policy: Policy, tools: tuple[tuple[str, str], ...] = ()) -
     lines += ["", "Do not generate <|SpawnThinking|> when:",
               "- 고객이 되읽기 접수 질문에 '네, 그렇게 접수해 주세요'처럼 동의만 했거나 추가 도움이 없다고만 답했을 때. "
               "서버가 그 답을 직접 처리하므로 다음 안내를 기다립니다. 고객이 접수 값도 새로 말하거나 고치면 그 값만 기록하도록 요청합니다.",
+              "- 고객이 방금 선택한 택배를 가리켜 취소를 요청하거나 서버의 취소 확인 질문에 답할 때. 서버가 다음 결과를 전달합니다.",
               "- 고객이 말한 수량 또는 서버가 요청한 물품 가액이 공통 입력 제한을 명백히 벗어나고 다른 정상 정보는 없을 때. "
               "도구 거절을 기다리지 말고 허용 범위를 설명해 해당 항목만 다시 묻습니다. 애매한 값은 추측하지 않고 확인합니다.",
               f"- 고객이 {', '.join(['예/아니요', '후보 고르기', *_labels(policy, choice)])}처럼 고르는 답을 할 때(서버가 직접 듣고 판단합니다). "
@@ -151,6 +153,8 @@ def decision_questions(policy: Policy, stage_id: str, *, pending: bool = False,
                        destination_candidates: CandidateSet | None = None,
                        callback: bool = False, origin: bool = False, sender_change: bool = False,
                        sender_name_scope: bool = False, cancel_current: bool = False,
+                       cancel_selected: bool = False, cancel_selected_order: bool = False,
+                       cancel_confirmation: bool = False,
                        box_label: str | None = None) -> list[dict]:
     """발화 끝 Decision 호출에 넣을 질문(SDK `questions` 모양). 선택형 판단이 없으면 빈 목록(호출하지 않음)."""
     stage = next((s for s in policy.stage if s.id == stage_id), None)
@@ -178,12 +182,26 @@ def decision_questions(policy: Policy, stage_id: str, *, pending: bool = False,
             item = {"type": q.type, "name": q.name, "instructions": q.instructions}
             if q.name == "box" and box_label:
                 item["instructions"] += f" 현재 확인할 후보는 '{box_label}'이다."
+            if q.name == "confirm" and cancel_confirmation:
+                item["instructions"] = (
+                    "직전 AI의 취소 확인 질문에 대한 답만 판단한다. '네, 취소해 주세요'는 yes, "
+                    "취소하지 말라는 답은 no, 다른 택배나 범위로 바꾸면 change, 그 밖은 not_answer다.")
             if q.type == "choice":
                 item["choices"] = [{"value": c} for c in q.choices]
                 if q.name == "switch" and cancel_current:
                     item["choices"].append({"value": "cancel_current"})
                     item["instructions"] += (" 고객이 지금 정보를 받는 중인 택배만 빼 달라고 명확히 말하면 cancel_current. "
                                              "이미 담은 다른 택배를 취소하거나 대상이 불분명하면 cancel을 고른다.")
+                if q.name == "switch" and cancel_selected:
+                    item["choices"].append({"value": "cancel_selected"})
+                    item["instructions"] += (" 방금 조회·선택한 택배 한 건을 '그거 취소해 주세요'처럼 가리키면 cancel_selected. "
+                                             "새 이름, 다른 택배 또는 다른 통화 범위를 지정하면 cancel.")
+                if q.name == "switch" and cancel_selected_order:
+                    item["choices"].append({"value": "cancel_selected_order"})
+                    item["instructions"] += (" 방금 선택한 택배가 속한 기존 주문의 모든 택배를 취소하라고 "
+                                             "명시한 경우에만 cancel_selected_order.")
+                if q.name == "switch" and cancel_confirmation:
+                    item["instructions"] += " 취소 확인 질문에 동의하거나 거절하는 답은 none이다."
             out.append(item)
     if pick_labels:
         instructions = "직전 AI 발화가 후보 중 하나를 고르라고 했고 고객이 골랐으면 그 후보를, 모두 아니라고 하면 none, 답이 아니면 not_answer."

@@ -70,6 +70,17 @@ def reject_candidates(state: ConversationState) -> None:
         state.bump()
 
 
+def clear_order_lookup(state: ConversationState) -> None:
+    """기존 주문 선택과 진행 중인 조회를 폐기한다."""
+    state.order_lookup_id += 1
+    state.selected_order = None
+    if state.candidates and state.candidates.kind == "order":
+        state.candidates = None
+    if state.pending and state.pending.kind == "cancel":
+        state.pending = None
+    state.bump()
+
+
 def apply_destination_change(state: ConversationState, index: int, change: DestinationChange) -> None:
     """현재 받는 곳 후보에서 고객이 그대로 쓰기로 한 항목만 가져온다."""
     place = state.candidates.items[index]
