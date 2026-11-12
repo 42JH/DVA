@@ -46,6 +46,72 @@ test('customer retention local cleanup preserves newer children and erases only 
   console.log(JSON.stringify({customerLocalRetention:after,localChildrenProtectRoot:true,rollback:true,lockedCardSkipped:true}));
 });
 
+test('customer retention hard deletion passes referenced pages and preserves source batches and child guards',async t=>{
+  const {RetentionRepository}=require('../dist/retention/retention.repository');
+  const {createHash}=require('node:crypto'),{createServer}=require('node:http');
+  const db=new Pool();t.after(()=>db.end());
+  await truncateFixture(db,'TRUNCATE customers,organizations,departments,memberships,personal_pins,payment_cards RESTART IDENTITY CASCADE');
+  const at=process.env.RETENTION_AT,token='retention-reference-test-'.padEnd(48,'t');
+  const source=!!(await db.query("SELECT to_regclass('orders') AS name")).rows[0].name;
+  if(source)await truncateFixture(db,'TRUNCATE call_sessions RESTART IDENTITY CASCADE');
+  else await db.query('TRUNCATE outbox_events,inbox_events');
+  await db.query(`INSERT INTO customers(name,phone_number,status,deleted_at)
+    SELECT '만료 고객 '||n,'010'||lpad(n::text,8,'0'),'ACTIVE',
+    CASE WHEN n=1160 THEN NULL WHEN n=1159 THEN $1::timestamptz-interval '4 years' ELSE $1::timestamptz-interval '6 years' END FROM generate_series(1,1160) n`,[at]);
+  await db.query("INSERT INTO organizations(name,status) VALUES('보존 기업','ACTIVE')");
+  await db.query("INSERT INTO memberships(customer_seq,organization_seq,employee_no,status,deleted_at) VALUES(1158,1,'kept','ACTIVE',$1::timestamptz-interval '4 years')",[at]);
+  const address={name:'보존 수령인',phoneNumber:'0212345678',roadAddress:'보존 도로',jibunAddress:'보존 지번',detailAddress:'',dongName:'보존동',postalCode:'01234'};
+  await db.query('INSERT INTO personal_pins(customer_seq,address_data) VALUES(1156,$1)',[address]);
+  await db.query("INSERT INTO payment_cards(customer_seq,registration_key,request_hash,provider_customer_key,provider_environment,expiration_year,expiration_month,status,deleted_at) VALUES(1157,$1,'kept',$1,'test',2099,12,'FAILED',$2::timestamptz-interval '4 years')",['40000000-0000-4000-8000-000000009999',at]);
+  if(source)await db.query("INSERT INTO orders(customer_seq,creation_source,created_at,updated_at) SELECT customer_seq,'ADMIN',$1,$1 FROM customers WHERE customer_seq<=1050",[at]);
+  let mode='ok',url='http://order:3002';const requests=[],errors=[];
+  if(!source){const server=createServer(async(req,res)=>{try{const chunks=[];for await(const chunk of req)chunks.push(chunk);const event=JSON.parse(Buffer.concat(chunks));
+    require('@dva/events/call-read-references.cjs').validateRetainedCustomersQuery(event);assert.equal(req.headers.authorization,'Bearer '+token);requests.push(event.payload.ids);
+    if(mode==='fail'){res.writeHead(503).end();return;}res.writeHead(200,{'Content-Type':'application/json'}).end(JSON.stringify({eventId:event.eventId,status:'processed',payload:event.payload.ids.filter(id=>id<=1050).sort((a,b)=>a-b)}));
+  }catch(error){errors.push(error.message);res.writeHead(500).end();}});await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));url='http://127.0.0.1:'+server.address().port;t.after(async()=>{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));});}
+  const transaction=async work=>{const client=await db.connect();try{await client.query('BEGIN');const result=await work(client);await client.query('COMMIT');return result;}catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}};
+  const repo=new RetentionRepository({pool:db,transaction},{get:key=>key==='ORDER_URL'?url:token});
+  const {RetentionWorker}=require('../dist/retention/retention.worker');
+  const worker=new RetentionWorker(repo,{pool:db,erase:async()=>{}},{get:key=>key==='ORDER_URL'?url:key==='NODE_ENV'?'test':token});t.after(()=>worker.onModuleDestroy());
+  const snapshot=async()=>(await db.query('SELECT to_jsonb(c) AS row FROM customers c ORDER BY customer_seq')).rows.map(({row})=>{if(row.anonymized_at)row.anonymized_at='<anonymized>';return row;});
+  const before=await snapshot();
+  if(!source){mode='fail';await assert.rejects(repo.purgeDatabase());assert.deepEqual(await snapshot(),before);mode='ok';requests.length=0;}
+  await db.query("CREATE FUNCTION retention_root_fault() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'controlled customer deletion failure'; END $$; CREATE TRIGGER retention_root_fault BEFORE DELETE ON customers FOR EACH ROW EXECUTE FUNCTION retention_root_fault()");
+  try{await assert.rejects(repo.purgeDatabase());assert.deepEqual(await snapshot(),before);}finally{await db.query('DROP TRIGGER retention_root_fault ON customers; DROP FUNCTION retention_root_fault()');}
+  requests.length=0;const gate=await db.connect(),batches=[];let count=1160;
+  try{await gate.query('BEGIN');await gate.query('SELECT 1 FROM customers WHERE customer_seq=1051 FOR UPDATE');
+    for(const expected of [100,4]){await worker.run();const rows=await snapshot();batches.push(count-rows.length);assert.equal(count-rows.length,expected);count=rows.length;assert.ok(rows.some(row=>row.customer_seq===1051));}
+    if(!source){assert.ok(requests.some(ids=>ids.length===1000));assert.ok(requests.length>=4);assert.ok(requests.every(ids=>!ids.includes(1051)));}
+  }finally{await gate.query('ROLLBACK');gate.release();}
+  await worker.run();const after=await snapshot();batches.push(count-after.length);assert.deepEqual(batches,[100,4,1]);
+  assert.deepEqual(after.map(row=>row.customer_seq),[...Array.from({length:1050},(_,n)=>n+1),1156,1157,1158,1159,1160]);
+  assert.deepEqual(errors,[]);
+  console.log(JSON.stringify({customerRetentionRoots:{batches,remaining:after.length,rowsHash:createHash('sha256').update(JSON.stringify(after)).digest('hex')}}));
+});
+
+test('customer retention worker preserves source scheduling, shared runs, retry and shutdown',async t=>{
+  const {RetentionWorker}=require('../dist/retention/retention.worker');
+  const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+  const fakeDatabase={pool:{connect:async()=>({query:async()=>({rows:[]}),release:()=>{}})}};
+  const config=environment=>({get:key=>key==='NODE_ENV'?environment:key==='ORDER_URL'?'http://order:3002':'retention-worker-test-'.padEnd(48,'t')});
+  let calls=0,finish;
+  const pending=new RetentionWorker({claimCall:async()=>undefined,purgeDatabase:()=>{calls++;return new Promise(resolve=>{finish=resolve;});}},fakeDatabase,config('test'));
+  t.after(()=>pending.onModuleDestroy());pending.onApplicationBootstrap();await pause(5);assert.equal(calls,0);
+  const one=pending.run(),two=pending.run();assert.equal(one,two);
+  for(let n=0;!finish;n++){assert.ok(n<100);await pause(1);}
+  let stopped=false;const shutdown=pending.onModuleDestroy().then(()=>{stopped=true;});await pause(5);assert.equal(stopped,false);
+  finish(true);await Promise.all([one,two,shutdown]);await pending.run();assert.equal(calls,1);
+  let fail=true,retries=0;const logs=[];
+  const recovering=new RetentionWorker({claimCall:async()=>undefined,purgeDatabase:async()=>{retries++;if(fail)throw Error('private failure details');return true;}},fakeDatabase,config('test'));
+  t.after(()=>recovering.onModuleDestroy());recovering.logger.error=value=>logs.push(value);
+  await assert.rejects(recovering.run());fail=false;await recovering.run();assert.equal(retries,2);assert.deepEqual(logs,[{event:'retention_cleanup_failed'}]);await recovering.onModuleDestroy();
+  let ticks=0;const scheduled=new RetentionWorker({claimCall:async()=>undefined,purgeDatabase:async()=>{ticks++;return true;}},fakeDatabase,config('production'));
+  t.after(()=>scheduled.onModuleDestroy());scheduled.onApplicationBootstrap();
+  const deadline=Date.now()+15000;while(ticks<2){assert.ok(Date.now()<deadline,'ten-second retention timer');await pause(50);}
+  await scheduled.onModuleDestroy();assert.equal(ticks,2);await scheduled.run();assert.equal(ticks,2);
+  console.log(JSON.stringify({customerRetentionWorker:{singleRun:true,retry:true,shutdown:true,timer:true}}));
+});
+
 test('customer reads match monolith with independent operations sessions and immutable customer data', async t => {
   assert.equal(process.env.NODE_ENV, 'test');
   assert.equal(process.env.PGDATABASE, 'dva_webhook_test');

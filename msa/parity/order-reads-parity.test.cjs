@@ -817,6 +817,7 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
     const url=sides[1].base+'/internal/call-read-references/events',token=process.env.CUSTOMER_AUTH_TOKEN;
     const links=async db=>(await db.query('SELECT to_jsonb(r) AS row FROM order_payment_requests r WHERE payment_request_id=ANY($1::uuid[]) ORDER BY payment_request_id',[requests])).rows;
     const original=await links(reference);
+    const keeper=await databases.customer.connect();await keeper.query('SELECT pg_advisory_lock(20261103,157)');retention.push(keeper);
     for(const db of [reference,databases.customer])for(const id of cards)await db.query(`INSERT INTO payment_cards(payment_card_seq,customer_seq,registration_key,request_hash,provider_customer_key,provider_environment,expiration_year,expiration_month,status,created_at,updated_at,deleted_at)
       OVERRIDING SYSTEM VALUE VALUES($1,1,$2,'retention-fixture',$2,'test',2099,12,'FAILED','2010-01-01Z','2010-01-01Z',$3)`,[id,'00000000-0000-4000-8000-'+String(id).padStart(12,'0'),id===29603?'2026-01-01Z':'2010-01-01Z']);
     for(const db of [reference,databases.order]){
@@ -825,7 +826,7 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
         await client.query('COMMIT');
       }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
     }
-    const transaction=async work=>{const client=await databases.customer.connect();try{await client.query('BEGIN');const result=await work(client);await client.query('COMMIT');return result;}catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}};
+    const transaction=async work=>{try{await keeper.query('BEGIN');const result=await work(keeper);await keeper.query('COMMIT');return result;}catch(error){await keeper.query('ROLLBACK');throw error;}};
     try{
       await reference.query('DELETE FROM payment_cards WHERE payment_card_seq=ANY($1::int[])',[[29601,29602]]);
       await new RetentionRepository({transaction}).purgeDatabase();
@@ -848,8 +849,10 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
       assert.deepEqual(await links(databases.order),await links(reference));
       assert.equal((await databases.order.query('SELECT 1 FROM inbox_events WHERE event_id=$1',[packet.eventId])).rowCount,1);
     }finally{
-      for(const db of [reference,databases.order])for(const {row}of original)await db.query('UPDATE order_payment_requests SET payment_card_seq=$2 WHERE payment_request_id=$1',[row.payment_request_id,row.payment_card_seq]);
-      for(const db of [reference,databases.customer])await db.query('DELETE FROM payment_cards WHERE payment_card_seq=ANY($1::int[])',[cards]);
+      try{
+        for(const db of [reference,databases.order])for(const {row}of original)await db.query('UPDATE order_payment_requests SET payment_card_seq=$2 WHERE payment_request_id=$1',[row.payment_request_id,row.payment_card_seq]);
+        for(const db of [reference,databases.customer])await db.query('DELETE FROM payment_cards WHERE payment_card_seq=ANY($1::int[])',[cards]);
+      }finally{await keeper.query('SELECT pg_advisory_unlock(20261103,157)');retention.splice(retention.indexOf(keeper),1);keeper.release();}
     }
   });
   await t.test('private queries reject forged tokens/sources and replay reads current state without writes',async()=> {

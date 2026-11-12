@@ -1,5 +1,9 @@
 # Customer 서비스
 
+고객 보관 워커는 시작 시와 10초마다 삭제 후 5년 지난 카드·멤버십·개인 PIN, 자식 참조 없는 부서/기업을 정리하고 고객 개인정보를 익명화한다. 고객 영구 삭제는 삭제/만료 주문을 포함한 모든 주문과 로컬 자식 참조가 없어야 하며 한 번에 100명까지만 처리한다. 주문 참조 확인에는 기존 `ORDER_URL`과 `CUSTOMER_AUTH_TOKEN`이 필요하다. `ORDER_URL`이 없으면 API 시작은 유지하고 보관 작업은 실패 기록을 남긴다. `test` 환경의 자동 실행은 끈다.
+
+카드 삭제와 같은 트랜잭션에 저장한 이벤트는 order의 결제 요청 카드 참조를 원본 FK처럼 NULL로 만든다. 전송 실패는 기존 outbox에서 재시도하고 중복/변조는 inbox로 처리한다. 새 공개 API·Secret·의존 서비스는 추가하지 않는다. 현재 대조 범위와 검증 근거는 [작업 보고서](../../CURRENT-PARITY.md)를 따른다.
+
 [주문 조회 이식](../../../docs/msa-order-reads-plan.md)은 기존 공개 customer API를 유지하고 내부 주문 조회 범위 확인만 추가한다. `ORDER_URL`은 미설정 시 기존 API의 시작을 막지 않으며, k3s에는 `http://order:3002`를 주입한다. 관리자 이전 주소는 삭제되지 않은 고객, AI는 현재 발신번호의 ACTIVE 고객을 공유 잠금으로 확인한 동안 order의 조회 callback을 기다린다. 내부 요청은 기존 토큰·source/type/payload 검증을 거치며 개인정보 응답을 저장하지 않는다. 공개 `/api/customers/:id/addresses`는 order Ingress로 전달한다.
 
 모놀리식의 고객·기업·부서·구성원과 고객 확인/통화 등록·개인 PIN·기업 청구 조회 24개 API를 제공한다. 프론트·AI 요청 형식은 바꾸지 않는다. 관련 작업은 [S15P31D109-160](https://ssafy.atlassian.net/browse/S15P31D109-160), [쓰기 계획](../../../docs/msa-customer-writes-plan.md), [고객 확인·통화 등록 계획](../../../docs/msa-caller-context-plan.md), [전체 동등성 계획](../../../docs/msa-parity-plan.md)을 따른다.

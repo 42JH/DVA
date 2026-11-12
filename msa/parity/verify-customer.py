@@ -153,12 +153,16 @@ def main():
             run('docker','cp',str(probe)+'/.',name+':/app/'+('' if side=='monolith' else 'service/')+'test',label=side+'-local-retention-copy')
             complete(name)
             output=run('docker','logs',name,label=side+'-local-retention-snapshot')
+            projections[side]={}
             for line in output.splitlines():
                 try:value=json.loads(line.removeprefix('# '))
                 except ValueError:continue
-                if 'customerLocalRetention' in value:projections[side]=value
+                if 'customerLocalRetention' in value:projections[side]['local']=value
+                if 'customerRetentionRoots' in value:projections[side]['roots']=value
+                if 'customerRetentionWorker' in value:projections[side]['worker']=value
+            assert set(projections[side])=={'local','roots','worker'}
         assert len(projections)==2 and projections['monolith']==projections['customer']
-        report['customerLocalRetention']={'matched':True,'rollback':True,'workerAndOrderReferences':False}
+        report['customerLocalRetention']={'matched':True,'rollback':True,'orderReferencesAndHardDeletion':True,'worker':True}
         report['passed'] = True
     finally:
         for kind, name in reversed(resources):
