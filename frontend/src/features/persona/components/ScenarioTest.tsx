@@ -110,13 +110,16 @@ function ScenarioTest({ me, dateOf }: { me: TestTarget; dateOf: (version: number
         </span>
       </div>
       <div className="min-h-0 flex-1 [scrollbar-width:thin] overflow-y-auto">
-        <table className={`w-full table-fixed text-[14px] ${dim}`}>
-          <thead className="sticky top-0 bg-ops-paper text-left text-ops-sub">
-            <tr className="h-10 [&>th]:text-left! [&>th]:font-medium">
-              <th scope="col" className="w-40 pl-6">
+        {/* 다른 목록과 같은 표 (ops-table) — 업무 · 시나리오는 왼쪽, 결과 · 변화는 가운데 (11/13 사용자) */}
+        <table className={`ops-table ${dim}`}>
+          <thead>
+            <tr>
+              <th scope="col" className="w-40">
                 업무
               </th>
-              <th scope="col">시나리오</th>
+              <th scope="col" className="pl-[15px]! text-left!">
+                시나리오
+              </th>
               <th scope="col" className="w-55">
                 통화에 사용 중 <Date_>{vm.baseDate}</Date_>
               </th>
@@ -128,15 +131,15 @@ function ScenarioTest({ me, dateOf }: { me: TestTarget; dateOf: (version: number
               </th>
             </tr>
           </thead>
-          <tbody className="[&_td]:text-left">
+          <tbody className="[&_td:nth-child(n+3)]:text-center">
             {vm.rows.map((r) => (
               <tr
                 key={r.id}
                 onClick={() => void navigate(r.to, { state: vm.from })}
-                className={`h-11 border-t ${r.firstOfGroup ? 'border-ops-line' : 'border-ops-line/50'} cursor-pointer hover:bg-ops-paper`}
+                className="cursor-pointer hover:bg-ops-route-soft"
               >
-                <td className="pl-6 text-ops-sub">{r.firstOfGroup && r.group}</td>
-                <td className="truncate pr-3">
+                <td className="text-center text-ops-sub">{r.firstOfGroup && r.group}</td>
+                <td className="truncate text-left">
                   {/* 줄 전체가 눌리지만 키보드로는 이 링크로 (줄의 onClick과 겹쳐 두 번 이동하지 않게 막음) */}
                   <Link
                     to={r.to}
