@@ -257,12 +257,12 @@ thead th {
 @theme {
   --color-ops-ink: #1d2433; /* 글자 */
   --color-ops-sub: #5b6475; /* 보조 글자 */
-  --color-ops-faint: #6b7487; /* 흐린 글자 · 미완료 — 흰 바탕 4.69:1 (11/12 접근성, 전 #8a94a6 3.06:1) */
+  --color-ops-faint: #636d7f; /* 흐린 글자 · 미완료 — 흰 바탕 5.22 · 회색 바탕 4.83 · 회색 칩 4.57:1 (11/12 접근성: 흰 바탕만 보고 고른 #6b7487이 회색 줄 위 4.34) */
   --color-ops-paper: #f5f6f8; /* 바탕 */
   --color-ops-line: #e3e6eb; /* 선 */
   --color-ops-route: #1a62d6; /* 선택 · 링크 · 진행 중 — 연한 파랑 바탕 4.95:1 (전 #1f6feb 4.11:1) */
   --color-ops-route-soft: #eaf2fe;
-  --color-ops-wait: #a86400; /* 결제 대기 · 입력 필요 — 흰 바탕 4.68:1 (전 #b86e00 3.99:1) */
+  --color-ops-wait: #9a5c00; /* 결제 대기 · 입력 필요 — 연한 주황 바탕 4.93 · 흰 바탕 5.38:1 (11/12 접근성: #a86400은 연한 주황 칩 위 4.29) */
   --color-ops-wait-soft: #fff4e0;
   --color-ops-done: #107a50; /* 완료 — 연한 초록 바탕 4.80:1 (전 #138a5b 3.91:1) */
   --color-ops-done-soft: #e7f6ef;

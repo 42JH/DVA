@@ -109,7 +109,7 @@ function Cat({
       className={`inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium whitespace-nowrap ${on ? 'bg-[#6b6b6b] text-white' : 'bg-ops-idle-soft text-ops-sub hover:bg-[#dfe2e8] hover:text-ops-ink'}`}
     >
       <span># {label}</span>
-      <span className={`text-[12px] tabular-nums ${on ? 'text-white/70' : 'text-ops-faint'}`}>
+      <span className={`text-[12px] tabular-nums ${on ? 'text-white/90' : 'text-ops-faint'}`}>
         {count}
       </span>
     </button>
