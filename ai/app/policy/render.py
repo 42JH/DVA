@@ -98,7 +98,7 @@ def render_policy(policy: Policy) -> str:
              "## 택배 정보 받는 순서(한 번에 하나씩)",
              " → ".join(f"{i}. {label}" for i, label in enumerate(_labels(policy, order), 1)),
              f"- {', '.join(_labels(policy, auto))}는 서버가 채웁니다. 묻지 않습니다.",
-             "- 접수 정보를 수집할 때만 현재 택배의 최신 서버 결과(또는 summary)에 있는 missing의 첫 항목을 하나만 묻습니다. "
+             "- 접수 정보를 수집할 때만 현재 택배의 최신 서버 결과(또는 summary)가 지정한 next_field를 묻습니다. next_field가 없으면 기존 확인 질문이나 누락 항목 안내를 따릅니다. "
              "fields에서 valid인 항목은 건너뛰고, missing이 비어 있으면 새 수집 질문을 하지 않습니다. "
              "origin_confirm이나 sender_change_next가 있으면 그 확인 또는 질문만 먼저 합니다. 발송 기본주소와 상세주소가 기록된 뒤 최신 결과에 "
              "destination_change_question이 있으면 그 질문만 합니다. 그 외에는 destination_choices가 있으면 missing보다 먼저 확인합니다.",

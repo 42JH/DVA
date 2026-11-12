@@ -562,6 +562,8 @@ def test_late_result_and_n2_wait_while_customer_is_speaking():
         s = svc.registry.calls["live_1"]
         await until(lambda: "session.commentary.append" in sent_types(conn))  # 첫 인사 N2
         await say(conn, "택배 보내려고요", 1000)
+        await until(lambda: any(e["type"] == "session.commentary.append" and '"intent": "order"' in e["content"]
+                                for e in conn.sent))
         conn.push({"type": "session.delegation.created", "delegation": {"id": "d1"}, "offset_ms": 2100})
         conn.push({"type": "response.event", "delegation_id": "d1", "event": {"type": "response.created"}})
         conn.push({"type": "response.event", "delegation_id": "d1", "event": {
@@ -583,7 +585,7 @@ def test_late_result_and_n2_wait_while_customer_is_speaking():
         await task
         return notes_while_speaking
 
-    assert run(scenario()) == 1  # 고객이 말하는 동안 새 N2 없음(첫 인사만)
+    assert run(scenario()) == 2  # 첫 인사와 접수 시작 안내 뒤, 고객이 말하는 동안 새 N2 없음
 
 
 def test_three_unanswered_manual_searches_suggest_agent_then_reset():
@@ -701,9 +703,16 @@ def test_customer_info_saved_on_commit_without_asking():
     assert [q["name"] for q in decision_questions(P, "more_parcels")] == ["more", "switch"]  # 저장 질문 없음
 
 
-def test_order_intent_notice_carries_missing_so_first_question_follows_order():
+@pytest.mark.parametrize("registered", [False, True])
+def test_order_intent_notice_carries_missing_so_first_question_follows_order(registered):
     """운영 통화 3a0b9c7f: 접수 시작 알림이 {"intent":"order"}뿐이라 Live가 "어떤 택배" 같은 순서 밖 질문을 함."""
     svc, client = flow()
+    if registered:
+        from backend_client.order import Place as BPlace
+        svc.d.backend.api.add_customer(CALLER, "김철수", default_origin=BPlace(
+            name="김철수", phone=CALLER, address="서울 강남구 테헤란로 212", address_detail="1201호"))
+        client.decisions.create = AsyncMock(return_value=SimpleNamespace(answers=[
+            choice("task", "order"), choice("origin", "yes")]))
 
     async def scenario():
         task = asyncio.create_task(svc.on_incoming(incoming()))
@@ -712,7 +721,7 @@ def test_order_intent_notice_carries_missing_so_first_question_follows_order():
         conn.push(started())
         await until(lambda: svc.registry.calls["live_1"].phase == Phase.ACTIVE)
         await ai(conn, "안녕하세요, 디바콜입니다.", 0)
-        await say(conn, "택배 보내려고요", 1000)
+        await say(conn, "네, 맞습니다" if registered else "택배 보내려고요", 1000)
         await until(lambda: any('"intent"' in e.get("content", "") for e in conn.sent))
         conn.push({"type": "session.closed", "reason": "remote_hangup"})
         await task
@@ -721,7 +730,10 @@ def test_order_intent_notice_carries_missing_so_first_question_follows_order():
     conn = run(scenario())
     notice = next(e for e in conn.sent if '"intent"' in e.get("content", ""))
     facts = json.loads(notice["content"].split("[서버 결과] ", 1)[1])
-    assert facts["intent"] == "order" and facts["summary"]["missing"][0] == "sender_name"
+    assert notice["type"] == "session.commentary.append"
+    first = "receiver_name" if registered else "sender_name"
+    assert facts["intent"] == "order" and facts["summary"]["missing"][0] == first
+    assert facts["summary"]["next_field"] == first
 
 
 
@@ -766,6 +778,7 @@ def test_registered_greeting_answer_preserves_address_scope_without_model(greeti
     assert cur["sender_name"].source == Source.CALLER_ID
     if expected == "prefilled":
         assert facts["origin"] == "prefilled" and facts["summary"]["missing"][0] == "receiver_name"
+        assert facts["summary"]["next_field"] == "receiver_name"
         assert all(cur[n].source == Source.PROFILE for n in ("sender_address", "sender_address_detail"))
         assert cur.sender_geo is not None and cur["sender_address_detail"].value == "1201호"
     else:
@@ -1394,7 +1407,8 @@ def test_call_record_keeps_decision_io_backend_text_tool_args_and_delivery():
     run(scenario())
 
 
-def test_tool_call_on_answer_to_candidates_waits_for_pick():
+@pytest.mark.parametrize("with_tool", [False, True])
+def test_tool_call_on_answer_to_candidates_waits_for_pick(with_tool):
     """후보 답과 같은 턴의 Backend 도구 호출은 Decision 반영 뒤에 처리한다(운영 통화: 선택으로 연락처가 채워졌는데
     Backend가 반영 전 상태로 연락처를 다시 물음)."""
     from app.domain.candidates import offer
@@ -1421,16 +1435,28 @@ def test_tool_call_on_answer_to_candidates_waits_for_pick():
             s.state.record("sender_address", "서울특별시 강남구 테헤란로 211")
             s.state.record("sender_address_detail", "")
             s.state.record("receiver_name", "현수민")
+            s.state.record("sender_name", "김철수")
             pin = Place("현수민", "01055556666", "부산광역시 서구 대신공원로 1", "201호",
                         Geo("x", "서대신동3가", "00000"), Source.PIN)
             offer(s.state, "destination", (label,), (pin,))
         await ai(conn, f"{label}로 보내시나요?", 0)
         await say(conn, "네 서대신동이요", 1500)
-        conn.push({"type": "session.delegation.created", "delegation": {"id": "d1"}, "offset_ms": 1600})
-        conn.push({"type": "response.event", "delegation_id": "d1", "event": {
-            "type": "response.output_item.done", "item": {"type": "function_call", "call_id": "c1",
-                                                         "name": "get_state", "arguments": "{}"}}})
-        await until(lambda: "response.item.create" in sent_types(conn), timeout=3.0)
+        if with_tool:
+            conn.push({"type": "session.delegation.created", "delegation": {"id": "d1"}, "offset_ms": 1600})
+            conn.push({"type": "response.event", "delegation_id": "d1", "event": {
+                "type": "response.output_item.done", "item": {"type": "function_call", "call_id": "c1",
+                                                             "name": "get_state", "arguments": "{}"}}})
+            await until(lambda: "response.item.create" in sent_types(conn), timeout=3.0)
+            conn.push({"type": "response.event", "delegation_id": "d1", "event": {"type": "response.completed"}})
+            await until(lambda: "response.create" in sent_types(conn))
+            conn.push({"type": "response.event", "delegation_id": "d1", "event": {"type": "response.completed"}})
+            await until(lambda: s.rt.delegations["d1"]["done"].is_set())
+            await asyncio.sleep(0.15)
+            assert not any(e["type"] == "session.commentary.append" and '"next_field"' in e["content"]
+                           for e in conn.sent)
+        else:
+            await until(lambda: any(e["type"] == "session.commentary.append" and '"next_field": "items"' in e["content"]
+                                    for e in conn.sent))
         conn.push({"type": "session.closed", "reason": "remote_hangup"})
         await task
         return conn
@@ -1441,7 +1467,13 @@ def test_tool_call_on_answer_to_candidates_waits_for_pick():
     facts = json.loads(selection.removeprefix("[서버 결과] "))
     assert facts["destination_selected"] == {"receiver_name": "현수민", "receiver_area": "서대신동3가"}
     assert "picked" not in facts
-    out = json.loads(next(e for e in conn.sent if e["type"] == "response.item.create")["item"]["output"])
+    if with_tool:
+        out = json.loads(next(e for e in conn.sent if e["type"] == "response.item.create")["item"]["output"])
+    else:
+        result = next(e["content"] for e in conn.sent
+                      if e["type"] == "session.commentary.append" and '"next_field"' in e["content"])
+        out = json.loads(result.removeprefix("[서버 결과] "))["summary"]
+    assert out["next_field"] == "items"
     assert out["fields"]["receiver_phone"] == "valid" and "receiver_phone" not in out["missing"]
 
 

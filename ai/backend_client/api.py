@@ -207,7 +207,11 @@ def _parcels(detail: dict) -> list[dict]:
             facts["receipt_number"] = detail["parcelNo"]
         out.append({"order_seq": detail["orderSeq"], "order_parcel_seq": p["orderParcelSeq"],
                     "receiver_name": dest.get("name"), "receiver_address": dest.get("roadAddress"),
-                    "status": status, "details": facts})
+                    "status": status, "details": facts,
+                    **({"call_session_seq": detail["callSessionSeq"]} if detail.get("callSessionSeq") else {}),
+                    **({"creation_source": detail["creationSource"]} if detail.get("creationSource") else {}),
+                    **({"ordered_at": _kst(detail["createdAt"])} if detail.get("createdAt") else {}),
+                    **({"receiver_area": dest["dongName"]} if dest.get("dongName") else {})})
     return out
 
 
