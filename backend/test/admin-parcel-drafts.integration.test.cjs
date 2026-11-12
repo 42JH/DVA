@@ -394,6 +394,12 @@ test('five-year draft purge is independent from weekly logs and from the convert
     )
   ).rows[0].audit_log_seq;
   await f.app.get(RetentionRepository).purgeDatabase();
+  assert.equal((await f.get('/api/parcel-drafts/' + ready.draftSeq)).status, 200);
+  await f.pool.query(
+    "UPDATE order_parcel_drafts SET deleted_at=clock_timestamp()-interval '5 years 1 day' WHERE draft_seq=$1",
+    [ready.draftSeq],
+  );
+  await f.app.get(RetentionRepository).purgeDatabase();
   assert.equal(
     (await f.pool.query('SELECT 1 FROM order_parcel_drafts WHERE draft_seq=$1', [ready.draftSeq]))
       .rowCount,

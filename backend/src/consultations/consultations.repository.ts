@@ -38,7 +38,7 @@ const callSelect = (
   WHEN c.ended_at<=transaction_timestamp()-interval '10 minutes' THEN 'EXPIRED'
   ELSE 'PENDING' END AS "analysisStatus",
  ${includeRecordedAt ? '(SELECT min(r.created_at) FROM recordings r WHERE r.call_session_seq=c.call_session_seq) AS "recordedAt",' : ''}
- c.caller_phone_number AS "callerPhoneNumber",c.order_seq AS "orderSeq",o.status AS "orderStatus",o.total_amount AS "orderTotalAmount",
+ c.caller_phone_number AS "callerPhoneNumber",o.order_seq AS "orderSeq",o.status AS "orderStatus",o.total_amount AS "orderTotalAmount",
  ${CALL_STARTED_AT} AS "startedAt",COALESCE(c.ended_at,a.ai_ended_at) AS "endedAt",
  customer.customer_seq AS "customerSeq",customer.name AS "customerName",company.name AS "organizationName",
  a.ai_persona_version_seq AS "aiPersonaVersionSeq",v.name AS "personaName",v.version AS "personaVersion",
@@ -123,7 +123,7 @@ export class ConsultationsRepository {
     return (
       await client.query<{ endedAt: Date | null }>(
         `SELECT ended_at AS "endedAt" FROM call_sessions
-      WHERE call_session_seq=$1 AND deleted_at IS NULL AND (incoming_at IS NULL OR incoming_at>clock_timestamp()-interval '5 years') FOR UPDATE`,
+      WHERE call_session_seq=$1 AND deleted_at IS NULL FOR UPDATE`,
         [id],
       )
     ).rows[0];
@@ -174,12 +174,10 @@ export class ConsultationsRepository {
   constructor(private readonly database: DatabaseService) {}
 
   async findMany(query: CallQueryDto, client?: PoolClient): Promise<PageRows<CallListItemDto>> {
-    const conditions: string[] = [
-      "c.deleted_at IS NULL AND (c.incoming_at IS NULL OR c.incoming_at>transaction_timestamp()-interval '5 years')",
-    ];
+    const conditions: string[] = ['c.deleted_at IS NULL'];
     const values: Array<string | number | boolean> = [];
     for (const [value, column, operator] of [
-      [query.orderSeq, 'c.order_seq', '='],
+      [query.orderSeq, 'o.order_seq', '='],
       [query.organizationSeq, 'company.organization_seq', '='],
       [query.orderStatus, 'o.status', '='],
       [query.callerPhoneNumber, 'c.caller_phone_number', '='],
@@ -213,7 +211,7 @@ export class ConsultationsRepository {
 
   async findOne(id: number): Promise<CallListItemDto | undefined> {
     const result = await this.database.pool.query<CallRow>(
-      `${callSelect()} WHERE c.call_session_seq=$1 AND c.deleted_at IS NULL AND (c.incoming_at IS NULL OR c.incoming_at>clock_timestamp()-interval '5 years')`,
+      `${callSelect()} WHERE c.call_session_seq=$1 AND c.deleted_at IS NULL`,
       [id],
     );
     return result.rows[0] ? callResult(result.rows[0]) : undefined;
@@ -224,7 +222,7 @@ export class ConsultationsRepository {
       await this.database.pool.query<RecordingRow>(
         `SELECT recording_seq AS "recordingSeq",created_at AS "createdAt",object_key AS "objectKey"
        FROM recordings WHERE call_session_seq=$1 AND EXISTS(SELECT 1 FROM call_sessions c WHERE c.call_session_seq=$1
-        AND c.deleted_at IS NULL AND (c.incoming_at IS NULL OR c.incoming_at>clock_timestamp()-interval '5 years')) ORDER BY recording_seq`,
+        AND c.deleted_at IS NULL) ORDER BY recording_seq`,
         [id],
       )
     ).rows;
@@ -234,7 +232,7 @@ export class ConsultationsRepository {
     return (
       (
         await this.database.pool.query(
-          "SELECT 1 FROM call_sessions WHERE call_session_seq=$1 AND deleted_at IS NULL AND (incoming_at IS NULL OR incoming_at>clock_timestamp()-interval '5 years')",
+          'SELECT 1 FROM call_sessions WHERE call_session_seq=$1 AND deleted_at IS NULL',
           [id],
         )
       ).rowCount === 1

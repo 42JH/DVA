@@ -134,6 +134,14 @@ async function migrate(pool) {
         "SELECT 1 FROM pg_constraint WHERE conrelid='public.admin_users'::regclass AND conname='admin_users_role_check' AND pg_get_constraintdef(oid) NOT LIKE '%SUPERVISOR%'",
       );
       assert.equal(roles.rowCount, 1, 'Apply migration 066 to the isolated DB first');
+      assert.ok(
+        (
+          await client.query(
+            "SELECT to_regclass('public.customers_related_deletion_due_idx') AS name",
+          )
+        ).rows[0].name,
+        'Apply migration 067 to the isolated DB first',
+      );
     } else {
       const directory = join(__dirname, '../../migrations');
       for (const file of readdirSync(directory)

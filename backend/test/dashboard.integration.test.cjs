@@ -165,7 +165,7 @@ async function call(changes = {}) {
   if (opts.deleted) await sent(await f.write('DELETE', '/api/calls', { callSessionSeqs: [c.id] }));
   if (opts.expired)
     await f.pool.query(
-      "UPDATE call_sessions SET incoming_at=statement_timestamp()-interval '5 years 1 day' WHERE call_session_seq=$1",
+      "UPDATE call_sessions SET deleted_at=statement_timestamp()-interval '5 years 1 day' WHERE call_session_seq=$1",
       [c.id],
     );
   return c;
@@ -531,7 +531,7 @@ test('the real retention finalizer removes metrics with expired analysis and pre
   const expired = await call({ stage: 'RECIPIENT_INFO', wait: sampleWait() });
   const claimId = randomUUID();
   await f.pool.query(
-    "UPDATE call_sessions SET incoming_at=statement_timestamp()-interval '5 years 1 day',purge_claim_id=$2,purge_claimed_until=statement_timestamp()+interval '5 minutes' WHERE call_session_seq=$1",
+    "UPDATE call_sessions SET deleted_at=statement_timestamp()-interval '5 years 1 day',purge_claim_id=$2,purge_claimed_until=statement_timestamp()+interval '5 minutes' WHERE call_session_seq=$1",
     [expired.id, claimId],
   );
   const { RetentionRepository } = require('../dist/retention/retention.repository');

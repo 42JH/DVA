@@ -335,7 +335,7 @@ test('admin standalone resume and edit retains the established admin role access
   assert.equal(changed.status, 'READY');
 });
 
-test('admin reads retain text and reference IDs after customer/call physical deletion, while expiry hides old drafts', async () => {
+test('admin reads retain draft text and references after customer/call purge until the draft is deleted', async () => {
   const id = (
     await f.pool.query(
       "INSERT INTO customers(name,phone_number,status) VALUES('원본 삭제','01011115555','ACTIVE') RETURNING customer_seq",
@@ -353,6 +353,9 @@ test('admin reads retain text and reference IDs after customer/call physical del
     "UPDATE order_parcel_drafts SET retention_started_at=clock_timestamp()-interval '5 years' WHERE draft_seq=$1",
     [draft.draftSeq],
   );
+  await data(await f.get('/api/parcel-drafts/' + draft.draftSeq), 200);
+  const deletion = await f.write('DELETE', '/api/parcel-drafts', { draftSeqs: [draft.draftSeq] });
+  assert.equal(deletion.status, 204, await deletion.text());
   await f.error(await f.get('/api/parcel-drafts/' + draft.draftSeq), 404, 'NOT_FOUND');
 });
 

@@ -48,6 +48,124 @@ export class CustomersRepository {
     );
   }
 
+  async claimRelatedDeletion(): Promise<number | undefined> {
+    return (
+      await this.database.pool.query<{ id: number }>(
+        "UPDATE customers SET related_deletion_due_at=clock_timestamp()+interval '1 minute' WHERE customer_seq=(SELECT customer_seq FROM customers WHERE related_deletion_due_at<=statement_timestamp() ORDER BY related_deletion_due_at,customer_seq LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING customer_seq AS id",
+      )
+    ).rows[0]?.id;
+  }
+
+  async lockRelatedDeletion(client: PoolClient, id: number): Promise<string | undefined> {
+    return (
+      await client.query<{ deletedAt: string }>(
+        'SELECT deleted_at::text AS "deletedAt" FROM customers WHERE customer_seq=$1 AND deleted_at IS NOT NULL AND related_deletion_due_at IS NOT NULL FOR UPDATE',
+        [id],
+      )
+    ).rows[0]?.deletedAt;
+  }
+
+  async finishRelatedDeletion(client: PoolClient, id: number): Promise<void> {
+    await client.query('UPDATE customers SET related_deletion_due_at=NULL WHERE customer_seq=$1', [
+      id,
+    ]);
+  }
+
+  async lockRelatedData(client: PoolClient, customerIds: number[], cutoff: string | null) {
+    const orders = await client.query<{ id: number }>(
+      `SELECT o.order_seq AS id FROM orders o
+       WHERE (o.customer_seq=ANY($1::int[]) OR (o.customer_seq IS NULL AND EXISTS(
+         SELECT 1 FROM call_sessions c WHERE c.order_seq=o.order_seq AND c.customer_seq=ANY($1::int[]))))
+        AND ($2::timestamptz IS NULL OR o.created_at<=$2)
+       ORDER BY o.order_seq FOR UPDATE`,
+      [customerIds, cutoff],
+    );
+    const orderIds = orders.rows.map((row) => row.id);
+    await client.query(
+      'SELECT 1 FROM order_payment_requests WHERE order_seq=ANY($1::int[]) ORDER BY payment_request_id FOR UPDATE',
+      [orderIds],
+    );
+    const calls = await client.query<{ id: number }>(
+      `SELECT c.call_session_seq AS id FROM call_sessions c
+       WHERE (c.customer_seq=ANY($1::int[]) OR (c.customer_seq IS NULL AND c.order_seq=ANY($2::int[])))
+        AND ($3::timestamptz IS NULL OR COALESCE(c.incoming_at,c.started_at,c.registered_at,'-infinity')<=$3)
+       ORDER BY c.call_session_seq FOR UPDATE`,
+      [customerIds, orderIds, cutoff],
+    );
+    return { orderIds, callIds: calls.rows.map((row) => row.id) };
+  }
+
+  async relatedDataInProgress(
+    client: PoolClient,
+    orderIds: number[],
+    callIds: number[],
+    customerIds: number[],
+  ) {
+    const { rows } = await client.query<{ busy: boolean }>(
+      `SELECT EXISTS(SELECT 1 FROM orders o WHERE o.order_seq=ANY($1::int[])
+        AND o.deleted_at IS NULL AND o.status IN ('PAID','SUBMITTING','SUBMITTING_FAILED'))
+       OR EXISTS(SELECT 1 FROM order_payment_requests r WHERE r.order_seq=ANY($1::int[]) AND
+        ((r.approval_started_at IS NOT NULL AND r.invalidated_at IS NULL AND r.completed_at IS NULL)
+          OR r.notification_status='SENDING' OR r.completion_notification_status='SENDING'))
+       OR EXISTS(SELECT 1 FROM call_sessions c WHERE c.call_session_seq=ANY($2::int[])
+        AND c.deleted_at IS NULL AND c.ended_at IS NULL)
+       OR EXISTS(SELECT 1 FROM pbx_webhooks.call_ended_events e WHERE e.call_session_seq=ANY($2::int[])
+        AND (e.processing_status<>'PROCESSED' OR e.claimed_until>clock_timestamp()))
+       OR EXISTS(SELECT 1 FROM payment_cards p WHERE p.customer_seq=ANY($3::int[])
+        AND p.status='REGISTERING' AND p.deleted_at IS NULL AND p.claimed_until>clock_timestamp()) AS busy`,
+      [orderIds, callIds, customerIds],
+    );
+    return rows[0].busy;
+  }
+
+  async removeRelatedData(
+    client: PoolClient,
+    customerIds: number[],
+    orderIds: number[],
+    callIds: number[],
+    cutoff: string | null,
+  ) {
+    await client.query(
+      `UPDATE order_payment_requests SET
+       notification_status=CASE WHEN notification_status='PENDING' THEN 'FAILED' ELSE notification_status END,
+       completion_notification_status=CASE WHEN completion_notification_status IN ('WAITING','PENDING') THEN 'FAILED' ELSE completion_notification_status END
+       WHERE order_seq=ANY($1::int[]) AND
+        (notification_status='PENDING' OR completion_notification_status IN ('WAITING','PENDING'))`,
+      [orderIds],
+    );
+    const orders = await client.query<{ id: number }>(
+      'UPDATE orders SET deleted_at=transaction_timestamp() WHERE order_seq=ANY($1::int[]) AND deleted_at IS NULL RETURNING order_seq AS id',
+      [orderIds],
+    );
+    const calls = await client.query<{ id: number }>(
+      'UPDATE call_sessions SET deleted_at=transaction_timestamp() WHERE call_session_seq=ANY($1::int[]) AND deleted_at IS NULL RETURNING call_session_seq AS id',
+      [callIds],
+    );
+    const drafts = await client.query<{ id: number }>(
+      `UPDATE order_parcel_drafts d SET deleted_at=transaction_timestamp(),
+       version=version+1,updated_at=transaction_timestamp()
+       WHERE d.deleted_at IS NULL AND ($4::timestamptz IS NULL OR d.created_at<=$4)
+        AND (d.customer_seq=ANY($1::int[]) OR (d.customer_seq IS NULL AND
+          (d.order_seq=ANY($2::int[]) OR d.legacy_order_seq=ANY($2::int[]) OR d.call_session_seq=ANY($3::int[]))))
+       RETURNING draft_seq AS id`,
+      [customerIds, orderIds, callIds, cutoff],
+    );
+    if (calls.rowCount) await client.query("SELECT pg_notify('call_sessions_changed','')");
+    return { orders: orders.rows, calls: calls.rows, drafts: drafts.rows };
+  }
+
+  async invalidateUnstartedPayments(client: PoolClient, orderIds: number[]): Promise<number[]> {
+    const result = await client.query<{ orderSeq: number }>(
+      `UPDATE order_payment_requests r SET invalidated_at=clock_timestamp()
+       WHERE r.order_seq=ANY($1::int[])
+        AND r.invalidated_at IS NULL AND r.completed_at IS NULL AND r.approval_started_at IS NULL
+        AND r.provider_approved_at IS NULL
+       RETURNING r.order_seq AS "orderSeq"`,
+      [orderIds],
+    );
+    return [...new Set(result.rows.map((row) => row.orderSeq))];
+  }
+
   constructor(private readonly database: DatabaseService) {}
 
   async billingMonth(id: number, month?: string) {
@@ -121,7 +239,8 @@ export class CustomersRepository {
       LEFT JOIN memberships m ON m.customer_seq=c.customer_seq AND m.deleted_at IS NULL
       LEFT JOIN organizations o ON o.organization_seq=m.organization_seq AND o.deleted_at IS NULL
       LEFT JOIN departments d ON d.department_seq=m.department_seq AND d.organization_seq=m.organization_seq AND d.deleted_at IS NULL
-      WHERE c.phone_number=$1 AND c.deleted_at IS NULL`,
+      WHERE c.phone_number=$1 AND (c.deleted_at IS NULL OR c.status='WITHDRAWN')
+      ORDER BY c.deleted_at NULLS FIRST,c.customer_seq DESC LIMIT 1`,
       [phoneNumber],
     );
     return (
@@ -143,6 +262,7 @@ export class CustomersRepository {
     client: PoolClient,
     input: Pick<CreateCustomerDto, 'name' | 'phoneNumber'>,
   ): Promise<Customer | undefined> {
+    if (await this.findByPhoneForOrder(client, input.phoneNumber)) return undefined;
     return (
       await client.query<Customer>(
         `INSERT INTO customers(name,phone_number,status) VALUES($1,$2,'ACTIVE')
@@ -155,7 +275,9 @@ export class CustomersRepository {
   async findByPhoneForOrder(client: PoolClient, phone: string): Promise<Customer | undefined> {
     return (
       await client.query<Customer>(
-        `SELECT ${columns} FROM customers WHERE phone_number=$1 AND deleted_at IS NULL FOR SHARE`,
+        `SELECT ${columns} FROM customers WHERE phone_number=$1
+         AND (deleted_at IS NULL OR status='WITHDRAWN')
+         ORDER BY deleted_at NULLS FIRST,customer_seq DESC LIMIT 1 FOR SHARE`,
         [phone],
       )
     ).rows[0];
