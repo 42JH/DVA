@@ -39,6 +39,18 @@ def test_waiting_guidance_limits_speech_to_one_allowed_phrase():
     assert "## 대기 안내" not in default_persona() and "네 고객님" not in default_persona()
 
 
+def test_readback_yields_to_customer_before_the_confirmation_question():
+    text = render_live("운영 페르소나", POLICY)
+    readback = POLICY.results["readback"]
+    assert "## 공통 끼어들기 규칙" in text
+    assert "접수 확인을 읽는 중에도 문장 중간에서 멈춥니다" in text
+    assert "끊긴 문장을 그대로 이어 읽지 않습니다" in text
+    assert "고객이 끼어들지 않으면" in readback and "이대로 접수할까요?" in readback
+    assert "고객이 끼어들면 공통 끼어들기 규칙을 따른다" in readback
+    assert "읽는 중 고객이 끼어들면 공통 끼어들기 규칙이 우선합니다" in business_rules()
+    assert "고객의 최신 발화가 정정이나 새 질문이면 그 내용을 먼저 처리합니다" in render_backend(POLICY)
+
+
 def test_live_instructions_carry_policy_order_forbid_and_delegation():
     text = render_live(None, POLICY)
     labels = [POLICY.fields[n].label for s in POLICY.collect_stages() for n in s.required]

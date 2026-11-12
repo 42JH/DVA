@@ -24,7 +24,7 @@ from app.domain.assess import area_label, assess, readback_facts
 from app.domain.candidates import (DESTINATION_CHANGE_FIELDS, DESTINATION_CLARIFICATIONS, apply_destination_change, apply_pick,
                                    clear_order_lookup, destination_changes, offer, reject_candidates)
 from app.domain.claims import unverified_values
-from app.domain.confirm import (ConfirmAnswer, Utterance, asks, asks_parcel_confirmation, check_gate, commit_parcel,
+from app.domain.confirm import (ConfirmAnswer, Utterance, asks, check_gate, commit_parcel, ends_parcel_readback,
                                 explicitly_requests_parcel, issue_cancel_confirmation, issue_parcel_confirmation,
                                 release, take_cancel)
 from app.domain.state import BOX_SIZE_NAMES, BoxProposal, CandidateSet, ConversationState, ParcelDraft, Place, Source
@@ -314,7 +314,7 @@ class LiveFlow:
         if not rt.ai:
             return
         spoken = rt.ai[-1]
-        if rt.readback_id and spoken.readback_id == rt.readback_id and asks_parcel_confirmation(spoken.text):
+        if rt.readback_id and spoken.readback_id == rt.readback_id and ends_parcel_readback(spoken.text):
             rt.readback_id = None
         if wrong := unverified_values(spoken.text, s.state):  # 측정만: 기억으로 답했거나 잘못 읽은 번호·호수
             s.note("값 대조", "서버 값에 없는 번호·호수", wrong)

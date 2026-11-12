@@ -37,7 +37,8 @@ def filled(receiver="이영희", **over) -> ConversationState:
 
 def confirm_once(s: ConversationState, t: float = 100.0) -> str:
     p = issue_parcel_confirmation(s, P, t)
-    gate = check_gate(s, P, p.id, YES, Utterance(2, 5000, 5400, t + 3), Utterance(1, 3000, 4800, t + 1),
+    gate = check_gate(s, P, p.id, YES, Utterance(2, 5000, 5400, t + 3),
+                      Utterance(1, 3000, 4800, t + 1, "이대로 접수할까요?", p.id),
                       latest_applied_utterance=None, closed=False)
     assert gate.ok, gate
     return commit_parcel(s, P, p.id)
@@ -144,7 +145,8 @@ def test_issue_requires_readback_ready_and_is_idempotent():
 def test_gate_rejections(case, code):
     s = filled()
     p = issue_parcel_confirmation(s, P, 100.0)
-    answer, cust, ai = YES, Utterance(5, 5000, 5400, 104.0), Utterance(4, 3000, 4800, 101.0)
+    answer, cust = YES, Utterance(5, 5000, 5400, 104.0)
+    ai = Utterance(4, 3000, 4800, 101.0, "이대로 접수할까요?", p.id)
     kw = {"latest_applied_utterance": None, "closed": False}
     pid = p.id
     if case == "closed":
@@ -265,7 +267,7 @@ def test_gate_requires_previous_ai_line_to_be_the_question():
     """S5 실통화 2: 되읽기 도중("…연락처는") 고객 "네, 됐습니다" → 확인 질문을 듣지 않은 답이라 확정하지 않는다."""
     s = filled()
     p = issue_parcel_confirmation(s, P, 100.0)
-    cust = Utterance(5, 5000, 5400, 104.0)
+    cust = Utterance(5, 5000, 5400, 104.0, "네")
     cut = Utterance(4, 3000, 4800, 101.0, "접수 내용을 확인하겠습니다. 보내시는 분 김철수 님, 연락처는")
     asked = Utterance(4, 3000, 4800, 101.0, "이대로 접수해 드릴까요?")
     kw = {"latest_applied_utterance": None, "closed": False}
@@ -273,23 +275,26 @@ def test_gate_requires_previous_ai_line_to_be_the_question():
     assert check_gate(s, P, p.id, YES, cust, asked, **kw).ok
     proceed = ConfirmAnswer("proceed", {"proceed": 0.98})
     assert check_gate(s, P, p.id, proceed, cust, asked, **kw).ok
-    unrelated = Utterance(4, 3000, 4800, 101.0, "더 궁금하신 점 있으세요?")
-    assert check_gate(s, P, p.id, proceed, cust, unrelated, **kw).code == "CONFIRM_BEFORE_READBACK_END"
+    for question, readback_id in (("가방 크기가 어느 정도인가요?", None), ("중형 박스가 맞으세요?", p.id), ("", p.id)):
+        unrelated = Utterance(4, 3000, 4800, 101.0, question, readback_id)
+        for answer in (YES, proceed):
+            assert check_gate(s, P, p.id, answer, cust, unrelated, **kw).code == "CONFIRM_BEFORE_READBACK_END"
     unlinked = Utterance(4, 3000, 5500, 101.0, "접수 내용 확인 부탁드릴게요. 보내는 분은")
     assert check_gate(s, P, p.id, proceed, cust, unlinked, **kw).code == "CONFIRM_BEFORE_READBACK_END"
     stale = Utterance(4, 3000, 4800, 101.0, asked.text, "old-pending")
     assert check_gate(s, P, p.id, proceed, cust, stale, **kw).code == "CONFIRM_BEFORE_READBACK_END"
     interrupted = Utterance(4, 3000, 5500, 101.0, "바뀐 받는 분은", p.id)
-    assert check_gate(s, P, p.id, proceed, cust, interrupted, **kw).ok
     explicit_yes = Utterance(5, 5000, 5400, 104.0, "네, 그렇게 접수해 주세요")
     short_yes = Utterance(5, 5000, 5400, 104.0, "네, 맞아요")
     mixed_change = Utterance(5, 5000, 5400, 104.0, "주소를 바꿔서 접수해 주세요")
     assert check_gate(s, P, p.id, YES, explicit_yes, interrupted, **kw).ok
+    assert check_gate(s, P, p.id, proceed, explicit_yes, interrupted, **kw).ok
     for early in (short_yes, mixed_change):
-        assert check_gate(s, P, p.id, YES, early, interrupted, **kw).code == "CONFIRM_BEFORE_READBACK_END"
+        for answer in (YES, proceed):
+            assert check_gate(s, P, p.id, answer, early, interrupted, **kw).code == "CONFIRM_BEFORE_READBACK_END"
     assert check_gate(s, P, p.id, YES, explicit_yes, unlinked, **kw).code == "CONFIRM_BEFORE_READBACK_END"
     s.record("item_price", 31000)
-    assert check_gate(s, P, p.id, proceed, cust, interrupted, **kw).code == "CONFIRM_SNAPSHOT_CHANGED"
+    assert check_gate(s, P, p.id, proceed, explicit_yes, interrupted, **kw).code == "CONFIRM_SNAPSHOT_CHANGED"
     assert check_gate(s, P, p.id, YES, explicit_yes, interrupted, **kw).code == "CONFIRM_SNAPSHOT_CHANGED"
 
 
