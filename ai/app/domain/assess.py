@@ -76,7 +76,7 @@ def assess(state: ConversationState, policy: Policy) -> Assessment:
     elif state.intent != "order":
         stage = state.intent
     elif origin_confirmation(state) or sender_change_next(state) in ("sender_address", "sender_address_detail"):
-        stage = "address"
+        stage = "sender"
     elif collecting and missing:
         stage = next(s.id for s in policy.collect_stages() if not stages[s.id].complete)
     elif collecting:

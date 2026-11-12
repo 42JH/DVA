@@ -55,8 +55,6 @@ def dropoff_stage(s: CallSession, policy) -> str | None:
         if a.stage in ("closing", "more_parcels"):
             return "NONE"  # 접수 정보 확정 뒤(남은 결정 없음)
         stage = ORDER_STAGE.get(a.stage)
-        if a.stage == "address":  # 대시보드 계약에 주소 단계가 없다: 빠진 첫 주소가 누구 쪽인지로 나눈다
-            stage = "SENDER_INFO" if a.missing and a.missing[0].startswith("sender_") else "RECIPIENT_INFO"
         if stage and s.tool_calls and s.tool_calls[-1]["name"] == "search_manual":
             return "FAQ_ANSWER"  # 접수 중 질문하다 끊김(문의는 진행 중 업무를 바꾸지 않는다)
         return stage

@@ -17,7 +17,7 @@ from typing import Literal
 from pydantic import Field, create_model, model_validator
 
 from app.address.parse import detail_text, has_numbered_address
-from app.domain.address_book import (begin_sender_name_change, origin_confirmation, prefill_sender,
+from app.domain.address_book import (begin_sender_name_change, origin_confirmation, origin_place, prefill_sender,
                                      request_sender_address_change, save_offer, sender_change_available,
                                      sender_change_next)
 from app.domain.assess import area_label, readback_facts
@@ -217,7 +217,7 @@ async def record_fields(ctx: ToolContext, args: RecordArgs, *, expected_box: Box
             # 주소 선택 질문에 주소로 직접 답해도 처리한다. 이전 상세는 새 상세를 기록하기 전에 비운다.
             resolved = results.get("sender_address")
             chosen = resolved.address if resolved is not None else spoken_origin
-            place = s.customer.origin_place
+            place = origin_place(s)
             known = draft["sender_address"].value or (place.address if place else None)
             keep_origin = bool(chosen and chosen == known
                                and (resolved is None or resolved.status not in ("not_found", "region_needed")))

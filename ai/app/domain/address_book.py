@@ -8,7 +8,7 @@ BE: 주문 저장은 고객 정보·PIN을 자동 갱신하지 않는다. AI가 
 shortcut: 주소록에서 고른 받는 곳을 고친 경우는 새 PIN으로 추가한다(PIN 번호를 지금 들고 있지 않음) — 기존 PIN 수정이 필요하면 PIN 번호를 Place에 싣는다.
 """
 
-from app.domain.state import ConversationState, FieldStatus, Source
+from app.domain.state import ConversationState, FieldStatus, Place, Source
 
 
 def sender_change_available(state: ConversationState) -> bool:
@@ -62,13 +62,20 @@ def sender_change_next(state: ConversationState) -> str | None:
     return None
 
 
+def origin_place(state: ConversationState) -> Place | None:
+    draft = state.current
+    return (draft.previous_parcel_origin if draft else None) or state.customer.origin_place
+
+
 def origin_confirmation(state: ConversationState) -> str | None:
-    """아직 발송 주소를 고르지 않았다면 다음 응답에도 확인 질문을 남긴다.
-    담은 택배가 있으면 묻지 않는다: 통화 중 등록된 고객은 등록 주소가 생겨도 이미 발송 주소를 말했다."""
-    place, draft = state.customer.origin_place, state.current
+    """발송 주소를 고르기 전까지 확인 질문을 유지한다. 담은 택배가 있으면 추가 접수 요청 뒤에만 다시 묻는다."""
+    place, draft = origin_place(state), state.current
+    previous = draft is not None and draft.previous_parcel_origin is not None
     if (state.intent == "order" and state.origin_offered and not state.origin_applied
-            and state.origin_answer is None and place and not state.parcels
+            and state.origin_answer is None and place and (previous or not state.parcels)
             and not (draft and (draft.sender_name_for_parcel or draft["sender_address"].valid))):
+        if previous:
+            return "previous_parcel"
         return "registered" if state.origin_mentioned_in_greeting else place.address
     return None
 
@@ -104,10 +111,9 @@ def save_offer(state: ConversationState) -> dict:
 
 
 def prefill_sender(state: ConversationState, full: bool) -> list[str]:
-    """기존 고객의 보내는 분을 등록 정보로 채운다(Source.PROFILE). full = 출발지 후보에서 보낸다고 함(주소·상세까지),
-    아니면 성함만. 고객이 이미 말한 항목은 덮지 않는다. 채운 항목 이름."""
+    """등록 성함을 채우고, full이면 확인된 발송 주소와 상세주소도 채운다. 고객이 말한 값은 유지한다."""
     c = state.customer
-    place = c.origin_place
+    place = origin_place(state)
     values = {} if state.current and state.current.sender_name_for_parcel else {"sender_name": c.name}
     if full and place:
         address = state.field_of("sender_address")
@@ -119,7 +125,8 @@ def prefill_sender(state: ConversationState, full: bool) -> list[str]:
             continue
         f = state.field_of(name)
         if f.status == FieldStatus.EMPTY:
-            state.record(name, value, Source.PROFILE)
+            source = Source.HISTORY if name != "sender_name" and state.current.previous_parcel_origin else Source.PROFILE
+            state.record(name, value, source)
             done.append(name)
     if "sender_address" in done:
         state.current.sender_geo = place.geo

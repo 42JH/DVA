@@ -69,7 +69,7 @@ def state_summary(state: ConversationState, policy: Policy) -> dict:
         summary.update(origin_confirm=origin, missing=[], can_proceed=False)
     elif missing := missing_sender_address(state):
         if "sender_name" not in a.missing and (destination or state.current.deferred_destination):
-            summary.update(stage="address", missing=list(missing), can_proceed=False)
+            summary.update(stage="sender", missing=list(missing), can_proceed=False)
     elif state.intent == "order" and destination:
         if question := destination_change_question(destination):
             summary["destination_change_question"] = question

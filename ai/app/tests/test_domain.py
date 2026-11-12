@@ -67,18 +67,23 @@ def test_assess_stage_progression_and_missing_order():
     assert assess(s, P).stage == "sender"
     s.record("sender_name", "김철수")
     a = assess(s, P)
-    assert a.stage == "receiver" and a.missing[0] == "receiver_name" and not a.readback_ready  # 주소는 연락처 뒤(2026-11-09)
+    assert a.stage == "sender" and a.missing[0] == "sender_address" and not a.readback_ready
     s.record("receiver_name", "이영희")
     s.record("receiver_phone", "01098765432")
     a = assess(s, P)
-    assert a.stage == "address" and a.missing[0] == "sender_address"
+    assert a.stage == "sender" and a.missing[0] == "sender_address"
+    s.record("sender_address", "서울 강남구 테헤란로 212")
+    assert assess(s, P).missing[0] == "sender_address_detail"
+    s.record("sender_address_detail", "")
+    a = assess(s, P)
+    assert a.stage == "receiver" and a.missing[0] == "receiver_address"
     s = filled()
     a = assess(s, P)
     assert (a.stage, a.missing, a.readback_ready) == ("readback", (), True)
     s.record_invalid("item_price", "x")  # VALID 유지
     s.clear("receiver_address_detail")
     a = assess(s, P)
-    assert a.stage == "address" and a.missing == ("receiver_address_detail",) and not a.readback_ready
+    assert a.stage == "receiver" and a.missing == ("receiver_address_detail",) and not a.readback_ready
 
 
 def test_assess_blocked_attempts_and_payment():
@@ -86,7 +91,7 @@ def test_assess_blocked_attempts_and_payment():
     for _ in range(P.reask.max_attempts):
         s.record_invalid("sender_address", "ADDRESS_NOT_FOUND")
     a = assess(s, P)
-    assert a.stages["address"].blocked == ("sender_address",) and a.attempts_exceeded == ("sender_address",)
+    assert a.stages["sender"].blocked == ("sender_address",) and a.attempts_exceeded == ("sender_address",)
     assert a.payment_auto == "groupBilling"
 
 
@@ -312,7 +317,7 @@ def test_registered_customer_name_prefilled_regardless_of_origin_answer():
     assert s.origin_answer is None
     f = s.field_of("sender_name")
     assert f.valid and f.value == "현승준" and f.source == Source.CALLER_ID
-    assert assess(s, P).missing[0] == "receiver_name"
+    assert assess(s, P).missing[0] == "sender_address"
     assert s.current.empty()  # 서버가 채운 값뿐이면 빈 택배(빈 주문을 만들지 않음)
     assert readback_facts({"sender_name": "현승준"}) == {"sender_name": "현승준"}
     s.record("sender_name", "김영희")  # 고객이 다른 이름을 말하면 덮는다
