@@ -102,9 +102,9 @@ export function TodayPage() {
               {/* 다른 카드의 [전체 보기]와 같은 말 · 모양 (11/11 버튼 검수 — 통계 화면으로 가는데 '그래프로 보기'였음) */}
               <Link
                 to="/stats"
-                aria-label="AI 상담 성능 전체 보기"
                 className="flex items-center gap-0.5 text-[12px] font-medium text-ops-sub hover:text-ops-ink"
               >
+                <span className="sr-only">AI 상담 성능 </span>
                 전체 보기
               </Link>
             </div>
@@ -139,12 +139,12 @@ function Panel({
       <header className="flex h-11 items-center gap-2 border-b border-ops-line px-4">
         <h2 className="text-[14px] font-bold">{title}</h2>
         {extra && <span className="text-[12px] font-semibold text-ops-route">{extra}</span>}
-        {/* 카드마다 같은 '전체 보기'라 읽기용 이름에 카드 제목을 붙임 (11/12 Lighthouse) */}
+        {/* 카드마다 같은 '전체 보기'라 링크 글자에 카드 제목을 숨겨 붙임 — 화면엔 안 보이고 읽기 프로그램 · 검사기는 '최근 통화 전체 보기'로 읽음 (11/12 Lighthouse: aria-label은 링크 글자 검사가 안 봄) */}
         <Link
           to={more}
-          aria-label={`${title} 전체 보기`}
           className="ml-auto flex items-center gap-0.5 text-[12px] font-medium text-ops-sub hover:text-ops-ink"
         >
+          <span className="sr-only">{title} </span>
           전체 보기
         </Link>
       </header>

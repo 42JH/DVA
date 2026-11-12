@@ -1,0 +1,973 @@
+{
+ "login": {
+  "before": {
+   "url": "/login",
+   "fetchTime": "2026-11-12T04:13:54.636Z",
+   "lighthouse": "13.6.0",
+   "scores": {
+    "performance": 99,
+    "accessibility": 100,
+    "best-practices": 100,
+    "seo": 83
+   },
+   "fcpMs": 508,
+   "lcpMs": 870,
+   "tbtMs": 0,
+   "cls": 0,
+   "bytesKB": 478,
+   "failing": [
+    "image-delivery-insight",
+    "lcp-discovery-insight",
+    "modern-http-insight",
+    "network-dependency-tree-insight",
+    "render-blocking-insight",
+    "unused-javascript",
+    "bf-cache",
+    "meta-description",
+    "robots-txt"
+   ]
+  },
+  "after": {
+   "url": "/login",
+   "fetchTime": "2026-11-12T05:27:03.060Z",
+   "lighthouse": "13.6.0",
+   "scores": {
+    "performance": 100,
+    "accessibility": 100,
+    "best-practices": 100,
+    "seo": 58
+   },
+   "fcpMs": 432,
+   "lcpMs": 787,
+   "tbtMs": 0,
+   "cls": 0,
+   "bytesKB": 395,
+   "failing": [
+    "image-delivery-insight",
+    "lcp-discovery-insight",
+    "modern-http-insight",
+    "network-dependency-tree-insight",
+    "render-blocking-insight",
+    "unused-javascript",
+    "bf-cache",
+    "is-crawlable",
+    "meta-description"
+   ]
+  }
+ },
+ "home": {
+  "before": {
+   "url": "/",
+   "fetchTime": "2026-11-12T04:14:04.736Z",
+   "lighthouse": "13.6.0",
+   "scores": {
+    "performance": 97,
+    "accessibility": 96,
+    "best-practices": 100,
+    "seo": 75
+   },
+   "fcpMs": 558,
+   "lcpMs": 1279,
+   "tbtMs": 0,
+   "cls": 0,
+   "bytesKB": 745,
+   "failing": [
+    "largest-contentful-paint",
+    "modern-http-insight",
+    "network-dependency-tree-insight",
+    "render-blocking-insight",
+    "unused-css-rules",
+    "unused-javascript",
+    "unsized-images",
+    "bf-cache",
+    "color-contrast",
+    "label-content-name-mismatch",
+    "meta-description",
+    "link-text",
+    "robots-txt"
+   ]
+  },
+  "after": {
+   "url": "/",
+   "fetchTime": "2026-11-12T05:27:11.818Z",
+   "lighthouse": "13.6.0",
+   "scores": {
+    "performance": 100,
+    "accessibility": 96,
+    "best-practices": 100,
+    "seo": 50
+   },
+   "fcpMs": 436,
+   "lcpMs": 780,
+   "tbtMs": 0,
+   "cls": 0,
+   "bytesKB": 432,
+   "failing": [
+    "modern-http-insight",
+    "network-dependency-tree-insight",
+    "render-blocking-insight",
+    "unused-css-rules",
+    "unused-javascript",
+    "bf-cache",
+    "color-contrast",
+    "is-crawlable",
+    "meta-description",
+    "link-text"
+   ]
+  }
+ },
+ "calls": {
+  "before": {
+   "url": "/calls",
+   "fetchTime": "2026-11-12T04:14:14.200Z",
+   "lighthouse": "13.6.0",
+   "scores": {
+    "performance": 99,
+    "accessibility": 97,
+    "best-practices": 100,
+    "seo": 83
+   },
+   "fcpMs": 433,
+   "lcpMs": 1022,
+   "tbtMs": 10,
+   "cls": 0,
+   "bytesKB": 524,
+   "failing": [
+    "forced-reflow-insight",
+    "image-delivery-insight",
+    "modern-http-insight",
+    "network-dependency-tree-insight",
+    "render-blocking-insight",
+    "unused-javascript",
+    "unsized-images",
+    "bf-cache",
+    "color-contrast",
+    "label-content-name-mismatch",
+    "meta-description",
+    "robots-txt"
+   ]
+  },
+  "after": {
+   "url": "/calls",
+   "fetchTime": "2026-11-12T05:27:19.275Z",
+   "lighthouse": "13.6.0",
+   "scores": {
+    "performance": 99,
+    "accessibility": 97,
+    "best-practices": 100,
+    "seo": 58
+   },
+   "fcpMs": 448,
+   "lcpMs": 889,
+   "tbtMs": 0,
+   "cls": 0,
+   "bytesKB": 402,
+   "failing": [
+    "forced-reflow-insight",
+    "modern-http-insight",
+    "network-dependency-tree-insight",
+    "render-blocking-insight",
+    "unused-javascript",
+    "bf-cache",
+    "color-contrast",
+    "is-crawlable",
+    "meta-description"
+   ]
+  }
+ },
+ "call-detail": {
+  "before": {
+   "url": "/calls/530",
+   "fetchTime": "2026-11-12T04:14:24.564Z",
+   "lighthouse": "13.6.0",
+   "scores": {
+    "performance": 98,
+    "accessibility": 93,
+    "best-practices": 100,
+    "seo": 83
+   },
+   "fcpMs": 444,
+   "lcpMs": 1085,
+   "tbtMs": 2,
+   "cls": 0.066,
+   "bytesKB": 705,
+   "failing": [
+    "image-delivery-insight",
+    "modern-http-insight",
+    "network-dependency-tree-insight",
+    "render-blocking-insight",
+    "unused-css-rules",
+    "unused-javascript",
+    "unsized-images",
+    "bf-cache",
+    "color-contrast",
+    "target-size",
+    "label-content-name-mismatch",
+    "meta-description",
+    "robots-txt"
+   ]
+  },
+  "after": {
+   "url": "/calls/530",
+   "fetchTime": "2026-11-12T05:27:26.822Z",
+   "lighthouse": "13.6.0",
+   "scores": {
+    "performance": 99,
+    "accessibility": 95,
+    "best-practices": 96,
+    "seo": 58
+   },
+   "fcpMs": 472,
+   "lcpMs": 925,
+   "tbtMs": 0,
+   "cls": 0,
+   "bytesKB": 406,
+   "failing": [
+    "modern-http-insight",
+    "network-dependency-tree-insight",
+    "render-blocking-insight",
+    "unused-javascript",
+    "bf-cache",
+    "color-contrast",
+    "errors-in-console",
+    "is-crawlable",
+    "meta-description"
+   ]
+  }
+ },
+ "orders": {
+  "before": {
+   "url": "/orders",
+   "fetchTime": "2026-11-12T04:14:32.781Z",
+   "lighthouse": "13.6.0",
+   "scores": {
+    "performance": 98,
+    "accessibility": 97,
+    "best-practices": 100,
+    "seo": 83
+   },
+   "fcpMs": 434,
+   "lcpMs": 1114,
+   "tbtMs": 0,
+   "cls": 0.001,
+   "bytesKB": 518,
+   "failing": [
+    "forced-reflow-insight",
+    "image-delivery-insight",
+    "modern-http-insight",
+    "network-dependency-tree-insight",
+    "render-blocking-insight",
+    "unused-javascript",
+    "unsized-images",
+    "bf-cache",
+    "color-contrast",
+    "label-content-name-mismatch",
+    "meta-description",
+    "robots-txt"
+   ]
+  },
+  "after": {
+   "url": "/orders",
+   "fetchTime": "2026-11-12T05:27:34.388Z",
+   "lighthouse": "13.6.0",
+   "scores": {
+    "performance": 99,
+    "accessibility": 97,
+    "best-practices": 100,
+    "seo": 58
+   },
+   "fcpMs": 448,
+   "lcpMs": 1008,
+   "tbtMs": 0,
+   "cls": 0,
+   "bytesKB": 453,
+   "failing": [
+    "modern-http-insight",
+    "network-dependency-tree-insight",
+    "render-blocking-insight",
+    "unused-javascript",
+    "bf-cache",
+    "color-contrast",
+    "is-crawlable",
+    "meta-description"
+   ]
+  }
+ },
+ "faqs": {
+  "before": {
+   "url": "/faqs",
+   "fetchTime": "2026-11-12T04:14:40.652Z",
+   "lighthouse": "13.6.0",
+   "scores": {
+    "performance": 99,
+    "accessibility": 96,
+    "best-practices": 100,
+    "seo": 83
+   },
+   "fcpMs": 446,
+   "lcpMs": 1007,
+   "tbtMs": 15,
+   "cls": 0,
+   "bytesKB": 597,
+   "failing": [
+    "forced-reflow-insight",
+    "image-delivery-insight",
+    "modern-http-insight",
+    "network-dependency-tree-insight",
+    "render-blocking-insight",
+    "unused-css-rules",
+    "unused-javascript",
+    "unsized-images",
+    "bf-cache",
+    "color-contrast",
+    "label-content-name-mismatch",
+    "meta-description",
+    "robots-txt"
+   ]
+  },
+  "after": {
+   "url": "/faqs",
+   "fetchTime": "2026-11-12T05:27:41.963Z",
+   "lighthouse": "13.6.0",
+   "scores": {
+    "performance": 99,
+    "accessibility": 96,
+    "best-practices": 100,
+    "seo": 58
+   },
+   "fcpMs": 448,
+   "lcpMs": 968,
+   "tbtMs": 9,
+   "cls": 0,
+   "bytesKB": 591,
+   "failing": [
+    "forced-reflow-insight",
+    "modern-http-insight",
+    "network-dependency-tree-insight",
+    "render-blocking-insight",
+    "unused-javascript",
+    "bf-cache",
+    "color-contrast",
+    "is-crawlable",
+    "meta-description"
+   ]
+  }
+ },
+ "customers": {
+  "before": {
+   "url": "/customers",
+   "fetchTime": "2026-11-12T04:14:48.392Z",
+   "lighthouse": "13.6.0",
+   "scores": {
+    "performance": 97,
+    "accessibility": 96,
+    "best-practices": 100,
+    "seo": 83
+   },
+   "fcpMs": 454,
+   "lcpMs": 1294,
+   "tbtMs": 12,
+   "cls": 0,
+   "bytesKB": 537,
+   "failing": [
+    "largest-contentful-paint",
+    "forced-reflow-insight",
+    "image-delivery-insight",
+    "modern-http-insight",
+    "network-dependency-tree-insight",
+    "render-blocking-insight",
+    "unused-javascript",
+    "unsized-images",
+    "bf-cache",
+    "color-contrast",
+    "label-content-name-mismatch",
+    "meta-description",
+    "robots-txt"
+   ]
+  },
+  "after": {
+   "url": "/customers",
+   "fetchTime": "2026-11-12T05:27:49.863Z",
+   "lighthouse": "13.6.0",
+   "scores": {
+    "performance": 100,
+    "accessibility": 96,
+    "best-practices": 100,
+    "seo": 58
+   },
+   "fcpMs": 450,
+   "lcpMs": 810,
+   "tbtMs": 0,
+   "cls": 0,
+   "bytesKB": 399,
+   "failing": [
+    "modern-http-insight",
+    "network-dependency-tree-insight",
+    "render-blocking-insight",
+    "unused-javascript",
+    "bf-cache",
+    "color-contrast",
+    "is-crawlable",
+    "meta-description"
+   ]
+  }
+ },
+ "companies": {
+  "before": {
+   "url": "/companies",
+   "fetchTime": "2026-11-12T04:14:56.472Z",
+   "lighthouse": "13.6.0",
+   "scores": {
+    "performance": 99,
+    "accessibility": 96,
+    "best-practices": 100,
+    "seo": 83
+   },
+   "fcpMs": 437,
+   "lcpMs": 957,
+   "tbtMs": 0,
+   "cls": 0.002,
+   "bytesKB": 435,
+   "failing": [
+    "forced-reflow-insight",
+    "image-delivery-insight",
+    "modern-http-insight",
+    "network-dependency-tree-insight",
+    "render-blocking-insight",
+    "unused-css-rules",
+    "unused-javascript",
+    "unsized-images",
+    "bf-cache",
+    "color-contrast",
+    "label-content-name-mismatch",
+    "meta-description",
+    "robots-txt"
+   ]
+  },
+  "after": {
+   "url": "/companies",
+   "fetchTime": "2026-11-12T05:27:57.386Z",
+   "lighthouse": "13.6.0",
+   "scores": {
+    "performance": 99,
+    "accessibility": 96,
+    "best-practices": 100,
+    "seo": 58
+   },
+   "fcpMs": 437,
+   "lcpMs": 877,
+   "tbtMs": 0,
+   "cls": 0,
+   "bytesKB": 377,
+   "failing": [
+    "modern-http-insight",
+    "network-dependency-tree-insight",
+    "render-blocking-insight",
+    "unused-css-rules",
+    "unused-javascript",
+    "bf-cache",
+    "color-contrast",
+    "is-crawlable",
+    "meta-description"
+   ]
+  }
+ },
+ "stats": {
+  "before": {
+   "url": "/stats",
+   "fetchTime": "2026-11-12T04:15:05.036Z",
+   "lighthouse": "13.6.0",
+   "scores": {
+    "performance": 99,
+    "accessibility": 96,
+    "best-practices": 100,
+    "seo": 83
+   },
+   "fcpMs": 468,
+   "lcpMs": 1028,
+   "tbtMs": 18,
+   "cls": 0,
+   "bytesKB": 789,
+   "failing": [
+    "image-delivery-insight",
+    "modern-http-insight",
+    "network-dependency-tree-insight",
+    "render-blocking-insight",
+    "unused-css-rules",
+    "unused-javascript",
+    "unsized-images",
+    "bf-cache",
+    "color-contrast",
+    "label-content-name-mismatch",
+    "meta-description",
+    "robots-txt"
+   ]
+  },
+  "after": {
+   "url": "/stats",
+   "fetchTime": "2026-11-12T05:28:05.100Z",
+   "lighthouse": "13.6.0",
+   "scores": {
+    "performance": 99,
+    "accessibility": 96,
+    "best-practices": 100,
+    "seo": 58
+   },
+   "fcpMs": 444,
+   "lcpMs": 965,
+   "tbtMs": 0,
+   "cls": 0,
+   "bytesKB": 481,
+   "failing": [
+    "modern-http-insight",
+    "network-dependency-tree-insight",
+    "render-blocking-insight",
+    "unused-javascript",
+    "bf-cache",
+    "color-contrast",
+    "is-crawlable",
+    "meta-description"
+   ]
+  }
+ },
+ "personas": {
+  "before": {
+   "url": "/personas",
+   "fetchTime": "2026-11-12T04:15:13.529Z",
+   "lighthouse": "13.6.0",
+   "scores": {
+    "performance": 99,
+    "accessibility": 95,
+    "best-practices": 100,
+    "seo": 83
+   },
+   "fcpMs": 450,
+   "lcpMs": 1011,
+   "tbtMs": 0,
+   "cls": 0,
+   "bytesKB": 570,
+   "failing": [
+    "image-delivery-insight",
+    "modern-http-insight",
+    "network-dependency-tree-insight",
+    "render-blocking-insight",
+    "unused-javascript",
+    "unsized-images",
+    "bf-cache",
+    "color-contrast",
+    "heading-order",
+    "label-content-name-mismatch",
+    "meta-description",
+    "robots-txt"
+   ]
+  },
+  "after": {
+   "url": "/personas",
+   "fetchTime": "2026-11-12T05:28:13.396Z",
+   "lighthouse": "13.6.0",
+   "scores": {
+    "performance": 99,
+    "accessibility": 95,
+    "best-practices": 100,
+    "seo": 58
+   },
+   "fcpMs": 471,
+   "lcpMs": 992,
+   "tbtMs": 0,
+   "cls": 0,
+   "bytesKB": 563,
+   "failing": [
+    "modern-http-insight",
+    "network-dependency-tree-insight",
+    "render-blocking-insight",
+    "unused-javascript",
+    "bf-cache",
+    "color-contrast",
+    "heading-order",
+    "is-crawlable",
+    "meta-description"
+   ]
+  }
+ },
+ "signup": {
+  "before": {
+   "url": "/signup",
+   "fetchTime": "2026-11-12T04:15:32.986Z",
+   "lighthouse": "13.6.0",
+   "scores": {
+    "performance": 100,
+    "accessibility": 100,
+    "best-practices": 100,
+    "seo": 83
+   },
+   "fcpMs": 449,
+   "lcpMs": 809,
+   "tbtMs": 0,
+   "cls": 0,
+   "bytesKB": 426,
+   "failing": [
+    "image-delivery-insight",
+    "lcp-discovery-insight",
+    "modern-http-insight",
+    "network-dependency-tree-insight",
+    "render-blocking-insight",
+    "unused-javascript",
+    "bf-cache",
+    "meta-description",
+    "robots-txt"
+   ]
+  },
+  "after": {
+   "url": "/signup",
+   "fetchTime": "2026-11-12T05:28:26.281Z",
+   "lighthouse": "13.6.0",
+   "scores": {
+    "performance": 100,
+    "accessibility": 100,
+    "best-practices": 100,
+    "seo": 58
+   },
+   "fcpMs": 420,
+   "lcpMs": 705,
+   "tbtMs": 0,
+   "cls": 0,
+   "bytesKB": 344,
+   "failing": [
+    "image-delivery-insight",
+    "lcp-discovery-insight",
+    "modern-http-insight",
+    "network-dependency-tree-insight",
+    "render-blocking-insight",
+    "unused-javascript",
+    "bf-cache",
+    "is-crawlable",
+    "meta-description"
+   ]
+  }
+ },
+ "unanswered": {
+  "before": {
+   "url": "/unanswered",
+   "fetchTime": "2026-11-12T04:15:41.658Z",
+   "lighthouse": "13.6.0",
+   "scores": {
+    "performance": 98,
+    "accessibility": 96,
+    "best-practices": 100,
+    "seo": 83
+   },
+   "fcpMs": 439,
+   "lcpMs": 1079,
+   "tbtMs": 0,
+   "cls": 0,
+   "bytesKB": 545,
+   "failing": [
+    "forced-reflow-insight",
+    "image-delivery-insight",
+    "modern-http-insight",
+    "network-dependency-tree-insight",
+    "render-blocking-insight",
+    "unused-javascript",
+    "unsized-images",
+    "bf-cache",
+    "color-contrast",
+    "label-content-name-mismatch",
+    "meta-description",
+    "robots-txt"
+   ]
+  },
+  "after": {
+   "url": "/unanswered",
+   "fetchTime": "2026-11-12T05:29:21.076Z",
+   "lighthouse": "13.6.0",
+   "scores": {
+    "performance": 99,
+    "accessibility": 96,
+    "best-practices": 100,
+    "seo": 58
+   },
+   "fcpMs": 505,
+   "lcpMs": 889,
+   "tbtMs": 0,
+   "cls": 0,
+   "bytesKB": 427,
+   "failing": [
+    "modern-http-insight",
+    "network-dependency-tree-insight",
+    "render-blocking-insight",
+    "unused-javascript",
+    "bf-cache",
+    "color-contrast",
+    "is-crawlable",
+    "meta-description"
+   ]
+  }
+ },
+ "company-detail": {
+  "before": {
+   "url": "/companies/10",
+   "fetchTime": "2026-11-12T04:15:49.411Z",
+   "lighthouse": "13.6.0",
+   "scores": {
+    "performance": 99,
+    "accessibility": 97,
+    "best-practices": 96,
+    "seo": 83
+   },
+   "fcpMs": 466,
+   "lcpMs": 1026,
+   "tbtMs": 0,
+   "cls": 0.014,
+   "bytesKB": 416,
+   "failing": [
+    "forced-reflow-insight",
+    "image-delivery-insight",
+    "modern-http-insight",
+    "network-dependency-tree-insight",
+    "render-blocking-insight",
+    "unused-css-rules",
+    "unused-javascript",
+    "unsized-images",
+    "bf-cache",
+    "color-contrast",
+    "label-content-name-mismatch",
+    "errors-in-console",
+    "meta-description",
+    "robots-txt"
+   ]
+  },
+  "after": null
+ },
+ "stats-wait": {
+  "before": {
+   "url": "/stats/response-wait",
+   "fetchTime": "2026-11-12T04:15:56.726Z",
+   "lighthouse": "13.6.0",
+   "scores": {
+    "performance": 99,
+    "accessibility": 95,
+    "best-practices": 100,
+    "seo": 83
+   },
+   "fcpMs": 474,
+   "lcpMs": 1035,
+   "tbtMs": 0,
+   "cls": 0,
+   "bytesKB": 468,
+   "failing": [
+    "image-delivery-insight",
+    "modern-http-insight",
+    "network-dependency-tree-insight",
+    "render-blocking-insight",
+    "unused-css-rules",
+    "unused-javascript",
+    "unsized-images",
+    "bf-cache",
+    "color-contrast",
+    "label-content-name-mismatch",
+    "meta-description",
+    "robots-txt"
+   ]
+  },
+  "after": {
+   "url": "/stats/response-wait",
+   "fetchTime": "2026-11-12T05:29:28.778Z",
+   "lighthouse": "13.6.0",
+   "scores": {
+    "performance": 99,
+    "accessibility": 95,
+    "best-practices": 100,
+    "seo": 58
+   },
+   "fcpMs": 470,
+   "lcpMs": 951,
+   "tbtMs": 0,
+   "cls": 0,
+   "bytesKB": 463,
+   "failing": [
+    "modern-http-insight",
+    "network-dependency-tree-insight",
+    "render-blocking-insight",
+    "unused-javascript",
+    "bf-cache",
+    "color-contrast",
+    "is-crawlable",
+    "meta-description"
+   ]
+  }
+ },
+ "stats-dropoff": {
+  "before": {
+   "url": "/stats/stage-dropoffs",
+   "fetchTime": "2026-11-12T04:16:04.035Z",
+   "lighthouse": "13.6.0",
+   "scores": {
+    "performance": 99,
+    "accessibility": 95,
+    "best-practices": 100,
+    "seo": 83
+   },
+   "fcpMs": 446,
+   "lcpMs": 966,
+   "tbtMs": 0,
+   "cls": 0,
+   "bytesKB": 423,
+   "failing": [
+    "image-delivery-insight",
+    "modern-http-insight",
+    "network-dependency-tree-insight",
+    "render-blocking-insight",
+    "unused-css-rules",
+    "unused-javascript",
+    "unsized-images",
+    "bf-cache",
+    "color-contrast",
+    "label-content-name-mismatch",
+    "meta-description",
+    "robots-txt"
+   ]
+  },
+  "after": {
+   "url": "/stats/stage-dropoffs",
+   "fetchTime": "2026-11-12T05:29:36.820Z",
+   "lighthouse": "13.6.0",
+   "scores": {
+    "performance": 99,
+    "accessibility": 95,
+    "best-practices": 100,
+    "seo": 58
+   },
+   "fcpMs": 448,
+   "lcpMs": 928,
+   "tbtMs": 0,
+   "cls": 0,
+   "bytesKB": 418,
+   "failing": [
+    "modern-http-insight",
+    "network-dependency-tree-insight",
+    "render-blocking-insight",
+    "unused-javascript",
+    "bf-cache",
+    "color-contrast",
+    "is-crawlable",
+    "meta-description"
+   ]
+  }
+ },
+ "admins": {
+  "before": {
+   "url": "/admins",
+   "fetchTime": "2026-11-12T04:16:11.396Z",
+   "lighthouse": "13.6.0",
+   "scores": {
+    "performance": 99,
+    "accessibility": 97,
+    "best-practices": 100,
+    "seo": 83
+   },
+   "fcpMs": 443,
+   "lcpMs": 923,
+   "tbtMs": 0,
+   "cls": 0,
+   "bytesKB": 398,
+   "failing": [
+    "forced-reflow-insight",
+    "image-delivery-insight",
+    "modern-http-insight",
+    "network-dependency-tree-insight",
+    "render-blocking-insight",
+    "unused-css-rules",
+    "unused-javascript",
+    "unsized-images",
+    "bf-cache",
+    "color-contrast",
+    "label-content-name-mismatch",
+    "meta-description",
+    "robots-txt"
+   ]
+  },
+  "after": {
+   "url": "/admins",
+   "fetchTime": "2026-11-12T05:29:44.659Z",
+   "lighthouse": "13.6.0",
+   "scores": {
+    "performance": 99,
+    "accessibility": 97,
+    "best-practices": 100,
+    "seo": 58
+   },
+   "fcpMs": 466,
+   "lcpMs": 877,
+   "tbtMs": 0,
+   "cls": 0,
+   "bytesKB": 391,
+   "failing": [
+    "modern-http-insight",
+    "network-dependency-tree-insight",
+    "render-blocking-insight",
+    "unused-javascript",
+    "bf-cache",
+    "color-contrast",
+    "is-crawlable",
+    "meta-description"
+   ]
+  }
+ },
+ "me": {
+  "before": {
+   "url": "/me",
+   "fetchTime": "2026-11-12T04:16:18.646Z",
+   "lighthouse": "13.6.0",
+   "scores": {
+    "performance": 99,
+    "accessibility": 96,
+    "best-practices": 100,
+    "seo": 83
+   },
+   "fcpMs": 447,
+   "lcpMs": 848,
+   "tbtMs": 0,
+   "cls": 0,
+   "bytesKB": 363,
+   "failing": [
+    "image-delivery-insight",
+    "modern-http-insight",
+    "network-dependency-tree-insight",
+    "render-blocking-insight",
+    "unused-javascript",
+    "unsized-images",
+    "bf-cache",
+    "color-contrast",
+    "label-content-name-mismatch",
+    "meta-description",
+    "robots-txt"
+   ]
+  },
+  "after": {
+   "url": "/me",
+   "fetchTime": "2026-11-12T05:29:52.061Z",
+   "lighthouse": "13.6.0",
+   "scores": {
+    "performance": 99,
+    "accessibility": 96,
+    "best-practices": 100,
+    "seo": 58
+   },
+   "fcpMs": 463,
+   "lcpMs": 823,
+   "tbtMs": 0,
+   "cls": 0,
+   "bytesKB": 357,
+   "failing": [
+    "network-dependency-tree-insight",
+    "render-blocking-insight",
+    "unused-css-rules",
+    "unused-javascript",
+    "bf-cache",
+    "color-contrast",
+    "is-crawlable",
+    "meta-description"
+   ]
+  }
+ }
+}
