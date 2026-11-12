@@ -16,11 +16,9 @@ import {
 
 export type { TestItem, VersionTest }
 
-/** 화면을 켜는 스위치. 가짜 모드(개발 서버 + VITE_USE_MOCK)에서는 늘 켜지고,
- *  실제 백엔드에 붙일 때는 VITE_SCENARIO_TEST=true (배포 빌드는 .env.production) */
-export const SCENARIO_TEST =
-  import.meta.env.VITE_SCENARIO_TEST === 'true' ||
-  (import.meta.env.DEV && import.meta.env.VITE_USE_MOCK === 'true')
+/** 화면을 켜는 스위치 — 늘 켜짐(가짜 모드 · 실제 백엔드 · 배포 모두. 백엔드 중계가 모든 서버에 있음, 11/12)
+ *  끄려면 VITE_SCENARIO_TEST=false → 화면과 [통화에 사용하기] 관문이 함께 사라짐 */
+export const SCENARIO_TEST = import.meta.env.VITE_SCENARIO_TEST !== 'false'
 
 export interface Scenario {
   id: string // 'A1' — AI 파트 문서의 번호
