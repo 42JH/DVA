@@ -221,13 +221,17 @@ def test_callback_field_sent_only_when_enabled(tmp_path):
 
 
 def test_customer_info_offer_and_save(tmp_path):
-    """업무 규칙 g: 되읽기 때 저장 대상 → 담으면 성함·기본 주소(PATCH 한 번, 통화 헤더)·받는 곳 PIN 저장, 고객 정보 갱신."""
-    from app.domain.address_book import save_offer
+    """업무 규칙 g: 저장 대상 → 담으면 동의받은 성함·기본 주소(PATCH 한 번, 통화 헤더)·받는 곳 PIN 저장, 고객 정보 갱신."""
+    from app.domain.address_book import save_offer, sender_change_next
     from app.domain.state import Source
     rs, db = service(tmp_path)
     st = filled()
     st.customer.customer_seq = db.add_customer(CALLER, "김옛이름")
     st.customer.default_address = "서울 강남구 테헤란로 1"  # 기본 주소와 다른 출발지
+    assert save_offer(st) == {"receiver": True} and sender_change_next(st) == "ask_address_save"  # 동의 전
+    st.sender_address_consent = ("서울 강남구 테헤란로 212", "1201호", False)  # 거절
+    assert save_offer(st) == {"receiver": True} and sender_change_next(st) is None
+    st.sender_address_consent = ("서울 강남구 테헤란로 212", "1201호", True)  # 등록 주소 변경 동의
     assert save_offer(st) == {"sender": True, "receiver": True}
     st.customer.name = "김옛이름"
     assert save_offer(st) == {"sender": True, "receiver": True}
@@ -259,15 +263,21 @@ def test_unregistered_customer_gets_no_address_offer():
 
 
 def test_sender_offer_when_only_detail_differs():
-    """BE 확인 4번: 도로명이 같아도 상세(101호→102호)가 바뀌면 기본 주소 저장을 제안한다. 둘 다 같으면 제안 없음."""
-    from app.domain.address_book import save_offer
+    """BE 확인 4번: 도로명이 같아도 상세(101호→102호)가 바뀌면 등록 주소 변경을 묻는다. 둘 다 같으면 묻지 않는다.
+    다른 주소에 한 동의는 새 주소에 쓰지 않는다."""
+    from app.domain.address_book import save_offer, sender_change_next
     from app.domain.state import Source
     st = filled(sender_address_detail="102호")
     st.record("receiver_address", "부산 해운대구 센텀로 10", Source.PIN)  # 받는 곳 제안은 끈다
     st.customer.default_address, st.customer.default_address_detail = "서울 강남구 테헤란로 212", "101호"
-    assert save_offer(st) == {"sender": True}
+    assert sender_change_next(st) == "ask_address_save" and save_offer(st) == {}
+    st.sender_address_consent = ("서울 강남구 테헤란로 212", "102호", True)
+    assert save_offer(st) == {"sender": True} and sender_change_next(st) is None
+    st.record("sender_address_detail", "103호")  # 동의 뒤 상세를 고침 → 새 상세로 다시 묻는다
+    assert sender_change_next(st) == "ask_address_save" and save_offer(st) == {}
+    st.record("sender_address_detail", "102호")
     st.customer.default_address_detail = "102호"
-    assert save_offer(st) == {}
+    assert save_offer(st) == {} and sender_change_next(st) is None
     st.record("sender_address_detail", "")  # 고객이 상세 없다고 함 ↔ BE 상세 ""(생략)도 같은 것으로
     st.customer.default_address_detail = ""
     assert save_offer(st) == {}

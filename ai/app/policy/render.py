@@ -162,7 +162,8 @@ def decision_questions(policy: Policy, stage_id: str, *, pending: bool = False,
                        pick_labels: tuple[str, ...] = (),
                        destination_candidates: CandidateSet | None = None,
                        callback: bool = False, origin: bool = False, sender_change: bool = False,
-                       sender_name_scope: bool = False, cancel_current: bool = False,
+                       sender_name_scope: bool = False, sender_address_save: bool = False,
+                       cancel_current: bool = False,
                        cancel_selected: bool = False, cancel_selected_order: bool = False,
                        cancel_confirmation: bool = False,
                        box_label: str | None = None) -> list[dict]:
@@ -184,6 +185,8 @@ def decision_questions(policy: Policy, stage_id: str, *, pending: bool = False,
         sets.insert(0, "sender_change")
     if sender_name_scope:
         sets.append("sender_name_scope")
+    if sender_address_save:
+        sets.append("sender_address_save")  # 서버가 등록 주소 변경 여부를 물었을 때만
     if box_label:
         sets.insert(0, "box")
     if sets or pick_labels:

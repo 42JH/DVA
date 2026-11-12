@@ -1110,10 +1110,12 @@ def test_late_sender_name_uses_scope_from_the_correct_turn(scope_case):
     run(scenario())
 
 
-@pytest.mark.parametrize("scope_case,with_address", [("confirm", False), ("save", False), ("confirm", True)])
-def test_registered_name_change_is_patched_as_soon_as_customer_agrees(tmp_path, scope_case, with_address):
+@pytest.mark.parametrize("scope_case,address_answer", [("confirm", None), ("save", None), ("confirm", "yes"),
+                                                        ("confirm", "no")])
+def test_registered_name_change_is_patched_as_soon_as_customer_agrees(tmp_path, scope_case, address_answer):
     """등록 이름 변경 동의 즉시(택배를 담기 전) PATCH /api/customers/{id}로 이름을 갱신한다.
-    발송 주소가 상세까지 확정돼 기본 주소와 다르면 담을 때와 같이 같은 PATCH에 싣는다."""
+    발송 주소가 등록 주소와 다르면 등록 주소 변경을 따로 묻고, 동의하면 그때 주소를 PATCH한다. 거절하면 저장하지 않는다."""
+    from app.domain.address_book import save_offer, sender_change_next
     from app.tests.test_domain import GEO
 
     svc, client = flow(tmp_path)
@@ -1141,7 +1143,7 @@ def test_registered_name_change_is_patched_as_soon_as_customer_agrees(tmp_path, 
         async with s.lock:
             s.state.intent = "order"
             s.state.record("receiver_name", "이영희")
-            if with_address:
+            if address_answer:
                 s.state.record("sender_address", FULL["sender_address"])
                 s.state.record("sender_address_detail", FULL["sender_address_detail"])
                 s.state.current.sender_geo = GEO
@@ -1166,11 +1168,29 @@ def test_registered_name_change_is_patched_as_soon_as_customer_agrees(tmp_path, 
             await say(conn, "네", 4200)
         await until(lambda: api.customers[CALLER]["name"] == "박영희")
         assert s.state.customer.name == "박영희" and not s.state.parcels
-        assert len(patches) == 1 and ("address" in patches[0]) == with_address
-        if with_address:
-            assert api.customers[CALLER]["address"]["roadAddress"] == FULL["sender_address"]
-            assert api.customers[CALLER]["address"]["detailAddress"] == FULL["sender_address_detail"]
-            assert s.state.customer.default_address == FULL["sender_address"]
+        assert patches == [{"name": "박영희"}]  # 주소는 이름 동의에 싣지 않는다
+        if address_answer:
+            await until(lambda: any('"sender_change_next": "ask_address_save"' in e.get("content", "")
+                                    for e in conn.sent))
+            assert "address" not in api.customers[CALLER]  # 동의 전에는 저장하지 않는다
+            client.decisions.create.return_value = SimpleNamespace(
+                answers=[choice("sender_address_save", address_answer), choice("switch", "none")])
+            await ai(conn, "다음에도 이 주소에서 보내실 수 있게 등록 주소로 저장해 드릴까요?", 5200)
+            await say(conn, "네" if address_answer == "yes" else "아니요", 6200)
+            await until(lambda: s.state.sender_address_consent is not None)
+            asked = [q["name"] for q in client.decisions.create.call_args.kwargs["questions"]]
+            assert "sender_address_save" in asked  # 서버가 물은 동안에만 Decision에 넣는다
+            assert sender_change_next(s.state) is None
+            if address_answer == "yes":
+                await until(lambda: len(patches) == 2)
+                assert set(patches[1]) == {"address"}
+                assert api.customers[CALLER]["address"]["roadAddress"] == FULL["sender_address"]
+                assert api.customers[CALLER]["address"]["detailAddress"] == FULL["sender_address_detail"]
+                assert s.state.customer.default_address == FULL["sender_address"]
+            else:
+                await asyncio.sleep(0.05)
+                assert len(patches) == 1 and "address" not in api.customers[CALLER]
+                assert "sender" not in save_offer(s.state)  # 담을 때도 저장하지 않는다
         conn.push({"type": "session.closed", "reason": "remote_hangup"})
         await task
 
