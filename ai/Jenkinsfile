@@ -1,6 +1,7 @@
 // AI 서버 CI·배포. develop-ai에 들어올 때마다 빌드·테스트가 통과하면 Lightsail에 배포한다.
 // 배포는 ai/deploy/upload.sh(이미지·릴리스 전송) → 대상 서버의 ai/deploy/deploy.sh(실행, 실패 시 직전 릴리스로 복구).
 // 비밀값은 Jenkins Secret file credential 'dva-ai'(커밋 금지). 배포 때 대상 서버의 /home/ubuntu/dva-ai/shared/.env로 올린다.
+// 시험 창구(persona_check)의 비밀값은 따로 'dva-persona-check'(선택) → shared/persona-check.env. 없으면 시험 창구는 뜨지 않는다.
 // 컨테이너를 다시 만들므로 진행 중인 통화는 끊긴다.
 pipeline {
     agent { label 'linux-docker-builder' }
@@ -52,10 +53,25 @@ pipeline {
         stage('Deploy to Lightsail') {
             options { timeout(time: 15, unit: 'MINUTES') }
             steps {
-                withCredentials([sshUserPrivateKey(credentialsId: 'dva-lightsail-ssh',
-                    keyFileVariable: 'LIGHTSAIL_SSH_KEY', usernameVariable: 'LIGHTSAIL_SSH_USER'),
-                    file(credentialsId: 'dva-ai', variable: 'AI_ENV_FILE')]) {
-                    sh 'bash ai/deploy/upload.sh "$RELEASE_VERSION" "$LIGHTSAIL_SSH_KEY" "$LIGHTSAIL_SSH_USER"'
+                script {
+                    def credentials = [
+                        sshUserPrivateKey(credentialsId: 'dva-lightsail-ssh',
+                            keyFileVariable: 'LIGHTSAIL_SSH_KEY', usernameVariable: 'LIGHTSAIL_SSH_USER'),
+                        file(credentialsId: 'dva-ai', variable: 'AI_ENV_FILE')
+                    ]
+                    // 시험 창구(persona_check)의 비밀값은 운영 비밀 파일과 따로 둔다: Secret file 'dva-persona-check'(선택).
+                    // 이 자격증명이 없는 Jenkins에서는 시험 창구 없이 배포한다(AI 서버 배포는 같다)
+                    try {
+                        withCredentials([file(credentialsId: 'dva-persona-check', variable: 'PERSONA_CHECK_ENV_FILE')]) {
+                            echo 'Persona check credential found.'
+                        }
+                        credentials.add(file(credentialsId: 'dva-persona-check', variable: 'PERSONA_CHECK_ENV_FILE'))
+                    } catch (ignored) {
+                        echo 'No dva-persona-check credential: deploying without the persona check.'
+                    }
+                    withCredentials(credentials) {
+                        sh 'bash ai/deploy/upload.sh "$RELEASE_VERSION" "$LIGHTSAIL_SSH_KEY" "$LIGHTSAIL_SSH_USER"'
+                    }
                 }
             }
         }
