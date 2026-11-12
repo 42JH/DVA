@@ -777,6 +777,39 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
       assert.deepEqual(await snapshot(databases[owner],['outbox_events','inbox_events']),messageCounts[owner],owner+' query messages not persisted');
     }
   });
+  await t.test('customer retention keeps references from deleted and expired orders without storing query events',async()=> {
+    const {requestRetainedCustomers}=require('@dva/events/call-read-references.cjs');
+    const ids=[7,6,4,3,2,1],url=sides[1].base+'/internal/call-read-references',token=process.env.CUSTOMER_AUTH_TOKEN;
+    for(const db of [reference,databases.order]){
+      const client=await db.connect();
+      try{
+        await client.query('BEGIN');
+        await client.query("SET LOCAL session_replication_role='replica'");
+        await client.query(`INSERT INTO orders(order_seq,customer_seq,status,payment_method_type,total_amount,creation_source,created_at,updated_at,closed_at,deleted_at)
+          OVERRIDING SYSTEM VALUE VALUES(29501,4,'CANCELLED','cat',0,'ADMIN','2010-01-01Z','2010-01-01Z','2010-01-01Z','2010-01-02Z'),
+          (29502,6,'CANCELLED','cat',0,'ADMIN','2010-01-01Z','2010-01-01Z','2010-01-01Z',NULL)`);
+        await client.query('COMMIT');
+      }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
+    }
+    try{
+      const stored=await snapshot(databases.order,[...orderTables,'outbox_events','inbox_events']);
+      const expected=(await reference.query('SELECT DISTINCT customer_seq FROM orders WHERE customer_seq=ANY($1::int[]) ORDER BY customer_seq',[ids])).rows.map(row=>row.customer_seq);
+      assert.ok(expected.includes(4),'soft-deleted order retains its customer');
+      assert.ok(expected.includes(6),'expired closed order retains its customer');
+      assert.ok(!expected.includes(7),'customer without an order is not retained');
+      assert.deepEqual(await requestRetainedCustomers(url,token,ids),expected);
+      assert.deepEqual(await requestRetainedCustomers(url,token,[7]),[]);
+      const event={eventId:randomUUID(),source:'customer',eventType:'CustomerOrderReferencesReadRequested',payload:{ids}};
+      async function post(body,credential){const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+credential},body:JSON.stringify(body),signal:AbortSignal.timeout(5000)});return{status:response.status,body:await response.json()};}
+      assert.equal((await post(event,'invalid')).status,403);
+      assert.equal((await post({...event,source:'consultation'},token)).status,422);
+      assert.equal((await post({...event,payload:{ids:[4,4]}},token)).status,422);
+      assert.deepEqual((await post(event,token)).body,{eventId:event.eventId,status:'processed',payload:expected});
+      assert.deepEqual(await snapshot(databases.order,[...orderTables,'outbox_events','inbox_events']),stored);
+    }finally{
+      for(const db of [reference,databases.order])await db.query('DELETE FROM orders WHERE order_seq IN (29501,29502)');
+    }
+  });
   await t.test('private queries reject forged tokens/sources and replay reads current state without writes',async()=> {
     const command={operation:'OrdersListed',id:null,callSessionSeq:1011,query:{limit:20,offset:0}};
     const event={eventId:randomUUID(),source:'order',eventType:'OrderReadRequested',payload:{command}};

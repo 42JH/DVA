@@ -6,6 +6,25 @@ const { validateEvent, createReceiver, createRelay, sendEvent } = require('../in
 const token = 'test-only-event-key-'.padEnd(40, 'a');
 const event = () => ({ eventId: randomUUID(), source: 'order', eventType: 'OrderAccepted', payload: { orderSeq: 1 } });
 
+test('retention order references reject forged queries and invalid customer subsets',async()=>{
+  const {validateRetainedCustomersQuery,validateRetainedCustomers,requestRetainedCustomers}=require('../call-read-references.cjs');
+  const query={eventId:randomUUID(),source:'customer',eventType:'CustomerOrderReferencesReadRequested',payload:{ids:[2,7,11]}};
+  validateRetainedCustomersQuery(query);validateRetainedCustomers([],query.payload.ids);validateRetainedCustomers([2,7],query.payload.ids);
+  validateRetainedCustomersQuery({...query,payload:{ids:Array.from({length:1000},(_,n)=>n+1)}});
+  for(const ids of [[],[0],[-1],[1.5],['2'],[2,2],[2147483648],Array.from({length:1001},(_,n)=>n+1)])assert.throws(()=>validateRetainedCustomersQuery({...query,payload:{ids}}));
+  for(const source of ['consultation','order','operations'])assert.throws(()=>validateRetainedCustomersQuery({...query,source}));
+  assert.throws(()=>validateRetainedCustomersQuery({...query,payload:{ids:[2],extra:true}}));
+  assert.throws(()=>validateRetainedCustomersQuery({...query,eventType:'CallReadReferencesRequested'}));
+  for(const rows of [null,{},[1],[2,2],[7,2],['2'],[{customer_seq:2}]])assert.throws(()=>validateRetainedCustomers(rows,query.payload.ids));
+  const oldFetch=global.fetch;let seen=0,mode='ok';
+  global.fetch=async(url,options)=>{seen++;assert.equal(url,'http://order/internal/call-read-references');assert.equal(options.headers.Authorization,'Bearer '+token);const packet=JSON.parse(options.body);assert.equal(packet.source,'customer');assert.equal(packet.eventType,query.eventType);assert.deepEqual(packet.payload,query.payload);return new Response(JSON.stringify({eventId:mode==='id'?randomUUID():packet.eventId,status:'processed',payload:mode==='outside'?[999]:[2,7]}),{status:mode==='status'?503:200,headers:{'Content-Type':'application/json'}});};
+  try{
+    assert.deepEqual(await requestRetainedCustomers('http://order/internal/call-read-references',token,query.payload.ids),[2,7]);
+    for(mode of ['id','outside','status'])await assert.rejects(requestRetainedCustomers('http://order/internal/call-read-references',token,query.payload.ids));
+    const before=seen;await assert.rejects(requestRetainedCustomers('http://user:pass@order/private',token,query.payload.ids));assert.equal(seen,before);
+  }finally{global.fetch=oldFetch;}
+});
+
 test('call read references validate owner rows, query bounds and authenticated replies',async()=>{
   const {validateReferenceQuery,validateReferenceRows,requestReferences}=require('../call-read-references.cjs');
   const input={eventId:randomUUID(),source:'consultation',eventType:'CallReadReferencesRequested',payload:{ids:[1,2]}};

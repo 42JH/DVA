@@ -8,7 +8,11 @@ import {
   SetMetadata,
 } from '@nestjs/common';
 import { ApiExcludeController } from '@nestjs/swagger';
-import { validateReferenceQuery, type ReferenceRows } from '@dva/events/call-read-references.cjs';
+import {
+  validateReferenceQuery,
+  validateRetainedCustomersQuery,
+  type ReferenceRows,
+} from '@dva/events/call-read-references.cjs';
 import { DatabaseService } from '../database/database.service';
 
 @ApiExcludeController()
@@ -20,6 +24,27 @@ export class CallReadReferencesController {
   @HttpCode(200)
   @Header('Cache-Control', 'no-store')
   async query(@Body() input: unknown) {
+    if (
+      input &&
+      typeof input === 'object' &&
+      'eventType' in input &&
+      input.eventType === 'CustomerOrderReferencesReadRequested'
+    ) {
+      try {
+        validateRetainedCustomersQuery(input);
+      } catch {
+        throw new HttpException({ error: 'INVALID_CUSTOMER_ORDER_REFERENCES' }, 422);
+      }
+      const { rows } = await this.database.referencePool.query<{ customer_seq: number }>(
+        'SELECT DISTINCT customer_seq FROM orders WHERE customer_seq=ANY($1::int[]) ORDER BY customer_seq',
+        [input.payload.ids],
+      );
+      return {
+        eventId: input.eventId,
+        status: 'processed',
+        payload: rows.map((row) => row.customer_seq),
+      };
+    }
     try {
       validateReferenceQuery(input);
     } catch {

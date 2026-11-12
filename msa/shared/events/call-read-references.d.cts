@@ -12,6 +12,12 @@ export type ReferenceRows={
 export function validateReferenceQuery(value:unknown,source?:'consultation'|'order'):asserts value is ReferenceQuery;
 export function validateReferenceRows<K extends keyof ReferenceRows>(kind:K,value:unknown,ids:number[]):asserts value is ReferenceRows[K][];
 export function requestReferences<K extends keyof ReferenceRows>(kind:K,url:string,token:string,ids:number[],source?:'consultation'|'order',readScopeId?:string):Promise<ReferenceRows[K][]>;
+export interface RetainedCustomersQuery extends Event {
+  source:'customer';eventType:'CustomerOrderReferencesReadRequested';payload:{ids:number[]};
+}
+export function validateRetainedCustomersQuery(value:unknown):asserts value is RetainedCustomersQuery;
+export function validateRetainedCustomers(value:unknown,ids:number[]):asserts value is number[];
+export function requestRetainedCustomers(url:string,token:string,ids:number[]):Promise<number[]>;
 export interface PersonaComparisonRow {
   ai_persona_seq:number;ai_persona_version_seq:number;name:string;version:number;
   status:'ACTIVE'|'PENDING'|'INACTIVE';previous_active_version_seq:number|null;
