@@ -11,6 +11,7 @@ import {
   SCENARIO_TEST,
   useScenarioTest,
   useScenarioTestPage,
+  type TestTarget,
 } from '@/features/persona/hooks/useScenarioTest'
 
 export function ScenarioTestPage() {
@@ -45,13 +46,7 @@ const Note = ({ children }: { children: string | null }) => (
   <p className="flex flex-1 items-center justify-center text-[14px] text-ops-sub">{children}</p>
 )
 
-function ScenarioTest({
-  me,
-  dateOf,
-}: {
-  me: { personaSeq: number; version: number; isHead: boolean }
-  dateOf: (version: number) => string
-}) {
+function ScenarioTest({ me, dateOf }: { me: TestTarget; dateOf: (version: number) => string }) {
   const vm = useScenarioTest(me, dateOf)
   const navigate = useNavigate()
   if (vm.note) return <Note>{vm.note}</Note>

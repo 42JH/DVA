@@ -98,7 +98,8 @@ export function useScenarioScript(scenarioId: string) {
     note: q.isError ? '불러오지 못했습니다. 다시 시도해 주세요.' : !q.data ? '불러오는 중…' : null,
     caller: q.data?.caller ?? '',
     lines: (q.data?.lines ?? []).map((l, i) => ({ ...l, no: i + 1 })),
-    expected: q.data?.expected ?? [],
+    // 정답 값은 판정 결과표와 같은 모양(숫자 · 주문 상태 묶음)으로 와서 같은 방식으로 글로 바꿈
+    expected: (q.data?.expected ?? []).map((e) => ({ name: e.name, value: text(e.value) })),
     checks: q.data?.checks ?? [],
   }
 }

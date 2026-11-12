@@ -28,6 +28,7 @@ export type PromptFields = Record<PromptKey, string>
 
 /** 서버 버전 (PersonaVersionDto) — 쓰는 칸만 */
 export interface PersonaVersionDto extends PromptFields {
+  promptText?: string // 여섯 칸을 서버가 합친 글 — AI가 통화에서 받는 글. 시나리오 시험을 시작할 때 창구에 보냄
   aiPersonaVersionSeq: number
   version: number
   name: string
@@ -75,6 +76,7 @@ export interface PersonaVersion {
   voiceOnly: boolean // 바로 앞 버전과 프롬프트는 같고 음성만 다름 ('음성 설정' 태그)
   changes: VersionChange // 바로 앞 버전과 무엇이 다른지 (요약 문장은 화면 층에서)
   author: string // 확인할 수 없는 옛 작성자는 ''
+  promptText: string // 서버가 합친 글 (초안 줄은 '')
   savedAt: string // 서버 ISO 그대로 — 화면 형식은 fmtVersionTime (버전 기록은 분까지, 11/11)
   prompt: PromptFields
   voice: VoiceSettings
@@ -196,6 +198,7 @@ export function toVersions(
         !changes.first && !changes.prompt && !!(changes.voice || changes.speed || changes.waitTime),
       changes,
       author: v.createdByAdminUserName ?? '',
+      promptText: (v as { promptText?: string }).promptText ?? '',
       savedAt: v.createdAt,
       prompt: toPrompt(v),
       voice,
