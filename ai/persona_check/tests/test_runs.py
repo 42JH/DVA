@@ -72,7 +72,9 @@ def test_run_queues_scenarios_within_the_concurrency_limit_and_reports_each(tmp_
     assert again.get("../" + run_id) is None and again.get(run_id + "/..") is None   # 묶음 번호 모양이 아니면 읽지 않는다
 
 
-def test_default_is_all_core_is_the_core_set_and_the_limit_spans_runs(tmp_path):
+def test_default_is_all_core_is_the_core_set_and_the_limit_spans_runs(tmp_path, monkeypatch):
+    monkeypatch.delenv("QDRANT_URL", raising=False)
+
     async def go():
         runs, seen = fake_runs(tmp_path, max_concurrency=2)
         with pytest.raises(ValueError):
@@ -83,9 +85,24 @@ def test_default_is_all_core_is_the_core_set_and_the_limit_spans_runs(tmp_path):
         return run, core, seen
 
     run, core, seen = asyncio.run(go())
-    assert run["total"] == len(judge.load_scenarios()) and run["candidate"] is False
-    assert [i["scenario"] for i in core["items"]] == [s["id"] for s in judge.load_scenarios() if s.get("core")]
+    usable = [s for s in judge.load_scenarios() if s.get("needs") != "faq"]            # 이 환경에는 FAQ 검색 서버가 없다
+    assert run["total"] == len(usable) < len(judge.load_scenarios()) and run["candidate"] is False
+    assert [i["scenario"] for i in core["items"]] == [s["id"] for s in usable if s.get("core")]
     assert seen["peak"] == 2                                                     # 묶음이 둘이어도 동시 통화는 전체 한도까지
+
+
+def test_faq_scenario_runs_only_where_the_search_server_is_connected(tmp_path, monkeypatch):
+    async def go():
+        runs, _ = fake_runs(tmp_path)
+        with pytest.raises(ValueError, match="FAQ"):
+            runs.start(server.RunRequest(scenarios=["G1"]))                       # 검색 서버가 없으면 걸지 않는다
+        monkeypatch.setenv("QDRANT_URL", "http://qdrant:6333")
+        run = runs.start(server.RunRequest(core=True))
+        await finish(runs)
+        return run
+
+    monkeypatch.delenv("QDRANT_URL", raising=False)
+    assert "G1" in [i["scenario"] for i in asyncio.run(go())["items"]]
 
 
 def test_stop_cancels_running_calls_and_leaves_the_run_interrupted(tmp_path):
@@ -102,6 +119,8 @@ def test_stop_cancels_running_calls_and_leaves_the_run_interrupted(tmp_path):
 
 
 def test_http_needs_the_token_and_serves_status(tmp_path, monkeypatch):
+    monkeypatch.delenv("QDRANT_URL", raising=False)
+
     async def go():
         runs, _ = fake_runs(tmp_path)
         transport = httpx.ASGITransport(app=server.create_app(runs))
@@ -111,7 +130,8 @@ def test_http_needs_the_token_and_serves_status(tmp_path, monkeypatch):
             assert (await http.get("/scenarios")).status_code == 401
             assert (await http.get("/scenarios", headers={"Authorization": "Bearer " + "틀림".encode().hex()})).status_code == 401
             listed = (await http.get("/scenarios", headers=AUTH)).json()
-            assert {"id": "A1", "name": "신규 고객 기본 접수", "group": "접수", "core": True} in listed
+            assert {"id": "A1", "name": "신규 고객 기본 접수", "group": "접수", "core": True, "available": True} in listed
+            assert next(s for s in listed if s["id"] == "G1")["available"] is False   # FAQ 검색 서버가 없는 환경
             assert (await http.post("/runs", json={"scenarios": ["없는것"]}, headers=AUTH)).status_code == 422
             assert (await http.post("/runs", json={"promptText": "가" * 20001}, headers=AUTH)).status_code == 422
             made = await http.post("/runs", json={"scenarios": ["A1"]}, headers=AUTH)

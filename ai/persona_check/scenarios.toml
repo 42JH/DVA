@@ -6,11 +6,13 @@
 #         optional = true: AI가 그 질문을 하지 않으면 안 쓰여도 되는 문장(예 · 아니오 답). 표시가 없는 문장을 다 말하지 못하면 실패다.
 # customer = true  등록 고객([data.customer])으로 전화한다. 주소록 · 기존 주문도 함께 심는다. 없으면 처음 이용하는 고객.
 # expect  코드로 비교하는 정답. outcome = registered(택배 접수) | none(접수 없음) | lookup(조회) | cancelled(취소)
+#         faq_answers = N: FAQ 답변이 N번 이상 있어야 한다.
 #         보내는 분은 적지 않으면 발신번호 · 등록 고객의 이름과 발송 주소여야 한다.
 # checks  모델이 통화를 보고 판정하는 행동 확인 항목(문서의 "확인"). 넓게 읽히지 않게 구체적으로 적는다.
 # say  TTS가 읽을 글을 직접 정한다. 지금 "010-7777-8888이요."는 "…입니다"로 읽힌다 — AI가 "…이요"로 끝나는 번호를 자릿수 오류로 거절해서(11/12) 둔 임시 조치다. 고쳐지면 say를 지운다.
 # core = true  프롬프트를 고칠 때마다 돌리는 핵심 묶음.
 # max_sec  이 시나리오의 통화 길이 상한(초). 없으면 실행기 기본값.
+# needs = "faq"  FAQ 검색 서버가 연결된 환경(QDRANT_URL)에서만 돌 수 있는 시나리오. 연결이 없으면 전체 · 핵심 묶음에서 빠진다.
 
 [data]
 new_caller = "01099990000"          # 가짜 백엔드에 없는 번호
@@ -281,3 +283,37 @@ lines = [
 ]
 [scenario.expect]
 outcome = "none"
+
+[[scenario]]
+id = "G1"
+group = "문의"
+name = "접수 중 FAQ 질문 후 복귀"
+customer = true
+core = true
+needs = "faq"
+# 문서의 G1은 받는 곳 주소를 묻는 대목부터만 적혀 있어, 앞뒤 발화는 A4 · B10의 것을 붙였다.
+# 아직 실제 통화로 돌려 보지 못했다(검색 서버가 있는 환경이 필요하다).
+lines = [
+  { text = "네. 받는 사람은 박서진이에요." },
+  { text = "010-7777-8888이요.", say = "공일공 칠칠칠칠 팔팔팔팔입니다." },
+  { text = "아 근데, 제주도도 보낼 수 있어요?" },
+  { text = "제주시 첨단로 242요." },
+  { text = "단독주택이라 없어요.", optional = true },
+  { text = "반찬통이요. 중형 박스 하나요." },
+  { text = "3만 원이요." },
+  { text = "네.", optional = true },
+  { text = "없어요.", optional = true },
+]
+checks = [
+  "제주도로 보낼 수 있는지 묻는 질문에 답한다(답을 피하거나 상담원 연결로 넘기지 않는다)",
+  "질문에 답한 뒤 하던 질문(받는 곳 주소)으로 돌아온다",
+  "이미 받은 받는 분 성함과 연락처를 새로 말해 달라고 하지 않는다",
+]
+[scenario.expect]
+outcome = "registered"
+faq_answers = 1          # 통화 분석의 FAQ 답변 횟수(검색 근거로 답한 횟수)
+[scenario.expect.parcel]
+receiver_name = "박서진"
+receiver_phone = "010-7777-8888"
+box = "medium"
+item_price = 30000
