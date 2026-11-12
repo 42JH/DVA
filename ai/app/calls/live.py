@@ -111,7 +111,7 @@ class Runtime:
     confirm_t: float = 0.0                            # 관제: 확인 "네" 발화 끝(→ 담기)
     # 서버 질문(후보·확인·출발지·박스·콜백)에 답하는 발화의 Decision 반영 대기. 같은 턴의 Backend 도구 호출이 기다린다
     deciding: asyncio.Event | None = None
-    name_saving: str | None = None                    # 동의 즉시 PATCH를 보낸 등록 이름(중복 전송 방지)
+    name_saving: tuple | None = None                  # 동의 즉시 PATCH를 보낸 (이름[, 주소, 상세])(중복 전송 방지)
 
     def cancel(self) -> None:
         for h in (self.endpoint, self.ai_end, self.commit):
@@ -1079,17 +1079,22 @@ class LiveFlow:
 
     def _maybe_save_name(self, s: CallSession) -> None:
         """등록 고객이 등록 이름 변경에 동의하면 택배를 담기 전이라도 바로 PATCH한다(사용자 결정 2026-11-12).
+        발송 주소가 상세까지 확정됐고 기본 주소와 다르면 담을 때와 같이 같은 PATCH에 싣는다.
         실패하면 담을 때 저장 경로(save_offer)가 다시 시도한다."""
-        results, c, draft = getattr(self.svc, "results", None), s.state.customer, s.state.current
-        if results is None or not c.customer_seq or draft is None or not draft.save_sender_name:
+        results, draft = getattr(self.svc, "results", None), s.state.current
+        offer = save_offer(s.state)
+        if results is None or not offer.get("name"):
             return
-        name = (draft["sender_name"].value or "").strip() if draft["sender_name"].valid else ""
+        offer = {"name": True} | ({"sender": True} if offer.get("sender")
+                                  and draft["sender_address_detail"].valid else {})
+        snap = {"sender_name": draft["sender_name"].value.strip(), "sender_address": draft["sender_address"].value,
+                "sender_address_detail": draft["sender_address_detail"].value or "", "sender_geo": draft.sender_geo}
+        key = (snap["sender_name"], snap["sender_address"], snap["sender_address_detail"])             if "sender" in offer else (snap["sender_name"],)
         rt = self.rt(s)
-        if not name or name == (c.name or "").strip() or name == rt.name_saving:
+        if key == rt.name_saving:
             return
-        rt.name_saving = name
-        s.spawn(results.save_addresses(s, self.svc.call_session_seq, {"sender_name": name}, {"name": True}),
-                "name_save")
+        rt.name_saving = key
+        s.spawn(results.save_addresses(s, self.svc.call_session_seq, snap, offer), "name_save")
 
     def _maybe_submit(self, s: CallSession, force: bool = False) -> None:
         """더 없음 + 결제 방식을 알면(또는 고객이 끝낼 때) 결과 전송을 백그라운드로 시작한다(결제는 묻지 않는다)."""

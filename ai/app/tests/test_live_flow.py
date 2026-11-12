@@ -1104,12 +1104,23 @@ def test_late_sender_name_uses_scope_from_the_correct_turn(scope_case):
     run(scenario())
 
 
-@pytest.mark.parametrize("scope_case", ["confirm", "save"])
-def test_registered_name_change_is_patched_as_soon_as_customer_agrees(tmp_path, scope_case):
-    """등록 이름 변경 동의 즉시(택배를 담기 전) PATCH /api/customers/{id}로 이름을 갱신한다."""
+@pytest.mark.parametrize("scope_case,with_address", [("confirm", False), ("save", False), ("confirm", True)])
+def test_registered_name_change_is_patched_as_soon_as_customer_agrees(tmp_path, scope_case, with_address):
+    """등록 이름 변경 동의 즉시(택배를 담기 전) PATCH /api/customers/{id}로 이름을 갱신한다.
+    발송 주소가 상세까지 확정돼 기본 주소와 다르면 담을 때와 같이 같은 PATCH에 싣는다."""
+    from app.tests.test_domain import GEO
+
     svc, client = flow(tmp_path)
     api = svc.d.backend.api
     api.add_customer(CALLER, "김철수")
+    patches = []
+    update = api.update_customer
+
+    async def counted(*args):
+        patches.append(args[2])
+        await update(*args)
+
+    api.update_customer = counted
     client.decisions.create = AsyncMock(return_value=SimpleNamespace(
         answers=[choice("sender_name_scope", "not_answer" if scope_case == "confirm" else "save"),
                  choice("switch", "none")]))
@@ -1124,6 +1135,10 @@ def test_registered_name_change_is_patched_as_soon_as_customer_agrees(tmp_path, 
         async with s.lock:
             s.state.intent = "order"
             s.state.record("receiver_name", "이영희")
+            if with_address:
+                s.state.record("sender_address", FULL["sender_address"])
+                s.state.record("sender_address_detail", FULL["sender_address_detail"])
+                s.state.current.sender_geo = GEO
         text = "보내는 분은 박영희로 할게요" if scope_case == "confirm" else "등록 이름도 박영희로 바꿔 주세요"
         customer = asyncio.create_task(say(conn, text, 1500))
         await until(lambda: s.rt.cust is not None)
@@ -1145,6 +1160,11 @@ def test_registered_name_change_is_patched_as_soon_as_customer_agrees(tmp_path, 
             await say(conn, "네", 4200)
         await until(lambda: api.customers[CALLER]["name"] == "박영희")
         assert s.state.customer.name == "박영희" and not s.state.parcels
+        assert len(patches) == 1 and ("address" in patches[0]) == with_address
+        if with_address:
+            assert api.customers[CALLER]["address"]["roadAddress"] == FULL["sender_address"]
+            assert api.customers[CALLER]["address"]["detailAddress"] == FULL["sender_address_detail"]
+            assert s.state.customer.default_address == FULL["sender_address"]
         conn.push({"type": "session.closed", "reason": "remote_hangup"})
         await task
 
