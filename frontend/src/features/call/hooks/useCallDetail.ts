@@ -13,7 +13,7 @@ import {
 import { utteranceAt, utteranceForAction, type CallActionKind } from '@/shared/call/callDto'
 import { faqResultText, groupActions } from '@/shared/call/actionText'
 import { isCustomerComplaint, splitComplaints, TARGET_LABEL } from '@/shared/call/complaints'
-import { useRecordingPlayer } from './useRecordingPlayer'
+import { useRecordingPlayer } from '@/shared/call/useRecordingPlayer'
 
 /** 스크립트 한 줄 (말만 — AI 동작은 오른쪽 처리 내용으로, 10/30). onClick = 이 말부터 듣기 (11/01, 시각을 모르면 없음) */
 interface ScriptLine {

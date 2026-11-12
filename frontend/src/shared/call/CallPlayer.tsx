@@ -1,5 +1,5 @@
 import { type AudioHTMLAttributes } from 'react'
-import type { PlayerState } from '@/features/call/hooks/useRecordingPlayer'
+import type { PlayerState } from './useRecordingPlayer'
 
 // 06 녹취 재생 줄 (11/05 새 디자인 맨 아래, 카드 폭 전체 · 위 구분선)
 // 왼쪽 '[ 빠른 접수형 ]'(받은 상담가) | 가운데 ⏮ 이전 발화 · ▶ 재생 · ⏭ 다음 발화 + 아래 지금 · 진행 막대 · 길이 | 오른쪽 🔈 음량
