@@ -3,11 +3,14 @@ groups:
     rules:
       - alert: DvaMsaNoScrape
         expr: >-
-          absent(up{job="dva-msa-app",service="operations"} == 1)
-          or absent(up{job="dva-msa-app",service="customer"} == 1)
-          or absent(up{job="dva-msa-app",service="consultation"} == 1)
-          or absent(up{job="dva-msa-app",service="delivery"} == 1)
-          or absent(up{job="dva-msa-app",service="order"} == 1)
+          (
+            label_replace(vector(1), "service", "operations", "__name__", ".*")
+            or label_replace(vector(1), "service", "customer", "__name__", ".*")
+            or label_replace(vector(1), "service", "consultation", "__name__", ".*")
+            or label_replace(vector(1), "service", "delivery", "__name__", ".*")
+            or label_replace(vector(1), "service", "order", "__name__", ".*")
+          )
+          unless on (service) (last_over_time(up{job="dva-msa-app"}[75s]) == 1)
         for: 1m
         annotations:
           summary: "{{ $labels.service }} has no reachable metrics target"

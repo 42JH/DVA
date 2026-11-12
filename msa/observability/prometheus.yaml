@@ -21,6 +21,10 @@ scrape_configs:
         replacement: "$1"
       - source_labels: [__meta_kubernetes_pod_name]
         target_label: pod
+    metric_relabel_configs:
+      - source_labels: [route]
+        regex: "/(operations|customer|consultation|delivery|order)/health(/.*)?"
+        action: drop
   - job_name: dva-msa-kubelet
     metrics_path: /metrics/resource
     scheme: https
