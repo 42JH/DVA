@@ -104,4 +104,18 @@ assert.deepEqual(runBody({ ...input, voiceId: 'marin', scenarios: ['B1'] }).scen
 assert.throws(() => runBody({ ...input, scenarios: [] })) // 빈 배열은 창구가 전체 실행으로 받음
 assert.throws(() => runBody({ ...input, promptText: '' })) // 글이 없으면 창구가 기본 페르소나로 걺
 assert.throws(() => runBody({ ...input, promptText: '   ' })) // 공백뿐인 글도 같음
+// 백엔드 중계의 검사 규칙(backend/src/ai-settings/dto/persona-check.dto.ts, 11/12)과 맞는가 — 모르는 칸이 하나라도 있으면 400
+const sent = JSON.parse(
+  JSON.stringify(runBody({ ...input, voiceId: 'marin', scenarios: ['B1', 'H10'] })),
+)
+const allowed = ['scenarios', 'promptText', 'voiceId', 'tag', 'concurrency']
+assert.deepEqual(
+  Object.keys(sent).filter((k) => !allowed.includes(k)),
+  [],
+)
+assert.match(sent.tag, /^[1-9][0-9]*:[1-9][0-9]*$/)
+assert.ok(sent.scenarios.every((id: string) => /^[A-Z]{1,3}[0-9]{1,3}$/.test(id)))
+assert.ok(Number.isInteger(sent.concurrency) && sent.concurrency >= 1)
+const bare = JSON.parse(JSON.stringify(runBody(input)))
+assert.deepEqual(Object.keys(bare).sort(), ['concurrency', 'promptText', 'tag']) // 기본 음성 · 전체 실행이면 두 칸은 아예 안 감
 console.log('scenarioTestMap ok')

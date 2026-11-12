@@ -14,6 +14,7 @@ dist-ssr
 # 루트 .gitignore의 .env.* 중 비밀 없는 개발 기본값만 다시 올림
 !.env.example
 !.env.development
+!.env.production
 
 # Editor directories and files
 .vscode/*
