@@ -855,6 +855,23 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
       }finally{await keeper.query('SELECT pg_advisory_unlock(20261103,157)');retention.splice(retention.indexOf(keeper),1);keeper.release();}
     }
   });
+  await t.test('call retention removes only its original empty results and fences failed and duplicate deliveries',async()=>{
+    const ids=[29701,29702,29703],url=sides[1].base+'/internal/call-read-references/events',token=process.env.CUSTOMER_AUTH_TOKEN;
+    for(const db of [reference,databases.order])for(const id of ids)await db.query("INSERT INTO empty_ai_order_results(request_id,call_session_seq,received_at) VALUES($1,$2,'2020-01-01Z')",['10000000-0000-4000-8000-'+String(id).padStart(12,'0'),id]);
+    const rows=async db=>(await db.query('SELECT to_jsonb(r) AS row FROM empty_ai_order_results r WHERE call_session_seq=ANY($1::int[]) ORDER BY call_session_seq',[ids])).rows;
+    const event={eventId:randomUUID(),source:'consultation',eventType:'ConsultationCallsPurged',payload:{ids:ids.slice(0,2)}};
+    const post=async(body,credential=token)=>{const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+credential},body:JSON.stringify(body),signal:AbortSignal.timeout(5000)});return{status:response.status,body:await response.json()};};
+    try{
+      const before=await rows(databases.order);
+      assert.equal((await post(event,'invalid')).status,403);assert.equal((await post({...event,source:'customer'})).status,422);assert.equal((await post({...event,payload:{ids:[29701,29701]}})).status,422);
+      assert.deepEqual(await rows(databases.order),before);assert.equal((await databases.order.query('SELECT 1 FROM inbox_events WHERE event_id=$1',[event.eventId])).rowCount,0);
+      await databases.order.query("CREATE FUNCTION retention_call_result_fault() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'controlled call result failure'; END $$; CREATE TRIGGER retention_call_result_fault BEFORE DELETE ON empty_ai_order_results FOR EACH ROW EXECUTE FUNCTION retention_call_result_fault()");
+      try{assert.equal((await post(event)).status,500);assert.deepEqual(await rows(databases.order),before);assert.equal((await databases.order.query('SELECT 1 FROM inbox_events WHERE event_id=$1',[event.eventId])).rowCount,0);}finally{await databases.order.query('DROP TRIGGER retention_call_result_fault ON empty_ai_order_results; DROP FUNCTION retention_call_result_fault()');}
+      for(const id of event.payload.ids)await reference.query('DELETE FROM empty_ai_order_results WHERE call_session_seq=$1',[id]);
+      assert.deepEqual(await post(event),{status:200,body:{eventId:event.eventId,status:'processed'}});assert.deepEqual(await rows(databases.order),await rows(reference));assert.equal((await rows(reference)).length,1);
+      assert.deepEqual(await post(event),{status:200,body:{eventId:event.eventId,status:'duplicate'}});assert.equal((await post({...event,payload:{ids:[29703]}})).status,409);assert.deepEqual(await rows(databases.order),await rows(reference));
+    }finally{for(const db of [reference,databases.order])await db.query('DELETE FROM empty_ai_order_results WHERE call_session_seq=ANY($1::int[])',[ids]);}
+  });
   await t.test('private queries reject forged tokens/sources and replay reads current state without writes',async()=> {
     const command={operation:'OrdersListed',id:null,callSessionSeq:1011,query:{limit:20,offset:0}};
     const event={eventId:randomUUID(),source:'order',eventType:'OrderReadRequested',payload:{command}};

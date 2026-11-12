@@ -10,6 +10,9 @@ test('retention order references reject forged queries and invalid customer subs
   const {validateRetainedCustomersQuery,validateRetainedCustomers,requestRetainedCustomers,validatePurgedCardsEvent}=require('../call-read-references.cjs');
   const purge={eventId:randomUUID(),source:'customer',eventType:'CustomerPaymentCardsPurged',payload:{ids:[1,2]}};
   validatePurgedCardsEvent(purge);
+  const {validatePurgedCallsEvent}=require('../call-read-references.cjs');
+  const calls={...purge,source:'consultation',eventType:'ConsultationCallsPurged'};validatePurgedCallsEvent(calls);
+  for(const changed of [{...calls,source:'customer'},{...calls,eventType:purge.eventType},...[[0],[1,1],['1'],[],Array.from({length:101},(_,n)=>n+1)].map(ids=>({...calls,payload:{ids}})),{...calls,payload:{ids:[1],extra:true}}])assert.throws(()=>validatePurgedCallsEvent(changed));
   for(const changed of [{...purge,source:'order'},{...purge,eventType:'CustomerOrderReferencesReadRequested'},...[[0],[1,1],['1'],[],Array.from({length:101},(_,n)=>n+1)].map(ids=>({...purge,payload:{ids}})),{...purge,payload:{ids:[1],extra:true}}])assert.throws(()=>validatePurgedCardsEvent(changed));
   const query={eventId:randomUUID(),source:'customer',eventType:'CustomerOrderReferencesReadRequested',payload:{ids:[2,7,11]}};
   validateRetainedCustomersQuery(query);validateRetainedCustomers([],query.payload.ids);validateRetainedCustomers([2,7],query.payload.ids);
