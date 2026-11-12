@@ -25,6 +25,7 @@ export class OrderPaymentsService {
   async claimApproval(id: string, amount: number, key?: string) {
     return this.database.transaction(async (client) => {
       await client.query("SET LOCAL lock_timeout='2s'");
+      const activeCustomer = await this.repository.lockActivePaymentCustomer(client, id);
       const r = await this.repository.request(client, id);
       if (!r || r.order.retentionExpired)
         throw new ApiException(404, 'NOT_FOUND', '결제 요청을 찾을 수 없습니다.');
@@ -50,6 +51,8 @@ export class OrderPaymentsService {
       const paymentKey = r.providerPaymentKey || key;
       if (!paymentKey) throw new ApiException(409, 'INVALID_STATE', '조회할 결제 정보가 없습니다.');
       if (!r.approvalStartedAt) {
+        if (!activeCustomer)
+          throw new ApiException(403, 'FORBIDDEN', '탈퇴·삭제된 고객의 결제 요청입니다.');
         const snapshot = await this.orders.detail(client, r.orderSeq, null);
         if (!snapshot) throw new ApiException(404, 'NOT_FOUND', '주문을 찾을 수 없습니다.');
         const errors = snapshot.parcels.flatMap((parcel, index) => {
@@ -114,6 +117,7 @@ export class OrderPaymentsService {
   async claimCardApproval(id: string) {
     return this.database.transaction(async (client) => {
       await client.query("SET LOCAL lock_timeout='2s'");
+      const activeCustomer = await this.repository.lockActivePaymentCustomer(client, id);
       const r = await this.repository.request(client, id);
       if (!r || r.order.retentionExpired)
         throw new ApiException(404, 'NOT_FOUND', '결제 요청을 찾을 수 없습니다.');
@@ -131,14 +135,8 @@ export class OrderPaymentsService {
       let card: Awaited<ReturnType<OrderPaymentsRepository['card']>> | undefined = undefined;
       if (!r.approvalStartedAt) {
         const policy = await this.repository.eligibility(client, r.order.customerSeq);
-        const active = (
-          await client.query(
-            "SELECT 1 FROM customers WHERE customer_seq=$1 AND status='ACTIVE' AND deleted_at IS NULL",
-            [r.order.customerSeq],
-          )
-        ).rowCount;
         if (
-          !active ||
+          !activeCustomer ||
           (r.order.paymentMethodType === 'groupBilling' &&
             (!policy.group || policy.organizationSeq !== r.order.billingOrganizationSeq))
         )

@@ -48,6 +48,18 @@ export class CustomersRepository {
     );
   }
 
+  async invalidateUnstartedPayments(client: PoolClient, ids: number[]): Promise<number[]> {
+    const result = await client.query<{ orderSeq: number }>(
+      `UPDATE order_payment_requests r SET invalidated_at=clock_timestamp()
+       FROM orders o WHERE o.order_seq=r.order_seq AND o.customer_seq=ANY($1::int[])
+        AND r.invalidated_at IS NULL AND r.completed_at IS NULL AND r.approval_started_at IS NULL
+        AND r.provider_approved_at IS NULL
+       RETURNING r.order_seq AS "orderSeq"`,
+      [ids],
+    );
+    return [...new Set(result.rows.map((row) => row.orderSeq))];
+  }
+
   constructor(private readonly database: DatabaseService) {}
 
   async billingMonth(id: number, month?: string) {
@@ -121,7 +133,8 @@ export class CustomersRepository {
       LEFT JOIN memberships m ON m.customer_seq=c.customer_seq AND m.deleted_at IS NULL
       LEFT JOIN organizations o ON o.organization_seq=m.organization_seq AND o.deleted_at IS NULL
       LEFT JOIN departments d ON d.department_seq=m.department_seq AND d.organization_seq=m.organization_seq AND d.deleted_at IS NULL
-      WHERE c.phone_number=$1 AND c.deleted_at IS NULL`,
+      WHERE c.phone_number=$1 AND (c.deleted_at IS NULL OR c.status='WITHDRAWN')
+      ORDER BY c.deleted_at NULLS FIRST,c.customer_seq DESC LIMIT 1`,
       [phoneNumber],
     );
     return (
@@ -143,6 +156,7 @@ export class CustomersRepository {
     client: PoolClient,
     input: Pick<CreateCustomerDto, 'name' | 'phoneNumber'>,
   ): Promise<Customer | undefined> {
+    if (await this.findByPhoneForOrder(client, input.phoneNumber)) return undefined;
     return (
       await client.query<Customer>(
         `INSERT INTO customers(name,phone_number,status) VALUES($1,$2,'ACTIVE')
@@ -155,7 +169,9 @@ export class CustomersRepository {
   async findByPhoneForOrder(client: PoolClient, phone: string): Promise<Customer | undefined> {
     return (
       await client.query<Customer>(
-        `SELECT ${columns} FROM customers WHERE phone_number=$1 AND deleted_at IS NULL FOR SHARE`,
+        `SELECT ${columns} FROM customers WHERE phone_number=$1
+         AND (deleted_at IS NULL OR status='WITHDRAWN')
+         ORDER BY deleted_at NULLS FIRST,customer_seq DESC LIMIT 1 FOR SHARE`,
         [phone],
       )
     ).rows[0];

@@ -143,7 +143,7 @@ export class CustomersController {
     summary: '고객 이름·상태 변경',
     security: [{ adminSession: [] }, { bearer: [] }],
     description:
-      'AI는 AI_BUSINESS_TOKEN의 Bearer 인증이 필요합니다. 내 주소 수정·삭제는 call_session_seq로 진행 중인 본인 통화도 확인합니다. 관리자는 통화 헤더 없이 기존 세션과 허용 Origin으로 수정합니다. status·월결제 자격은 관리자 전용이며 전화번호 변경·탈퇴 복구는 지원하지 않습니다.',
+      'AI는 AI_BUSINESS_TOKEN의 Bearer 인증이 필요합니다. 내 주소 수정·삭제는 call_session_seq로 진행 중인 본인 통화도 확인합니다. 관리자는 통화 헤더 없이 기존 세션과 허용 Origin으로 수정합니다. status·월결제 자격은 관리자 전용입니다. WITHDRAWN을 지정하면 고객과 소속·주소록·등록 카드를 소프트 삭제하고 승인 전 결제 링크를 닫습니다.',
   })
   @ApiHeader({
     name: 'call_session_seq',

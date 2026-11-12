@@ -399,7 +399,7 @@ test('list supports literal name search, partial phone, state and stable offset 
   }));
   const ids = [];
   for (const input of inputs) ids.push(await register(input));
-  await patch(ids[1], { status: 'WITHDRAWN' }, adminHeaders());
+  await pool.query("UPDATE customers SET status='WITHDRAWN' WHERE customer_seq=$1", [ids[1]]);
   const list = async (query) => {
     const response = await request('?' + new URLSearchParams(query), { headers: adminHeaders() });
     assert.equal(response.status, 200);
@@ -733,7 +733,7 @@ test('customer transaction failure rolls back registration and leaves the phone 
   assert.equal((await create(input)).status, 201);
 });
 
-test('withdrawal preserves related data, prevents AI access, duplicate registration and reactivation', async () => {
+test('withdrawal soft deletes the customer and related records while preserving orders and the phone reservation', async () => {
   const input = { name: '탈퇴 고객', phoneNumber: phone() };
   const key = randomUUID();
   const created = await create(input, key);
@@ -765,27 +765,28 @@ test('withdrawal preserves related data, prevents AI access, duplicate registrat
   await error(replay, 409, 'DUPLICATE_RESOURCE');
   await error(
     await patch(id, { name: '실패', status: 'ACTIVE' }, adminHeaders()),
-    409,
-    'INVALID_STATE',
+    404,
+    'NOT_FOUND',
   );
-  const detail = await request('/' + id, { headers: adminHeaders() });
-  assert.equal(detail.status, 200);
-  assert.deepEqual((await detail.json()).data, {
-    customerSeq: id,
-    ...input,
-    status: 'WITHDRAWN',
-    monthlyBillingEnabled: false,
-    address: customerAddress(),
-  });
-  assert.equal(
-    (await pool.query('SELECT status FROM memberships WHERE customer_seq=$1', [id])).rows[0].status,
-    'ACTIVE',
-  );
-  for (const table of ['orders', 'personal_pins'])
+  await error(await request('/' + id, { headers: adminHeaders() }), 404, 'NOT_FOUND');
+  for (const table of ['customers', 'memberships', 'personal_pins'])
     assert.equal(
-      (await pool.query(`SELECT count(*) FROM ${table} WHERE customer_seq=$1`, [id])).rows[0].count,
+      (
+        await pool.query(
+          `SELECT count(*) FROM ${table} WHERE customer_seq=$1 AND deleted_at IS NOT NULL`,
+          [id],
+        )
+      ).rows[0].count,
       '1',
     );
+  assert.equal(
+    (
+      await pool.query('SELECT count(*) FROM orders WHERE customer_seq=$1 AND deleted_at IS NULL', [
+        id,
+      ])
+    ).rows[0].count,
+    '1',
+  );
 });
 
 test('customer create/name/status writes record AI or the administrator name without retaining request payloads', async () => {
@@ -805,8 +806,9 @@ test('customer create/name/status writes record AI or the administrator name wit
     [adminCreated, 'CUSTOMER_CREATED', 'ADMIN'],
   ]) {
     const rows = (
-      await pool.query('SELECT * FROM audit_logs WHERE request_id=$1', [
+      await pool.query('SELECT * FROM audit_logs WHERE request_id=$1 AND action=$2', [
         response.headers.get('x-request-id'),
+        action,
       ])
     ).rows;
     assert.equal(rows.length, 1);
@@ -1290,7 +1292,7 @@ test('name search preserves short terms, literal punctuation and Unicode forms w
     const id = await register({ name, phoneNumber: phonePrefix + String(index).padStart(3, '0') });
     rows.push({ id, name, status: index === 1 ? 'WITHDRAWN' : 'ACTIVE' });
   }
-  await patch(rows[1].id, { status: 'WITHDRAWN' }, adminHeaders());
+  await pool.query("UPDATE customers SET status='WITHDRAWN' WHERE customer_seq=$1", [rows[1].id]);
   const deleted = await register({ name: names[0], phoneNumber: phonePrefix + '999' });
   await pool.query('UPDATE customers SET deleted_at=clock_timestamp() WHERE customer_seq=$1', [
     deleted,

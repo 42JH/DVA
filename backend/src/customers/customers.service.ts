@@ -43,19 +43,7 @@ export class CustomersService {
             'NOT_FOUND',
             '삭제할 고객 중 찾을 수 없거나 이미 삭제된 고객이 있습니다.',
           );
-        await this.cards.softDelete(client, 'CUSTOMER', sorted, actorId, requestId);
-        await this.repository.removeMany(client, sorted);
-        for (const id of sorted)
-          await this.audit.recordSuccess(
-            {
-              actorId,
-              targetId: id,
-              targetType: 'CUSTOMER',
-              action: 'CUSTOMER_DELETED',
-              requestId,
-            },
-            client,
-          );
+        await this.softDelete(client, sorted, actorId, requestId);
       });
     } catch (error) {
       if (
@@ -71,6 +59,33 @@ export class CustomersService {
         );
       throw error;
     }
+  }
+
+  private async softDelete(
+    client: PoolClient,
+    ids: number[],
+    actorId: number,
+    requestId: string,
+  ): Promise<void> {
+    const closedOrders = await this.repository.invalidateUnstartedPayments(client, ids);
+    await this.cards.softDelete(client, 'CUSTOMER', ids, actorId, requestId);
+    await this.repository.removeMany(client, ids);
+    for (const orderId of closedOrders)
+      await this.audit.recordSuccess(
+        {
+          actorId,
+          targetId: orderId,
+          targetType: 'ORDER',
+          action: 'ORDER_PAYMENT_REQUEST_INVALIDATED',
+          requestId,
+        },
+        client,
+      );
+    for (const id of ids)
+      await this.audit.recordSuccess(
+        { actorId, targetId: id, targetType: 'CUSTOMER', action: 'CUSTOMER_DELETED', requestId },
+        client,
+      );
   }
 
   // 소속 충돌 검증과 고객 잠금을 마친 호출자의 같은 트랜잭션에 참여한다.
@@ -164,6 +179,8 @@ export class CustomersService {
     if (actorId === null && input.monthlyBillingEnabled === true)
       throw new ApiException(403, 'FORBIDDEN', '월결제 자격은 관리자만 설정할 수 있습니다.');
     return this.database.transaction(async (client) => {
+      if (await this.repository.findByPhoneForOrder(client, input.phoneNumber))
+        throw new ApiException(409, 'DUPLICATE_RESOURCE', '이미 등록된 전화번호입니다.');
       const customerSeq = await this.repository.insert(client, input);
       await this.audit.recordSuccess(
         {
@@ -237,6 +254,8 @@ export class CustomersService {
       if (customer.status === 'WITHDRAWN' && changes.status === 'ACTIVE')
         throw new ApiException(409, 'INVALID_STATE', '탈퇴 고객의 복구는 지원하지 않습니다.');
       await this.repository.update(id, changes, client);
+      if (changes.status === 'WITHDRAWN' && actorId !== null)
+        await this.softDelete(client, [id], actorId, requestId);
       await this.audit.recordSuccess(
         {
           actorId,

@@ -467,6 +467,55 @@ test('verified Toss approval updates the real order and posts Dver once with pic
   assert.equal(parcels.length - start, 1);
   assert.equal((await confirm(r, 'different')).status, 409);
 });
+test('withdrawn and deleted customer links close and never request a new provider approval', async () => {
+  for (const [index, change] of [
+    'withdraw',
+    'delete',
+    'legacy-withdraw',
+    'legacy-delete',
+  ].entries()) {
+    const customer = (
+      await pool.query(
+        "INSERT INTO customers(name,phone_number,status) VALUES('탈퇴 검증',$1,'ACTIVE') RETURNING customer_seq",
+        ['0100021080' + index],
+      )
+    ).rows[0].customer_seq;
+    const order = await create({ ...orderBody(), customerSeq: customer });
+    const id = order.paymentRequest.paymentRequestId;
+    if (change === 'withdraw') {
+      assert.equal(
+        (await request('/customers/' + customer, { status: 'WITHDRAWN' }, true, 'PATCH')).status,
+        204,
+      );
+    } else if (change === 'delete') {
+      assert.equal(
+        (await request('/customers', { customerSeqs: [customer] }, true, 'DELETE')).status,
+        204,
+      );
+    } else {
+      await pool.query(
+        change === 'legacy-withdraw'
+          ? "UPDATE customers SET status='WITHDRAWN' WHERE customer_seq=$1"
+          : 'UPDATE customers SET deleted_at=clock_timestamp() WHERE customer_seq=$1',
+        [customer],
+      );
+    }
+    const current = await request(`/payments/requests/${id}`, undefined, false, 'GET');
+    assert.equal(current.status, 200);
+    assert.equal(current.body.data.status, 'CANCELLED');
+    assert.equal((await confirm(order)).status, change.startsWith('legacy-') ? 403 : 409);
+    assert.ok(!calls.some((call) => call.body?.orderId === id));
+    const stored = (
+      await pool.query(
+        'SELECT invalidated_at,approval_started_at FROM order_payment_requests WHERE payment_request_id=$1',
+        [id],
+      )
+    ).rows[0];
+    assert.equal(Boolean(stored.invalidated_at), !change.startsWith('legacy-'));
+    assert.equal(stored.approval_started_at, null);
+  }
+});
+
 test('amount/order mismatch, expired/invalidated links and foreign origins cannot approve', async () => {
   const r = await create(),
     id = r.paymentRequest.paymentRequestId;
