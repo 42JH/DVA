@@ -423,17 +423,25 @@ export class OrdersService {
     requestId: string,
     orderParcelSeqs: number[] | undefined,
     customerId: number | null,
+    unpaidOnly = false,
   ): Promise<void> {
     await this.database.transaction(async (client) => {
       const order = await this.repository.lockOrder(client, id);
-      if (await this.repository.hasMigratedDrafts(client, id))
+      const ownsOrder = customerId === null || order?.customerSeq === customerId;
+      if (ownsOrder && (await this.repository.hasMigratedDrafts(client, id)))
         throw new ApiException(
           409,
           'INVALID_STATE',
           '미완료 배송 초안으로 이관된 주문입니다. 배송 초안 API에서 보완해 주세요.',
         );
-      if (!order || (customerId !== null && order.customerSeq !== customerId))
+      if (!order || !ownsOrder)
         throw new ApiException(404, 'NOT_FOUND', '주문을 찾을 수 없습니다.');
+      if (unpaidOnly && order.status !== 'notPaid')
+        throw new ApiException(
+          409,
+          'INVALID_STATE',
+          '신규 통화에서 결제 대기 주문만 취소할 수 있습니다.',
+        );
       const parcels = await this.repository.lockParcels(client, id);
       const selectedIds = orderParcelSeqs === undefined ? null : new Set(orderParcelSeqs);
       const selected = selectedIds

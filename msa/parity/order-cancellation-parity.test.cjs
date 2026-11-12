@@ -78,10 +78,10 @@ test('both cancellation APIs preserve source HTTP, full order/payment/shipment r
     }
     return{id,parcels,requestId};
   }
-  async function call({phone='01000000001',ended=false,order=null,expired=false,deleted=false,customer=2}={}){
+  async function call({phone='01000000001',ended=false,order=null,expired=false,deleted=false,customer=2,draftEnabled=false}={}){
     const id=++next;
     for(const side of sides){await side.calls.query(`INSERT INTO call_sessions(call_session_seq,provider_call_id,caller_phone_number,customer_seq,order_seq,incoming_at,registered_at,started_at,ended_at,deleted_at,order_intake_enabled)
-      OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,$4,$5,$6,'2030-01-01Z',$7,$8,$9,false)`,[id,'cancel-scope-'+id,phone,customer,order,expired?'2000-01-01Z':'2030-01-01Z',ended?'2030-01-01Z':null,ended?'2030-01-02Z':null,deleted?'2030-01-03Z':null]);
+      OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,$4,$5,$6,'2030-01-01Z',$7,$8,$9,$10)`,[id,'cancel-scope-'+id,phone,customer,order,expired?'2000-01-01Z':'2030-01-01Z',ended?'2030-01-01Z':null,ended?'2030-01-02Z':null,deleted?'2030-01-03Z':null,draftEnabled]);
       if(expired){const lock=await side.calls.connect();retained.push(lock);await lock.query('BEGIN');await lock.query('SELECT 1 FROM call_sessions WHERE call_session_seq=$1 FOR KEY SHARE',[id]);}}
     return{call_session_seq:String(id)};
   }
@@ -187,6 +187,23 @@ test('both cancellation APIs preserve source HTTP, full order/payment/shipment r
     for(const flags of [{approval:true,invalid:true},{approval:true,completed:true}])await compare((await seed(flags)).id,204);
     for(const notification of ['PENDING','SENDING','SENT','FAILED','UNKNOWN'])for(const completion of ['WAITING','PENDING','SENDING','SENT','FAILED','UNKNOWN']){
       const f=await seed({status:'notPaid',notification,completion});await compare(f.id,204,{parcels:[f.parcels[0]]});
+    }
+  });
+  await t.test('new AI calls cancel only the caller’s unpaid orders', async () => {
+    const headers = await call({ draftEnabled: true });
+    const unpaid = await seed({ status: 'notPaid' });
+    const partial = await compare(unpaid.id, 204, { headers, parcels: [unpaid.parcels[0]] });
+    assert.equal(partial.after[0].orders.find(row => row.order_seq === unpaid.id).total_amount, 3500);
+    const full = await compare(unpaid.id, 204, { headers });
+    assert.equal(full.after[0].orders.find(row => row.order_seq === unpaid.id).status, 'CANCELLED');
+
+    const foreign = await seed({ status: 'notPaid', customer: 2 });
+    const collecting = await seed();
+    const paid = await seed({ status: 'PAID' });
+    const approving = await seed({ status: 'notPaid', approval: true });
+    for (const [order, status] of [[foreign, 404], [collecting, 409], [paid, 409], [approving, 409]]) {
+      await compare(order.id, status, { headers });
+      await compare(order.id, status, { headers, parcels: [order.parcels[0]] });
     }
   });
   await t.test('every shipment status blocks active targets, while unrelated/cancelled siblings remain untouched',async()=>{
