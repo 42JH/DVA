@@ -310,7 +310,7 @@ test('event order references match the source permission decision and retain one
   const {createServer}=require('node:http'),{networkInterfaces}=require('node:os');
   const {privateAddress,validateScopeResult}=require('@dva/events/call-event-reference.cjs');
   const reference=new Pool({host:'monolith-db',user:'monolith_app'}),orders=new Pool({host:'order-db',user:'order_app'});
-  const customers=[9100001,9100002],ids=[9100101,9100102,9100103,9100104],calls=[],requestIds=[];
+  const customers=[9100001,9100002],ids=[9100101,9100102,9100103,9100104],calls=[],requestIds=[],retainedOrders=[];
   const scripts=new Map(),address=Object.values(networkInterfaces()).flat().find(v=>v?.family==='IPv4'&&privateAddress(v.address))?.address;
   assert.ok(address);
   const headers={Authorization:'Bearer '+process.env.PGPASSWORD,'Content-Type':'application/json'};
@@ -335,6 +335,7 @@ test('event order references match the source permission decision and retain one
   await new Promise(resolve=>server.listen(3004,'0.0.0.0',resolve));
   t.after(async()=>{
     await new Promise(resolve=>server.close(resolve));
+    for(const fixture of retainedOrders){await fixture.query('ROLLBACK');fixture.release();}
     await reference.query('DELETE FROM call_insight_events WHERE call_session_seq=ANY($1::int[])',[calls]);
     await reference.query('DELETE FROM call_sessions WHERE call_session_seq=ANY($1::int[])',[calls]);
     await reference.query('DELETE FROM audit_logs WHERE request_id=ANY($1::uuid[])',[requestIds]);
@@ -346,6 +347,9 @@ test('event order references match the source permission decision and retain one
   for(const db of [reference,orders]){
     for(const [index,id]of ids.entries())await db.query("INSERT INTO orders(order_seq,customer_seq,status,creation_source) OVERRIDING SYSTEM VALUE VALUES($1,$2,'COLLECTING','AI')",[id,customers[index===1?1:0]]);
     await db.query('UPDATE orders SET deleted_at=clock_timestamp() WHERE order_seq=$1',[ids[2]]);
+    // Pause expiry cleanup without masking the owner's row-lock assertions.
+    const fixture=await db.connect();retainedOrders.push(fixture);await fixture.query('BEGIN');
+    await fixture.query('SELECT pg_advisory_xact_lock(20261103,157)');
     await db.query("UPDATE orders SET created_at=clock_timestamp()-interval '6 years' WHERE order_seq=$1",[ids[3]]);
   }
   const lookups=[
@@ -391,11 +395,12 @@ test('public call events preserve the source batch, references, FAQ examples and
   const customer=new Pool({host:'customer-db',user:'customer_app'}),orders=new Pool({host:'order-db',user:'order_app'});
   const sides=[{base:'http://monolith-app:3000',db:mono,audit:mono},{base:'http://consultation-app:3004',db:cons,audit:ops}];
   const faqIds=[9200001,9200002,9200003,9200004],callIds=[9200101,9200102,9200103],customerIds=[9200201,9200202],orderIds=[9200301,9200302,9200303,9200304],questionId=9200401;
-  const providers=callIds.map(()=> 'public-events-'+randomUUID()),requestIds=new Set(),concurrentIds=new Set(),gates=[];
+  const providers=callIds.map(()=> 'public-events-'+randomUUID()),requestIds=new Set(),concurrentIds=new Set(),gates=[],retainedOrders=[];
   const exampleIds=new Map(),reverseExampleIds=new Map(),sessionToken='c'.repeat(64);
   const headers={Authorization:'Bearer '+process.env.AI_INSIGHTS_TOKEN,'Content-Type':'application/json'};
   t.after(async()=>{
     for(const gate of gates){await gate.query('SELECT pg_advisory_unlock(20261110,$1)',[faqIds[0]]);gate.release();}
+    for(const fixture of retainedOrders){await fixture.query('ROLLBACK');fixture.release();}
     for(const db of [mono,ops]){
       await db.query('DROP TRIGGER IF EXISTS gate_event_audit ON audit_logs; DROP FUNCTION IF EXISTS gate_event_audit(); DROP TRIGGER IF EXISTS reject_event_audit ON audit_logs; DROP FUNCTION IF EXISTS reject_event_audit()');
       await db.query('DELETE FROM faq_entries WHERE faq_entry_seq=ANY($1::int[])',[faqIds]);
@@ -422,6 +427,8 @@ test('public call events preserve the source batch, references, FAQ examples and
   for(const db of [mono,orders]){
     for(const [n,id]of orderIds.entries())await db.query("INSERT INTO orders(order_seq,customer_seq,status,creation_source) OVERRIDING SYSTEM VALUE VALUES($1,$2,'COLLECTING','AI')",[id,customerIds[n===1?1:0]]);
     await db.query('UPDATE orders SET deleted_at=clock_timestamp() WHERE order_seq=$1',[orderIds[2]]);
+    const fixture=await db.connect();retainedOrders.push(fixture);await fixture.query('BEGIN');
+    await fixture.query('SELECT pg_advisory_xact_lock(20261103,157)');
     await db.query("UPDATE orders SET created_at=clock_timestamp()-interval '6 years' WHERE order_seq=$1",[orderIds[3]]);
   }
   for(const db of [mono,cons]){

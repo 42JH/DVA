@@ -1008,3 +1008,19 @@ MSA #55는 operations 실패 뒤의 실제 신규 이미지 전달·DB 전달·�
 - 종합 진단의 원시 결과는 492개 일치·10개 차이다. 차이 전체가 새로 생성한 시각·SYSTEM 배송 이력/추적 UUID·프로세스별 HTTP/DB 지표임을 각 필드·타입·실행 시간 범위로 확인했다. 그 밖의 업무 값·상태·금액·ID·감사 필드는 그대로 대조했다. 지표 형식/유형과 업무 DB/주문 gauge도 일치한다. 원시 passed=false 및 원형 검증기의 미검증 테이블/분기 플래그는 보존하며 이를 전체 분기 검증 성공으로 바꾸지 않았다. 근거는 current-global-third/differential.json·classification.json이다.
 - 다섯 앱과 DB의 패키징 여섯 개가 모두 통과했다. manifest 태그·image-id.txt·CI 이미지 ID와 전체 SHA256SUMS를 확인했다. 최종 근거 대조도 passed=true이며 테스트 파일 경로 집합은 처음과 같은 69개다. 작성 변경은 msa의 기존 다섯 파일이며 backend·프론트·AI·infra/Jenkins 설정은 변경하지 않았다.
 - CI 근거는 verification-logs/current-parity/build62-final-cli의 summary.json·final-evidence-audit.json·ci-images.json·서비스별 verification.json·release-manifests와 실행 로그다. 이 후속 커밋은 보고서만 갱신한다. 같은 Jira S15P31D109-160에 후속 MR을 연결한다. 실제 새 Jenkins 실행·운영 배포·실제 S3/외부 공급자 결과와 모든 유효 분기의 형식적 동등성은 미검증이다.
+
+### 104. 실제 Jenkins #63에서 상담 조회 검증과 주문 보관 워커가 겹친 원인 수정
+
+- 실제 #63의 소스는 `f9773ef7`(!607 병합)이다. 배포 스크립트·공통 이벤트·이미지 준비와 운영 198·고객 78단계는 통과했다. 상담 검증의 읽기 전후 DB 비교에서 6년 된 주문 `9100104`가 누락되어 실패했고, 후속 주문 검증·패키징·배포는 실행되지 않았다.
+- 원본과 MSA를 운영 모드로 실행하고 조회 전 스냅샷 직후 12.5초를 기다려 실제 10초 주기의 보관 워커를 겹치게 했다. 수정 전에는 #63과 같은 주문이 누락되었고 상담 95단계에서 종료됐다. 수정 후 같은 조건에서 해당 Node 검증 4/4와 상담 전체 172단계가 통과했다.
+- 상담의 두 비교에서 6년 된 주문을 만들기 전에 두 임시 DB의 보관 작업과 같은 트랜잭션 자문 잠금을 잡고 검증 뒤 해제한다. 주문 행에는 잠금을 추가하지 않아 소유 서비스의 행 잠금 및 무변경 단언을 계속 검증한다. 운영 API, 보관 주기와 삭제 로직, DB 스키마, 테스트 파일 수(69개)는 그대로다.
+- 근거는 `verification-logs/current-parity/jenkins-63-analysis-failure.log`, `jenkins-63-scopes.json`, `build63-{old,fixed}-consultation/verification.json`과 해당 `call-analysis-run.log`다. 이 재현에서 넣은 대기는 추적 파일에 포함되지 않는다.
+
+### 105. #63 수정 커밋의 CI 전체 경로와 배포 복원 검증
+
+- 원격 `develop-backend` `f9773ef7`에서 만든 코드 커밋 `6f2e810d`를 깨끗한 Linux 작업 복사본에 체크아웃했다. Jenkins가 호출하는 환경 확인·원본 격리·범위 선택·검증·패키징·정리 명령을 순서대로 실행했다. 모놀리식 검증 기준은 기존 `fa0e4a2f`이며 별도 API 최적화는 이식하지 않았다.
+- 실제 #63에서 남은 성공 기록과 #61 배포 기준을 넣은 로컬 상태로 다음 빌드 범위를 계산했다. 상담·주문만 다시 비교하고 DB 전체 검사와 DB 배포는 선택하지 않는다. #63에서 배포하지 못한 앱 다섯 개는 선택된다. 이 조건의 필요 CI 이미지는 9개이며, 아래의 전체 비교에서는 네 서비스 검사에 필요한 11개를 준비했다.
+- 배포 스크립트 130건, API 계약 11건, 공통 이벤트 단위 37건 및 실제 PostgreSQL/HTTP 통합 16건이 통과했다. 로컬 Docker를 1 CPU·3GB로 제한하고 운영 198·고객 78·상담 172·주문 243, 총 691단계를 모두 새로 실행했다. 타이머 재현에만 넣었던 대기는 이 실행에 없다. 주문의 실제 보관 삭제·이벤트·재시작 복구도 통과했다.
+- DB 입력이 동일해 전체 DB 검사를 반복하지 않았다. Jenkins #59의 성공 기록을 기존 가드로 확인했고, 동일 입력으로 보존한 로컬 DB 검증은 236단계다. 앱 5개와 DB의 패키지 6개를 검증한 이미지 ID로 만들고 태그·배포 명세·전체 SHA256SUMS를 대조했다. DB 패키지는 향후 DB 배포 경로 검증용이다.
+- 실제 Jenkins의 앱 준비·적용 셸을 기존 SSH fixture로 실행했고 실패 전파도 확인했다. 격리 PostgreSQL에서 DB 백업 2개를 복원해 업무 테이블 6개를 비교하고 늦은 이벤트 차단을 확인했다. 동일한 상담 이미지로 로컬 k3s에서 정상 교체 2회와 의도적 실패 후 복원 1회를 실행했으며 그동안 health 요청 456/456건이 성공했다.
+- 결과는 `verification-logs/current-parity/build63-final-cli/`의 `summary.json`, `final-evidence-audit.json`, 서비스별 `verification.json`, `release-manifests` 및 `build63-rollout.log`에 남겼다. 검증 뒤 커밋은 이 보고서만 갱신한다. 테스트 파일 경로 69개, 운영 코드와 Jenkins 설정은 그대로다. 수정본의 실제 운영 Jenkins 실행과 운영 배포는 미검증이다. 작업은 [Jira S15P31D109-160](https://ssafy.atlassian.net/browse/S15P31D109-160)에 연결한다.
