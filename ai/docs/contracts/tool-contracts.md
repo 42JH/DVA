@@ -8,6 +8,8 @@
 
 **접수 확인 답변**: 서버가 접수 동의를 확인한 발화에서 상태만 보는 `get_state`가 호출되면 `confirmation: await_server`를 반환한다. 음성·Backend는 상태 안내를 기다리고, 같은 발화에 새 값이 있으면 `record_fields`로 기록한다. 서버는 그 기록과 기존 접수 확인이 일치할 때 확정한다.
 
+**취소 확인**: 방금 조회한 택배를 가리키면 서버가 선택한 대상을 바로 확인한다. 새 대상을 찾을 때는 `lookup_orders.scope`의 이번 통화·직전 통화 범위를 취소에도 적용한다. 기존 주문에 속한 모든 택배의 취소를 명시했으면 `whole_order=true`로 해당 주문을 찾는다. 조회나 후보 선택으로 대상이 하나로 정해지면 `cancel_target.question`을 그대로 묻는다. 서버는 그 질문을 들은 뒤 받은 동의와 대상이 일치할 때 취소한다. 거절되거나 실패한 조회 결과로 기존 선택을 확인하지 않는다.
+
 **받는 곳 부분 변경**: 개인 주소록·이전 도착지 후보 확인에서 서버가 `destination_change_question`을 보내면 후보 이름을 포함한 질문을 그대로 한다. `destination_partial_change`가 `address`이면 기존 이름·연락처를 유지하고 새 주소를 받는다. `recipient`이면 기존 주소·상세주소를 유지하고 새 이름·연락처를 받는다. 구체적인 새 값만 `record_fields`에 넣는다. 범위 확인 중 받은 새 값은 현재 후보에 보관해 답변 후 검증한다. 주소로 검증되지 않고 도로명·지번과 번호도 없는 입력은 `RECEIVER_ADDRESS_VALUE_REQUIRED`를 반환한다. 부분 변경 중 `find_destination`은 `DEST_CHANGE_USE_RECORD`와 현재 누락 항목을 반환한다.
 
 **개인 주소록 후보**: 받는 분 이름이 기록된 택배는 두 도구 모두 이름이 일치하는 후보만 찾는다. 이름이 아직 없으면 주소로 후보를 제안할 수 있다. `find_destination`에 기록된 이름과 다른 이름이 들어오면 `DEST_RECIPIENT_USE_RECORD`를 반환한다. 고객이 이름을 정정하면 `record_fields`에 실제로 들은 이름을 넣는다.
@@ -26,7 +28,7 @@
 | `search_manual` | question | ok(answerable, context; `KB_NO_EVIDENCE`·`KB_LOW_SCORE`) / unavailable(`KB_UNAVAILABLE`·`KB_TIMEOUT`) |
 | `get_state` | `include_values`(bool, 기본 false) | ok + 상태 요약(아무것도 바꾸지 않음). `include_values=true`면 `facts.current`(진행 중 택배의 검증된 값 `{value, from?}`, 발신번호 제외)·`facts.candidates`(제시 중인 받는 곳 후보의 이름표·성함·주소·상세주소·연락처). 기업 사원 후보·값의 연락처·상세주소는 넣지 않음 |
 
-**서버 전용**(모델에 없음): `app/tools/cancel.py cancel_parcel` — `ops["cancel:{o}:{p}"]`, 앞 시도가 불확실하면 상세 재조회 후 재요청, 결과 ok(done·`CANCEL_ALREADY`) / rejected(`CANCEL_LOCKED`·`ORDER_OUT_OF_RANGE`) / unknown(`CANCEL_OUTCOME_UNKNOWN`, 완료라고 말하지 않음). 선택형 판단(확인·후보 선택·용건)은 도구가 아니라 발화 끝 Decision(`delegation.md` §2).
+**서버 전용**(모델에 없음): `app/tools/cancel.py`의 `cancel_parcel`은 선택 택배 한 건, `cancel_order`는 같은 기존 주문 전체를 취소한다. 같은 주문의 취소 요청은 겹쳐 실행하지 않으며, 앞 시도가 불확실하면 해당 대상 상태를 다시 조회한다. 결과는 ok(done·`CANCEL_ALREADY`), rejected(`CANCEL_LOCKED`·`ORDER_OUT_OF_RANGE`), unknown(`CANCEL_OUTCOME_UNKNOWN`)이다. 현재 통화의 초안은 배송 초안 경로로 취소한다. 확인·후보 선택·용건은 발화 끝 Decision으로 판단한다.
 
 **주소**(`app/integrations/address.py` + `app/address/`): (2026-11-09) 모델은 들은 문장을 한글 그대로 기본주소 필드에 넣고, 서버가 상세주소(동·호·층·건물 이름)를 떼어 `_detail`에 기록하며 수사를 숫자로 바꾼다(`parse.split_detail`·`detail_text`, `matcher.resolve_detail` — 수사가 붙어 경계가 여럿이면 실존하는 기본주소를 주소DB가 고르고, 둘 이상이면 ambiguous). 기본주소를 못 찾아도 뗀 상세는 기록하고(결정 1), 번호 뒤 이름은 상세로(결정 3). 뗀 상세는 고객이 말한 값이라 출처 CUSTOMER로 기록해 되읽기에 넣는다. 기본주소가 바뀌었는데 상세를 같이(문장 안이든 따로든) 말하지 않으면 이전 상세를 비우고 다시 묻는다(같은 도로의 번호 정정도 — 사용자 결정 2026-11-09). 도구 필드는 그대로다. 주소DB 보정은 전용 스레드풀, 예산 3초(도구 예산 3.5초 안). 장애·초과는 들은 값 그대로 + geo 없음. (2026-11-06) 접수용 지번·법정동·우편번호는 주소DB에서 만들고(`AddressDB.geo`, 카카오와 같은 표기) 비어 있을 때만 카카오 geocode. 카카오 키워드·similar 검색은 로컬이 못 찾았거나 약할 때만 두 번째 근거로(결과는 주소DB로 검증). 카카오는 공유 클라이언트 + 세마포어. (2026-11-12) 번호 없이 건물명·상호명으로 기본주소를 확정하면 기본주소에는 도로명주소를, 상세주소 앞에는 검색이 찾은 이름(주소DB 건물명·카카오 장소명)을 붙여 기록한다("국회의사당 3층", 상세주소가 없으면 이름만). 기본주소가 그 뒤 바뀌었거나 상세주소가 이미 그 이름으로 시작하면 붙이지 않는다. 도구 필드와 BE 계약은 그대로다.
 작성일: 2026-11-03 · 근거: `tools/*.py`, `backend_client/order.py`, `address_resolver/`, `app/rag/text_agent.py`(당시 `tools/rag/`, 지금은 원본 경로)

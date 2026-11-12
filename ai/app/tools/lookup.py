@@ -12,7 +12,8 @@ from pydantic import Field
 
 from app.address.parse import detail_text
 from app.domain.address_book import receiver_questions_deferred
-from app.domain.candidates import apply_pick, buffer_destination_fields, offer, reject_candidates
+from app.domain.candidates import apply_pick, buffer_destination_fields, clear_order_lookup, offer, reject_candidates
+from app.domain.confirm import cancel_question, issue_cancel_confirmation
 from app.domain.state import DOCUMENT_ITEM_PRICE, CandidateSet, Items, ParcelDraft, Place, Source
 from app.domain.store import is_pending_reconfirm
 from app.integrations.backend.gateway import BackendFailure
@@ -305,41 +306,46 @@ class LookupArgs(Args):
                                                      "찾으면 true. 받는 분 성함은 다른 사람이어도 false")
     scope: Literal["current_call", "previous_call", "selected"] | None = Field(
         None, description="이번 통화에서 방금 접수한 건은 current_call, 직전 통화에서 접수한 건은 previous_call, "
-                          "이미 선택한 택배의 후속 질문은 selected. 일반 조회나 취소는 null")
+                          "이미 선택한 택배의 조회 후속 질문은 selected. 그 외는 null. 취소 대상 조회에도 같은 통화 범위를 사용")
+    whole_order: bool = Field(False, description="고객이 같은 기존 주문에 속한 모든 택배의 취소를 명시한 경우에만 true")
 
 
 @model_tool("lookup_orders", "지금 전화한 번호의 기존 주문과 이번 통화에서 저장한 택배를 받는 분 성함으로 찾는다. "
                              "다른 번호·다른 고객의 접수는 조회할 수 없다(other_customer=true로 부르면 안내할 사실을 준다).",
             LookupArgs)
 async def lookup_orders(ctx: ToolContext, args: LookupArgs) -> ToolOutcome:
-    if args.other_customer:  # BE를 부르지 않는다: 본인 주문을 다른 번호의 결과처럼 안내하지 않게
-        return ToolOutcome("rejected", "ORDER_OTHER_CUSTOMER", {"found": 0, "scope": OTHER_CUSTOMER})
-    seq = ctx.state.customer.call_session_seq
-    if not seq:
-        return ToolOutcome("unavailable", "CALL_NOT_REGISTERED")  # 2단계 고객 확인 전·실패: 고객 범위 없음
-    api = ctx.backend.api
     scope = ("지금 전화하신 번호의 주문과 이번 통화에서 저장한 택배만 조회됨. "
              "다른 번호·다른 고객의 정보는 안내할 수 없음") if ctx.draft_intake else SCOPE
+    seq = ctx.state.customer.call_session_seq
     async with ctx.lock:
-        intent = ctx.state.intent
-        pending_cancel = ctx.state.pending
-        current_cancel = (pending_cancel and pending_cancel.kind == "cancel"
-                          and "client_parcel_id" in pending_cancel.snapshot)
-        lookup_scope = args.scope if intent != "cancel" and not current_cancel else None
-        if lookup_scope == "selected":
-            selected = ctx.state.selected_order
+        state = ctx.state
+        intent = state.intent
+        cancelling = intent == "cancel"
+        pending = state.pending
+        current_cancel = bool(pending and pending.kind == "cancel" and "client_parcel_id" in pending.snapshot)
+        if args.other_customer:
+            clear_order_lookup(state)
+            return ToolOutcome("rejected", "ORDER_OTHER_CUSTOMER", {"found": 0, "scope": OTHER_CUSTOMER})
+        if current_cancel:
+            return ToolOutcome("ok", facts={"cancel_confirmation_pending": True})
+        if cancelling and args.scope == "selected" and pending and pending.kind == "cancel":
+            return ToolOutcome("ok", facts={"cancel_confirmation_pending": True})
+        if args.scope == "selected" and not cancelling and seq:
+            selected = state.selected_order
             if selected is None:
                 return ToolOutcome("needs_input", "ORDER_SELECTION_REQUIRED", {"scope": scope})
             return ToolOutcome("ok", facts={"found": 1, "scope": scope, "lookup_order": lookup_order_facts(selected)})
-        ctx.state.order_lookup_id += 1
-        lookup_id = ctx.state.order_lookup_id
-        if lookup_scope:
-            ctx.state.selected_order = None
-            if ctx.state.candidates and ctx.state.candidates.kind == "order":
-                ctx.state.candidates = None
-            ctx.state.bump()
+        clear_order_lookup(state)
+        lookup_id = state.order_lookup_id
+    if not seq:
+        return ToolOutcome("unavailable", "CALL_NOT_REGISTERED")  # 2단계 고객 확인 전·실패: 고객 범위 없음
+    api = ctx.backend.api
+    lookup_scope = args.scope
+    if lookup_scope == "selected":
+        return ToolOutcome("needs_input", "ORDER_SELECTION_REQUIRED", {"scope": scope})
+    whole_order = cancelling and args.whole_order
     failed = []
-    if ctx.draft_intake and lookup_scope != "previous_call":
+    if ctx.draft_intake and lookup_scope != "previous_call" and not whole_order:
         budget = ctx.tool_budget_sec * 0.8
         pending = ctx.pending_drafts and ctx.pending_drafts()
         reads = {}
@@ -371,59 +377,64 @@ async def lookup_orders(ctx: ToolContext, args: LookupArgs) -> ToolOutcome:
         orders = orders + [_draft_result(row) for row in drafts.values()]
         if pending or (ctx.pending_drafts and ctx.pending_drafts()):
             failed.append("draft_save_pending")
-    elif lookup_scope == "current_call":
+    elif lookup_scope == "current_call" and not cancelling:
         async with ctx.lock:
             orders = [{"status": "READY", "current_call": True, "receiver_name": p.confirmed_snapshot["receiver_name"],
                        "details": parcel_lookup_details(parcel_body(to_order(p.confirmed_snapshot)))}
                       for p in ctx.state.parcels if p.confirmed_snapshot and not is_pending_reconfirm(p)]
     else:
         orders = await ctx.backend.read("find_parcels", api.find_parcels, seq, ctx.lookup_limit)
+        if lookup_scope == "current_call":
+            orders = [o for o in orders if o.get("call_session_seq") == seq]
         if lookup_scope == "previous_call":
             orders = [o for o in orders if o.get("creation_source") != "ADMIN" and o.get("call_session_seq") != seq]
             if orders:
                 latest = orders[0]["order_seq"]  # 백엔드 목록이 최근 주문부터 반환한다.
                 orders = [o for o in orders if o["order_seq"] == latest]
+    all_orders = orders
     if args.receiver_name:
         said = "".join(words(args.receiver_name))
         orders = [o for o in orders if said and said in "".join(words(o.get("receiver_name")))]
-    if lookup_scope == "current_call" and failed:
+    if whole_order:
+        order_seqs = dict.fromkeys(o["order_seq"] for o in orders)
+        grouped = {}
+        for order in all_orders:
+            key = order["order_seq"]
+            if key in order_seqs:
+                group = grouped.setdefault(key, [])
+                group.append(order)
+        orders = [_whole_order_target(grouped[key]) for key in order_seqs]
+    if failed and (lookup_scope == "current_call" or cancelling):
         orders = []
     facts = {"found": len(orders), "scope": scope}
     if failed:
         facts["unavailable_sources"] = failed
         facts["guidance"] = "조회에 실패한 범위의 내역은 확인하지 못했다고 안내한다. 없다고 단정하지 않는다."
-    labels = [f"{o.get('receiver_name') or '받는 분 미상'}님 택배"
+    labels = [(_whole_order_label(o) if o.get("whole_order") else f"{o.get('receiver_name') or '받는 분 미상'}님 택배")
               + (" (이번 통화)" if _lookup_source(o) == "draft" else " (기존 주문)" if ctx.draft_intake else "")
               for o in orders]
-    if ctx.state.intent == "cancel":
-        labels = [f"{i}번 {label}" for i, label in enumerate(labels, 1)]
-    elif len(orders) > 1:
+    if len(orders) > 1:
         labels = [" ".join(part for part in (label, o.get("receiver_area"), o.get("ordered_at")) if part)
                   for label, o in zip(labels, orders)]
         if len(set(labels)) < len(labels):
             labels = [f"{label} [후보 {i}]" for i, label in enumerate(labels, 1)]
     async with ctx.lock:
         active_intent = ctx.state.intent
-        entered_lookup = intent in (None, "order") and (
-            active_intent == "lookup" or active_intent == "cancel" and lookup_scope is None)
+        entered_lookup = intent in (None, "order") and active_intent == "lookup"
         switched_away = active_intent != intent and not entered_lookup
         if ctx.state.order_lookup_id != lookup_id or switched_away:
             return ToolOutcome("needs_input", "RESULT_SUPERSEDED")
-        pending_cancel = ctx.state.pending
-        current_cancel = (pending_cancel and pending_cancel.kind == "cancel"
-                          and "client_parcel_id" in pending_cancel.snapshot)
-        if not current_cancel:
-            ctx.state.selected_order = None
-            if pending_cancel and pending_cancel.kind == "cancel":
-                ctx.state.pending = None
-            if len(orders) == 1:  # 하나면 바로 대상으로(취소는 확인 관문을 거친다)
-                ctx.state.selected_order, ctx.state.candidates = orders[0], None
-                ctx.state.bump()
-            elif orders:
-                offer(ctx.state, "order", tuple(labels), tuple(orders))
-            elif ctx.state.candidates and ctx.state.candidates.kind == "order":
-                ctx.state.candidates = None
-                ctx.state.bump()
+        ctx.state.selected_order = None
+        if len(orders) == 1:
+            ctx.state.selected_order, ctx.state.candidates = orders[0], None
+            ctx.state.bump()
+            if cancelling:
+                pending = issue_cancel_confirmation(ctx.state, ctx.clock())
+                facts["cancel_target"] = cancel_target_facts(pending.snapshot)
+        elif orders:
+            offer(ctx.state, "order", tuple(labels), tuple(orders))
+        elif ctx.state.candidates and ctx.state.candidates.kind == "order":
+            reject_candidates(ctx.state)
     if not orders:
         return ToolOutcome("unavailable" if failed else "needs_input",
                            "ORDER_LOOKUP_PARTIAL" if failed else "ORDER_NOT_FOUND_BY_NAME", facts)
@@ -432,12 +443,33 @@ async def lookup_orders(ctx: ToolContext, args: LookupArgs) -> ToolOutcome:
                         "receiver_area": o.get("receiver_area"),
                         **({"source": _lookup_source(o)} if ctx.draft_intake or lookup_scope else {})}
                        for label, o in zip(labels, orders)]
-    if len(orders) == 1 and not current_cancel and ctx.state.intent != "cancel":
+    if len(orders) == 1 and not cancelling:
         facts["lookup_order"] = lookup_order_facts(orders[0])
         if lookup_scope:
             facts.pop("orders")  # 범위를 좁혀 하나를 찾았으면 후보 확인을 다시 할 필요가 없다.
     return ToolOutcome("needs_choice" if len(orders) > 1 else "ok", None,
                        facts)
+
+
+def _whole_order_target(parcels: list[dict]) -> dict:
+    first = next((p for p in parcels if p["status"] != "CANCELLED"), parcels[0])
+    return first | {"whole_order": True, "parcel_count": len(parcels)}
+
+
+def _whole_order_label(order: dict) -> str:
+    return f"{order['receiver_name'] or '받는 분 미상'}님 등이 포함된 주문 전체(택배 {order['parcel_count']}건)"
+
+
+def cancel_target_facts(order: dict) -> dict:
+    """고객이 들을 대상과 확인 질문. 내부 식별자는 음성 모델에 전달하지 않는다."""
+    count = order.get("parcel_count")
+    facts = {"receiver_name": order.get("receiver_name"), "status": order.get("status"),
+             "status_text": status_text(order.get("status")), "question": cancel_question(order)}
+    if order.get("whole_order"):
+        facts["scope"] = "whole_order"
+        if count:
+            facts["parcel_count"] = count
+    return facts
 
 
 def _draft_result(row: dict) -> dict:

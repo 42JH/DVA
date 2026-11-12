@@ -42,7 +42,8 @@ class FakeDecisions:
                                       "change" if "바꿔" in said else
                                       "proceed" if "접수해 주세요" in said else "not_answer"))
         if "task" in names:
-            answers.append(choice("task", "inquiry" if "궁금" in said else "order"))
+            task = "cancel" if said == "기존 택배를 취소하려고요" else "inquiry" if "궁금" in said else "order"
+            answers.append(choice("task", task))
         if "origin" in names:
             answers.append(choice("origin", "no" if "다른" in said else "yes" if said[:1] in "예네" else "not_answer"))
         if "more" in names:
@@ -464,7 +465,7 @@ def test_cancel_reask_carries_cancel_target_not_parcel_readback():
     from app.tests.test_results import session
     sent = []
 
-    async def notify(s, level, facts, again=False):
+    async def notify(s, level, facts, again=False, **kwargs):
         sent.append((level, facts, again))
 
     lf = LiveFlow.__new__(LiveFlow)
@@ -1348,9 +1349,107 @@ def test_parcel_consent_does_not_commit_before_same_turn_correction():
 
 
 def test_cancel_target_carries_status_meaning():
-    from app.calls.live import _order_facts
-    facts = _order_facts({"receiver_name": "홍길동", "status": "COLLECTING", "receiver_address": "부산"})
-    assert facts == {"receiver_name": "홍길동", "status": "COLLECTING", "status_text": "접수 미완료(정보 수집 중), 최종 접수 전"}
+    from app.tools.lookup import cancel_target_facts
+    facts = cancel_target_facts({"receiver_name": "홍길동", "status": "COLLECTING", "receiver_address": "부산"})
+    assert facts == {"receiver_name": "홍길동", "status": "COLLECTING", "status_text": "접수 미완료(정보 수집 중), 최종 접수 전",
+                     "question": "홍길동님께 보내는 택배를 취소할까요?"}
+
+
+def test_first_cancel_lookup_waits_for_intent_and_confirmation_survives_same_turn_lookup():
+    from app.tests.test_tools import registered
+
+    svc, client = flow()
+    db = svc.d.backend.api
+    registered(db)
+    order = db.add_order(CALLER, "notPaid", [("홍길동", "주소")])
+
+    async def scenario():
+        task = asyncio.create_task(svc.on_incoming(incoming()))
+        await until(lambda: client.conns)
+        conn = client.conns[0]
+        conn.push(started())
+        await until(lambda: svc.registry.calls["live_1"].phase == Phase.ACTIVE)
+        s = svc.registry.calls["live_1"]
+
+        def delegate(did, start):
+            conn.push({"type": "session.delegation.created", "delegation": {"id": did}, "offset_ms": start})
+            conn.push({"type": "response.event", "delegation_id": did, "event": {
+                "type": "response.output_item.done", "item": {"type": "function_call", "call_id": did,
+                    "name": "lookup_orders", "arguments": "{}"}}})
+            conn.push({"type": "response.event", "delegation_id": did, "event": {"type": "response.completed"}})
+
+        conn.push({"type": "session.input_transcript.delta", "delta": "기존 택배를 취소하려고요",
+                   "start_ms": 1000, "end_ms": 1550})
+        delegate("find-cancel", 1500)
+        await until(lambda: s.tool_calls and s.tool_calls[0]["done_at"])
+        assert s.state.intent == "cancel" and s.state.pending.kind == "cancel"
+        target = s.tool_calls[0]["output"]["facts"]["cancel_target"]
+        assert (await db.order_detail(s.state.customer.call_session_seq, order))["status"] == "notPaid"
+        await ai(conn, target["question"], 2400)
+
+        conn.push({"type": "session.input_transcript.delta", "delta": "네, 취소해 주세요",
+                   "start_ms": 3400, "end_ms": 3800})
+        delegate("redundant", 3750)
+        await until(lambda: len(s.tool_calls) == 2 and s.tool_calls[-1]["done_at"])
+        assert s.tool_calls[-1]["output"]["facts"]["cancel_confirmation_pending"]
+        await until(lambda: s.rt.delegations["redundant"]["outputs"] == 0)
+        conn.push({"type": "response.event", "delegation_id": "redundant", "event": {"type": "response.completed"}})
+        await until(lambda: s.state.cancel_done)
+        assert (await db.order_detail(s.state.customer.call_session_seq, order))["status"] == "CANCELLED"
+        conn.push({"type": "session.closed", "reason": "remote_hangup"})
+        await task
+
+    run(scenario())
+
+
+@pytest.mark.parametrize("whole_order", [False, True])
+def test_cancel_after_lookup_waits_for_scoped_confirmation_and_executes(whole_order):
+    from app.calls.live import Spoken
+    from app.tests.test_domain import filled
+    from app.tests.test_results import session
+    from app.tests.test_tools import registered
+    from app.tools import run_tool
+
+    svc, _ = flow()
+    lf = LiveFlow(svc)
+    db = svc.d.backend.api
+    customer = registered(db)
+    order = db.add_order(CALLER, "notPaid", [("홍길동", "주소"), ("김민지", "다른 주소")])
+
+    async def scenario():
+        st = filled()
+        st.intent = "lookup"
+        st.customer.call_session_seq = customer.call_session_seq
+        s = session(st)
+        s.tools.backend = svc.d.backend
+        lf.rt(s).intent_started = True
+        await run_tool(s.tools, "lookup_orders", '{"receiver_name":"홍길동"}', "lookup")
+        assert st.selected_order and not st.pending
+        text = "그 주문 전부 취소해 주세요" if whole_order else "그거 취소해 주세요"
+        switch = "cancel_selected_order" if whole_order else "cancel"
+        await lf.apply(s, Spoken(1, text, 1000, 2000, 100, 100), None, {"switch": (switch, 1)}, None)
+        pending = st.pending
+        assert pending and bool(pending.snapshot.get("whole_order")) is whole_order
+        assert [p["status"] for p in (await db.order_detail(customer.call_session_seq, order))["parcels"]] == ["ACTIVE", "ACTIVE"]
+
+        await until(lambda: any((e.get("data") or {}).get("content", {}).get("cancel_target") for e in s.events))
+        target = next(e["data"]["content"]["cancel_target"] for e in s.events
+                      if (e.get("data") or {}).get("content", {}).get("cancel_target"))
+        early = Spoken(2, "네", 3150, 3300, pending.issued_t + 1, pending.issued_t + 1)
+        question = Spoken(1, target["question"], 2500, 3600, pending.issued_t + 0.1, pending.issued_t + 0.1)
+        await lf.apply(s, early, question, {"confirm": ("yes", 1, {"yes": 1})}, pending.id)
+        assert st.pending is pending and not lf.rt(s).commit
+
+        answer = Spoken(3, "네, 취소해 주세요", 3900, 4200, pending.issued_t + 2, pending.issued_t + 2)
+        wrong = Spoken(1, "김민지님께 보내는 택배를 취소할까요?", 2500, 3600, pending.issued_t + 0.1, pending.issued_t + 0.1)
+        await lf.apply(s, answer, wrong, {"confirm": ("yes", 1, {"yes": 1})}, pending.id)
+        assert st.pending is pending and not lf.rt(s).commit
+        await lf.apply(s, answer, question, {"confirm": ("proceed", 1, {"proceed": 1}), "switch": ("cancel", 1)}, pending.id)
+        await until(lambda: st.cancel_done)
+        statuses = [p["status"] for p in (await db.order_detail(customer.call_session_seq, order))["parcels"]]
+        assert statuses == ["CANCELLED", "CANCELLED" if whole_order else "ACTIVE"]
+
+    run(scenario())
 
 
 @pytest.mark.parametrize(("transcript", "tool_phone", "expected", "code"), [
