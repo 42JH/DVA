@@ -1,4 +1,4 @@
-"""배송비: 원본 요금표·규칙 그대로(config/server.toml [fare], app/domain/fare.py)."""
+"""배송비 요금표와 규격별 계산 규칙."""
 
 from functools import partial
 
@@ -20,7 +20,13 @@ def test_table_is_original_values():
 
 @pytest.mark.parametrize("items, fare", [
     (Items(small_box_count=1), 4950),
-    (Items(document_count=2, medium_box_count=1, big_box_count=3), 2 * 3850 + 6050 + 3 * 7150),
+    (Items(document_count=1), 3850),
+    (Items(document_count=2, medium_box_count=1, big_box_count=3), 3850 + 6050 + 3 * 7150),
+    (Items(document_count=10), 3850),
+    (Items(document_count=11), 2 * 3850),
+    (Items(document_count=20), 2 * 3850),
+    (Items(document_count=21), 3 * 3850),
+    (Items(document_count=100), 10 * 3850),
     (Items(), None),                                      # 물품 없음
     (Items(other_item="이불"), None),                      # 기타 물품만
     (Items(small_box_count=1, other_item="이불"), None),   # 기타 물품이 섞이면 모른다
@@ -40,15 +46,16 @@ def test_outcome_complete_with_config_fare_and_body_amounts():
     first = s.parcels[0].draft
     for name, f in first.fields.items():  # 두 번째 택배: 같은 보내는 곳, 다른 받는 분·물품
         s.record(name, f.value, f.source)
-    s.record("items", Items(medium_box_count=2))
+    s.record("items", Items(document_count=11, medium_box_count=2))
     s.record("receiver_name", "최지우")
     s.current.sender_geo = s.current.receiver_geo = first.sender_geo
     confirm_once(s, t=300.0)
     o = decide_outcome(s, P, NOW, partial(parcel_fare, table=TABLE))
-    assert (o.kind, o.fares) == ("COMPLETE", (4950, 12100))
+    assert (o.kind, o.fares) == ("COMPLETE", (4950, 19800))
     call = {"providerCallId": "live_1", "callerPhoneNumber": "01012345678", "incomingAt": "2026-11-03T01:00:00Z"}
     body = submit_body(o, call, 12, None, "01012345678")
-    assert [p["notifiedPrice"] for p in body["parcels"]] == [4950, 12100] and body["totalAmount"] == 17050
+    assert body["parcels"][1]["documentCount"] == 11
+    assert [p["notifiedPrice"] for p in body["parcels"]] == [4950, 19800] and body["totalAmount"] == 24750
 
 
 def test_other_item_parcel_goes_incomplete():

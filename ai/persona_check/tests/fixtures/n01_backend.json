@@ -1,0 +1,79 @@
+{
+ "scenario": "N01",
+ "caller": "01055501234",
+ "address": "stub",
+ "received": {
+  "drafts": {
+   "2": {
+    "draftSeq": 2,
+    "version": 10,
+    "intakeVersion": 10,
+    "callSessionSeq": 1,
+    "callerPhoneNumber": "01055501234",
+    "status": "READY",
+    "parcel": {
+     "origin": {
+      "detailAddress": "멀티 캠퍼스 1층",
+      "dongName": "강남구",
+      "jibunAddress": "강남구 1-1",
+      "name": "김민수",
+      "phoneNumber": "01055501234",
+      "postalCode": "06236",
+      "roadAddress": "서울시 강남구 테헤란로 이백십이, 멀티캠퍼스 일 층"
+     },
+     "destination": {
+      "detailAddress": "원 헌드레드 투 동 원 파이브 오 쓰리",
+      "dongName": "해운대구",
+      "jibunAddress": "해운대구 1-1",
+      "name": "이지은",
+      "phoneNumber": "01023456789",
+      "postalCode": "06236",
+      "roadAddress": "부산광역시 해운대구 센텀중앙로 칠십구, 백이동 천오백삼 호"
+     },
+     "mediumBoxCount": 1,
+     "itemPrice": 50000,
+     "notifiedPrice": 6050
+    },
+    "createdAt": "2026-11-11T14:29:16.523923+00:00"
+   }
+  },
+  "intakes": {
+   "1": {
+    "intakeVersion": 10,
+    "complete": {
+     "expectedIntakeVersion": 10,
+     "paymentMethodType": "billing",
+     "pickupRequestedAt": "2026-11-12T09:00:00+09:00"
+    }
+   }
+  },
+  "analyses": {
+   "1": {
+    "providerCallId": "live_u23_Ej3bXp3oMyxfRFZAigPyBLJDZ26n3wuu",
+    "startedAt": "2026-11-11T14:28:45.018+00:00",
+    "endedAt": "2026-11-11T14:33:05.321+00:00",
+    "aiPersonaVersionSeq": null,
+    "isNewCustomer": true,
+    "registeredParcelCount": 1,
+    "faqAnswerCount": 0,
+    "orderLookupCount": 0,
+    "cancelledParcelCount": 0,
+    "hasHandoffRequest": false,
+    "repeatQuestionCount": 0,
+    "hasComplaint": null,
+    "complaints": []
+   }
+  }
+ },
+ "said": [
+  1,
+  2,
+  4,
+  5,
+  6,
+  7,
+  8,
+  9,
+  11
+ ]
+}

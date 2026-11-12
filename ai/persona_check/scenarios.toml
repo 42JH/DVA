@@ -1,0 +1,283 @@
+# 시험 시나리오. ID · 고객 발화 · 확인 항목은 AI 파트 문서 "AI 상담원 테스트 시나리오"(develop-ai cdc018d6 기준)에서 가져왔다.
+#
+# lines   고객이 말할 대본. 순서대로 틀지 않고, 가짜 고객이 AI가 방금 물은 것에 맞는 문장을 고른다(customer.py).
+#         숫자는 실행기가 한글 읽기로 바꿔 TTS에 준다. 읽기를 직접 정하려면 say = "..."를 덧붙인다.
+#         "(무응답)" = 그 차례에는 아무 말도 하지 않는다.
+#         optional = true: AI가 그 질문을 하지 않으면 안 쓰여도 되는 문장(예 · 아니오 답). 표시가 없는 문장을 다 말하지 못하면 실패다.
+# customer = true  등록 고객([data.customer])으로 전화한다. 주소록 · 기존 주문도 함께 심는다. 없으면 처음 이용하는 고객.
+# expect  코드로 비교하는 정답. outcome = registered(택배 접수) | none(접수 없음) | lookup(조회) | cancelled(취소)
+#         보내는 분은 적지 않으면 발신번호 · 등록 고객의 이름과 발송 주소여야 한다.
+# checks  모델이 통화를 보고 판정하는 행동 확인 항목(문서의 "확인"). 넓게 읽히지 않게 구체적으로 적는다.
+# say  TTS가 읽을 글을 직접 정한다. 지금 "010-7777-8888이요."는 "…입니다"로 읽힌다 — AI가 "…이요"로 끝나는 번호를 자릿수 오류로 거절해서(11/12) 둔 임시 조치다. 고쳐지면 say를 지운다.
+# core = true  프롬프트를 고칠 때마다 돌리는 핵심 묶음.
+# max_sec  이 시나리오의 통화 길이 상한(초). 없으면 실행기 기본값.
+
+[data]
+new_caller = "01099990000"          # 가짜 백엔드에 없는 번호
+
+[data.customer]
+caller = "01011112222"
+name = "김민수"
+address = "서울 강남구 테헤란로 212"
+detail = "멀티캠퍼스"
+
+[[data.pins]]
+name = "이지은"
+phone = "01023456789"
+address = "부산 해운대구 센텀중앙로 79"
+detail = "102동 1503호"
+
+[[data.pins]]
+name = "김영희"
+phone = "01033334444"
+address = "대구 수성구 달구벌대로 2450"
+detail = ""
+
+[[data.pins]]
+name = "김영수"
+phone = "01055556666"
+address = "광주 북구 첨단과기로 123"
+detail = ""
+
+[[data.orders]]                     # 취소 가능
+receiver = "이지은"
+address = "부산 해운대구 센텀중앙로 79"
+status = "COLLECTING"
+
+[[data.orders]]                     # 결제 완료: 전화로 취소 불가
+receiver = "박서준"
+address = "대전 유성구 대학로 99"
+status = "PAID"
+
+[[data.orders]]
+receiver = "최유리"
+address = "광주 북구 첨단과기로 123"
+status = "CANCELLED"
+
+
+[[scenario]]
+id = "A1"
+group = "접수"
+name = "신규 고객 기본 접수"
+core = true
+lines = [
+  { text = "택배 접수하려고요." },
+  { text = "김철수입니다." },
+  { text = "이지은이요." },
+  { text = "010-2345-6789요." },
+  { text = "서울시 강남구 테헤란로 212요." },
+  { text = "멀티캠퍼스 1층이요." },
+  { text = "부산 해운대구 센텀중앙로 79요." },
+  { text = "102동 1503호요." },
+  { text = "옷이랑 책이요. 중형 박스 하나요." },
+  { text = "5만 원 정도요." },
+  { text = "네.", optional = true },
+  { text = "아니요.", optional = true },
+]
+checks = [
+  "첫 인사가 \"안녕하세요. 디바콜입니다. 택배 접수를 원하시거나 궁금하신 점이 있으시면 편하게 말씀해 주세요\"이다",
+  "보내는 분 연락처를 묻지 않는다",
+  "받는 분 전화번호를 고객이 말한 숫자 그대로 끊어 읽어 확인한다",
+  "보내는 곳과 받는 곳의 지역 이름으로 경로를 확인한다",
+  "접수 직전 되읽기에 도로명 주소, 상세주소, 연락처, 물품, 가액을 넣지 않는다(이름과 지역 이름은 괜찮다)",
+  "고객이 접수에 동의하기 전에 접수됐다고 말하지 않는다",
+]
+[scenario.expect]
+outcome = "registered"
+[scenario.expect.parcel]
+sender_name = "김철수"
+sender_address = "서울시 강남구 테헤란로 212"
+sender_detail = "멀티캠퍼스 1층"
+receiver_name = "이지은"
+receiver_phone = "010-2345-6789"
+receiver_address = "부산 해운대구 센텀중앙로 79"
+receiver_detail = "102동 1503호"
+box = "medium"
+item_price = 50000
+
+[[scenario]]
+id = "A2"
+group = "접수"
+name = "등록 고객, 주소록 1건 매칭"
+customer = true
+lines = [
+  { text = "네.", optional = true },
+  { text = "이지은이요." },
+  { text = "네, 맞아요.", optional = true },
+  { text = "반찬통이요. 중형 박스 하나요." },
+  { text = "3만 원이요." },
+  { text = "네.", optional = true },
+  { text = "없어요.", optional = true },
+]
+checks = [
+  "보내는 분 성함과 발송 주소를 새로 말해 달라고 하지 않는다",
+  "주소록 후보를 확인할 때 이름과 지역만 말하고, 저장된 상세주소와 연락처를 먼저 읽지 않는다",
+  "받는 분의 연락처와 주소를 새로 말해 달라고 하지 않는다",
+]
+[scenario.expect]
+outcome = "registered"
+[scenario.expect.parcel]
+receiver_name = "이지은"
+receiver_phone = "010-2345-6789"
+receiver_address = "부산 해운대구 센텀중앙로 79"
+receiver_detail = "102동 1503호"
+box = "medium"
+item_price = 30000
+
+[[scenario]]
+id = "A4"
+group = "접수"
+name = "등록 고객, 주소록에 없는 새 받는 분"
+customer = true
+lines = [
+  { text = "네. 받는 사람은 박서진이에요." },
+  { text = "010-7777-8888이요.", say = "공일공 칠칠칠칠 팔팔팔팔입니다." },
+  { text = "대전 유성구 대학로 99요." },
+  { text = "공학관 305호요." },
+  { text = "반찬통이요. 중형 박스 하나요." },
+  { text = "3만 원이요." },
+  { text = "네.", optional = true },
+  { text = "없어요.", optional = true },
+]
+checks = [
+  "보내는 분 성함과 발송 주소를 새로 말해 달라고 하지 않는다",
+  "받는 분 전화번호를 고객이 말한 숫자 그대로 끊어 읽어 확인한다",
+  "접수 직전 되읽기에 도로명 주소, 상세주소, 연락처, 물품, 가액을 넣지 않는다(이름과 지역 이름은 괜찮다)",
+]
+[scenario.expect]
+outcome = "registered"
+[scenario.expect.parcel]
+receiver_name = "박서진"
+receiver_phone = "010-7777-8888"
+receiver_address = "대전 유성구 대학로 99"
+receiver_detail = "공학관 305호"
+box = "medium"
+item_price = 30000
+
+[[scenario]]
+id = "B1"
+group = "정보 수집"
+name = "한 번에 여러 정보 말하기"
+customer = true
+lines = [
+  { text = "네. 받는 사람은 박서진이고 번호는 010-7777-8888, 주소는 대전 유성구 대학로 99 공학관 305호예요." },
+  { text = "반찬통이요. 중형 박스 하나요." },
+  { text = "3만 원이요." },
+  { text = "네.", optional = true },
+  { text = "없어요.", optional = true },
+]
+checks = [
+  "고객이 이미 말한 받는 분 성함, 연락처, 주소를 새로 말해 달라고 하지 않는다",
+]
+[scenario.expect]
+outcome = "registered"
+[scenario.expect.parcel]
+receiver_name = "박서진"
+receiver_phone = "010-7777-8888"
+receiver_address = "대전 유성구 대학로 99"
+box = "medium"
+item_price = 30000
+
+[[scenario]]
+id = "B3"
+group = "정보 수집"
+name = "앞 항목 정정"
+customer = true
+core = true
+lines = [
+  { text = "네. 받는 사람은 박서진이에요." },
+  { text = "아, 잠깐만요. 아까 이름 틀렸어요. 박서진이 아니라 박서준이에요." },
+  { text = "010-7777-8888이요.", say = "공일공 칠칠칠칠 팔팔팔팔입니다." },
+  { text = "대전 유성구 대학로 99요." },
+  { text = "공학관 305호요." },
+  { text = "반찬통이요. 중형 박스 하나요." },
+  { text = "3만 원이요." },
+  { text = "네.", optional = true },
+  { text = "없어요.", optional = true },
+]
+checks = [
+  "받는 분 성함을 박서준으로 고쳤다고 한 번 확인한다",
+  "정정한 뒤 하던 질문(받는 분 연락처)으로 돌아간다",
+]
+[scenario.expect]
+outcome = "registered"
+[scenario.expect.parcel]
+receiver_name = "박서준"
+receiver_phone = "010-7777-8888"
+receiver_address = "대전 유성구 대학로 99"
+receiver_detail = "공학관 305호"
+box = "medium"
+item_price = 30000
+
+[[scenario]]
+id = "E1"
+group = "조회"
+name = "1건 조회"
+customer = true
+core = true
+lines = [
+  { text = "아니요.", optional = true },
+  { text = "보낸 택배 확인하려고요." },
+  { text = "이지은이요." },
+  { text = "없어요.", optional = true },
+]
+checks = [
+  "이지은님께 보낸 택배의 상태를 접수 미완료(최종 접수 전)로 안내한다",
+  "\"수거 중\", \"배송 중\"처럼 없는 상태를 말하지 않는다",
+]
+[scenario.expect]
+outcome = "lookup"
+
+[[scenario]]
+id = "F1"
+group = "취소"
+name = "취소 가능한 택배 취소"
+customer = true
+core = true
+lines = [
+  { text = "아니요.", optional = true },
+  { text = "접수한 택배 취소하고 싶어요." },
+  { text = "이지은이요." },
+  { text = "네, 취소해 주세요." },
+  { text = "없어요.", optional = true },
+]
+checks = [
+  "취소하기 전에 이지은님께 보내는 택배를 취소할지 확인한다",
+  "고객이 취소에 동의하기 전에 취소됐다고 말하지 않는다",
+]
+[scenario.expect]
+outcome = "cancelled"
+receiver = "이지은"
+
+[[scenario]]
+id = "H9"
+group = "종료"
+name = "접수 중 중도 포기"
+customer = true
+lines = [
+  { text = "네. 받는 사람은 박서진이에요." },
+  { text = "010-7777-8888이요.", say = "공일공 칠칠칠칠 팔팔팔팔입니다." },
+  { text = "아, 그냥 안 할게요. 직접 갖다줄게요." },
+  { text = "네.", optional = true },
+]
+checks = [
+  "접수를 그만하고 통화를 마칠지 확인한다",
+  "접수됐다고 말하지 않는다",
+]
+[scenario.expect]
+outcome = "none"
+
+[[scenario]]
+id = "H10"
+group = "종료"
+name = "무응답"
+customer = true
+core = true
+max_sec = 150   # 무응답 30초면 서버가 끊는다. AI가 계속 되물어 끝나지 않는 경우의 상한
+lines = [
+  { text = "네.", optional = true },
+  { text = "(무응답)" },
+  { text = "(무응답)", optional = true },   # AI가 한 번 더 물으면 또 가만히 있는다. 안 묻고 30초 뒤 끊어도 된다
+]
+[scenario.expect]
+outcome = "none"
