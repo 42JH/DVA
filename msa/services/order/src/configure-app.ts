@@ -69,6 +69,7 @@ export function configureApp(app: INestApplication, logger = new Logger('Http'))
       { path: 'internal/parcel-draft-delete', method: RequestMethod.ALL },
       { path: 'internal/call-event-order-scope', method: RequestMethod.ALL },
       { path: 'internal/call-read-references', method: RequestMethod.ALL },
+      { path: 'internal/call-read-references/events', method: RequestMethod.ALL },
       { path: 'internal/order-cancellation', method: RequestMethod.ALL },
     ],
   });

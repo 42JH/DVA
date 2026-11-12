@@ -7,7 +7,10 @@ const token = 'test-only-event-key-'.padEnd(40, 'a');
 const event = () => ({ eventId: randomUUID(), source: 'order', eventType: 'OrderAccepted', payload: { orderSeq: 1 } });
 
 test('retention order references reject forged queries and invalid customer subsets',async()=>{
-  const {validateRetainedCustomersQuery,validateRetainedCustomers,requestRetainedCustomers}=require('../call-read-references.cjs');
+  const {validateRetainedCustomersQuery,validateRetainedCustomers,requestRetainedCustomers,validatePurgedCardsEvent}=require('../call-read-references.cjs');
+  const purge={eventId:randomUUID(),source:'customer',eventType:'CustomerPaymentCardsPurged',payload:{ids:[1,2]}};
+  validatePurgedCardsEvent(purge);
+  for(const changed of [{...purge,source:'order'},{...purge,eventType:'CustomerOrderReferencesReadRequested'},...[[0],[1,1],['1'],[],Array.from({length:101},(_,n)=>n+1)].map(ids=>({...purge,payload:{ids}})),{...purge,payload:{ids:[1],extra:true}}])assert.throws(()=>validatePurgedCardsEvent(changed));
   const query={eventId:randomUUID(),source:'customer',eventType:'CustomerOrderReferencesReadRequested',payload:{ids:[2,7,11]}};
   validateRetainedCustomersQuery(query);validateRetainedCustomers([],query.payload.ids);validateRetainedCustomers([2,7],query.payload.ids);
   validateRetainedCustomersQuery({...query,payload:{ids:Array.from({length:1000},(_,n)=>n+1)}});

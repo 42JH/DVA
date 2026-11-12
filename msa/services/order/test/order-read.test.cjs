@@ -11,7 +11,7 @@ const token = 'order-read-test-only-'.padEnd(48, 't');
 test('retention references use the independent connection while ordinary order reads are occupied',async()=>{
   const {CallReadReferencesController}=require('../dist/orders/call-read-references.controller');
   const seen=[];
-  const controller=new CallReadReferencesController({pool:{query:async()=>{throw Error('all business connections occupied');}},referencePool:{query:async(sql,params)=>{seen.push({sql,params});return{rows:[{customer_seq:2},{customer_seq:7}]};}}});
+  const controller=new CallReadReferencesController({pool:{query:async()=>{throw Error('all business connections occupied');}},referencePool:{query:async(sql,params)=>{seen.push({sql,params});return{rows:[{customer_seq:2},{customer_seq:7}]};}}},{get:()=>token});
   const event={eventId:randomUUID(),source:'customer',eventType:'CustomerOrderReferencesReadRequested',payload:{ids:[7,2,11]}};
   assert.deepEqual(await controller.query(event),{eventId:event.eventId,status:'processed',payload:[2,7]});
   assert.deepEqual(seen[0].params,[[7,2,11]]);

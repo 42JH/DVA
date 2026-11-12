@@ -5,6 +5,47 @@ const { randomUUID } = require('node:crypto');
 const { Pool } = require('pg');
 const { hashPassword } = require('./seed-password.cjs');
 
+test('customer retention local cleanup preserves newer children and erases only expired personal details', async t=>{
+  assert.equal(process.env.NODE_ENV,'test');assert.equal(process.env.PGDATABASE,'dva_webhook_test');
+  const {RetentionRepository}=require('../dist/retention/retention.repository');
+  const db=new Pool();t.after(()=>db.end());
+  const transaction=async work=>{const client=await db.connect();try{await client.query('BEGIN');const result=await work(client);await client.query('COMMIT');return result;}catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}};
+  const repo=new RetentionRepository({pool:db,transaction});
+  await truncateFixture(db,'TRUNCATE customers,organizations,departments,memberships,personal_pins,payment_cards RESTART IDENTITY CASCADE');
+  const at=process.env.RETENTION_AT;assert.ok(Number.isFinite(Date.parse(at)));
+  const address={name:'보존 수령인',phoneNumber:'0212345678',roadAddress:'보존 도로',jibunAddress:'보존 지번',detailAddress:'',dongName:'보존동',postalCode:'01234'};
+  const own={roadAddress:'개인 도로',jibunAddress:'개인 지번',detailAddress:'',dongName:'개인동',postalCode:'01234'};
+  for(const [n,age]of [[1,null],[2,6],[3,4]])await db.query(`INSERT INTO customers(name,phone_number,status,deleted_at,monthly_billing_enabled,address_data)
+    VALUES($1,$2,'ACTIVE',CASE WHEN $4::text IS NULL THEN NULL ELSE $3::timestamptz-$4::interval END,true,$5)`,['개인정보 '+n,'0100000000'+n,at,age===null?null:age+' years',own]);
+  for(const [n,age]of [[1,6],[2,6],[3,4],[4,null]])await db.query(`INSERT INTO organizations(name,status,created_at,deleted_at)
+    VALUES($1,'ACTIVE',$2::timestamptz-interval '7 years',CASE WHEN $3::text IS NULL THEN NULL ELSE $2::timestamptz-$3::interval END)`,['조직 '+n,at,age===null?null:age+' years']);
+  for(const [n,org,age]of [[1,1,6],[2,2,6],[3,2,4]])await db.query(`INSERT INTO departments(organization_seq,name,created_at,deleted_at)
+    VALUES($1,$2,$3::timestamptz-interval '7 years',$3::timestamptz-$4::interval)`,[org,'부서 '+n,at,age+' years']);
+  for(const [n,customer,org,dept,age]of [[1,2,1,1,6],[2,3,2,2,4]])await db.query(`INSERT INTO memberships(customer_seq,organization_seq,department_seq,employee_no,role,status,deleted_at)
+    VALUES($1,$2,$3,$4,'MEMBER','ACTIVE',$5::timestamptz-$6::interval)`,[customer,org,dept,'employee'+n,at,age+' years']);
+  for(const [n,age]of [[1,6],[2,4]])await db.query(`INSERT INTO personal_pins(customer_seq,label,address_data,deleted_at)
+    VALUES(2,$1,$2,$3::timestamptz-$4::interval)`,['주소 '+n,{...address,detailAddress:String(n)},at,age+' years']);
+  for(const [n,customer,org,age]of [[1,2,null,6],[2,3,null,4],[3,null,1,6],[4,null,2,4]])await db.query(`INSERT INTO payment_cards(customer_seq,organization_seq,registration_key,request_hash,provider_customer_key,provider_environment,masked_number,expiration_year,expiration_month,status,created_at,updated_at,deleted_at)
+    VALUES($1,$2,$3,repeat('a',64),$3,'test','****1234',2029,1,'FAILED',$4::timestamptz-interval '7 years',$4::timestamptz-interval '7 years',$4::timestamptz-$5::interval)`,[customer,org,'40000000-0000-4000-8000-'+String(n).padStart(12,'0'),at,age+' years']);
+  const tables=[['customers','customer_seq'],['organizations','organization_seq'],['departments','department_seq'],['memberships','membership_seq'],['personal_pins','personal_pin_seq'],['payment_cards','payment_card_seq']];
+  const snapshot=async()=>{const result={};for(const[table,key]of tables)result[table]=(await db.query(`SELECT to_jsonb(t) AS row FROM ${table} t ORDER BY ${key}`)).rows.map(r=>r.row);return result;};
+  const before=await snapshot();
+  const hasOutbox=!!(await db.query("SELECT to_regclass('outbox_events') AS name")).rows[0].name;
+  const pending=async()=>hasOutbox?(await db.query("SELECT event_id,payload FROM outbox_events WHERE event_type='CustomerPaymentCardsPurged' ORDER BY outbox_seq")).rows:[];
+  const pendingBefore=await pending();
+  for(const [key,value]of [[20261103,157],[20261027,37]]){const gate=await db.connect();try{await gate.query('SELECT pg_advisory_lock($1,$2)',[key,value]);await repo.purgeDatabase();assert.deepEqual(await snapshot(),before);}finally{await gate.query('SELECT pg_advisory_unlock($1,$2)',[key,value]);gate.release();}}
+  await db.query("CREATE FUNCTION customer_retention_fault() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.anonymized_at IS DISTINCT FROM OLD.anonymized_at THEN RAISE EXCEPTION 'controlled anonymization failure'; END IF; RETURN NEW; END $$; CREATE TRIGGER customer_retention_fault BEFORE UPDATE ON customers FOR EACH ROW EXECUTE FUNCTION customer_retention_fault()");
+  try{await assert.rejects(repo.purgeDatabase());assert.deepEqual(await snapshot(),before);assert.deepEqual(await pending(),pendingBefore);}finally{await db.query('DROP TRIGGER customer_retention_fault ON customers; DROP FUNCTION customer_retention_fault()');}
+  const gate=await db.connect();try{await gate.query('BEGIN');await gate.query('SELECT 1 FROM payment_cards WHERE payment_card_seq=1 FOR UPDATE');await repo.purgeDatabase();assert.deepEqual((await db.query('SELECT payment_card_seq FROM payment_cards ORDER BY payment_card_seq')).rows.map(r=>r.payment_card_seq),[1,2,4]);}finally{await gate.query('ROLLBACK');gate.release();}
+  await repo.purgeDatabase();const after=await snapshot();
+  assert.deepEqual(after.payment_cards.map(r=>r.payment_card_seq),[2,4]);assert.deepEqual(after.memberships.map(r=>r.membership_seq),[2]);assert.deepEqual(after.personal_pins.map(r=>r.personal_pin_seq),[2]);assert.deepEqual(after.departments.map(r=>r.department_seq),[2,3]);assert.deepEqual(after.organizations.map(r=>r.organization_seq),[2,3,4]);
+  assert.equal(after.customers.length,3);assert.equal(after.customers[1].name,'삭제된 고객');assert.equal(after.customers[1].phone_number,'0002');assert.equal(after.customers[1].address_data,null);assert.equal(after.customers[1].monthly_billing_enabled,false);assert.ok(after.customers[1].anonymized_at);assert.deepEqual(after.customers[0],before.customers[0]);assert.deepEqual(after.customers[2],before.customers[2]);
+  await repo.purgeDatabase();assert.deepEqual(await snapshot(),after);
+  if(hasOutbox){const oldIds=new Set(pendingBefore.map(row=>row.event_id));assert.deepEqual((await pending()).filter(row=>!oldIds.has(row.event_id)).flatMap(row=>row.payload.ids).sort((a,b)=>a-b),[1,3]);}
+  for(const rows of Object.values(after))for(const row of rows)for(const key of Object.keys(row))if(key.endsWith('_at')&&row[key]&&Date.parse(row[key])>=Date.parse(at)){assert.ok(Date.parse(row[key])<=Date.now()+2000);row[key]='<new fixture or retention timestamp>';}
+  console.log(JSON.stringify({customerLocalRetention:after,localChildrenProtectRoot:true,rollback:true,lockedCardSkipped:true}));
+});
+
 test('customer reads match monolith with independent operations sessions and immutable customer data', async t => {
   assert.equal(process.env.NODE_ENV, 'test');
   assert.equal(process.env.PGDATABASE, 'dva_webhook_test');

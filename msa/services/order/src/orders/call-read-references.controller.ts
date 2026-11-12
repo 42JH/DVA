@@ -2,24 +2,74 @@ import {
   Body,
   Controller,
   Header,
+  Headers,
   HttpCode,
   HttpException,
   Post,
   SetMetadata,
 } from '@nestjs/common';
 import { ApiExcludeController } from '@nestjs/swagger';
+import { ConfigService } from '@nestjs/config';
+import { createReceiver } from '@dva/events';
+import type { PoolClient } from 'pg';
 import {
   validateReferenceQuery,
   validateRetainedCustomersQuery,
+  validatePurgedCardsEvent,
   type ReferenceRows,
 } from '@dva/events/call-read-references.cjs';
 import { DatabaseService } from '../database/database.service';
+import type { Environment } from '../config/environment';
 
 @ApiExcludeController()
 @SetMetadata('auth:internal-customer', true)
 @Controller('internal/call-read-references')
 export class CallReadReferencesController {
-  constructor(private readonly database: DatabaseService) {}
+  private readonly receiveEvent: ReturnType<typeof createReceiver>;
+
+  constructor(
+    private readonly database: DatabaseService,
+    config: ConfigService<Environment, true>,
+  ) {
+    this.receiveEvent = createReceiver<PoolClient>({
+      pool: database.pool,
+      sources: { customer: config.get('CUSTOMER_AUTH_TOKEN', { infer: true }) },
+      handlers: {
+        'customer:CustomerPaymentCardsPurged': async (client, event) => {
+          await client.query(
+            'UPDATE order_payment_requests SET payment_card_seq=NULL WHERE payment_card_seq=ANY($1::int[])',
+            [event.payload.ids],
+          );
+        },
+      },
+    });
+  }
+
+  @Post('events')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  async receive(@Body() input: unknown, @Headers('authorization') authorization: string) {
+    try {
+      validatePurgedCardsEvent(input);
+    } catch {
+      throw new HttpException({ error: 'INVALID_PURGED_CARDS' }, 422);
+    }
+    try {
+      return await this.receiveEvent(input, authorization);
+    } catch (error: unknown) {
+      if (
+        error &&
+        typeof error === 'object' &&
+        'status' in error &&
+        'code' in error &&
+        typeof error.status === 'number' &&
+        error.status >= 400 &&
+        error.status < 500
+      )
+        throw new HttpException({ error: error.code }, error.status);
+      throw new HttpException({ error: 'EVENT_PROCESSING_FAILED' }, 500);
+    }
+  }
   @Post()
   @HttpCode(200)
   @Header('Cache-Control', 'no-store')

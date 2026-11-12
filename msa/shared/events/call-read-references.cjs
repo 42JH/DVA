@@ -15,6 +15,11 @@ function validateReferenceQuery(value,source='consultation') {
      !ids.every(id)||new Set(ids).size!==ids.length)throw new Error('Invalid call reference query');
 }
 const retentionIds=ids=>Array.isArray(ids)&&ids.length>0&&ids.length<=1000&&ids.every(id)&&new Set(ids).size===ids.length;
+function validatePurgedCardsEvent(value) {
+  validateEvent(value);
+  if(value.source!=='customer'||value.eventType!=='CustomerPaymentCardsPurged'||
+     !keys(value.payload,'ids')||!retentionIds(value.payload.ids)||value.payload.ids.length>100)throw new Error('Invalid purged cards');
+}
 function validateRetainedCustomersQuery(value) {
   validateEvent(value);
   if(value.source!=='customer'||value.eventType!=='CustomerOrderReferencesReadRequested'||
@@ -132,4 +137,4 @@ function requestHomeOrders(url,token,observedAt,consultationAddress,readScopeId)
   return requestSnapshot(url,token,'HomeOrdersReadRequested',validateHomeOrdersResult,'consultation',
     {observedAt,consultationAddress},readScopeId);
 }
-module.exports={validateReferenceQuery,validateReferenceRows,requestReferences,validatePersonaComparisonQuery,validatePersonaComparisonRows,requestPersonaComparison,validateComplaintFaqQuery,validateComplaintFaqRows,requestComplaintFaqs,validateOrderOrganizationQuery,validateOrderOrganizationRows,requestOrderOrganization,validateHomeOrdersQuery,validateHomeOrdersResult,requestHomeOrders,validateRetainedCustomersQuery,validateRetainedCustomers,requestRetainedCustomers};
+module.exports={validateReferenceQuery,validateReferenceRows,requestReferences,validatePersonaComparisonQuery,validatePersonaComparisonRows,requestPersonaComparison,validateComplaintFaqQuery,validateComplaintFaqRows,requestComplaintFaqs,validateOrderOrganizationQuery,validateOrderOrganizationRows,requestOrderOrganization,validateHomeOrdersQuery,validateHomeOrdersResult,requestHomeOrders,validateRetainedCustomersQuery,validateRetainedCustomers,requestRetainedCustomers,validatePurgedCardsEvent};
