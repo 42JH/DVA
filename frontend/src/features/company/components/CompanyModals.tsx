@@ -1,5 +1,5 @@
 // 기업 창 — 사원 추가 · 수정, CSV로 사원 추가, CSV로 기업 등록, 이름 하나 입력(기업명 · 부서명). 규칙 · 요청은 기존 훅 그대로
-// 파일 칸 규칙은 긴 설명 대신 [예시 파일 받기]로 (예시 파일에 칸 이름 · 형식이 다 들어 있음)
+// 파일 칸 규칙은 긴 설명 대신 [샘플 파일 받기]로 (샘플 파일에 칸 이름 · 형식이 다 들어 있음)
 import type { Member } from '@/features/company/api/companyApi'
 import { downloadExample, type CsvKind, type CsvMember } from '@/features/company/csvMembers'
 import { fmtPhone } from '@/shared/lib/format'
@@ -29,7 +29,7 @@ const FootNote = ({ error, hint }: { error?: string | null; hint?: string | null
 const Example = ({ kind = 'members' }: { kind?: CsvKind }) => (
   <Btn kind="plain" onClick={() => downloadExample(kind)} className="self-start">
     <Icon name="download" />
-    예시 파일 받기
+    샘플 파일 받기
   </Btn>
 )
 
