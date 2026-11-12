@@ -6,7 +6,7 @@ from uuid import uuid4
 from weakref import WeakValueDictionary
 
 from app.domain.assess import assess
-from app.domain.state import draft_snapshot
+from app.domain.state import ACCEPTED_STATUSES, draft_snapshot
 from app.domain.store import hold_unclassified_items, is_pending_reconfirm
 from app.integrations.backend.gateway import BackendFailure
 from app.integrations.backend.mapping import to_order
@@ -185,7 +185,7 @@ class IntakeService:
         order = result.get("order")
         if order:
             s.result = order | {"orderSeq": result["orderSeq"]}
-            st.result_accepted = order.get("status") == "ACCEPTED"
+            st.result_accepted = order.get("status") in ACCEPTED_STATUSES
         s.note("접수 종료", result.get("status", "SAVE_PENDING"))
 
     async def recover(self) -> None:

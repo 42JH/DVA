@@ -18,7 +18,7 @@ from app.calls.unanswered import ReviewError, apply_review, evidence_from_sessio
 from app.domain.assess import assess
 from app.domain.outcome import decide_outcome
 from app.domain.store import hold_unclassified_items
-from app.domain.state import Source, draft_snapshot
+from app.domain.state import ACCEPTED_STATUSES, Source, draft_snapshot
 from app.integrations.backend.gateway import BackendFailure, BackendGateway
 from app.integrations.backend.mapping import submit_body, to_order
 from app.persistence.outbox import Outbox
@@ -206,7 +206,7 @@ class ResultService:
             row = await asyncio.to_thread(self.outbox.create_result, s.call_id, str(uuid.uuid4()), body)
         data = await self._send(row)
         if data is not None:
-            s.state.result_accepted = data.get("status") == "ACCEPTED"
+            s.state.result_accepted = data.get("status") in ACCEPTED_STATUSES
             s.result = data
             s.note("결과", str(data.get("status")))
             if on_result:

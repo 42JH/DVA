@@ -337,3 +337,14 @@ def test_unverified_values_spoken_phone_and_ho():
     assert unverified_values("일이공삼호요", s) == {}
     assert unverified_values("공일공 일이삼사 오육칠구입니다. 1204호예요", s) == {"phone": ["010****5679"], "ho": 1}
     assert unverified_values("일호선 타고 오세요. 이번 택배요. 삼호동 근처요", s) == {}  # 호선·일반 낱말은 번호가 아니다
+
+
+def test_registered_mid_call_goes_to_more_parcels_after_commit():
+    """통화 중 등록돼 등록 주소가 생겨도, 담은 뒤에는 발송 주소 확인 단계로 돌아가지 않는다(접수 안내가 막혔던 통화)."""
+    from app.domain.state import Place
+    s = filled()
+    s.customer.origin_place = Place("김철수", "01012345678", "서울 강남구 테헤란로 212", "1201호", GEO, Source.PROFILE)
+    s.origin_offered = True
+    assert assess(s, P).stage == "readback"
+    assert confirm_once(s)
+    assert assess(s, P).stage == "more_parcels"

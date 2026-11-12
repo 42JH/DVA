@@ -14,7 +14,7 @@ from app.address.parse import detail_text
 from app.domain.address_book import receiver_questions_deferred
 from app.domain.candidates import apply_pick, buffer_destination_fields, clear_order_lookup, offer, reject_candidates
 from app.domain.confirm import cancel_question, issue_cancel_confirmation
-from app.domain.state import DOCUMENT_ITEM_PRICE, CandidateSet, Items, ParcelDraft, Place, Source
+from app.domain.state import ACCEPTED_STATUSES, DOCUMENT_ITEM_PRICE, CandidateSet, Items, ParcelDraft, Place, Source
 from app.domain.store import is_pending_reconfirm
 from app.integrations.backend.gateway import BackendFailure
 from app.integrations.backend.mapping import to_order
@@ -275,10 +275,7 @@ async def _offer(ctx: ToolContext, search: tuple[ParcelDraft, int],
 # 수정 중인 지시문과 간섭하지 않게(2026-11-06 사용자 결정). 수거·배송·결제 완료는 말하지 않는다(백엔드에 수거·배송 상태 없음).
 ORDER_STATUS_TEXT = {
     "COLLECTING": "접수 미완료(정보 수집 중), 최종 접수 전",
-    "notPaid": "접수 대기 중, 결제가 확인되면 접수 진행",
-    "PAID": "접수 대기 중",
-    "SUBMITTING": "접수 처리 중",
-    "ACCEPTED": "접수 완료",
+    **dict.fromkeys(ACCEPTED_STATUSES, "접수 완료"),  # BE에 전송된 주문은 결제 여부와 상관없이 접수 완료
     "SUBMISSION_FAILED": "접수 처리 문제, 담당자 확인 중",
     "CANCELLED": "취소됨",
 }
@@ -490,7 +487,7 @@ def lookup_order_facts(order: dict) -> dict:
     if details.get("item_price") == DOCUMENT_ITEM_PRICE and Items(**(details.get("items") or {})).documents_only():
         details.pop("item_price")
     return {"receiver_name": order.get("receiver_name"), "status": status,
-            "status_text": "접수된 택배" if status == "ACCEPTED" else status_text(status),
+            "status_text": "접수된 택배" if status in ACCEPTED_STATUSES else status_text(status),
             "source": _lookup_source(order), **details}
 
 

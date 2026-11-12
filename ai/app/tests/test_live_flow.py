@@ -1301,7 +1301,7 @@ def test_intake_followup_routes_additional_requests(text, more, switch, notice):
         st.customer.customer_seq, st.customer.name = 7, "김철수"
         confirm_once(st)
         s.tools.state = st
-        await ai(conn, "접수 요청을 확인했습니다. 더 보내실 택배가 있거나 다른 도움이 필요하신가요?", 0)
+        await ai(conn, "접수했습니다. 더 보내실 택배가 있거나 다른 도움이 필요하신가요?", 0)
         await say(conn, text, 1500)
         key, expected = notice
         await until(lambda: any(f'"{key}": "{expected}"' in e.get("content", "") for e in conn.sent))
