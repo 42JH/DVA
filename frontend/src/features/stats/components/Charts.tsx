@@ -186,7 +186,8 @@ export function Donut({
         ) : (
           // 11/13 사용자: 조각마다 따로 채우지 말고 12시부터 한 바퀴 한 번에 — 흰 고리 가림막 하나가 시계 방향으로 열림
           <g mask={`url(#${CSS.escape(mask)})`}>
-            <mask id={mask}>
+            {/* 가림막 영역을 그림 전체로 — 기본값(선 굵기 뺀 크기 +10%)이면 고리 바깥 4px가 잘려 각져 보임 */}
+            <mask id={mask} maskUnits="userSpaceOnUse" x={0} y={0} width={166} height={166}>
               <circle
                 cx={83}
                 cy={83}
