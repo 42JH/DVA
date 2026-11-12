@@ -129,9 +129,12 @@ async function acknowledged(response, eventId) {
   return object(ack) && ack.eventId === eventId && ['processed', 'duplicate'].includes(ack.status);
 }
 
-function createRelay({ pool, source, destinations, timeoutMs = 5000 }) {
+function createRelay({ pool, source, destinations, timeoutMs = 5000, eventTypes }) {
   if (!services.has(source) || !Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 30000)
     throw new Error('Invalid event relay configuration');
+  if (eventTypes !== undefined && (!Array.isArray(eventTypes) || !eventTypes.length ||
+      !eventTypes.every(value => typeof value === 'string' && /^[A-Z][A-Za-z0-9]{0,99}$/.test(value)) ||
+      new Set(eventTypes).size !== eventTypes.length)) throw new Error('Invalid event relay types');
   const endpoints = new Map(Object.entries(destinations).map(([destination, config]) => {
     if (!services.has(destination)) throw new Error('Invalid event destination');
     const url = endpoint(config.url);
@@ -142,11 +145,13 @@ function createRelay({ pool, source, destinations, timeoutMs = 5000 }) {
     const { rows } = await client.query(
       `SELECT pending.* FROM outbox_events pending
        WHERE destination=ANY($1::text[]) AND delivered_at IS NULL AND next_attempt_at<=clock_timestamp()
+         AND ($2::text[] IS NULL OR pending.event_type=ANY($2::text[]))
          AND NOT EXISTS (SELECT 1 FROM outbox_events earlier
            WHERE earlier.destination=pending.destination AND earlier.aggregate_seq=pending.aggregate_seq
-             AND earlier.delivered_at IS NULL AND earlier.outbox_seq<pending.outbox_seq)
+             AND earlier.delivered_at IS NULL AND earlier.outbox_seq<pending.outbox_seq
+             AND ($2::text[] IS NULL OR earlier.event_type=ANY($2::text[])))
        ORDER BY outbox_seq FOR UPDATE OF pending SKIP LOCKED LIMIT 1`,
-      [[...endpoints.keys()]],
+      [[...endpoints.keys()], eventTypes ?? null],
     );
     if (!rows.length) return false;
     const event = rows[0], endpoint = endpoints.get(event.destination);

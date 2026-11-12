@@ -88,6 +88,21 @@ test('relay delivers a committed event and acknowledges exactly that event after
   assert.equal(await relay(), false);
 });
 
+test('a filtered relay leaves unrelated durable intents pending and preserves selected aggregate order', async () => {
+  const intent = await transaction(sender, client => enqueue(client, { destination: 'delivery', eventType: 'PreparationRequested', aggregateSeq: 1, payload: {} }));
+  const first = await add({orderSeq: 1}), second = await add({orderSeq: 2});
+  const selected = createRelay({ pool: sender, source: 'order', destinations: { delivery: { url, token } }, eventTypes: ['OrderAccepted'] });
+  mode = 'http-failure'; await selected();
+  assert.deepEqual(await counts(), [0, 0]);
+  assert.equal(await selected(), false, 'the following selected event must wait for its failed predecessor');
+  await sender.query("UPDATE outbox_events SET next_attempt_at=clock_timestamp()-interval '1 second' WHERE event_id=$1", [first]);
+  mode = 'success'; assert.equal(await selected(), true); assert.equal(await selected(), true); assert.equal(await selected(), false);
+  const events = new Map((await rows(sender, 'outbox_events')).map(row => [row.event_id, row]));
+  assert.equal(events.get(intent).delivered_at, null); assert.equal(events.get(intent).attempt_count, 0);
+  assert.ok(events.get(first).delivered_at); assert.ok(events.get(second).delivered_at);
+  assert.deepEqual((await receiver.query('SELECT event_id FROM inbox_events ORDER BY processed_at')).rows.map(row => row.event_id), [first, second]);
+});
+
 test('concurrent duplicate deliveries apply one business change', async () => {
   const event = envelope();
   const responses = await Promise.all(Array.from({ length: 10 }, () => send(event)));

@@ -14,7 +14,7 @@ export function createReceiver<Client>(options: {
 }): (event: Event, authorization: string) => Promise<{eventId: string; status: string}>;
 export function createRelay(options: {
   pool: { connect(): Promise<unknown> }; source: string;
-  destinations: Record<string, {url: string; token: string}>; timeoutMs?: number;
+  destinations: Record<string, {url: string; token: string}>; timeoutMs?: number; eventTypes?: string[];
 }): () => Promise<boolean>;
 export function sendEvent(url: string, token: string, event: Event, signal?: AbortSignal | null): Promise<void>;
 export function validateEvent(event: unknown): asserts event is Event;

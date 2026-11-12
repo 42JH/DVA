@@ -263,6 +263,8 @@ test('receiver and relay reject empty or malformed authentication configuration'
   }
   for (const url of ['file:///tmp/events', 'http://user:pass@delivery/events', 'http://delivery/events?token=secret', 'http://delivery/events#x'])
     assert.throws(() => createRelay({ pool, source: 'order', destinations: { delivery: { url, token } } }));
+  for (const eventTypes of [null, '', [], ['lowercase'], ['OrderAccepted', 'OrderAccepted'], [1], ['A'.repeat(101)]])
+    assert.throws(() => createRelay({ pool, source: 'order', destinations: { delivery: { url: 'http://delivery/events', token } }, eventTypes }));
 });
 
 test('authentication and unsupported events fail before any DB access', async () => {
