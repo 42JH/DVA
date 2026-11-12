@@ -173,3 +173,15 @@ def test_behaviour_keeps_only_what_two_of_three_rounds_agree_on():
     verdict = asyncio.run(judge.judge_call(FakeClient([answer(("kept", ""), ("broken", phone), ("kept", ""))] * 3), scenario,
                                            RECORD | TALK["received"] and {**RECORD, "received": RECORD["received"] | TALK["received"]}))
     assert not verdict["passed"] and verdict["summary"] == "통과 13 · 실패 1 · 제외 2"
+
+
+def test_addresses_match_when_only_the_city_name_is_shortened():
+    # 주소DB가 있는 서버는 시 · 도를 정식 이름으로 저장한다(11/12 서버 첫 시험: 기대 '서울시 …' · 실제 '서울특별시 …'로 실패)
+    assert judge.same_address("서울시 강남구 테헤란로 212", "서울특별시 강남구 테헤란로 212")
+    assert judge.same_address("부산 해운대구 센텀중앙로 79", "부산광역시 해운대구 센텀중앙로 79")
+    assert judge.same_address("대전 유성구 대학로 99", "대전광역시 유성구 대학로 99")
+    assert judge.same_address("강원도 춘천시 중앙로 1", "강원특별자치도 춘천시 중앙로 1")
+    assert judge.same_address("충북 청주시 상당구 상당로 82", "충청북도 청주시 상당구 상당로 82")
+    assert not judge.same_address("서울시 강남구 테헤란로 212", "부산광역시 강남구 테헤란로 212")   # 다른 시 · 도
+    assert not judge.same_address("서울 강남구 테헤란로 212", "서울특별시 강남구 테헤란로 213")      # 다른 번지
+    assert not judge.same_address("대전 유성구 대학로 99", None)

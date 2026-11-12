@@ -49,6 +49,23 @@ def _squash(value) -> str:
     return re.sub(r"[\s,.]", "", str(value or ""))
 
 
+# 시 · 도 이름: 고객은 '서울시' · '부산'처럼 줄여 말하고, 주소DB가 있는 서버는 '서울특별시' · '부산광역시'로 저장한다(11/12 서버 첫 시험)
+_SIDO = {"서울특별시": "서울", "부산광역시": "부산", "대구광역시": "대구", "인천광역시": "인천", "광주광역시": "광주",
+         "대전광역시": "대전", "울산광역시": "울산", "세종특별자치시": "세종", "경기도": "경기", "강원특별자치도": "강원",
+         "충청북도": "충북", "충청남도": "충남", "전북특별자치도": "전북", "전라남도": "전남", "경상북도": "경북",
+         "경상남도": "경남", "제주특별자치도": "제주"}
+SIDO = {alias: full for full, short in _SIDO.items() for alias in (full, short, short + "시", short + "도")}
+SIDO |= {"강원도": "강원특별자치도", "전라북도": "전북특별자치도", "제주도": "제주특별자치도"}
+
+
+def same_address(a, b) -> bool:
+    """도로명 주소가 같은가. 첫 낱말이 시 · 도면 정식 이름으로 맞춘 뒤 띄어쓰기 · 쉼표 없이 비교한다."""
+    def full(value) -> str:
+        head, _, rest = str(value or "").strip().partition(" ")
+        return _squash(f"{SIDO.get(head, head)} {rest}")
+    return full(a) == full(b)
+
+
 def _check(name: str, expected, actual, same=None, skip: str = "") -> dict:
     if skip:
         return {"name": name, "status": SKIP, "expected": expected, "actual": actual, "note": skip}
@@ -89,7 +106,7 @@ def _parcel_checks(want: dict, parcel: dict, caller: str, stub: bool) -> list[di
             checks.append(_check(f"{label} 지역", area(address), area(place.get("roadAddress"))))
             checks.append(_check(f"{label} 상세주소", detail, place.get("detailAddress"), text, STUB_NOTE))
         else:
-            checks.append(_check(f"{label} 주소", address, place.get("roadAddress"), text))
+            checks.append(_check(f"{label} 주소", address, place.get("roadAddress"), same_address))
             checks.append(_check(f"{label} 상세주소", detail, place.get("detailAddress"), text))
     return [c for c in checks if c["expected"] is not None]  # 정답에 적지 않은 항목은 보지 않는다
 
