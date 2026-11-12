@@ -52,7 +52,7 @@ docker compose up -d --build   # Qdrant + AI 서버(현재 S0 스파이크 + 관
 - `gazetteer.open_db(path)`로 행안부 주소DB(SQLite, 읽기 전용)를 연다. 파일이 없으면 None → `AddressService(None)`은 보정 없이 들은 그대로(`off`).
 - `matcher.resolve(db, text)` → `Resolution(status, address, candidates)`: `confirmed`(확정)·`ambiguous`(애매함)·`not_found`(없음). 들은 그대로 못 찾았을 때만 `parse.readings`(말끝·붙인 길 번호·건물명·붙인 '다시'·"N가")의 표기로 적게 고친 것부터 다시 본다(묶음 8개·1초 상한).
 - 나눔: `numbers`(한글 숫자) · `phonetic`(소리 비교, `backend_client.place_score`도 씀) · `parse`(말 다듬기) · `matcher`(찾기·판정) · `gazetteer`(조회·빌드). 스레드마다 SQLite 연결 — 전역 락 없음.
-- `app/integrations/address.py` `AddressService`: 전용 스레드풀·예산 2.5초·카카오. `app/integrations/kakao.py` `geocode()`는 지번·동명·우편번호(`app.domain.state.Geo`), 키가 없거나 못 찾으면 None.
+- `app/integrations/address.py` `AddressService`: 전용 스레드풀·예산 3초·카카오. `app/integrations/kakao.py` `geocode()`는 지번·동명·우편번호(`app.domain.state.Geo`), 키가 없거나 못 찾으면 None.
 - BE 모양 `Geo`(pydantic)는 `backend_client/order.py`에 있다.
 - 주소DB 만들기: `uv run python -X utf8 -m app.address.gazetteer <주소DB 텍스트 폴더> data/address.db`
 - 회귀 시험지: `uv run python -X utf8 -m scripts.evaluate_address` (`evaluation/datasets/address_v1.json`, 실제 주소DB 필요)
