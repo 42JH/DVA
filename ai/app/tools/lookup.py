@@ -275,9 +275,10 @@ async def _offer(ctx: ToolContext, search: tuple[ParcelDraft, int],
 # 수정 중인 지시문과 간섭하지 않게(2026-11-06 사용자 결정). 수거·배송·결제 완료는 말하지 않는다(백엔드에 수거·배송 상태 없음).
 ORDER_STATUS_TEXT = {
     "COLLECTING": "접수 미완료(정보 수집 중), 최종 접수 전",
-    "notPaid": "접수 대기 중, 결제가 확인되면 접수 진행",
-    "PAID": "접수 대기 중",
-    "SUBMITTING": "접수 처리 중",
+    # 백엔드에 전송된 주문은 결제·전달 단계와 상관없이 접수 완료로 안내한다(사용자 결정 2026-11-12)
+    "notPaid": "접수 완료",
+    "PAID": "접수 완료",
+    "SUBMITTING": "접수 완료",
     "ACCEPTED": "접수 완료",
     "SUBMISSION_FAILED": "접수 처리 문제, 담당자 확인 중",
     "CANCELLED": "취소됨",

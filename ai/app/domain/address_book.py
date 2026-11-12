@@ -62,10 +62,11 @@ def sender_change_next(state: ConversationState) -> str | None:
 
 
 def origin_confirmation(state: ConversationState) -> str | None:
-    """아직 발송 주소를 고르지 않았다면 다음 응답에도 확인 질문을 남긴다."""
+    """아직 발송 주소를 고르지 않았다면 다음 응답에도 확인 질문을 남긴다.
+    담은 택배가 있으면 묻지 않는다: 통화 중 등록된 고객은 등록 주소가 생겨도 이미 발송 주소를 말했다."""
     place, draft = state.customer.origin_place, state.current
     if (state.intent == "order" and state.origin_offered and not state.origin_applied
-            and state.origin_answer is None and place
+            and state.origin_answer is None and place and not state.parcels
             and not (draft and (draft.sender_name_for_parcel or draft["sender_address"].valid))):
         return "registered" if state.origin_mentioned_in_greeting else place.address
     return None
