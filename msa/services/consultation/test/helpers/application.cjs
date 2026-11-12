@@ -33,14 +33,14 @@ function applicationFixture(name = '통합 테스트 관리자') {
   const identity = new Pool({ ...pool.options, host: 'operations-db', user: 'operations_app', password: process.env.DB_PASSWORD });
   process.env.SWAGGER_ENABLED = 'false';
   process.env.CORS_ORIGINS = 'http://localhost:5173';
-  const f = { pool, apps: [], cookies: [], ids: [], logs: [], origin: 'http://localhost:5173' };
+  const f = { pool, audit: identity, apps: [], cookies: [], ids: [], logs: [], origin: 'http://localhost:5173' };
   f.start = () => startTestApp(f.apps, { log: entry => f.logs.push(entry) });
   f.get = (path, actor = 0, headers = {}) => fetch(f.base + path, {
     headers: Object.fromEntries(Object.entries({ Cookie: f.cookies[actor], ...headers }).filter(([, value]) => value !== undefined)),
   });
   before(async () => {
     f.app = await f.start(); f.base = await f.app.getUrl();
-    for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN']) {
+    for (const role of ['OPERATOR', 'OPERATOR', 'SYSTEM_ADMIN']) {
       const login = 'test' + randomUUID().replaceAll('-', '').slice(0, 16), token = randomBytes(32).toString('hex');
       const id = (await identity.query("INSERT INTO admin_users(login_id,name,password_hash,role,status) VALUES($1,$2,'not-for-login',$3,'ACTIVE') RETURNING admin_user_seq", [login, name, role])).rows[0].admin_user_seq;
       await identity.query('INSERT INTO admin_sessions(session_token_hash,admin_user_seq) VALUES($1,$2)', [createHash('sha256').update(token).digest('hex'), id]);

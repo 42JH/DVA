@@ -4,6 +4,19 @@ const { randomUUID } = require('node:crypto');
 const { createServer } = require('node:http');
 const { validateParcelDraftCommand, requestParcelDraftCommand } = require('../parcel-drafts.cjs');
 const token = 'parcel-draft-test-only-'.padEnd(40, 'x');
+test('card approval status references bind the customer source, card ID and boolean acknowledgement', async t => {
+  const {validateWriteReference,requestWriteReference}=require('../parcel-draft-write.cjs');
+  const event={eventId:randomUUID(),source:'customer',eventType:'ParcelDraftWriteReferenceRequested',
+    payload:{operation:'OrderPendingCardApprovalRead',input:{id:7}}};
+  validateWriteReference(event);
+  for(const invalid of [{...event,source:'order'}, {...event,payload:{...event.payload,input:{id:0}}},
+    {...event,payload:{...event.payload,input:{id:7,billingKey:'private'}}}])
+    assert.throws(()=>validateWriteReference(invalid));
+  let payload=false;
+  t.mock.method(globalThis,'fetch',async ()=>Response.json({eventId:event.eventId,status:'processed',payload}));
+  for(payload of [false,true]) assert.equal(await requestWriteReference('http://order:3002/internal/parcel-draft-write/reference',token,event),payload);
+  for(payload of [null,{},0,'false']) await assert.rejects(requestWriteReference('http://order:3002/internal/parcel-draft-write/reference',token,event));
+});
 const read = () => ({ eventId: randomUUID(), source: 'order', eventType: 'LegacyDraftCallBindingsReadRequested', payload: { orderSeqs: [1, 2] } });
 const check = () => ({ eventId: randomUUID(), source: 'consultation', eventType: 'CallDraftDeletionCheckRequested', payload: { callSessionSeq: 3 } });
 let server, url, mode;
@@ -135,31 +148,42 @@ test('draft read scopes preserve anonymous and stored-customer context without l
 test('draft deletion binds owner, actor, scope and phase and preserves source lock errors',async()=>{
   const {validateDraftDeletion,validateDraftDeletionResult}=require('../parcel-drafts.cjs');
   const {requestDraftDeletion,OrderReadError}=require('../order-read.cjs');
-  const root={eventId:randomUUID(),source:'order',eventType:'ParcelDraftDeletionRequested',payload:{command:{id:1,adminId:2,requestId:randomUUID()},orderAddress:null}};
+  const root={eventId:randomUUID(),source:'order',eventType:'ParcelDraftDeletionRequested',payload:{command:{ids:[1],adminId:2,requestId:randomUUID()},orderAddress:null}};
   const hint={...root,source:'consultation',payload:{command:root.payload.command,phase:'hint',callFinalized:null,consultationAddress:'10.1.2.3'}};
-  const deletion={...hint,payload:{...hint.payload,phase:'delete',callFinalized:false}};
+  const deletion={...hint,payload:{...hint.payload,phase:'delete',callFinalized:[{draftSeq:1,callSessionSeq:3,finalized:false}]}};
   for(const event of [root,hint,deletion])validateDraftDeletion(event,event.source);
   for(const bad of [{...root,source:'customer'},{...root,eventId:'invalid'},
     {...root,payload:{...root.payload,orderAddress:'127.0.0.1'}},
     {...root,payload:{...root.payload,command:{...root.payload.command,adminId:null}}},
-    {...root,payload:{...root.payload,command:{...root.payload.command,id:'1'}}},
+    {...root,payload:{...root.payload,command:{...root.payload.command,ids:'1'}}},
     {...root,payload:{...root.payload,command:{...root.payload.command,sql:'DELETE'}}},
     {...hint,payload:{...hint.payload,callFinalized:true}},
     {...deletion,payload:{...deletion.payload,phase:'commit'}},
     {...deletion,payload:{...deletion.payload,callFinalized:'false'}}])assert.throws(()=>validateDraftDeletion(bad,bad.source));
-  validateDraftDeletionResult(null,hint);validateDraftDeletionResult({callSessionSeq:null},hint);
-  validateDraftDeletionResult({callSessionSeq:1},hint);validateDraftDeletionResult(true,deletion);validateDraftDeletionResult(true,root);
-  for(const value of [true,{callSessionSeq:0},{callSessionSeq:1,finalized:true}])assert.throws(()=>validateDraftDeletionResult(value,hint));
+  const bound=[{draftSeq:1,callSessionSeq:3}];
+  validateDraftDeletionResult(null,hint);validateDraftDeletionResult([{draftSeq:1,callSessionSeq:null}],hint);
+  validateDraftDeletionResult(bound,hint);validateDraftDeletionResult(true,deletion);validateDraftDeletionResult(true,root);
+  for(const value of [true,[],{callSessionSeq:3},[{draftSeq:1,callSessionSeq:0}],[{draftSeq:2,callSessionSeq:3}],
+    [{draftSeq:1,callSessionSeq:3,finalized:true}]])assert.throws(()=>validateDraftDeletionResult(value,hint));
   for(const value of [null,false,{},'true'])assert.throws(()=>validateDraftDeletionResult(value,deletion));
+  for(const ids of [undefined,null,[],[1,1],[2,1],['1'],[0],[1.5],[2147483648],Array.from({length:101},(_,n)=>n+1)])
+    assert.throws(()=>validateDraftDeletion({...root,payload:{...root.payload,command:{...root.payload.command,ids}}},'order'));
+  const batch={...deletion,payload:{...deletion.payload,command:{...root.payload.command,ids:[1,2]},
+    callFinalized:[{draftSeq:1,callSessionSeq:3,finalized:false},{draftSeq:2,callSessionSeq:null,finalized:null}]}};
+  validateDraftDeletion(batch,'consultation');
+  for(const callFinalized of [null,false,[],batch.payload.callFinalized.slice(0,1),[...batch.payload.callFinalized].reverse(),
+    [{draftSeq:1,callSessionSeq:3,finalized:false},{draftSeq:2,callSessionSeq:null,finalized:true}]])
+    assert.throws(()=>validateDraftDeletion({...batch,payload:{...batch.payload,callFinalized}},'consultation'));
   const oldFetch=global.fetch;let mode='hint',calls=0;
   global.fetch=async(url,options)=>{
     calls++;const request=JSON.parse(options.body);
     assert.equal(options.headers.Authorization,'Bearer '+token);
+    assert.equal(options.signal,undefined,'draft deletion must retain its owner locks through commit');
     if(mode==='lock')return Response.json({error:{code:'REQUEST_IN_PROGRESS',message:'source lock timeout',details:[]}},{status:409});
-    return Response.json({eventId:mode==='wrong'?randomUUID():request.eventId,status:'processed',payload:mode==='hint'?{callSessionSeq:3}:mode==='invalid'?false:true});
+    return Response.json({eventId:mode==='wrong'?randomUUID():request.eventId,status:'processed',payload:mode==='hint'?bound:mode==='invalid'?false:true});
   };
   try {
-    assert.deepEqual(await requestDraftDeletion('http://order/private',token,hint),{callSessionSeq:3});
+    assert.deepEqual(await requestDraftDeletion('http://order/private',token,hint),bound);
     mode='delete';assert.equal(await requestDraftDeletion('http://consultation/private',token,root),true);
     for(mode of ['wrong','invalid'])await assert.rejects(requestDraftDeletion('http://order/private',token,deletion));
     mode='lock';await assert.rejects(requestDraftDeletion('http://order/private',token,deletion),error=>error instanceof OrderReadError&&error.status===409&&error.error.code==='REQUEST_IN_PROGRESS');
@@ -318,7 +342,7 @@ test('write hops await source transactions while individual reference requests k
   const {requestDraftWrite,requestWriteReference}=require('../parcel-draft-write.cjs');
   const signals=[],saved=global.fetch;
   global.fetch=async(url,options)=>{signals.push(options.signal);const input=JSON.parse(options.body);
-    return Response.json({eventId:input.eventId,status:'processed',payload:input.eventType==='ParcelDraftWriteRequested'?{data:{sealed:true},receipt:null}:null});};
+    return Response.json({eventId:input.eventId,status:'processed',payload:input.eventType==='ParcelDraftWriteRequested'?{data:{sealed:true},receipt:null}:input.payload.operation==='RecipientPinsPrepared'?[]:null});};
   try {
     const input={eventId:randomUUID(),source:'order',eventType:'ParcelDraftWriteRequested',payload:{orderAddress:null,
       command:{operation:'OrderIntakeSealed',id:1,adminId:null,callSessionSeq:1,input:{expectedIntakeVersion:1},requestId:randomUUID()}}};
@@ -326,6 +350,8 @@ test('write hops await source transactions while individual reference requests k
     assert.equal(signals[0],null);
     await requestWriteReference('http://order/private',token,{eventId:randomUUID(),source:'consultation',eventType:'ParcelDraftWriteReferenceRequested',payload:{operation:'IntakeFinalizationRead',input:{id:1}}});
     assert.ok(signals[1] instanceof AbortSignal);
+    await requestWriteReference('http://customer/private',token,{eventId:randomUUID(),source:'order',eventType:'ParcelDraftWriteReferenceRequested',payload:{operation:'RecipientPinsPrepared',input:{id:42,customerSeq:7}}},randomUUID());
+    assert.equal(signals[2],null);
   } finally {global.fetch=saved;}
 });
 
@@ -822,8 +848,35 @@ test('order creation binds customer and legacy call receipts to the original com
       await requestDraftWrite('http://consultation/private', token, input),
       result,
     );
+    const originalName = input.payload.command.input.customer.name;
+    input.payload.command.input.customer.name = '\ud800';
+    output = {
+      ...result,
+      customerCreationReceipt: {
+        ...result.customerCreationReceipt,
+        payload: {
+          ...result.customerCreationReceipt.payload,
+          customer: {
+            ...result.customerCreationReceipt.payload.customer,
+            name: '\ufffd',
+          },
+        },
+      },
+    };
+    assert.deepEqual(
+      await requestDraftWrite('http://consultation/private', token, input),
+      output,
+    );
+    input.payload.command.input.customer.name = originalName;
+    output = result;
     for (const changes of [
       { writeEventId: randomUUID() },
+      {
+        customer: {
+          ...result.customerCreationReceipt.payload.customer,
+          name: 'different customer',
+        },
+      },
       { adminId: 2 },
       { requestId: randomUUID() },
       {
@@ -863,10 +916,26 @@ test('order creation binds customer and legacy call receipts to the original com
     assert.throws(() =>
       validateLegacyCallWrite({ ...legacy, beforeCustomerSeq: 9 }),
     );
-    input.payload.command.input.call=legacy.call;
-    input.payload.command.input.outcome='INCOMPLETE';
-    input.payload.command.input.parcels=[{documentCount:1}];
-    output = { ...result,data:{result:{orderSeq:42,version:1,status:'COLLECTING',callSessionSeq:1,totalAmount:null,parcelNo:null,paymentDueAt:null,paymentRequest:null},submit:false},receipt: { eventId: randomUUID(), payload: legacy } };
+    input.payload.command.input.call = legacy.call;
+    input.payload.command.input.outcome = 'INCOMPLETE';
+    input.payload.command.input.parcels = [{ documentCount: 1 }];
+    output = {
+      ...result,
+      data: {
+        result: {
+          orderSeq: 42,
+          version: 1,
+          status: 'COLLECTING',
+          callSessionSeq: 1,
+          totalAmount: null,
+          parcelNo: null,
+          paymentDueAt: null,
+          paymentRequest: null,
+        },
+        submit: false,
+      },
+      receipt: { eventId: randomUUID(), payload: legacy },
+    };
     assert.deepEqual(
       await requestDraftWrite('http://consultation/private', token, input),
       output,
@@ -881,8 +950,19 @@ test('order creation binds customer and legacy call receipts to the original com
     await assert.rejects(
       requestDraftWrite('http://consultation/private', token, input),
     );
-    output={...output,receipt:{...output.receipt,payload:{...legacy,call:{...legacy.call,providerCallId:'another-call'}}}};
-    await assert.rejects(requestDraftWrite('http://consultation/private',token,input));
+    output = {
+      ...output,
+      receipt: {
+        ...output.receipt,
+        payload: {
+          ...legacy,
+          call: { ...legacy.call, providerCallId: 'another-call' },
+        },
+      },
+    };
+    await assert.rejects(
+      requestDraftWrite('http://consultation/private', token, input),
+    );
     const reference = {
       eventId: randomUUID(),
       source: 'order',
@@ -914,4 +994,252 @@ test('order creation binds customer and legacy call receipts to the original com
   } finally {
     global.fetch = saved;
   }
+});
+
+test('manual creation requires an administrator and keeps call-free current results and recipient receipts', async () => {
+  const {
+    validateDraftWrite,
+    requestDraftWrite,
+  } = require('../parcel-draft-write.cjs');
+  const event = {
+    eventId: randomUUID(),
+    source: 'order',
+    eventType: 'ParcelDraftWriteRequested',
+    payload: {
+      orderAddress: null,
+      command: {
+        operation: 'ManualOrderCreated',
+        id: null,
+        key: randomUUID(),
+        adminId: 1,
+        callSessionSeq: null,
+        input: { customerSeq: 7, parcels: [{}] },
+        requestId: randomUUID(),
+      },
+    },
+  };
+  validateDraftWrite(event, 'order');
+  for (const patch of [{ adminId: null }, { callSessionSeq: 1 }, { id: 42 }])
+    assert.throws(() =>
+      validateDraftWrite(
+        {
+          ...event,
+          payload: {
+            ...event.payload,
+            command: { ...event.payload.command, ...patch },
+          },
+        },
+        'order',
+      ),
+    );
+  let output = {
+    data: {
+      result: {
+        orderSeq: 42,
+        version: 1,
+        status: 'COLLECTING',
+        callSessionSeq: null,
+        totalAmount: null,
+        parcelNo: null,
+        paymentDueAt: null,
+        paymentRequest: null,
+      },
+      submit: false,
+    },
+    receipt: null,
+    customerCreationReceipt: null,
+    customerReceipt: null,
+  };
+  const saved = global.fetch;
+  global.fetch = async (url, options) => {
+    const input = JSON.parse(options.body);
+    return Response.json({
+      eventId: input.eventId,
+      status: 'processed',
+      payload: output,
+    });
+  };
+  try {
+    assert.deepEqual(
+      await requestDraftWrite('http://consultation/private', token, event),
+      output,
+    );
+    output = {
+      ...output,
+      data: { ...output.data, result: { orderSeq: 42, version: 1 } },
+    };
+    await assert.rejects(
+      requestDraftWrite('http://consultation/private', token, event),
+    );
+    output = {
+      ...output,
+      data: {
+        ...output.data,
+        result: {
+          orderSeq: 42,
+          version: 1,
+          status: 'COLLECTING',
+          callSessionSeq: 1,
+          totalAmount: null,
+          parcelNo: null,
+          paymentDueAt: null,
+          paymentRequest: null,
+        },
+      },
+    };
+    await assert.rejects(
+      requestDraftWrite('http://consultation/private', token, event),
+    );
+  } finally {
+    global.fetch = saved;
+  }
+});
+
+test('card scopes carry only routing addresses and live call identifiers', () => {
+  const { validateCardCallScope, validateCardCaller } = require('../card-call-scope.cjs');
+  for (const source of ['customer', 'consultation']) {
+    const field = source === 'customer' ? 'customerAddress' : 'consultationAddress';
+    const event = {
+      eventId: randomUUID(),
+      source,
+      eventType: 'PaymentCardCallScopeRequested',
+      payload: { [field]: null },
+    };
+    validateCardCallScope(event, source);
+    if (source === 'customer')
+      validateCardCallScope({ ...event, payload: { [field]: null, registration: true } }, source);
+    for (const registration of [false, 'true', 1])
+      assert.throws(() =>
+        validateCardCallScope({ ...event, payload: { [field]: null, registration } }, source),
+      );
+    for (const address of ['10.0.0.8', '172.16.2.3', '192.168.1.5'])
+      validateCardCallScope({ ...event, payload: { [field]: address } }, source);
+    for (const payload of [
+      {},
+      { [field]: '127.0.0.1' },
+      { [field]: '8.8.8.8' },
+      { [field]: 'http://10.0.0.8' },
+      { [field]: null, cardNumber: '4000000000000000' },
+    ])
+      assert.throws(() => validateCardCallScope({ ...event, payload }, source));
+    assert.throws(() => validateCardCallScope({ ...event, source: 'order' }, source));
+    assert.throws(() =>
+      validateCardCallScope({ ...event, eventId: '00000000-0000-0000-0000-000000000000' }, source),
+    );
+  }
+  const event = {
+    eventId: randomUUID(),
+    source: 'customer',
+    eventType: 'PaymentCardCallerRead',
+    payload: { scopeId: randomUUID(), callSessionSeq: 1 },
+  };
+  validateCardCaller(event);
+  for (const patch of [
+    { callSessionSeq: 0 },
+    { callSessionSeq: 2147483648 },
+    { callSessionSeq: '1' },
+    { scopeId: 'bad' },
+    { providerKey: 'private' },
+  ])
+    assert.throws(() => validateCardCaller({ ...event, payload: { ...event.payload, ...patch } }));
+});
+
+test('card caller transport validates acknowledgements and preserves source call errors', async (t) => {
+  const { requestCardCaller } = require('../card-call-scope.cjs');
+  const { ScopeResponseError } = require('../call-scope.cjs');
+  const event = {
+    eventId: randomUUID(),
+    source: 'customer',
+    eventType: 'PaymentCardCallerRead',
+    payload: { scopeId: randomUUID(), callSessionSeq: 1 },
+  };
+  const caller = { phone: '01012345678', customerSeq: 1, endedAt: null };
+  let result = { eventId: event.eventId, status: 'processed', payload: caller };
+  let status = 200;
+  let type = 'application/json';
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    assert.equal(url.href, 'http://consultation/internal/card-call-scope/caller');
+    assert.equal(options.signal, null);
+    assert.equal(options.redirect, 'error');
+    assert.equal(options.headers.Authorization, 'Bearer ' + token);
+    assert.equal(options.headers.Cookie, undefined);
+    assert.deepEqual(JSON.parse(options.body), event);
+    return Response.json(result, { status, headers: { 'Content-Type': type } });
+  });
+  const request = () =>
+    requestCardCaller('http://consultation/internal/card-call-scope/caller', token, event);
+  assert.deepEqual(await request(), caller);
+  for (const patch of [
+    { phone: '' },
+    { customerSeq: 0 },
+    { endedAt: '2026-01-01Z' },
+    { encryptedBillingKey: 'private' },
+  ]) {
+    result = { eventId: event.eventId, status: 'processed', payload: { ...caller, ...patch } };
+    await assert.rejects(request());
+  }
+  result = { eventId: randomUUID(), status: 'processed', payload: caller };
+  await assert.rejects(request());
+  for (const [code, failureStatus] of [
+    ['FORBIDDEN', 403],
+    ['NOT_FOUND', 404],
+    ['INVALID_STATE', 409],
+  ]) {
+    status = failureStatus;
+    result = { error: { code, message: '원본 통화 오류', details: [] } };
+    await assert.rejects(
+      request(),
+      (error) =>
+        error instanceof ScopeResponseError &&
+        error.status === failureStatus &&
+        error.error.code === code,
+    );
+  }
+  result.error.details = [{ field: 'x', reason: 'y', secret: 'private' }];
+  await assert.rejects(request(), (error) => !(error instanceof ScopeResponseError));
+  status = 401;
+  await assert.rejects(request(), (error) => !(error instanceof ScopeResponseError));
+  status = 200;
+  type = 'text/html';
+  result = { eventId: event.eventId, status: 'processed', payload: caller };
+  await assert.rejects(request());
+  for (const url of [
+    'file:///private',
+    'http://user:secret@consultation/private',
+    'http://consultation/private?token=value',
+  ])
+    await assert.rejects(requestCardCaller(url, token, event));
+});
+
+test('current order payment snapshots require both boolean card fields', () => {
+  const { orderIntakeResult } = require('../order-read.cjs');
+  const paymentRequest = {
+    paymentRequestId: randomUUID(),
+    amount: 5000,
+    expiresAt: '2099-01-01T00:00:00.000Z',
+    notificationStatus: 'PENDING',
+  };
+  const result = {
+    orderSeq: 7,
+    callSessionSeq: 3,
+    version: 1,
+    status: 'notPaid',
+    totalAmount: 5000,
+    parcelNo: null,
+    paymentDueAt: '2099-01-01T00:00:00.000Z',
+    paymentRequest,
+  };
+  const valid = (request) =>
+    orderIntakeResult({ ...result, paymentRequest: request }, { orderSeq: 7, callSessionSeq: 3 });
+  assert.equal(valid(paymentRequest), false);
+  for (const autoCharge of [false, true])
+    for (const cardPaymentFailed of [false, true])
+      assert.equal(valid({ ...paymentRequest, autoCharge, cardPaymentFailed }), true);
+  for (const fields of [
+    { autoCharge: false },
+    { autoCharge: 'false', cardPaymentFailed: false },
+    { autoCharge: false, cardPaymentFailed: null },
+    { autoCharge: true, cardPaymentFailed: false, billingKey: 'private' },
+  ])
+    assert.equal(valid({ ...paymentRequest, ...fields }), false);
 });

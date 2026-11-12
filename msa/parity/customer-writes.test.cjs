@@ -40,8 +40,9 @@ test('customer writes preserve monolith HTTP, business rows and immediately visi
     'SELECT customer_seq,name,phone_number,status,monthly_billing_enabled,address_data,deleted_at,anonymized_at FROM customers ORDER BY customer_seq',
     'SELECT organization_seq,name,status,monthly_billing_enabled,created_at,deleted_at FROM organizations ORDER BY organization_seq',
     'SELECT department_seq,organization_seq,name,group_billing_enabled,created_at,deleted_at FROM departments ORDER BY department_seq',
-    'SELECT membership_seq,customer_seq,organization_seq,department_seq,employee_no,role,status,deleted_at FROM memberships ORDER BY membership_seq',
-    'SELECT personal_pin_seq,customer_seq,label,address_data,version,deleted_at FROM personal_pins ORDER BY personal_pin_seq'];
+    'SELECT membership_seq,customer_seq,organization_seq,department_seq,employee_no,role,status,monthly_billing_enabled,group_billing_enabled,deleted_at FROM memberships ORDER BY membership_seq',
+    'SELECT personal_pin_seq,customer_seq,label,address_data,version,deleted_at FROM personal_pins ORDER BY personal_pin_seq',
+    'SELECT * FROM payment_cards ORDER BY payment_card_seq'];
   const auditSQL='SELECT audit_log_seq,actor_type,actor_seq,actor_name,action,target_type,target_seq,target_admin_name,request_id,result,metadata,occurred_at FROM audit_logs ORDER BY audit_log_seq';
   async function compareState(label){
     for(const sql of queries)assert.deepEqual(normalize((await customer.query(sql)).rows),normalize((await reference.query(sql)).rows),label+' '+sql);
@@ -55,7 +56,7 @@ test('customer writes preserve monolith HTTP, business rows and immediately visi
       const endpoint=/^\/api\/(auth|admins|audit-logs)(\/|\?|$)/.test(path)?side.auth:side.base;
       const r=await fetch(endpoint+path,{method,signal:AbortSignal.timeout(15000),redirect:'error',
         headers:{'X-Request-Id':id,Authorization:'Bearer '+process.env.AI_BUSINESS_TOKEN,...(options.noOrigin?{}:{Origin:options.origin??'http://localhost:5173'}),
-          ...(actor&&side.cookies[actor]?{Cookie:side.cookies[actor]}:{}),...(body===undefined?{}:{'Content-Type':'application/json'})},body:body===undefined?undefined:JSON.stringify(body)});
+          ...(actor&&side.cookies[actor]?{Cookie:side.cookies[actor]}:{}),...(options.key?{'Idempotency-Key':options.key}:{}),...(body===undefined?{}:{'Content-Type':'application/json'})},body:body===undefined?undefined:JSON.stringify(body)});
       assert.equal(r.status,status,method+' '+path+' '+side.base);assert.equal(r.headers.get('x-request-id'),id);
       assert.equal(r.headers.get('cache-control'),'no-store');
       const cookie=r.headers.get('set-cookie'); if(options.login){assert.match(cookie,/^dva_session=[a-f0-9]{64};/);side.cookies[options.login]=cookie.split(';')[0];}
@@ -76,13 +77,16 @@ test('customer writes preserve monolith HTTP, business rows and immediately visi
   for(const [phoneNumber,detailAddress]of [['01011110997',undefined],['01011110998','']])
     await request('POST','/api/customers',{name:'상세주소 선택',phoneNumber,address:{...address,detailAddress}},201,null);
   const ai=(await request('POST','/api/customers',person('AI 고객','01011110001'),201,null)).data.customerSeq;
+  await request('PUT','/api/customers/'+ai+'/card',{
+    cardNumber:'4000000000001234',expirationYear:2099,expirationMonth:12,customerIdentityNumber:'900101',
+  },503,'root',{key:randomUUID()});
   await request('POST','/api/customers',person('중복','01011110001'),409,null);
   await request('POST','/api/customers',{...person('권한 없음','01011110002'),monthlyBillingEnabled:true},403,null);
   await request('POST','/api/customers',{...person('관리자 고객','01011110002'),monthlyBillingEnabled:true,address},201);
   for(const body of [{name:' ',phoneNumber:'0109'},{name:'고객',phoneNumber:'invalid'},
     {...person('고객','01011110003'),status:'ACTIVE'}])await request('POST','/api/customers',body,400,null);
   const company=(await request('POST','/api/companies',{name:' 본사 ',departments:[{name:'영업',groupBillingEnabled:true},{name:'지원'}],
-    members:[{name:'이직원',phoneNumber:'01022220001',employeeNo:'0001',departmentName:'영업',address},
+    members:[{name:'이직원',phoneNumber:'01022220001',employeeNo:'0001',departmentName:'영업',address,monthlyBillingEnabled:false,groupBillingEnabled:true},
       {name:'김직원',phoneNumber:'01022220002',employeeNo:'0002',role:'ORG_ADMIN'}]},201)).data.organizationSeq;
   for(const path of [`/api/companies/${company}`,`/api/companies/${company}/departments`,`/api/companies/${company}/members`])await request('GET',path,undefined,200,'writer');
   await request('PATCH',`/api/companies/${company}`,{status:'INACTIVE'},204,'writer');
@@ -94,7 +98,7 @@ test('customer writes preserve monolith HTTP, business rows and immediately visi
   await request('PATCH',`/api/departments/${dept}`,{name:'신규 이름',groupBillingEnabled:true},204);
   for(const body of [{},{groupBillingEnabled:'true'}])await request('PATCH',`/api/departments/${dept}`,body,400);
   await request('PATCH','/api/departments/99999',{name:'없음'},404);
-  await request('POST',`/api/companies/${company}/members`,{customerSeq:ai,employeeNo:'0003',role:'MEMBER',departmentSeq:dept},204);
+  await request('POST',`/api/companies/${company}/members`,{customerSeq:ai,employeeNo:'0003',role:'MEMBER',departmentSeq:dept,monthlyBillingEnabled:false,groupBillingEnabled:true},204);
   const member=(await reference.query('SELECT membership_seq FROM memberships WHERE customer_seq=$1 AND deleted_at IS NULL',[ai])).rows[0].membership_seq;
   await request('POST',`/api/companies/${company}/members`,{customerSeq:ai,employeeNo:'duplicate-customer',role:'MEMBER'},409);
   const unmapped=(await reference.query("SELECT customer_seq FROM customers WHERE phone_number='01011110002'")).rows[0].customer_seq;
@@ -113,9 +117,180 @@ test('customer writes preserve monolith HTTP, business rows and immediately visi
   await request('PATCH','/api/companies/99999',{name:'없는 기업'},404);
   await request('PATCH','/api/companies/0',{name:'잘못된 번호'},400);
   const foreign=(await reference.query('SELECT department_seq FROM departments WHERE organization_seq=$1',[other])).rows[0].department_seq;
+  await t.test(
+    'member payment permissions preserve defaults, mixed imports and atomic administrator updates',
+    async () => {
+      const ids = (
+        await reference.query(
+          'SELECT membership_seq FROM memberships WHERE organization_seq=$1 AND deleted_at IS NULL ORDER BY membership_seq',
+          [company],
+        )
+      ).rows.map((row) => row.membership_seq);
+      assert.ok(ids.length >= 2);
+      assert.equal(
+        (
+          await customer.query(
+            'SELECT monthly_billing_enabled FROM organizations WHERE organization_seq=$1',
+            [other],
+          )
+        ).rows[0].monthly_billing_enabled,
+        true,
+      );
+      const path = '/api/companies/' + company + '/members';
+      for (const body of [
+        {},
+        { membershipSeqs: [] },
+        { membershipSeqs: [member, member] },
+        { membershipSeqs: ['1'] },
+        { membershipSeqs: [0] },
+        { membershipSeqs: [2147483648] },
+        { membershipSeqs: Array.from({ length: 101 }, (_, i) => i + 1) },
+        { membershipSeqs: [member], monthlyBillingEnabled: null },
+        { membershipSeqs: [member], groupBillingEnabled: 'true' },
+        { membershipSeqs: [member], monthlyBillingEnabled: true, unknown: true },
+        { membershipSeqs: [member] },
+      ])
+        await request('PATCH', path, body, 400);
+      const changes = {
+        membershipSeqs: [...ids].reverse(),
+        monthlyBillingEnabled: false,
+        groupBillingEnabled: true,
+      };
+      await request('PATCH', path, changes, 401, null);
+      await request('PATCH', path, changes, 403, 'root', { noOrigin: true });
+      await request('PATCH', '/api/companies/0/members', changes, 400);
+      await request('PATCH', '/api/companies/' + other + '/members', changes, 404);
+      await request('PATCH', path, { ...changes, membershipSeqs: [ids[0], 2147483647] }, 404);
+      for (const flags of [{ monthlyBillingEnabled: null }, { groupBillingEnabled: 1 }])
+        await request('PATCH', '/api/members/' + member, flags, 400);
+      await request('PATCH', path, changes, 204, 'writer');
+      await request('PATCH', '/api/members/' + member, { monthlyBillingEnabled: true }, 204);
+      const state = (
+        await customer.query(
+          'SELECT monthly_billing_enabled,group_billing_enabled FROM memberships WHERE membership_seq=$1',
+          [member],
+        )
+      ).rows[0];
+      assert.deepEqual(state, { monthly_billing_enabled: true, group_billing_enabled: true });
+      const employees = (
+        await reference.query(
+          'SELECT c.phone_number,m.employee_no FROM memberships m JOIN customers c USING(customer_seq) WHERE m.membership_seq=ANY($1::int[]) AND m.membership_seq<>$2 ORDER BY m.membership_seq',
+          [ids, member],
+        )
+      ).rows;
+      const employee = employees[0];
+      const inline = {
+        name: '결제 권한 직원',
+        phoneNumber: employee.phone_number,
+        employeeNo: employee.employee_no,
+      };
+      await request(
+        'POST',
+        path,
+        { ...inline, monthlyBillingEnabled: true, groupBillingEnabled: false },
+        204,
+      );
+      await request('POST', path, inline, 204);
+      assert.deepEqual(
+        (
+          await customer.query(
+            'SELECT monthly_billing_enabled,group_billing_enabled FROM memberships WHERE organization_seq=$1 AND employee_no=$2',
+            [company, employee.employee_no],
+          )
+        ).rows[0],
+        { monthly_billing_enabled: true, group_billing_enabled: false },
+      );
+      await request('PATCH', '/api/companies/' + company, { status: 'INACTIVE' }, 204);
+      await request('PATCH', path, { membershipSeqs: ids, groupBillingEnabled: false }, 204);
+      await request('PATCH', '/api/companies/' + company, { status: 'ACTIVE' }, 204);
+      const failing = ids.at(-1);
+      const trigger =
+        'CREATE FUNCTION reject_member_payment() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.membership_seq=' +
+        failing +
+        " AND NEW.group_billing_enabled THEN RAISE EXCEPTION 'injected member payment failure'; END IF; RETURN NEW; END $$; CREATE TRIGGER reject_member_payment BEFORE UPDATE ON memberships FOR EACH ROW EXECUTE FUNCTION reject_member_payment()";
+      for (const side of sides) await side.db.query(trigger);
+      try {
+        await request(
+          'PATCH',
+          path,
+          { membershipSeqs: [...ids].reverse(), groupBillingEnabled: true },
+          500,
+        );
+      } finally {
+        for (const side of sides)
+          await side.db.query(
+            'DROP TRIGGER reject_member_payment ON memberships; DROP FUNCTION reject_member_payment()',
+          );
+      }
+      assert.equal(
+        (
+          await customer.query(
+            'SELECT count(*)::int n FROM memberships WHERE membership_seq=ANY($1::int[]) AND group_billing_enabled',
+            [ids],
+          )
+        ).rows[0].n,
+        0,
+      );
+      await request('PATCH', path, { membershipSeqs: ids, monthlyBillingEnabled: true }, 204);
+      await request('GET', path, undefined, 200, 'writer');
+      const registrationKey = randomUUID(),
+        providerKey = randomUUID();
+      for (const side of sides)
+        await side.db.query(
+          "INSERT INTO payment_cards(organization_seq,registration_key,request_hash,provider_customer_key,provider_environment,encrypted_billing_key,masked_number,expiration_year,expiration_month,status) VALUES($1,$2,'fixture-hash',$3,'test','fixture-ciphertext','1234',2099,12,'ACTIVE')",
+          [company, registrationKey, providerKey],
+        );
+      try {
+        for (const [monthly, group, expirationYear, deleted, expected] of [
+          [true, true, 2099, false, ['billing', 'credit', 'groupBilling']],
+          [false, true, 2099, false, ['billing', 'groupBilling']],
+          [true, false, 2099, false, ['billing', 'credit']],
+          [true, true, 2000, false, ['billing', 'credit']],
+          [true, true, 2099, true, ['billing', 'credit']],
+        ]) {
+          await request(
+            'PATCH',
+            path,
+            {
+              membershipSeqs: [member],
+              monthlyBillingEnabled: monthly,
+              groupBillingEnabled: group,
+            },
+            204,
+          );
+          for (const side of sides)
+            await side.db.query(
+              'UPDATE payment_cards SET expiration_year=$2,deleted_at=CASE WHEN $3 THEN clock_timestamp() ELSE NULL END WHERE registration_key=$1',
+              [registrationKey, expirationYear, deleted],
+            );
+          const context = await request(
+            'POST',
+            '/api/customers/context',
+            { phoneNumber: '01011110001' },
+            200,
+            null,
+          );
+          assert.deepEqual(context.data.availablePaymentMethods, expected);
+          assert.equal(
+            context.data.organization.groupCardRegistered,
+            !deleted && expirationYear === 2099,
+          );
+          assert.equal(context.data.membership.monthlyBillingEnabled, monthly);
+          assert.equal(context.data.membership.groupBillingEnabled, group);
+          await request('GET', '/api/customers?limit=100', undefined, 200, 'writer');
+          await request('GET', '/api/companies/' + company, undefined, 200, 'writer');
+        }
+      } finally {
+        for (const side of sides)
+          await side.db.query('DELETE FROM payment_cards WHERE registration_key=$1', [
+            registrationKey,
+          ]);
+      }
+    },
+  );
   await request('PATCH',`/api/members/${member}`,{departmentSeq:foreign},422);
-  await request('DELETE',`/api/members/${member}`,undefined,204);
-  await request('DELETE',`/api/members/${member}`,undefined,404);
+  await request('DELETE','/api/members',{membershipSeqs:[member]},204);
+  await request('DELETE','/api/members',{membershipSeqs:[member]},404);
   await request('POST',`/api/companies/${company}/members`,{customerSeq:ai,employeeNo:'0003',role:'MEMBER',departmentSeq:dept},204);
   const pinAddress={...address,name:'수신자',phoneNumber:'01011110001'};
   assert.equal((await reference.query("SELECT to_regclass('company_pins') IS NULL AS retired")).rows[0].retired,true);
@@ -126,9 +301,11 @@ test('customer writes preserve monolith HTTP, business rows and immediately visi
   }
   await request('PATCH',`/api/departments/${dept}`,{name:'배송 부서'},204);
   assert.deepEqual((await customer.query('SELECT * FROM company_pins ORDER BY company_pin_seq')).rows,legacyPins);
-  await request('DELETE',`/api/departments/${dept}`,undefined,204);
-  await request('DELETE',`/api/departments/${dept}`,undefined,404);
-  await request('DELETE',`/api/companies/${company}`,undefined,204);
+  await request('DELETE','/api/departments',{departmentSeqs:[dept]},204);
+  await request('DELETE','/api/departments',{departmentSeqs:[dept]},404);
+  await request('DELETE','/api/companies',{organizationSeqs:[company]},204);
+  for(const path of [`/api/members/${member}`,`/api/departments/${dept}`,`/api/companies/${company}`])
+    await request('DELETE',path,undefined,404);
   await request('GET',`/api/companies/${company}`,undefined,404);
   assert.deepEqual((await customer.query('SELECT * FROM company_pins ORDER BY company_pin_seq')).rows,legacyPins);
   assert.equal((await customer.query('SELECT count(*)::int AS n FROM personal_pins WHERE customer_seq=$1',[ai])).rows[0].n,1);
@@ -137,7 +314,63 @@ test('customer writes preserve monolith HTTP, business rows and immediately visi
   assert.equal((await customer.query("SELECT count(*)::int AS n FROM organizations WHERE name='전체 rollback'")).rows[0].n,0);
   const bulkIds=[];
   const companies=[];
-  for(const [name,phoneNumber] of [['다건 기업 A','01055551001'],['다건 기업 B','01055551002']])companies.push((await request('POST','/api/companies',{name,departments:[{name:'삭제 부서'}],members:[{name,phoneNumber,employeeNo:name,departmentName:'삭제 부서'}]},201)).data.organizationSeq);
+  for(const [name,phoneNumber] of [['다건 기업 A','01055551001'],['다건 기업 B','01055551002']])companies.push((await request('POST','/api/companies',{name,
+    departments:[{name:'삭제 부서'},{name:'일괄 부서'}],members:[{name,phoneNumber,employeeNo:name,departmentName:'삭제 부서'},
+      {name:name+' 별도',phoneNumber:phoneNumber.slice(0,-1)+(Number(phoneNumber.at(-1))+3),employeeNo:name+'-2',departmentName:'일괄 부서'}]},201)).data.organizationSeq);
+  const memberDeleteIds=(await reference.query(`SELECT m.membership_seq id FROM memberships m
+    JOIN departments d USING(department_seq) WHERE m.organization_seq=ANY($1::int[])
+    AND d.name='삭제 부서' ORDER BY m.membership_seq`,[companies])).rows.map(row=>row.id);
+  const departmentDeleteIds=(await reference.query(`SELECT department_seq id FROM departments
+    WHERE organization_seq=ANY($1::int[]) AND name='일괄 부서' ORDER BY department_seq`,[companies])).rows.map(row=>row.id);
+  for(const [path,key,ids,table,column,action,targetType] of [
+    ['/api/members','membershipSeqs',memberDeleteIds,'memberships','membership_seq','MEMBERSHIP_REMOVED','MEMBERSHIP'],
+    ['/api/departments','departmentSeqs',departmentDeleteIds,'departments','department_seq','DEPARTMENT_DELETED','DEPARTMENT'],
+  ]) {
+    assert.equal(ids.length,2);
+    for(const input of [{},{[key]:[]},{[key]:[ids[0],ids[0]]},{[key]:['1']},{[key]:[0]},{[key]:ids,extra:true}])
+      await request('DELETE',path,input,400);
+    await request('DELETE',path,{[key]:ids},401,null);
+    const state=async()=>{
+      const rows=[];
+      for(const sql of queries)rows.push(normalize((await reference.query(sql)).rows));
+      rows.push((await reference.query("SELECT action,target_seq,request_id FROM audit_logs WHERE result='SUCCESS' ORDER BY audit_log_seq")).rows);
+      return rows;
+    };
+    const before=await state();
+    await request('DELETE',path,{[key]:[ids[0],2147483647]},404);
+    assert.deepEqual(await state(),before);
+    for(const db of [reference,operations])await db.query(`CREATE FUNCTION reject_second_deletion_audit() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN IF NEW.action='${action}' AND NEW.target_type='${targetType}' AND NEW.target_seq=${ids[1]}
+      AND NEW.result='SUCCESS' THEN RAISE EXCEPTION 'private second deletion audit failure'; END IF; RETURN NEW; END $$;
+      CREATE TRIGGER reject_second_deletion_audit BEFORE INSERT ON audit_logs FOR EACH ROW EXECUTE FUNCTION reject_second_deletion_audit()`);
+    try {
+      await request('DELETE',path,{[key]:[...ids].reverse()},500);
+      assert.deepEqual(await state(),before);
+    } finally {
+      for(const db of [reference,operations])await db.query('DROP TRIGGER reject_second_deletion_audit ON audit_logs; DROP FUNCTION reject_second_deletion_audit()');
+    }
+    await request('DELETE',path,{[key]:[...ids].reverse()},204,'writer');
+    assert.equal((await reference.query(`SELECT count(*)::int n FROM ${table} WHERE ${column}=ANY($1::int[]) AND deleted_at IS NOT NULL`,[ids])).rows[0].n,2);
+    const audits=(await reference.query(`SELECT target_seq,request_id FROM audit_logs
+      WHERE action=$1 AND target_type=$2 AND target_seq=ANY($3::int[]) AND result='SUCCESS' ORDER BY audit_log_seq`,[action,targetType,ids])).rows;
+    assert.deepEqual(audits.map(row=>row.target_seq),ids);
+    assert.equal(new Set(audits.map(row=>row.request_id)).size,1);
+    if(table==='departments')assert.equal((await reference.query(`SELECT count(*)::int n FROM memberships
+      WHERE department_seq=ANY($1::int[]) AND deleted_at IS NULL`,[ids])).rows[0].n,0);
+    await request('DELETE',path,{[key]:ids},404);
+  }
+  async function seedDeletionCards(kind, ids) {
+    for (const id of ids) for (const status of ['ACTIVE','REGISTERING','FAILED']) {
+      const registrationKey=randomUUID(),providerKey=randomUUID();
+      for (const side of sides) await side.db.query(
+        'INSERT INTO payment_cards(customer_seq,organization_seq,registration_key,request_hash,provider_customer_key,provider_environment,encrypted_billing_key,masked_number,expiration_year,expiration_month,status,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,2099,12,$9,$10,$10)',
+        [kind==='CUSTOMER'?id:null,kind==='ORGANIZATION'?id:null,registrationKey,'fixed-card-delete',providerKey,
+          'test',status==='ACTIVE'?'fixture-ciphertext':null,status==='ACTIVE'?'************1234':null,
+          status,'2025-01-01Z']);
+    }
+  }
+
+  await seedDeletionCards('ORGANIZATION',companies);
   const pinIds=[];
   for(const side of sides){const rows=(await side.db.query("INSERT INTO personal_pins(customer_seq,label,address_data) SELECT customer_seq,'다건 PIN', $1::jsonb FROM customers WHERE deleted_at IS NULL ORDER BY customer_seq DESC LIMIT 2 RETURNING personal_pin_seq",[pinAddress])).rows;if(side===sides[0])pinIds.push(...rows.map(r=>r.personal_pin_seq));}
   for(const [path,key,ids] of [['/api/companies','organizationSeqs',companies],['/api/pins','personalPinSeqs',pinIds]]){
@@ -151,6 +384,7 @@ test('customer writes preserve monolith HTTP, business rows and immediately visi
   }
   for(const [name,phone] of [['삭제 A','01055550001'],['삭제 B','01055550002']])
     bulkIds.push((await request('POST','/api/customers',person(name,phone),201)).data.customerSeq);
+  await seedDeletionCards('CUSTOMER',bulkIds);
   for(const side of sides){
     await side.db.query('INSERT INTO personal_pins(customer_seq,label,address_data) VALUES($1,$2,$3)',[bulkIds[0],'다건 삭제 PIN',pinAddress]);
     await side.db.query('INSERT INTO memberships(customer_seq,organization_seq,department_seq,employee_no,role,status) VALUES($1,$2,$3,$4,$5,$6)',[bulkIds[0],other,foreign,'bulk-customer-delete','MEMBER','ACTIVE']);
@@ -166,6 +400,7 @@ test('customer writes preserve monolith HTTP, business rows and immediately visi
   assert.equal((await customer.query('SELECT count(*)::int n FROM memberships WHERE customer_seq=$1 AND deleted_at IS NOT NULL',[bulkIds[0]])).rows[0].n,1);
   await request('DELETE','/api/customers',{customerSeqs:bulkIds},404);
   const auditVictim=(await request('POST','/api/customers',person('삭제 감사 롤백','01055550003'),201)).data.customerSeq;
+  await seedDeletionCards('CUSTOMER',[auditVictim]);
   const trigger=`CREATE FUNCTION reject_customer_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.action IN ('CUSTOMER_CREATED','CUSTOMER_DELETED') AND NEW.result='SUCCESS' THEN RAISE EXCEPTION 'injected audit failure'; END IF; RETURN NEW; END $$;
     CREATE TRIGGER reject_customer_audit BEFORE INSERT ON audit_logs FOR EACH ROW EXECUTE FUNCTION reject_customer_audit()`;
   for(const db of [reference,operations])await db.query(trigger);
@@ -186,8 +421,8 @@ test('customer writes preserve monolith HTTP, business rows and immediately visi
       assert.deepEqual(documents[1].components.schemas[name],documents[0].components.schemas[name],name+' write schema');schemas(documents[0].components.schemas[name]);
     }for(const child of Object.values(value))schemas(child);}
   for(const [path,methods] of Object.entries({'/api/customers':['post','delete'],'/api/companies':['post','delete'],'/api/pins':['delete'],
-    '/api/companies/{id}':['patch','delete'],'/api/companies/{id}/members':['post'],'/api/companies/{id}/departments':['post'],
-    '/api/members/{id}':['patch','delete'],'/api/departments/{id}':['patch','delete']}))for(const method of methods){
+    '/api/companies/{id}':['patch'],'/api/companies/{id}/members':['post','patch'],'/api/companies/{id}/departments':['post'],
+    '/api/members/{id}':['patch'],'/api/departments/{id}':['patch'],'/api/members':['delete'],'/api/departments':['delete']}))for(const method of methods){
     assert.deepEqual(documents[1].paths[path][method],documents[0].paths[path][method],method+' '+path+' OpenAPI');schemas(documents[0].paths[path][method]);}
   t.diagnostic(`${compared} identical write/read/auth requests compared with business and audit data after each response`);
 

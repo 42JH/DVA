@@ -1,3 +1,19 @@
+import { Body, Res, ParseUUIDPipe } from '@nestjs/common';
+import type { Response } from 'express';
+import { CreateManualOrderDto, ManualOrderResultDto } from './dto/manual-order.dto';
+import { OrderRequestKey } from './order-request-key';
+import { ApiException } from '../common/errors/api.exception';
+import {
+  ApiHeader,
+  ApiBody,
+  ApiCreatedResponse,
+  ApiAcceptedResponse,
+  ApiForbiddenResponse,
+  ApiNotFoundResponse,
+  ApiConflictResponse,
+  ApiUnprocessableEntityResponse,
+  ApiServiceUnavailableResponse,
+} from '@nestjs/swagger';
 import { Controller, Get, HttpCode, Param, Post, Query, Req } from '@nestjs/common';
 import {
   ApiTags,
@@ -19,9 +35,10 @@ import { ErrorResponseDto, RequestMetaDto } from '../common/dto/api-response.dto
 import { AdminOrderListQueryDto, AdminOrderListResponseDto } from './dto/admin-order-list.dto';
 import { OrdersService } from './orders.service';
 
+@ApiExtraModels(CreateManualOrderDto, ManualOrderResultDto, RequestMetaDto)
 @ApiTags('Admin Orders')
 @ApiCookieAuth('adminSession')
-@Roles('OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN')
+@Roles('OPERATOR', 'SYSTEM_ADMIN')
 @Controller('admin/orders')
 export class AdminOrdersController {
   constructor(
@@ -45,6 +62,96 @@ export class AdminOrdersController {
     return this.orders.adminList(query);
   }
 
+  @Post()
+  @AuditOperation({ action: 'ORDER_CREATED', targetType: 'ORDER', target: 'none' })
+  @ApiOperation({
+    summary: '관리자 수기 주문 접수',
+    description:
+      '활성 관리자 세션과 허용 Origin 필수. 완성된 주문을 검증·저장합니다. 개인 카드는 결제를 대기하고 월·그룹결제는 즉시 결제 완료 후 디버에 접수합니다. 통화 정보·outcome은 받지 않습니다. ACCEPTED만 접수 성공이며 실패 주문은 관리자 재접수 API를 사용합니다. 같은 UUID는 최초 생성자에게 현재 결과만 반환합니다.',
+  })
+  @ApiHeader({
+    name: 'Idempotency-Key',
+    required: true,
+    schema: { type: 'string', format: 'uuid' },
+    description:
+      '주문 의도별 UUID. 전송 전에 보관하고 재시도에도 같은 키 사용. 본문 재적용·디버 재전송 없음.',
+  })
+  @ApiBody({
+    schema: {
+      allOf: [{ $ref: getSchemaPath(CreateManualOrderDto) }],
+      oneOf: [{ required: ['customerSeq'] }, { required: ['customer'] }],
+    },
+    description:
+      'customerSeq 또는 customer 중 하나와 완성된 택배 상세. 요청 수거 시각은 그 시각까지 결제하면 유지하며, 이후 결제 또는 생략 시 결제 완료 + 1시간을 한국시간 09:00~17:00으로 조정합니다. totalAmount와 각 parcels[].notifiedPrice를 전달하며 미취소 상세 합계를 검증합니다.',
+  })
+  @ApiCreatedResponse({
+    description: '현재 접수 결과. HTTP 201만으로 성공을 판단하지 않습니다.',
+    schema: {
+      type: 'object',
+      required: ['data', 'meta'],
+      properties: {
+        data: { $ref: getSchemaPath(ManualOrderResultDto) },
+        meta: { $ref: getSchemaPath(RequestMetaDto) },
+      },
+    },
+  })
+  @ApiAcceptedResponse({
+    description: 'SUBMITTING: 처리 중 또는 결과 저장 미확정. 같은 키로 재확인.',
+    schema: {
+      type: 'object',
+      properties: {
+        data: { $ref: getSchemaPath(ManualOrderResultDto) },
+        meta: { $ref: getSchemaPath(RequestMetaDto) },
+      },
+    },
+  })
+  @ApiBadRequestResponse({
+    description: '키·본문 형식 오류, 추가 필드 또는 통화 헤더 전달.',
+    type: ErrorResponseDto,
+  })
+  @ApiUnauthorizedResponse({
+    description: '관리자 로그인 세션 없음·만료·비활성 계정.',
+    type: ErrorResponseDto,
+  })
+  @ApiForbiddenResponse({
+    description: 'Origin·권한·고객/PIN/결제 자격 또는 요청 키 소유자 불일치.',
+    type: ErrorResponseDto,
+  })
+  @ApiNotFoundResponse({ description: '고객 없음.', type: ErrorResponseDto })
+  @ApiConflictResponse({
+    description: '중복 요청 처리 중, 고객 상태 충돌 또는 수기 주문이 아닌 요청 키.',
+    type: ErrorResponseDto,
+  })
+  @ApiUnprocessableEntityResponse({
+    description: '완성 주문의 필수 주소·물품 미충족. 저장·외부 호출 없음.',
+    type: ErrorResponseDto,
+  })
+  @ApiServiceUnavailableResponse({
+    description: '디버 접수 설정 누락. 저장·외부 호출 없음.',
+    type: ErrorResponseDto,
+  })
+  async create(
+    @Req() request: AuthRequest,
+    @Res({ passthrough: true }) response: Response,
+    @OrderRequestKey(new ParseUUIDPipe()) key: string,
+    @Body() input: CreateManualOrderDto,
+  ) {
+    if (request.get('call_session_seq') !== undefined)
+      throw new ApiException(
+        400,
+        'INVALID_REQUEST',
+        '수기 주문에는 통화 헤더를 전달하지 않습니다.',
+      );
+    const result = await this.orders.createManual(
+      request.admin.adminUserSeq,
+      key.toLowerCase(),
+      input,
+      request.requestId,
+    );
+    response.location(`/api/orders/${result.orderSeq}`);
+    if (result.status === 'SUBMITTING') response.status(202);
+    return result;
+  }
   @Post(':id/retry')
   @HttpCode(200)
   @AuditOperation({ action: 'ORDER_RESUBMISSION_STARTED', targetType: 'ORDER', target: 'id' })

@@ -142,6 +142,39 @@ test('production analysis and metrics match the unchanged monolith and preserve 
     isNewCustomer:null,hasCallbackRequest:null}),204);
   await post(fallback.id,'response-wait-metrics',wait(fallback.provider,{totalWaitMs:180001}),422);
   await post(fallback.id,'response-wait-metrics',wait(fallback.provider,{totalWaitMs:0,latencyStats:[]}),204);
+  await t.test('historical and late call analyses retain publicly deleted persona version references',async()=>{
+    const versionSeq=9200999,ids=[];
+    for(const side of sides){
+      const persona=(await side.identity.query("INSERT INTO ai_personas(code) VALUES('analysis-deleted') RETURNING ai_persona_seq")).rows[0].ai_persona_seq;
+      ids.push(persona);
+      await side.identity.query(`INSERT INTO ai_persona_versions(ai_persona_version_seq,ai_persona_seq,version,prompt_text,name,turn_wait_level)
+        OVERRIDING SYSTEM VALUE VALUES($1,$2,1,'보존 원문','삭제된 실제 버전','NORMAL')`,[versionSeq,persona]);
+    }
+    assert.equal(ids[1],ids[0]);
+    const historical=await call(),late=await call();
+    await post(historical.id,'analysis',body(historical.provider,{aiPersonaVersionSeq:versionSeq}),204);
+    const requestId=randomUUID();requestIds.add(requestId);
+    for(const side of sides){
+      await side.identity.query("UPDATE admin_users SET role='SYSTEM_ADMIN' WHERE admin_user_seq=$1",[side.adminId]);
+      try{
+        const response=await fetch((side===sides[0]?side.base:'http://operations-app:3005')+'/api/personas',{
+          method:'DELETE',headers:{Cookie:cookie,Origin:origin,'Content-Type':'application/json','X-Request-Id':requestId},
+          body:JSON.stringify({aiPersonaSeqs:[ids[0]]})});
+        assert.equal(response.status,204,await response.text());
+      }finally{await side.identity.query("UPDATE admin_users SET role='OPERATOR' WHERE admin_user_seq=$1",[side.adminId]);}
+      const version=(await side.identity.query('SELECT status,deleted_at FROM ai_persona_versions WHERE ai_persona_version_seq=$1',[versionSeq])).rows[0];
+      assert.equal(version.status,'INACTIVE');assert.ok(version.deleted_at instanceof Date);normalize(version.deleted_at);
+    }
+    await post(late.id,'analysis',body(late.provider,{aiPersonaVersionSeq:versionSeq}),204);
+    for(const id of [historical.id,late.id])for(const side of sides){
+      const response=await fetch(`${side.base}/api/calls/${id}`,{headers:{Cookie:cookie}});
+      assert.equal(response.status,200,await response.clone().text());
+      const detail=(await response.json()).data;
+      assert.equal(detail.analysis.aiPersonaVersionSeq,versionSeq);
+      assert.equal(detail.analysis.personaName,'삭제된 실제 버전');assert.equal(detail.analysis.personaVersion,1);
+    }
+    await compare();
+  });
   for(const extra of [{incoming:'2020-01-01T00:00:00Z'},{deleted:'2026-11-01T02:00:00Z'}]){
     const hidden=await call(extra);
     for(const [section,input]of[['analysis',body(hidden.provider)],['analysis/failure',{providerCallId:hidden.provider}],['stage-metrics',stage(hidden.provider)],['response-wait-metrics',wait(hidden.provider)]])

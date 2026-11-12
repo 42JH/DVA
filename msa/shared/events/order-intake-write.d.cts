@@ -16,6 +16,7 @@ export interface PaymentPolicy {
   organizationName: string | null;
   departmentName: string | null;
 }
+export type BillingSnapshot = Pick<PaymentPolicy, 'organizationSeq' | 'departmentSeq' | 'organizationName' | 'departmentName'>;
 export interface IntakeFinalization {
   eventId: string;
   callSessionSeq: number;

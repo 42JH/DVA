@@ -1,5 +1,6 @@
 """Compare unchanged PBX/worker tests and production PBX/SSE on isolated Docker DBs."""
 import json
+import re
 from pathlib import Path
 import subprocess
 import time
@@ -133,8 +134,18 @@ def main():
                        '-e', 'AI_BUSINESS_TOKEN='+password, '-e', 'AI_INSIGHTS_TOKEN='+pbx, '-e', 'AI_AGENT_URL=http://ai.invalid:8000', '-e', 'S3_RECORDINGS_BUCKET=',
                        '-e', 'CUSTOMER_URL=http://customer-app:3001', '-e', 'OPERATIONS_URL=http://operations-app:3005', '-e', 'CONSULTATION_AUTH_TOKEN='+token,
                        '-e', 'CUSTOMER_AUTH_TOKEN='+password, '-e', 'CONSULTATION_URL=http://consultation-app:3004',
-                       '-e', 'ORDER_URL=http://order-app:3002', '-e', 'DELIVERY_URL=http://delivery-app:3003', '-e', 'PBX_WEBHOOK_TOKEN='+pbx)
+                       '-e', 'ORDER_URL=http://order-app:3002', '-e', 'DELIVERY_URL=http://delivery-app:3003', '-e', 'PBX_WEBHOOK_TOKEN='+pbx,
+                       *(['-e','TOSS_BILLING_SECRET_KEY=test_sk_card_parity','-e','PAYMENT_CARD_ENCRYPTION_KEY='+'01'*32,
+                          '-e','PAYMENT_TOSS_BASE_URL=http://127.0.0.1:8000'] if environment=='test' and side in ('monolith','customer') else []))
                 run('docker', 'start', name, label=side+'-app-start')
+                if environment=='test' and side in ('monolith','customer'):
+                    peer=RUN+'-'+side+'-card-peer'
+                    create(peer,images[side],'-e','NODE_ENV=test','-e','FINAL_SERVICE_TOKEN='+password,
+                           '-e','FINAL_TOSS_BILLING_SECRET_KEY=test_sk_card_parity',
+                           command=('node','/tmp/final-peer.cjs'),network='container:'+name)
+                    run('docker','cp',str(ROOT/'msa/parity/final-peer.cjs'),peer+':/tmp/final-peer.cjs',label=side+'-card-peer-copy')
+                    run('docker','start',peer,label=side+'-card-peer-start')
+                    run('docker','exec',peer,'node','-e',"(async()=>{for(let n=0;n<100;n++){try{if((await fetch('http://127.0.0.1:8000/health')).ok)return;}catch{}await new Promise(r=>setTimeout(r,100));}throw Error('card fixture unavailable')})().catch(()=>process.exit(1))",label=side+'-card-peer-ready')
                 if side == 'consultation':
                     run('docker', 'exec', name, 'node', '-e', "(async()=>{for(let i=0;i<100;i++){try{if((await fetch('http://127.0.0.1:3004/consultation/health')).ok)return;}catch{}await new Promise(r=>setTimeout(r,100));}throw Error('consultation startup unavailable')})().catch(()=>process.exit(1))", label='consultation-startup-'+environment)
         start_apps('production')
@@ -148,7 +159,13 @@ def main():
                '-e', 'ORDER_URL=http://order-app:3002', '-e', 'CONSULTATION_AUTH_TOKEN='+token, '-e', 'CUSTOMER_AUTH_TOKEN='+password,
                network='container:'+RUN+'-consultation-db',
                command=('node', '--require', './test/analysis-environment-fixture.cjs', '--test', 'test/complaint-judge.integration.test.cjs'))
-        run('docker', 'cp', str(ROOT/'backend/test/complaint-judge.integration.test.cjs'),
+        source = (ROOT/'backend/test/complaint-judge.integration.test.cjs').read_text(encoding='utf-8')
+        source, count = re.subn(r'await f\.pool\.query\((\s*"SELECT [^"\n]*FROM audit_logs[^"\n]*")',
+                                r'await f.audit.query(\1', source)
+        assert count == 4, 'Source complaint audit ownership queries changed'
+        fixture = LOGS/'complaint-judge.integration.test.cjs'
+        fixture.write_text(source, encoding='utf-8')
+        run('docker', 'cp', str(fixture),
             name+':/app/service/test/complaint-judge.integration.test.cjs', label='complaint-integration-copy')
         run('docker', 'cp', str(ROOT/'msa/services/consultation/test/helpers/application.cjs'),
             name+':/app/service/test/helpers/application.cjs', label='complaint-fixture-copy')

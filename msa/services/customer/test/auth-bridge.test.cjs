@@ -66,8 +66,11 @@ test('uses current operations identity on every request and excludes extra sensi
   assert.equal(first.role, 'OPERATOR');
   assert.equal(first.passwordHash, undefined);
   assert.ok(first.createdAt instanceof Date);
+  admin.role = 'SYSTEM_ADMIN';
+  assert.equal((await client.authenticate(token)).role, 'SYSTEM_ADMIN');
   admin.role = 'SUPERVISOR';
-  assert.equal((await client.authenticate(token)).role, 'SUPERVISOR');
+  await assert.rejects(client.authenticate(token), rejects(500));
+  admin.role = 'OPERATOR';
   mode = 401;
   await assert.rejects(client.authenticate(token), rejects(401));
 });

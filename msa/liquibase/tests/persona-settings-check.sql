@@ -43,5 +43,13 @@ BEGIN
   OR (SELECT created_by_admin_user_name FROM ai_persona_versions WHERE ai_persona_version_seq=first_version)<>'삭제 후 보존할 작성자'
   OR (SELECT previous_active_version_seq FROM ai_persona_versions WHERE ai_persona_version_seq=second_version)<>first_version THEN
   RAISE EXCEPTION 'Draft, logical author or previous active was lost'; END IF;
+ BEGIN
+  UPDATE ai_persona_versions SET deleted_at=transaction_timestamp() WHERE ai_persona_version_seq=second_version;
+  RAISE EXCEPTION 'Deleted ACTIVE persona version was accepted';
+ EXCEPTION WHEN check_violation THEN NULL; END;
+ UPDATE ai_persona_versions SET deleted_at=transaction_timestamp() WHERE ai_persona_version_seq=first_version;
+ IF (SELECT previous_active_version_seq FROM ai_persona_versions WHERE ai_persona_version_seq=second_version)<>first_version
+  OR NOT EXISTS(SELECT 1 FROM ai_persona_versions WHERE ai_persona_version_seq=first_version AND deleted_at IS NOT NULL) THEN
+  RAISE EXCEPTION 'Soft deletion lost immutable version history'; END IF;
 END $$;
 ROLLBACK;

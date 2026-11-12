@@ -8,7 +8,7 @@ import { OrganizationSummaryDto } from './dto/organization-response.dto';
 import { CompanyDirectoryEntryDto, CompanyDirectoryQueryDto } from './dto/company-directory.dto';
 
 const summaryColumns = `o.organization_seq AS "organizationSeq",o.name,o.status,
-  o.monthly_billing_enabled AS "monthlyBillingEnabled",o.created_at AS "createdAt",
+  o.monthly_billing_enabled AS "monthlyBillingEnabled",EXISTS(SELECT 1 FROM payment_cards pc WHERE pc.organization_seq=o.organization_seq AND pc.status='ACTIVE' AND pc.deleted_at IS NULL AND pc.expiration_year*12+pc.expiration_month>=extract(year FROM clock_timestamp() AT TIME ZONE 'Asia/Seoul')*12+extract(month FROM clock_timestamp() AT TIME ZONE 'Asia/Seoul')) AS "groupCardRegistered",o.created_at AS "createdAt",
   (SELECT count(*)::integer FROM memberships m
    WHERE m.organization_seq=o.organization_seq AND m.status='ACTIVE' AND m.deleted_at IS NULL) AS "memberCount"`;
 
@@ -72,7 +72,7 @@ export class OrganizationsRepository {
     return result.rowCount === 1;
   }
 
-  async insert(client: PoolClient, name: string, monthlyBillingEnabled = false): Promise<number> {
+  async insert(client: PoolClient, name: string, monthlyBillingEnabled = true): Promise<number> {
     const result = await client.query<{ organizationSeq: number }>(
       `INSERT INTO organizations (name, status,monthly_billing_enabled) VALUES ($1, 'ACTIVE',$2)
        RETURNING organization_seq AS "organizationSeq"`,

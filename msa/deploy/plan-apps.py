@@ -164,7 +164,7 @@ def main():
         baseline = origins[suite]['commit']
         if suite in parity_suites(baseline, verification(baseline, [])):
             suites.append(suite)
-    db = changed(origins['database']['commit'], DB_PATHS)
+    db = ci_verification.database_changed(origins['database']['commit'], Path.cwd())
     events = changed(origins['events']['commit'], ci_verification.EVENT_PATHS)
     deployment_ci = changed(origins['deployment']['commit'], ci_verification.DEPLOY_PATHS)
     (out / "services.txt").write_text("".join(s + "\n" for s in services))

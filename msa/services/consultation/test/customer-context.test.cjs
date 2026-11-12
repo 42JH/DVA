@@ -35,6 +35,36 @@ test('preserves the unpaginated personal PIN contract instead of truncating the 
 });
 test('validates nullable logical customer references separately from hidden public context',async()=>{
  mode='reference';assert.equal(await client.callCustomer('01012345678'),12);mode='context';assert.equal(await client.callCustomer('01012345678'),null);
+  const registered = {
+    ...empty,
+    lookupStatus: 'REGISTERED',
+    customer: {
+      customerSeq: 1, name: 'registered', phoneNumber: '01012345678',
+      status: 'ACTIVE', monthlyBillingEnabled: false, address: null,
+    },
+    membership: {
+      membershipSeq: 1, customerSeq: 1, organizationSeq: 1, departmentSeq: null,
+      employeeNo: '001', role: 'MEMBER', status: 'ACTIVE',
+      monthlyBillingEnabled: true, groupBillingEnabled: false,
+    },
+    organization: {
+      organizationSeq: 1, name: 'company', status: 'ACTIVE',
+      monthlyBillingEnabled: true, groupCardRegistered: false,
+    },
+  };
+  assert.deepEqual(contextResponse(registered), registered);
+  for (const field of ['monthlyBillingEnabled', 'groupBillingEnabled']) {
+    for (const value of [undefined, null, 'true', 1]) {
+      assert.throws(() => contextResponse({
+        ...registered, membership: { ...registered.membership, [field]: value },
+      }));
+    }
+  }
+  for (const value of [undefined, null, 'false', 0]) {
+    assert.throws(() => contextResponse({
+      ...registered, organization: { ...registered.organization, groupCardRegistered: value },
+    }));
+  }
 });
 test('rejects dependency errors, redirects and malformed response envelopes or context shapes',async()=>{
  for(mode of [503,'redirect','html','json','wrong-id','invalid','extra'])await assert.rejects(client.context('01012345678'));

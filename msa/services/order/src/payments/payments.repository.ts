@@ -1,9 +1,13 @@
-import type { PaymentPolicy } from '@dva/events/order-intake-write.cjs';
+import type { PaymentPolicy, BillingSnapshot } from '@dva/events/order-intake-write.cjs';
 import type { PoolClient } from 'pg';
 import { Injectable } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
 import { ApiException } from '../common/errors/api.exception';
+import { AuditService } from '../audit/audit.service';
+import { randomUUID } from 'node:crypto';
 export interface PaymentView {
+  autoCharge: boolean;
+  cardPaymentFailed: boolean;
   token: string;
   orderId: string;
   orderSeq: number;
@@ -30,6 +34,9 @@ export interface PaymentNoticeView extends PaymentView {
   parcels: PaymentNoticeParcel[];
 }
 export interface PaymentRequest {
+  paymentCardSeq: number | null;
+  cardPaymentOrderId: string;
+  cardPaymentFailed: boolean;
   paymentRequestId: string;
   orderSeq: number;
   amount: number;
@@ -47,11 +54,47 @@ export interface PaymentRequest {
 
 @Injectable()
 export class PaymentsRepository {
-  constructor(private readonly database: DatabaseService) {}
+  constructor(
+    private readonly database: DatabaseService,
+    private readonly audit: AuditService,
+  ) {}
+  async paymentOrderId(id: string): Promise<number | null> {
+    return (
+      (
+        await this.database.pool.query<{ id: number }>(
+          'SELECT order_seq AS id FROM order_payment_requests WHERE payment_request_id=$1',
+          [id],
+        )
+      ).rows[0]?.id ?? null
+    );
+  }
+
+  private async notificationAudit(
+    client: PoolClient,
+    rows: Array<{ orderSeq: number }>,
+    completion: boolean,
+    status: string,
+  ) {
+    for (const row of rows)
+      await this.audit.recordResult(
+        {
+          actorId: null,
+          actorType: 'SYSTEM',
+          targetType: 'ORDER',
+          targetId: row.orderSeq,
+          action: `ORDER_PAYMENT_${completion ? 'COMPLETION_' : ''}NOTIFICATION_${status === 'SENDING' ? 'ATTEMPTED' : status}`,
+          requestId: randomUUID(),
+        },
+        ['SENT', 'SENDING'].includes(status) ? 'SUCCESS' : 'FAILED',
+        client,
+      );
+  }
+
   async read(id: string): Promise<PaymentView> {
     const result = (
       await this.database.pool.query<PaymentView>(
-        `SELECT r.payment_request_id AS token,r.payment_request_id AS "orderId",r.order_seq AS "orderSeq",
+        `SELECT r.payment_card_seq IS NOT NULL AS "autoCharge",r.card_payment_failed AS "cardPaymentFailed",
+       r.payment_request_id AS token,r.payment_request_id AS "orderId",r.order_seq AS "orderSeq",
        'DVA 택배 결제' AS "orderName",r.amount,o.status AS "orderStatus",
        CASE WHEN r.completed_at IS NOT NULL THEN 'PAID'
         WHEN r.invalidated_at IS NOT NULL OR o.status='CANCELLED' THEN 'CANCELLED'
@@ -102,8 +145,13 @@ export class PaymentsRepository {
         totalAmount: number;
         paidAt: Date | null;
         retentionExpired: boolean;
+        customerSeq: number | null;
+        paymentMethodType: string;
+        billingOrganizationSeq: number | null;
+        billingDepartmentSeq: number | null;
       }>(
-        `SELECT status,total_amount AS "totalAmount",paid_at AS "paidAt",
+        `SELECT status,total_amount AS "totalAmount",paid_at AS "paidAt",customer_seq AS "customerSeq",
+         payment_method_type AS "paymentMethodType",billing_organization_seq AS "billingOrganizationSeq",billing_department_seq AS "billingDepartmentSeq",
          COALESCE(closed_at,created_at)<=clock_timestamp()-interval '5 years' AS "retentionExpired"
          FROM orders WHERE order_seq=$1 AND deleted_at IS NULL FOR UPDATE`,
         [parent.orderSeq],
@@ -112,7 +160,8 @@ export class PaymentsRepository {
     if (!order) return undefined;
     const request = (
       await client.query<PaymentRequest>(
-        `SELECT payment_request_id AS "paymentRequestId",order_seq AS "orderSeq",amount,expires_at AS "expiresAt",approval_started_at AS "approvalStartedAt",invalidated_at AS "invalidatedAt",completed_at AS "completedAt",provider_reference AS "providerReference",provider_payment_key AS "providerPaymentKey",provider_approved_at AS "providerApprovedAt",approval_claim_id AS "approvalClaimId",approval_claimed_until AS "approvalClaimedUntil",notification_status AS "notificationStatus" FROM order_payment_requests WHERE payment_request_id=$1 FOR UPDATE`,
+        `SELECT payment_card_seq AS "paymentCardSeq",card_payment_order_id AS "cardPaymentOrderId",card_payment_failed AS "cardPaymentFailed",
+         payment_request_id AS "paymentRequestId",order_seq AS "orderSeq",amount,expires_at AS "expiresAt",approval_started_at AS "approvalStartedAt",invalidated_at AS "invalidatedAt",completed_at AS "completedAt",provider_reference AS "providerReference",provider_payment_key AS "providerPaymentKey",provider_approved_at AS "providerApprovedAt",approval_claim_id AS "approvalClaimId",approval_claimed_until AS "approvalClaimedUntil",notification_status AS "notificationStatus" FROM order_payment_requests WHERE payment_request_id=$1 FOR UPDATE`,
         [id],
       )
     ).rows[0];
@@ -131,7 +180,94 @@ export class PaymentsRepository {
     return result.rowCount === 1;
   }
 
-  async markPaid(client: PoolClient, id: number, approvedAt?: string, policy?: PaymentPolicy) {
+  async reserveCardApproval(client: PoolClient, id: string, claimId: string) {
+    await client.query(
+      `UPDATE order_payment_requests SET approval_started_at=COALESCE(approval_started_at,clock_timestamp()),
+       approval_claim_id=$2,approval_claimed_until=clock_timestamp()+interval '90 seconds',approval_next_check_at=clock_timestamp()+interval '1 minute',card_payment_failed=false
+       WHERE payment_request_id=$1`,
+      [id, claimId],
+    );
+  }
+
+  async retryCard(client: PoolClient, id: string, card: number, orderId: string) {
+    await client.query(
+      `UPDATE order_payment_requests SET payment_card_seq=$2,card_payment_order_id=$3,
+       card_payment_failed=false,provider_payment_key=NULL,provider_approved_at=NULL,approval_next_check_at=NULL
+       WHERE payment_request_id=$1 AND approval_started_at IS NULL AND completed_at IS NULL`,
+      [id, card, orderId],
+    );
+  }
+
+  async recordCardApproval(id: string, key: string, approvedAt: string) {
+    await this.database.pool.query(
+      `UPDATE order_payment_requests SET provider_payment_key=$2,provider_approved_at=$3
+       WHERE payment_request_id=$1 AND payment_card_seq IS NOT NULL AND (provider_payment_key IS NULL OR provider_payment_key=$2)`,
+      [id, key, approvedAt],
+    );
+  }
+
+  async failCardApproval(id: string, claimId: string) {
+    return !!(
+      await this.database.pool.query(
+        `UPDATE order_payment_requests SET card_payment_failed=true,
+         approval_started_at=NULL,approval_claim_id=NULL,approval_claimed_until=NULL
+         WHERE payment_request_id=$1 AND approval_claim_id=$2 AND completed_at IS NULL AND provider_approved_at IS NULL`,
+        [id, claimId],
+      )
+    ).rowCount;
+  }
+
+  async pendingCardForOrder(id: number) {
+    return (
+      await this.database.pool.query<{ id: string }>(
+        `SELECT payment_request_id AS id FROM order_payment_requests WHERE order_seq=$1 AND payment_card_seq IS NOT NULL
+         AND NOT card_payment_failed AND completed_at IS NULL AND invalidated_at IS NULL
+         AND (approval_started_at IS NOT NULL OR expires_at>clock_timestamp())`,
+        [id],
+      )
+    ).rows[0];
+  }
+
+  async pendingCardApprovals() {
+    return (
+      await this.database.pool.query<{ id: string }>(
+        `WITH candidates AS (SELECT r.payment_request_id FROM order_payment_requests r JOIN orders o USING(order_seq)
+         WHERE r.payment_card_seq IS NOT NULL AND NOT r.card_payment_failed AND r.completed_at IS NULL
+          AND r.invalidated_at IS NULL AND o.status='notPaid' AND o.deleted_at IS NULL
+          AND COALESCE(o.closed_at,o.created_at)>statement_timestamp()-interval '5 years'
+          AND (r.approval_started_at IS NOT NULL OR r.expires_at>clock_timestamp())
+          AND (r.approval_claimed_until IS NULL OR r.approval_claimed_until<=clock_timestamp())
+          AND (r.approval_next_check_at IS NULL OR r.approval_next_check_at<=clock_timestamp())
+         ORDER BY COALESCE(r.approval_next_check_at,r.created_at),r.payment_request_id LIMIT 4 FOR UPDATE OF r SKIP LOCKED)
+         UPDATE order_payment_requests r SET approval_next_check_at=clock_timestamp()+interval '1 minute'
+         FROM candidates c WHERE r.payment_request_id=c.payment_request_id
+         RETURNING r.payment_request_id AS id`,
+      )
+    ).rows;
+  }
+
+  async defaultMonthly(client: PoolClient, id: number) {
+    await client.query(
+      "UPDATE orders SET payment_method_type='credit' WHERE order_seq=$1 AND payment_method_type IS NULL",
+      [id],
+    );
+  }
+
+  async prepareCompanyCard(client: PoolClient, id: number, policy: PaymentPolicy) {
+    await client.query(
+      `UPDATE orders SET billing_organization_seq=$2,billing_department_seq=$3,
+       billing_organization_name=$4,billing_department_name=$5 WHERE order_seq=$1`,
+      [
+        id,
+        policy.organizationSeq,
+        policy.departmentSeq,
+        policy.organizationName,
+        policy.departmentName,
+      ],
+    );
+  }
+
+  async markPaid(client: PoolClient, id: number, approvedAt?: string, policy?: BillingSnapshot) {
     await client.query(
       `WITH paid AS (SELECT COALESCE($2::timestamptz,clock_timestamp()) AS at),
        pickup AS (SELECT at,date_trunc('day',at AT TIME ZONE 'Asia/Seoul') AS local_day FROM paid)
@@ -227,39 +363,50 @@ export class PaymentsRepository {
 
   async claimNotification() {
     return this.database.transaction(async (client) => {
-      await client.query(`UPDATE order_payment_requests SET notification_status='UNKNOWN'
-        WHERE notification_status='SENDING' AND notification_attempted_at<clock_timestamp()-interval '45 seconds'`);
+      const stale = await client.query<{
+        orderSeq: number;
+      }>(`UPDATE order_payment_requests SET notification_status='UNKNOWN'
+        WHERE notification_status='SENDING' AND notification_attempted_at<clock_timestamp()-interval '45 seconds'
+        RETURNING order_seq AS "orderSeq"`);
+      await this.notificationAudit(client, stale.rows, false, 'UNKNOWN');
       const row = (
         await client.query<{
           id: string;
         }>(`SELECT r.payment_request_id AS id FROM order_payment_requests r
-        JOIN orders o USING(order_seq) WHERE r.notification_status='PENDING' AND r.invalidated_at IS NULL
+        JOIN orders o USING(order_seq) WHERE r.notification_status='PENDING' AND r.invalidated_at IS NULL AND r.payment_card_seq IS NULL AND o.payment_method_type='billing'
         AND r.completed_at IS NULL AND r.approval_started_at IS NULL AND r.expires_at>clock_timestamp() AND o.status='notPaid' AND o.deleted_at IS NULL
         ORDER BY r.created_at LIMIT 1 FOR UPDATE OF r SKIP LOCKED`)
       ).rows[0];
       if (!row) return;
-      await client.query(
-        `UPDATE order_payment_requests SET notification_status='SENDING',notification_attempted_at=clock_timestamp() WHERE payment_request_id=$1`,
+      const sending = await client.query<{ orderSeq: number }>(
+        `UPDATE order_payment_requests SET notification_status='SENDING',notification_attempted_at=clock_timestamp() WHERE payment_request_id=$1 RETURNING order_seq AS "orderSeq"`,
         [row.id],
       );
+      await this.notificationAudit(client, sending.rows, false, 'SENDING');
       return row.id;
     });
   }
 
   async finishNotification(id: string, status: string) {
-    await this.database.pool.query(
-      `UPDATE order_payment_requests SET notification_status=$2,
+    await this.database.transaction(async (client) => {
+      const result = await client.query<{ orderSeq: number }>(
+        `UPDATE order_payment_requests SET notification_status=$2,
       notification_sent_at=CASE WHEN $2='SENT' THEN clock_timestamp() ELSE NULL END
-      WHERE payment_request_id=$1 AND notification_status='SENDING'`,
-      [id, status],
-    );
+      WHERE payment_request_id=$1 AND notification_status='SENDING' RETURNING order_seq AS "orderSeq"`,
+        [id, status],
+      );
+      await this.notificationAudit(client, result.rows, false, status);
+    });
   }
 
   async claimCompletionNotification() {
     return this.database.transaction(async (client) => {
-      await client.query(`UPDATE order_payment_requests SET completion_notification_status='UNKNOWN'
+      const stale = await client.query<{
+        orderSeq: number;
+      }>(`UPDATE order_payment_requests SET completion_notification_status='UNKNOWN'
         WHERE completion_notification_status='SENDING'
-        AND completion_notification_attempted_at<clock_timestamp()-interval '45 seconds'`);
+        AND completion_notification_attempted_at<clock_timestamp()-interval '45 seconds' RETURNING order_seq AS "orderSeq"`);
+      await this.notificationAudit(client, stale.rows, true, 'UNKNOWN');
       const row = (
         await client.query<{
           id: string;
@@ -268,21 +415,25 @@ export class PaymentsRepository {
         ORDER BY completed_at LIMIT 1 FOR UPDATE SKIP LOCKED`)
       ).rows[0];
       if (!row) return;
-      await client.query(
+      const sending = await client.query<{ orderSeq: number }>(
         `UPDATE order_payment_requests SET completion_notification_status='SENDING',
-        completion_notification_attempted_at=clock_timestamp() WHERE payment_request_id=$1`,
+        completion_notification_attempted_at=clock_timestamp() WHERE payment_request_id=$1 RETURNING order_seq AS "orderSeq"`,
         [row.id],
       );
+      await this.notificationAudit(client, sending.rows, true, 'SENDING');
       return row.id;
     });
   }
 
   async finishCompletionNotification(id: string, status: string) {
-    await this.database.pool.query(
-      `UPDATE order_payment_requests SET completion_notification_status=$2,
+    await this.database.transaction(async (client) => {
+      const result = await client.query<{ orderSeq: number }>(
+        `UPDATE order_payment_requests SET completion_notification_status=$2,
       completion_notification_sent_at=CASE WHEN $2='SENT' THEN clock_timestamp() ELSE NULL END
-      WHERE payment_request_id=$1 AND completion_notification_status='SENDING'`,
-      [id, status],
-    );
+      WHERE payment_request_id=$1 AND completion_notification_status='SENDING' RETURNING order_seq AS "orderSeq"`,
+        [id, status],
+      );
+      await this.notificationAudit(client, result.rows, true, status);
+    });
   }
 }

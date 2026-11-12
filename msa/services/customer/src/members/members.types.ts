@@ -3,6 +3,8 @@ export const MEMBER_STATUSES = ['ACTIVE', 'INACTIVE'] as const;
 export type MemberRole = (typeof MEMBER_ROLES)[number];
 export type MemberStatus = (typeof MEMBER_STATUSES)[number];
 export interface ImportedMembership {
+  monthlyBillingEnabled?: boolean;
+  groupBillingEnabled?: boolean;
   membershipSeq: number | null;
   customerSeq: number;
   employeeNo: string;
@@ -10,6 +12,8 @@ export interface ImportedMembership {
   role?: MemberRole;
 }
 export interface Membership {
+  monthlyBillingEnabled: boolean;
+  groupBillingEnabled: boolean;
   departmentSeq: number | null;
   membershipSeq: number;
   customerSeq: number;

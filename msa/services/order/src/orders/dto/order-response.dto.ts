@@ -22,6 +22,8 @@ export class CreatedOrderDto {
 }
 
 export class OrderPaymentRequestDto {
+  @ApiProperty() autoCharge!: boolean;
+  @ApiProperty() cardPaymentFailed!: boolean;
   @ApiProperty({
     enum: ['PENDING', 'SENDING', 'SENT', 'FAILED', 'UNKNOWN'],
     description: '결제 안내 발송 상태. UNKNOWN은 자동 재발송하지 않습니다.',

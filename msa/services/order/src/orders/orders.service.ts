@@ -1,3 +1,4 @@
+import { CreateManualOrderDto, ManualOrderResultDto } from './dto/manual-order.dto';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { CreatedOrderDto, OrderResultDto } from './dto/order-response.dto';
 import { NoOrderResultDto } from './dto/no-order-result.dto';
@@ -41,6 +42,7 @@ import { AdminOrderListQueryDto } from './dto/admin-order-list.dto';
 import { OrderAddressHistoryQueryDto } from './dto/order-address-history.dto';
 import { OrderQueryDto } from './dto/order-query.dto';
 import { OrdersRepository } from './orders.repository';
+import { PaymentsService } from '../payments/payments.service';
 
 @Injectable()
 export class OrdersService {
@@ -53,6 +55,7 @@ export class OrdersService {
     private readonly shipmentCheck: OrderShipmentCheckClient,
     private readonly writeScope: ParcelDraftWriteScope,
     private readonly submission: OrderSubmissionService,
+    private readonly payments: PaymentsService,
   ) {}
 
   async create(
@@ -62,9 +65,46 @@ export class OrdersService {
     requestId: string,
     header?: string,
   ): Promise<CreatedOrderDto | OrderResultDto | NoOrderResultDto> {
+    return this.createOrder(adminId, key, input, requestId, header);
+  }
+
+  async createManual(
+    adminId: number,
+    key: string,
+    input: CreateManualOrderDto,
+    requestId: string,
+  ): Promise<ManualOrderResultDto> {
+    const result = (await this.createOrder(
+      adminId,
+      key,
+      input,
+      requestId,
+      undefined,
+      true,
+    )) as OrderResultDto;
+    return {
+      orderSeq: result.orderSeq,
+      version: result.version,
+      status: result.status,
+      parcelNo: result.parcelNo,
+      creationSource: 'ADMIN',
+      totalAmount: result.totalAmount,
+      paymentRequest: result.paymentRequest,
+      paymentDueAt: result.paymentDueAt,
+    };
+  }
+
+  private async createOrder(
+    adminId: number | null,
+    key: string,
+    input: CreateOrderDto,
+    requestId: string,
+    header?: string,
+    submitManual = false,
+  ): Promise<CreatedOrderDto | OrderResultDto | NoOrderResultDto> {
     const callSessionSeq = this.creationHeader(adminId, input, header);
     const prepared = (await this.writeScope.request({
-      operation: 'OrderCreated',
+      operation: submitManual ? 'ManualOrderCreated' : 'OrderCreated',
       id: null,
       key,
       adminId,
@@ -75,8 +115,13 @@ export class OrdersService {
       result: CreatedOrderDto | OrderResultDto | NoOrderResultDto;
       submit: boolean;
     };
-    if (!prepared.submit || prepared.result.orderSeq === null) return prepared.result;
-    await this.submission.submitPaidOrder(prepared.result.orderSeq, requestId);
+    if (
+      prepared.result.orderSeq === null ||
+      (!prepared.submit && (prepared.result as OrderResultDto).status !== 'notPaid')
+    )
+      return prepared.result;
+    if (prepared.submit) await this.submission.submitPaidOrder(prepared.result.orderSeq, requestId);
+    else await this.payments.forOrder(prepared.result.orderSeq, requestId);
     try {
       return await this.database.transaction((client) =>
         this.repository.result(
@@ -93,9 +138,10 @@ export class OrdersService {
   executeCreation(event: DraftWriteEvent) {
     return this.writeScope.run(event, async () => {
       const command = event.payload.command;
+      const submitManual = command.operation === 'ManualOrderCreated';
       const input = (await createValidationPipe().transform(command.input, {
         type: 'body',
-        metatype: CreateOrderDto,
+        metatype: submitManual ? CreateManualOrderDto : CreateOrderDto,
       })) as CreateOrderDto;
       const headerId = this.creationHeader(
         command.adminId,
@@ -138,7 +184,9 @@ export class OrdersService {
               'INVALID_STATE',
               '삭제되었거나 보관 기간이 지난 주문의 요청 키입니다.',
             );
-          if (!input.call)
+          if (submitManual && previous.creationSource !== 'ADMIN')
+            throw new ApiException(409, 'INVALID_STATE', '관리자 수기 주문의 요청 키가 아닙니다.');
+          if (!input.call && !submitManual)
             return {
               result: { orderSeq: previous.orderSeq, version: previous.version },
               submit: false,
@@ -231,7 +279,7 @@ export class OrdersService {
           },
           client,
         );
-        if (!input.call) return { result, submit: false };
+        if (!input.call && !submitManual) return { result, submit: false };
         if (input.outcome === 'CANCELLED') {
           await this.repository.cancel(client, result.orderSeq);
           await this.repository.recalculateAmount(client, result.orderSeq);
@@ -249,7 +297,7 @@ export class OrdersService {
           );
         }
         const payload =
-          input.outcome === 'COMPLETE'
+          input.outcome === 'COMPLETE' || submitManual
             ? await this.submission.prepareSubmission(
                 client,
                 result.orderSeq,
@@ -295,25 +343,34 @@ export class OrdersService {
     return this.repository.result(this.database.pool, id, callId);
   }
 
-  async delete(id: number, adminId: number, requestId: string): Promise<void> {
+  async delete(id: number | number[], adminId: number, requestId: string): Promise<void> {
+    const ids = (Array.isArray(id) ? [...id] : [id]).sort((a, b) => a - b);
     await writeOrder(this.database, async (client) => {
-      const order = await this.repository.lockOrder(client, id);
-      if (!order) throw new ApiException(404, 'NOT_FOUND', '주문을 찾을 수 없습니다.');
-      if (
-        !['COLLECTING', 'CANCELLED', 'ACCEPTED'].includes(order.status) ||
-        (await this.repository.paymentDeletionBlocked(client, id)) ||
-        (await this.deletionCheck.blocked(id))
-      )
-        throw new ApiException(
-          409,
-          'INVALID_STATE',
-          '진행 중인 통화·결제·접수 처리를 마친 뒤 삭제해 주세요.',
+      for (const id of ids) {
+        const order = await this.repository.lockOrder(client, id);
+        if (!order) throw new ApiException(404, 'NOT_FOUND', '주문을 찾을 수 없습니다.');
+        if (
+          !['COLLECTING', 'CANCELLED', 'ACCEPTED'].includes(order.status) ||
+          (await this.repository.paymentDeletionBlocked(client, id)) ||
+          (await this.deletionCheck.blocked(id))
+        )
+          throw new ApiException(
+            409,
+            'INVALID_STATE',
+            '진행 중인 통화·결제·접수 처리를 마친 뒤 삭제해 주세요.',
+          );
+        await this.repository.softDelete(client, id);
+        await this.audit.recordSuccess(
+          {
+            actorId: adminId,
+            action: 'ORDER_DELETED',
+            targetType: 'ORDER',
+            targetId: id,
+            requestId,
+          },
+          client,
         );
-      await this.repository.softDelete(client, id);
-      await this.audit.recordSuccess(
-        { actorId: adminId, action: 'ORDER_DELETED', targetType: 'ORDER', targetId: id, requestId },
-        client,
-      );
+      }
     });
   }
 
@@ -980,6 +1037,7 @@ export class OrdersService {
       requestId,
     });
     const status = result.status as OrderStatus;
+    if (status === 'notPaid') return (await this.payments.forOrder(id, requestId)) ?? { status };
     return status === 'PAID' ? this.submission.submitPaidOrder(id, requestId) : { status };
   }
   executeSubmission(event: DraftWriteEvent) {

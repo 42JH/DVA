@@ -39,6 +39,8 @@ export function contextResponse(value: unknown): CallerContextDto {
         id(m.organizationSeq) &&
         (m.departmentSeq === null || id(m.departmentSeq)) &&
         typeof m.employeeNo === 'string' &&
+        typeof m.monthlyBillingEnabled === 'boolean' &&
+        typeof m.groupBillingEnabled === 'boolean' &&
         oneOf(m.role, ['MEMBER', 'ORG_ADMIN']) &&
         oneOf(m.status, ['ACTIVE', 'INACTIVE']),
     ) ||
@@ -48,7 +50,8 @@ export function contextResponse(value: unknown): CallerContextDto {
         id(o.organizationSeq) &&
         typeof o.name === 'string' &&
         oneOf(o.status, ['ACTIVE', 'INACTIVE']) &&
-        typeof o.monthlyBillingEnabled === 'boolean',
+        typeof o.monthlyBillingEnabled === 'boolean' &&
+        typeof o.groupCardRegistered === 'boolean',
     ) ||
     !nullable(
       value.department,

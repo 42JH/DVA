@@ -6,7 +6,8 @@ export const AUDIT_OPERATION = 'audit:operation';
 export interface AuditOperationOptions {
   action: string;
   targetType: string;
-  target: 'actor' | 'id' | 'none';
+  target: 'actor' | 'id' | 'ids' | 'none';
+  idsField?: string;
 }
 
 export const AuditOperation = (options: AuditOperationOptions) =>
@@ -22,6 +23,12 @@ export function auditEvent(
 ): AuditEvent {
   const rawId = request.params.id;
   const id = typeof rawId === 'string' && /^\d+$/.test(rawId) ? Number(rawId) : NaN;
+  const body: unknown = request.body;
+  const ids: unknown =
+    options.idsField && body && typeof body === 'object'
+      ? (body as Record<string, unknown>)[options.idsField]
+      : undefined;
+  const bodyId: unknown = Array.isArray(ids) && ids.length === 1 ? ids[0] : undefined;
   const actorId = request.auditActorType === 'AI' ? null : (request.admin?.adminUserSeq ?? null);
   return {
     action: options.action,
@@ -32,9 +39,15 @@ export function auditEvent(
     targetId:
       options.target === 'actor'
         ? actorId
-        : options.target === 'id' && Number.isInteger(id) && id > 0 && id <= 2147483647
-          ? id
-          : null,
+        : options.target === 'ids' &&
+            typeof bodyId === 'number' &&
+            Number.isInteger(bodyId) &&
+            bodyId > 0 &&
+            bodyId <= 2147483647
+          ? bodyId
+          : options.target === 'id' && Number.isInteger(id) && id > 0 && id <= 2147483647
+            ? id
+            : null,
     requestId: request.requestId,
   };
 }

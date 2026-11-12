@@ -77,12 +77,12 @@ describe('Order read API (e2e)', () => {
           '/order/health',
           '/order/health/ready',
         ]);
-        expect(Object.keys(body.paths['/api/parcel-drafts/{id}']).sort()).toEqual([
+        expect(Object.keys(body.paths['/api/parcel-drafts/{id}']).sort()).toEqual(['get', 'patch']);
+        expect(Object.keys(body.paths['/api/parcel-drafts']).sort()).toEqual([
           'delete',
           'get',
-          'patch',
+          'post',
         ]);
-        expect(Object.keys(body.paths['/api/parcel-drafts']).sort()).toEqual(['get', 'post']);
         expect(Object.keys(body.paths['/api/orders/{id}/cancel'])).toEqual(['post']);
         expect(Object.keys(body.paths['/api/admin/orders/{id}/retry'])).toEqual(['post']);
         expect(Object.keys(body.paths['/api/orders/{id}/parcels/cancel'])).toEqual(['post']);
@@ -94,10 +94,12 @@ describe('Order read API (e2e)', () => {
         ])
           expect(Object.keys(body.paths[path]).sort()).toEqual(
             path === '/api/orders/{id}'
-              ? ['delete', 'get', 'patch']
+              ? ['get', 'patch']
               : path === '/api/orders'
-                ? ['get', 'post']
-                : ['get'],
+                ? ['delete', 'get', 'post']
+                : path === '/api/admin/orders'
+                  ? ['get', 'post']
+                  : ['get'],
           );
       });
   });
@@ -195,15 +197,15 @@ describe('Order read API (e2e)', () => {
   });
 
   it('requires an allowed Origin and administrator session for DELETE and protects audit recovery', async () => {
-    await request(app.getHttpServer()).delete('/api/parcel-drafts/1').expect(403);
+    await request(app.getHttpServer()).delete('/api/parcel-drafts').expect(403);
     await request(app.getHttpServer())
-      .delete('/api/parcel-drafts/1')
+      .delete('/api/parcel-drafts')
       .set('Origin', 'http://localhost:5173')
       .set('Authorization', 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN)
       .expect(401);
-    await request(app.getHttpServer()).delete('/api/orders/1').expect(403);
+    await request(app.getHttpServer()).delete('/api/orders').expect(403);
     await request(app.getHttpServer())
-      .delete('/api/orders/1')
+      .delete('/api/orders')
       .set('Origin', 'http://localhost:5173')
       .set('call_session_seq', '1')
       .set('Authorization', 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN)

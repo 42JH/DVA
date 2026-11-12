@@ -70,7 +70,12 @@ export class ParcelDraftWriteService {
               : '신규 통화의 수정·취소는 배송 초안 API를 사용해 주세요.',
           );
         let call: DraftCallSnapshot | null = null;
-        if (id !== null && event.payload.command.operation !== 'OrderCreated') {
+        if (
+          id !== null &&
+          !['OrderCreated', 'ManualOrderCreated'].includes(
+            event.payload.command.operation,
+          )
+        ) {
           await this.recoverCall(client, id);
           call =
             (

@@ -17,9 +17,9 @@ const columns =
 const availablePaymentMethods = `CASE WHEN c.status<>'ACTIVE' THEN '[]'::jsonb ELSE
   '["billing"]'::jsonb || CASE WHEN
     (m.membership_seq IS NULL AND c.monthly_billing_enabled)
-    OR (m.status='ACTIVE' AND o.status='ACTIVE' AND o.monthly_billing_enabled)
+    OR (m.status='ACTIVE' AND o.status='ACTIVE' AND o.monthly_billing_enabled AND m.monthly_billing_enabled)
     THEN '["credit"]'::jsonb ELSE '[]'::jsonb END
-  || CASE WHEN m.status='ACTIVE' AND o.status='ACTIVE' AND d.group_billing_enabled
+  || CASE WHEN m.status='ACTIVE' AND o.status='ACTIVE' AND m.group_billing_enabled AND EXISTS(SELECT 1 FROM payment_cards pc WHERE pc.organization_seq=o.organization_seq AND pc.status='ACTIVE' AND pc.deleted_at IS NULL AND pc.expiration_year*12+pc.expiration_month>=extract(year FROM clock_timestamp() AT TIME ZONE 'Asia/Seoul')*12+extract(month FROM clock_timestamp() AT TIME ZONE 'Asia/Seoul'))
     THEN '["groupBilling"]'::jsonb ELSE '[]'::jsonb END END`;
 
 @Injectable()
@@ -83,18 +83,13 @@ export class CustomersRepository {
           'customerSeq',c.customer_seq,'name',c.name,'phoneNumber',c.phone_number,'status',c.status,'monthlyBillingEnabled',c.monthly_billing_enabled,'address',c.address_data) END,
         'membership', CASE WHEN c.status='ACTIVE' AND m.membership_seq IS NOT NULL THEN jsonb_build_object(
           'membershipSeq',m.membership_seq,'customerSeq',m.customer_seq,'organizationSeq',m.organization_seq,
-          'employeeNo',m.employee_no,'role',m.role,'status',m.status,'departmentSeq',m.department_seq) END,
+          'employeeNo',m.employee_no,'role',m.role,'status',m.status,'departmentSeq',m.department_seq,'monthlyBillingEnabled',m.monthly_billing_enabled,'groupBillingEnabled',m.group_billing_enabled) END,
         'organization', CASE WHEN c.status='ACTIVE' AND o.organization_seq IS NOT NULL THEN jsonb_build_object(
-          'organizationSeq',o.organization_seq,'name',o.name,'status',o.status,'monthlyBillingEnabled',o.monthly_billing_enabled) END,
+          'organizationSeq',o.organization_seq,'name',o.name,'status',o.status,'monthlyBillingEnabled',o.monthly_billing_enabled,
+          'groupCardRegistered',EXISTS(SELECT 1 FROM payment_cards pc WHERE pc.organization_seq=o.organization_seq AND pc.status='ACTIVE' AND pc.deleted_at IS NULL AND pc.expiration_year*12+pc.expiration_month>=extract(year FROM clock_timestamp() AT TIME ZONE 'Asia/Seoul')*12+extract(month FROM clock_timestamp() AT TIME ZONE 'Asia/Seoul'))) END,
         'department',CASE WHEN c.status='ACTIVE' AND d.department_seq IS NOT NULL THEN jsonb_build_object(
           'departmentSeq',d.department_seq,'organizationSeq',d.organization_seq,'name',d.name,'groupBillingEnabled',d.group_billing_enabled) END,
-        'availablePaymentMethods',CASE WHEN c.status<>'ACTIVE' THEN '[]'::jsonb ELSE
-          '["billing"]'::jsonb || CASE WHEN
-            (m.membership_seq IS NULL AND c.monthly_billing_enabled)
-            OR (m.status='ACTIVE' AND o.status='ACTIVE' AND o.monthly_billing_enabled)
-            THEN '["credit"]'::jsonb ELSE '[]'::jsonb END
-          || CASE WHEN m.status='ACTIVE' AND o.status='ACTIVE' AND d.group_billing_enabled
-            THEN '["groupBilling"]'::jsonb ELSE '[]'::jsonb END END,
+        'availablePaymentMethods',${availablePaymentMethods},
         'availableUsageTypes', CASE
           WHEN c.status<>'ACTIVE' THEN '[]'::jsonb
           WHEN m.status='ACTIVE' AND o.status='ACTIVE' THEN '["PERSONAL","COMPANY"]'::jsonb

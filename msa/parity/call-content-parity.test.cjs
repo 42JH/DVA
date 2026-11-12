@@ -26,7 +26,7 @@ test('production unanswered writes and call content/deletion match the monolith'
   for(const side of sides){
     await truncateFixture(side.db, 'TRUNCATE call_sessions RESTART IDENTITY CASCADE');
     side.cookies=[];side.admins=[];
-    for(const [index,role]of ['OPERATOR','SUPERVISOR','SYSTEM_ADMIN'].entries()){
+    for(const [index,role]of ['OPERATOR','OPERATOR','SYSTEM_ADMIN'].entries()){
       const id=(await side.identity.query(`INSERT INTO admin_users(login_id,name,password_hash,role,status)
         VALUES($1,$2,'unused-password',$3,'ACTIVE') RETURNING admin_user_seq`,['content'+index,'콘텐츠 관리자 '+index,role])).rows[0].admin_user_seq;
       const session=String(index+3).repeat(64);
@@ -68,7 +68,7 @@ test('production unanswered writes and call content/deletion match the monolith'
       FROM audit_logs WHERE request_id=ANY($1::uuid[])`,[[...requestIds]])).rows;
     for(const row of audits){
       if(row.actor_seq!==null){const index=side.admins.indexOf(row.actor_seq);assert.ok(index>=0);row.actor_seq='<admin-'+index+'>';}
-      receipt(side,'audit-'+row.request_id+'-'+row.action+'-'+row.result,row.occurred_at);delete row.occurred_at;
+      receipt(side,'audit-'+row.request_id+'-'+row.action+'-'+row.result+'-'+row.target_type+'-'+row.target_seq,row.occurred_at);delete row.occurred_at;
       row.request_id=parallelRequests.get(row.request_id)??row.request_id;
     }
     audits.sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)));
@@ -179,12 +179,12 @@ test('production unanswered writes and call content/deletion match the monolith'
   assert.equal(results[0].questionText,first.questionText);assert.equal(results[1].unansweredReason,'KB_NO_ANSWER');
   assert.deepEqual(results[2].faqEntrySeqs,[31,32]);assert.equal(results[2].faqEntrySeq,null);assert.equal(results[2].questionText,'실제 고객 질문');assert.equal(results[2].answerText,'실제 답변\n안내');
   assert.deepEqual(results[3].faqEntrySeqs,[31]);assert.equal(results[3].faqEntrySeq,31);
-  for(const options of [{session:false},{cookie:'dva_session=bad'}])await pair('DELETE','/api/unanswered-questions/'+qid,undefined,401,options);
-  for(const options of [{origin:false},{origin:'https://evil.invalid'}])await pair('DELETE','/api/unanswered-questions/'+qid,undefined,403,options);
-  for(const body of [{x:1},[],null,'invalid'])await pair('DELETE','/api/unanswered-questions/'+qid,body,400);
-  for(const id of ['0','abc','2147483648'])await pair('DELETE','/api/unanswered-questions/'+id,undefined,400);
-  await pair('DELETE','/api/unanswered-questions/199999',undefined,404);
-  await pair('DELETE','/api/unanswered-questions/'+qid,{},204);await pair('DELETE','/api/unanswered-questions/'+qid,undefined,204);
+  for(const options of [{session:false},{cookie:'dva_session=bad'}])await pair('DELETE','/api/unanswered-questions',{unansweredQuestionSeqs:[qid]},401,options);
+  for(const options of [{origin:false},{origin:'https://evil.invalid'}])await pair('DELETE','/api/unanswered-questions',{unansweredQuestionSeqs:[qid]},403,options);
+  for(const body of [{x:1},[],null,'invalid'])await pair('DELETE','/api/unanswered-questions',body,400);
+  for(const id of ['0','abc','2147483648'])await pair('DELETE','/api/unanswered-questions',{unansweredQuestionSeqs:[id]},400);
+  await pair('DELETE','/api/unanswered-questions',{unansweredQuestionSeqs:[199999]},404);
+  await pair('DELETE','/api/unanswered-questions',{unansweredQuestionSeqs:[qid]},204);await pair('DELETE','/api/unanswered-questions',{unansweredQuestionSeqs:[qid]},204);
   await collect(first,200);
   assert.equal((await mono.query('SELECT question_text FROM unanswered_questions WHERE unanswered_question_seq=$1',[qid])).rows[0].question_text,first.questionText);
   results=(await pair('GET','/api/calls/100001/processing-results',undefined,200)).data;
@@ -192,40 +192,40 @@ test('production unanswered writes and call content/deletion match the monolith'
   // Preserve a legacy registered state independently of the public conversion scenarios below.
   for(const side of sides)await side.db.query(`UPDATE unanswered_questions SET status='REGISTERED',faq_entry_seq=31,faq_conversion_hash=$2,registered_at='2026-11-01T01:02:00Z'
     WHERE unanswered_question_seq=$1`,[classifiedId,'b'.repeat(64)]);
-  await pair('DELETE','/api/unanswered-questions/'+classifiedId,undefined,409);await collect(classified,200);
-  for(const actor of [0,1,2]){const body=question(100003);const id=(await collect(body)).data.unansweredQuestionSeq;await pair('DELETE','/api/unanswered-questions/'+id,undefined,204,{actor});await collect(body,200);}
+  await pair('DELETE','/api/unanswered-questions',{unansweredQuestionSeqs:[classifiedId]},409);await collect(classified,200);
+  for(const actor of [0,1,2]){const body=question(100003);const id=(await collect(body)).data.unansweredQuestionSeq;await pair('DELETE','/api/unanswered-questions',{unansweredQuestionSeqs:[id]},204,{actor});await collect(body,200);}
   // Fail the actual audit table on each owner; neither source may commit a business change.
   for(const side of sides)await side.identity.query(`CREATE FUNCTION fail_content_audit() RETURNS trigger LANGUAGE plpgsql AS $$BEGIN
     IF NEW.action IN ('UNANSWERED_QUESTION_RECORDED','UNANSWERED_QUESTION_DELETED','CALL_DELETED') AND NEW.result='SUCCESS' THEN RAISE EXCEPTION 'fixture audit unavailable'; END IF; RETURN NEW; END$$;
     CREATE TRIGGER fail_content_audit BEFORE INSERT ON audit_logs FOR EACH ROW EXECUTE FUNCTION fail_content_audit()`);
   const failed=question(100003);
   const openId=(await mono.query("SELECT unanswered_question_seq FROM unanswered_questions WHERE call_session_seq=100002 AND status='OPEN' ORDER BY unanswered_question_seq LIMIT 1")).rows[0].unanswered_question_seq;
-  try{await collect(failed,500);await pair('DELETE','/api/unanswered-questions/'+openId,undefined,500);await pair('DELETE','/api/calls/100003',undefined,500);}
+  try{await collect(failed,500);await pair('DELETE','/api/unanswered-questions',{unansweredQuestionSeqs:[openId]},500);await pair('DELETE','/api/calls',{callSessionSeqs:[100003]},500);}
   finally{for(const side of sides)await side.identity.query('DROP TRIGGER fail_content_audit ON audit_logs; DROP FUNCTION fail_content_audit()');}
-  await collect(failed);await pair('DELETE','/api/unanswered-questions/'+openId,undefined,204);
-  await pair('DELETE','/api/calls/100002',undefined,409);
-  for(const options of [{session:false},{session:false,bearer:token}])await pair('DELETE','/api/calls/100003',undefined,401,options);
-  await pair('DELETE','/api/calls/100003',undefined,403,{origin:false});await pair('DELETE','/api/calls/100004',undefined,404);
-  for(const id of ['0','abc','2147483648'])await pair('DELETE','/api/calls/'+id,undefined,400);
+  await collect(failed);await pair('DELETE','/api/unanswered-questions',{unansweredQuestionSeqs:[openId]},204);
+  await pair('DELETE','/api/calls',{callSessionSeqs:[100002]},409);
+  for(const options of [{session:false},{session:false,bearer:token}])await pair('DELETE','/api/calls',{callSessionSeqs:[100003]},401,options);
+  await pair('DELETE','/api/calls',{callSessionSeqs:[100003]},403,{origin:false});await pair('DELETE','/api/calls',{callSessionSeqs:[100004]},404);
+  for(const id of ['0','abc','2147483648'])await pair('DELETE','/api/calls',{callSessionSeqs:[id]},400);
   // A real PostgreSQL row lock follows the source 2-second conflict policy.
   const locks=[];
   try{
     for(const side of sides){const lock=await side.db.connect();locks.push(lock);await lock.query('BEGIN');await lock.query('SELECT 1 FROM call_sessions WHERE call_session_seq=100003 FOR UPDATE');}
-    await pair('DELETE','/api/calls/100003',undefined,409);
+    await pair('DELETE','/api/calls',{callSessionSeqs:[100003]},409);
   }finally{for(const lock of locks){await lock.query('ROLLBACK');lock.release();}}
-  await pair('DELETE','/api/calls/100003',undefined,204);await pair('DELETE','/api/calls/100003',undefined,404);
+  await pair('DELETE','/api/calls',{callSessionSeqs:[100003]},204);await pair('DELETE','/api/calls',{callSessionSeqs:[100003]},404);
   for(const route of ['transcript','actions','processing-results'])await pair('GET','/api/calls/100003/'+route,undefined,404);
   await collect(question(100003),404);
   const callId=100001;
   for(const side of sides)await side.db.query(`INSERT INTO pbx_webhooks.call_ended_events(recording_id,payload,call_session_seq,processing_status)
     VALUES('content-recording',$1,$2,'RECEIVED')`,[{callFrom:'01011112222',startedAt:'2026-11-01T01:00:00Z',endedAt:'2026-11-01T01:03:00Z',durationSeconds:180,recordingUrl:'https://recordings.example.test/a.mp3'},callId]);
-  for(const status of ['RECEIVED','FAILED']){for(const side of sides)await side.db.query('UPDATE pbx_webhooks.call_ended_events SET processing_status=$1 WHERE call_session_seq=$2',[status,callId]);await pair('DELETE','/api/calls/'+callId,undefined,409);}
+  for(const status of ['RECEIVED','FAILED']){for(const side of sides)await side.db.query('UPDATE pbx_webhooks.call_ended_events SET processing_status=$1 WHERE call_session_seq=$2',[status,callId]);await pair('DELETE','/api/calls',{callSessionSeqs:[callId]},409);}
   for(const side of sides)await side.db.query(`UPDATE pbx_webhooks.call_ended_events SET processing_status='PROCESSED',claim_id=$1,claimed_until=clock_timestamp()+interval '1 hour' WHERE call_session_seq=$2`,[randomUUID(),callId]);
-  await pair('DELETE','/api/calls/'+callId,undefined,409);
+  await pair('DELETE','/api/calls',{callSessionSeqs:[callId]},409);
   for(const side of sides)await side.db.query(`UPDATE pbx_webhooks.call_ended_events SET claim_id=NULL,claimed_until=NULL WHERE call_session_seq=$1`,[callId]);
-  await pair('DELETE','/api/calls/'+callId,undefined,204);
+  await pair('DELETE','/api/calls',{callSessionSeqs:[callId]},204);
   for(const route of ['transcript','actions','processing-results'])await pair('GET','/api/calls/'+callId+'/'+route,undefined,404);
-  await collect(first,404);await pair('DELETE','/api/unanswered-questions/'+qid,undefined,404);
+  await collect(first,404);await pair('DELETE','/api/unanswered-questions',{unansweredQuestionSeqs:[qid]},404);
   const faqBody=(changes={})=>({category:'수거 일정',question:'content-conversion '+randomUUID(),answer:' 답변 원문\n\n- 안내 ',...changes});
   const conversionPath=id=>'/api/unanswered-questions/'+id+'/faqs';
   async function collectConversion(){const input=question(100002,{questionText:'FAQ 전환 원문 '+randomUUID()});return{input,id:(await collect(input)).data.unansweredQuestionSeq};}
@@ -233,13 +233,13 @@ test('production unanswered writes and call content/deletion match the monolith'
   await pair('POST',conversionPath(conversion.id),conversionInput,204);
   const faqId=(await mono.query('SELECT faq_entry_seq FROM unanswered_questions WHERE unanswered_question_seq=$1',[conversion.id])).rows[0].faq_entry_seq;
   await pair('POST',conversionPath(conversion.id),conversionInput,204);
-  await collect(conversion.input,200);await pair('DELETE','/api/unanswered-questions/'+conversion.id,undefined,409);
+  await collect(conversion.input,200);await pair('DELETE','/api/unanswered-questions',{unansweredQuestionSeqs:[conversion.id]},409);
   await pair('GET','/api/faqs/'+faqId,undefined,200);
   for(const changes of [{question:conversionInput.question+' '},{category:'기타'},{answer:conversionInput.answer+'추가'}])await pair('POST',conversionPath(conversion.id),{...conversionInput,...changes},409);
   await pair('DELETE','/api/faqs',{faqEntrySeqs:[faqId]},204);
   await pair('POST',conversionPath(conversion.id),conversionInput,409);
   await pair('POST',conversionPath(qid),faqBody(),404);await pair('POST',conversionPath(199999),faqBody(),404);
-  const deletedConversion=await collectConversion();await pair('DELETE','/api/unanswered-questions/'+deletedConversion.id,undefined,204);
+  const deletedConversion=await collectConversion();await pair('DELETE','/api/unanswered-questions',{unansweredQuestionSeqs:[deletedConversion.id]},204);
   await pair('POST',conversionPath(deletedConversion.id),faqBody(),409);
   const open=await collectConversion(),duplicateInput=faqBody();registeredIds.add(open.id);
   await pair('POST','/api/faqs',{items:[duplicateInput]},204);
@@ -311,8 +311,52 @@ test('production unanswered writes and call content/deletion match the monolith'
     await confirmationGate.query('ROLLBACK');confirmationGate.release();await ops.query('DROP TRIGGER IF EXISTS content_conversion_confirmation_gate ON faq_entries; DROP FUNCTION IF EXISTS content_conversion_confirmation_gate()');
     await Promise.allSettled([delayedRequest,...readers.map(reader=>reader.promise)].filter(Boolean));
   }
+  const batchQuestions=[];
+  for(let n=0;n<3;n++)batchQuestions.push((await collect(question(100002))).data.unansweredQuestionSeq);
+  for(const side of sides)await side.db.query(`UPDATE unanswered_questions SET status='REGISTERED',faq_entry_seq=31,
+    faq_conversion_hash=$2,registered_at='2026-11-01T01:02:00Z' WHERE unanswered_question_seq=$1`,[batchQuestions[2],'c'.repeat(64)]);
+  for(const id of [100011,100012,100013])await seedCall(id,{ongoing:id===100013});
+  for(const [path,field,ids,protectedId,action] of [
+    ['/api/unanswered-questions','unansweredQuestionSeqs',batchQuestions.slice(0,2),batchQuestions[2],'UNANSWERED_QUESTION_DELETED'],
+    ['/api/calls','callSessionSeqs',[100011,100012],100013,'CALL_DELETED'],
+  ]) {
+    for(const input of [undefined,{}, {[field]:[]},{[field]:[ids[0],ids[0]]},{[field]:['1']},
+      {[field]:[0]},{[field]:[1.5]},{[field]:[2147483648]},{[field]:ids,extra:true}])
+      await pair('DELETE',path,input,400);
+    const state=async()=>{
+      const value=await snapshot(sides[0]);
+      value.audits=value.audits.filter(row=>row.result==='SUCCESS');
+      return value;
+    };
+    const before=await state();
+    await pair('DELETE',path,{[field]:[ids[0],2147483647]},404);
+    assert.deepEqual(await state(),before);
+    await pair('DELETE',path,{[field]:[protectedId,ids[0]]},409);
+    assert.deepEqual(await state(),before);
+    for(const side of sides)await side.identity.query(`CREATE FUNCTION reject_second_content_audit() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN IF NEW.action='${action}' AND NEW.target_seq=${ids[1]} AND NEW.result='SUCCESS'
+      THEN RAISE EXCEPTION 'private second content audit failure'; END IF; RETURN NEW; END $$;
+      CREATE TRIGGER reject_second_content_audit BEFORE INSERT ON audit_logs FOR EACH ROW EXECUTE FUNCTION reject_second_content_audit()`);
+    try {
+      await pair('DELETE',path,{[field]:[...ids].reverse()},500);
+      assert.deepEqual(await state(),before);
+    } finally {
+      for(const side of sides)await side.identity.query('DROP TRIGGER reject_second_content_audit ON audit_logs; DROP FUNCTION reject_second_content_audit()');
+    }
+    await pair('DELETE',path,{[field]:[...ids].reverse()},204);
+    const audits=(await mono.query(`SELECT target_seq,request_id FROM audit_logs WHERE action=$1
+      AND target_seq=ANY($2::int[]) AND result='SUCCESS' ORDER BY audit_log_seq`,[action,ids])).rows;
+    assert.deepEqual(audits.map(row=>row.target_seq),ids);
+    assert.equal(new Set(audits.map(row=>row.request_id)).size,1);
+    if(field==='unansweredQuestionSeqs') {
+      const fresh=(await collect(question(100002))).data.unansweredQuestionSeq;
+      await pair('DELETE',path,{[field]:[fresh,ids[0]]},204);
+      assert.equal((await mono.query('SELECT status FROM unanswered_questions WHERE unanswered_question_seq=$1',[fresh])).rows[0].status,'DELETED');
+    }
+    await pair('DELETE',path+'/'+ids[0],undefined,404);
+  }
   const docs=await Promise.all(sides.map(async side=>(await fetch(side.base+'/api/docs-json')).json()));
-  const paths=[['/api/ai/unanswered-questions','post'],['/api/unanswered-questions/{id}','delete'],['/api/unanswered-questions/{id}/faqs','post'],['/api/calls/{id}','delete'],
+  const paths=[['/api/ai/unanswered-questions','post'],['/api/unanswered-questions','delete'],['/api/unanswered-questions/{id}/faqs','post'],['/api/calls','delete'],
     ...['transcript','actions','processing-results'].map(s=>['/api/calls/{id}/'+s,'get'])];
   const seen=new Set();
   function schema(value){if(Array.isArray(value))return value.forEach(schema);if(!value||typeof value!=='object')return;
@@ -360,8 +404,8 @@ test('production unanswered writes and call content/deletion match the monolith'
     const row=(await cons.query('SELECT status FROM unanswered_questions WHERE event_id=$1',[input.eventId])).rows[0];
     if(operation==='collect')assert.equal(!!row,mode==='committed');else assert.equal(row.status,mode==='committed'?'DELETED':'OPEN');
     await until(async()=>(await ops.query("SELECT count(*) FROM audit_logs WHERE request_id=$1 AND result='SUCCESS'",[requestId])).rows[0].count===(mode==='committed'?'1':'0'),'committed audit missing or duplicate');
-    const retry=randomUUID(),response=await http(sides[1],operation==='collect'?'POST':'DELETE',operation==='collect'?'/api/ai/unanswered-questions':'/api/unanswered-questions/'+id,
-      operation==='collect'?input:undefined,operation==='collect'?{session:false,bearer:token}:{},retry);
+    const retry=randomUUID(),response=await http(sides[1],operation==='collect'?'POST':'DELETE',operation==='collect'?'/api/ai/unanswered-questions':'/api/unanswered-questions',
+      operation==='collect'?input:{unansweredQuestionSeqs:[id]},operation==='collect'?{session:false,bearer:token}:{},retry);
     assert.equal(response.status,operation==='collect'?(mode==='committed'?200:201):204);
     const current=(await cons.query('SELECT question_text,status FROM unanswered_questions WHERE event_id=$1',[input.eventId])).rows[0];assert.equal(current.question_text,input.questionText);
     assert.equal(current.status,operation==='collect'?'OPEN':'DELETED');

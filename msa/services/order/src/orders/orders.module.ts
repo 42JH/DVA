@@ -32,6 +32,8 @@ import { DverClient } from './dver.client';
 import { OrderSubmissionRepository } from './order-submission.repository';
 import { OrderSubmissionService } from './order-submission.service';
 import { OrderSubmissionWorker } from './order-submission.worker';
+import { PaymentsService } from '../payments/payments.service';
+import { PaymentClient } from '../payments/payment.client';
 
 @Module({
   imports: [DatabaseModule, BillingModule],
@@ -50,6 +52,8 @@ import { OrderSubmissionWorker } from './order-submission.worker';
     OrderReadController,
   ],
   providers: [
+    PaymentsService,
+    PaymentClient,
     OrderIntakeWritesService,
     PaymentsRepository,
     ParcelDraftWritesService,
@@ -70,6 +74,12 @@ import { OrderSubmissionWorker } from './order-submission.worker';
     OrderSubmissionService,
     OrderSubmissionWorker,
   ],
-  exports: [OrderSubmissionService, OrdersRepository],
+  exports: [
+    OrderSubmissionService,
+    OrdersRepository,
+    ParcelDraftWriteScope,
+    PaymentsService,
+    PaymentsRepository,
+  ],
 })
 export class OrdersModule {}

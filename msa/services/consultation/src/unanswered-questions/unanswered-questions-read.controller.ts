@@ -14,7 +14,7 @@ import { UnansweredQuestionsService } from './unanswered-questions.service';
 
 @ApiTags('Unanswered Questions')
 @ApiCookieAuth('adminSession')
-@Roles('OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN')
+@Roles('OPERATOR', 'SYSTEM_ADMIN')
 @ApiResponse({
   status: 400,
   type: ErrorResponseDto,

@@ -4,6 +4,7 @@ import type { OrderAddressPatchDto } from './dto/create-order.dto';
 import type { OriginPinDto } from './dto/origin-pin.dto';
 import type { OrderCreationSource } from './orders.types';
 import { createHash } from 'node:crypto';
+import { ParcelDraftWriteScope } from './parcel-draft-write-scope.service';
 import { Injectable } from '@nestjs/common';
 import { Pool, PoolClient } from 'pg';
 import type { IntakeOrderResult } from '@dva/events/order-read.cjs';
@@ -20,11 +21,13 @@ import {
 import { OrderDetailDto, OrderSummaryDto } from './dto/order-response.dto';
 import type { OrderStatus } from './orders.types';
 import { OrderQueryDto } from './dto/order-query.dto';
-const paymentRequestJson = `(SELECT jsonb_build_object('paymentRequestId',r.payment_request_id,'amount',r.amount,'expiresAt',r.expires_at,'notificationStatus',r.notification_status)
+const paymentRequestJson = `(SELECT jsonb_build_object('paymentRequestId',r.payment_request_id,'amount',r.amount,'expiresAt',r.expires_at,'notificationStatus',r.notification_status,'autoCharge',r.payment_card_seq IS NOT NULL,'cardPaymentFailed',r.card_payment_failed)
  FROM order_payment_requests r WHERE r.order_seq=o.order_seq AND r.invalidated_at IS NULL AND r.completed_at IS NULL AND r.expires_at>clock_timestamp())`;
 
 @Injectable()
 export class OrdersRepository {
+  constructor(private readonly scope: ParcelDraftWriteScope) {}
+
   async result(client: Pool | PoolClient, id: number, callId: number | null) {
     return (
       await client.query<
@@ -127,10 +130,28 @@ export class OrdersRepository {
       'UPDATE order_payment_requests SET invalidated_at=clock_timestamp() WHERE order_seq=$1 AND invalidated_at IS NULL AND completed_at IS NULL',
       [id],
     );
+    const order = (
+      await client.query<{
+        customerSeq: number | null;
+        organizationSeq: number | null;
+        paymentMethodType: string;
+      }>(
+        `SELECT customer_seq AS "customerSeq",billing_organization_seq AS "organizationSeq",payment_method_type AS "paymentMethodType"
+         FROM orders WHERE order_seq=$1 AND status='notPaid' AND total_amount>0`,
+        [id],
+      )
+    ).rows[0];
+    if (!order) return;
+    const customer = order.paymentMethodType === 'billing' ? order.customerSeq : null;
+    const company = order.paymentMethodType === 'groupBilling' ? order.organizationSeq : null;
+    const card =
+      customer !== null || company !== null
+        ? await this.scope.paymentCard(customer, company)
+        : null;
     await client.query(
-      `INSERT INTO order_payment_requests(order_seq,amount,expires_at)
-      SELECT order_seq,total_amount,payment_due_at FROM orders WHERE order_seq=$1 AND status='notPaid' AND total_amount>0`,
-      [id],
+      `INSERT INTO order_payment_requests(order_seq,amount,expires_at,payment_card_seq,card_payment_failed)
+      SELECT order_seq,total_amount,payment_due_at,$2,$3 FROM orders WHERE order_seq=$1 AND status='notPaid' AND total_amount>0`,
+      [id, card, order.paymentMethodType === 'groupBilling' && card === null],
     );
   }
   async isApproving(client: PoolClient, id: number) {

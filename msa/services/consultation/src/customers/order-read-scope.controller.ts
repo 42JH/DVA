@@ -93,21 +93,41 @@ export class OrderReadScopeController {
               'NOT_FOUND',
               '배송 초안을 찾을 수 없습니다.',
             );
-          const call =
-            hint.callSessionSeq === null
-              ? undefined
-              : (
-                  await client.query<{ finalized: boolean }>(
-                    "SELECT order_finalized_at IS NOT NULL AS finalized FROM call_sessions WHERE call_session_seq=$1 AND deleted_at IS NULL AND incoming_at>statement_timestamp()-interval '5 years' FOR UPDATE",
-                    [hint.callSessionSeq],
-                  )
-                ).rows[0];
+          const callIds = [
+            ...new Set(
+              hint.flatMap((row) =>
+                row.callSessionSeq === null ? [] : [row.callSessionSeq],
+              ),
+            ),
+          ].sort((a, b) => a - b);
+          const calls = callIds.length
+            ? (
+                await client.query<{
+                  callSessionSeq: number;
+                  finalized: boolean;
+                }>(
+                  `SELECT call_session_seq AS "callSessionSeq",order_finalized_at IS NOT NULL AS finalized FROM call_sessions
+             WHERE call_session_seq=ANY($1::int[]) AND deleted_at IS NULL AND incoming_at>statement_timestamp()-interval '5 years'
+             ORDER BY call_session_seq FOR UPDATE`,
+                  [callIds],
+                )
+              ).rows
+            : [];
+          const finalized = new Map(
+            calls.map((row) => [row.callSessionSeq, row.finalized]),
+          );
           const payload = await requestDraftDeletion(url, token, {
             ...base,
             payload: {
               ...base.payload,
               phase: 'delete',
-              callFinalized: call?.finalized ?? null,
+              callFinalized: hint.map((row) => ({
+                ...row,
+                finalized:
+                  row.callSessionSeq === null
+                    ? null
+                    : (finalized.get(row.callSessionSeq) ?? null),
+              })),
             },
           });
           return { eventId: event.eventId, status: 'processed', payload };

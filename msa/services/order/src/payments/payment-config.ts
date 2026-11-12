@@ -7,6 +7,8 @@ export interface PaymentEnvironment {
   TOSS_TEST_CLIENT_KEY?: string;
   TOSS_TEST_SECRET_KEY?: string;
   PAYMENT_MATTERMOST_WEBHOOK_URL?: string;
+  TOSS_BILLING_SECRET_KEY?: string;
+  PAYMENT_CARD_ENCRYPTION_KEY?: string;
 }
 
 export function paymentEnvironment(
@@ -66,6 +68,18 @@ export function paymentEnvironment(
       errors.push(name);
     return typeof value === 'string' && value ? value : undefined;
   };
+  const billingSecret = raw.TOSS_BILLING_SECRET_KEY;
+  const cardEncryption = raw.PAYMENT_CARD_ENCRYPTION_KEY;
+  if (
+    billingSecret &&
+    (typeof billingSecret !== 'string' || !/^(?:test|live)_sk_[A-Za-z0-9_-]+$/.test(billingSecret))
+  )
+    errors.push('TOSS_BILLING_SECRET_KEY');
+  if (
+    cardEncryption &&
+    (typeof cardEncryption !== 'string' || !/^[a-fA-F0-9]{64}$/.test(cardEncryption))
+  )
+    errors.push('PAYMENT_CARD_ENCRYPTION_KEY');
   return {
     ORDER_PAYMENTS_ENABLED: enabled,
     PAYMENT_PUBLIC_URL: url('PAYMENT_PUBLIC_URL', '', true),
@@ -73,5 +87,9 @@ export function paymentEnvironment(
     TOSS_TEST_CLIENT_KEY: key('TOSS_TEST_CLIENT_KEY', 'test_gck_'),
     TOSS_TEST_SECRET_KEY: key('TOSS_TEST_SECRET_KEY', 'test_gsk_'),
     PAYMENT_MATTERMOST_WEBHOOK_URL: url('PAYMENT_MATTERMOST_WEBHOOK_URL', '') || undefined,
+    TOSS_BILLING_SECRET_KEY:
+      typeof billingSecret === 'string' && billingSecret ? billingSecret : undefined,
+    PAYMENT_CARD_ENCRYPTION_KEY:
+      typeof cardEncryption === 'string' && cardEncryption ? cardEncryption : undefined,
   };
 }

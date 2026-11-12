@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { BillingService } from '../billing/billing.service';
 import { ConfigService } from '@nestjs/config';
 import { Environment } from '../config/environment';
@@ -7,15 +7,47 @@ import { PaymentsRepository } from './payments.repository';
 import { DatabaseService } from '../database/database.service';
 import { AuditService } from '../audit/audit.service';
 import { PaymentClient } from './payment.client';
-import { randomUUID } from 'node:crypto';
+import { createDecipheriv, randomUUID } from 'node:crypto';
+import type { PoolClient } from 'pg';
+import { ReadScopes } from '@dva/events/read-scope.cjs';
+import {
+  requestCardApprovalScope,
+  type CardApprovalScopeEvent,
+  type StoredPaymentCard,
+} from '@dva/events/parcel-draft-write.cjs';
+import {
+  ParcelDraftWriteScope,
+  type CustomerReferenceScope,
+} from '../orders/parcel-draft-write-scope.service';
 import { isZonedDate } from '../orders/order-draft';
 import { orderItemPriceError } from '../orders/order-pricing';
 import { OrdersRepository } from '../orders/orders.repository';
 import { OrderSubmissionService } from '../orders/order-submission.service';
 import { paymentCompletionMessage, paymentMessage } from './payment-message';
+
+type CardApprovalClaim =
+  | { done: true }
+  | {
+      done: false;
+      amount: number;
+      orderId: string;
+      lookupOnly: boolean;
+      card: StoredPaymentCard | undefined;
+      billingKey: string | undefined;
+      claimId: string;
+    };
+
 @Injectable()
 export class PaymentsService {
+  private readonly logger = new Logger(PaymentsService.name);
   private readonly active = new Map<string, { key: string; promise: Promise<unknown> }>();
+  private readonly cardScopes = new ReadScopes<{
+    id: string;
+    prepare: (scope: CustomerReferenceScope) => Promise<void>;
+  }>(
+    () =>
+      new ApiException(503, 'DEPENDENCY_UNAVAILABLE', '서비스를 일시적으로 사용할 수 없습니다.'),
+  );
   constructor(
     private readonly config: ConfigService<Environment, true>,
     private readonly repository: PaymentsRepository,
@@ -25,7 +57,217 @@ export class PaymentsService {
     private readonly ordersRepository: OrdersRepository,
     private readonly submissions: OrderSubmissionService,
     private readonly billing: BillingService,
+    private readonly scope: ParcelDraftWriteScope,
   ) {}
+
+  async recordPaymentFailure(
+    id: string,
+    requestId: string,
+    error: unknown,
+    action: 'ORDER_PAYMENT_CONFIRMATION' | 'ORDER_PAYMENT_RECONCILED' | 'ORDER_CARD_PAYMENT',
+  ) {
+    let orderId: number | null = null;
+    try {
+      orderId = await this.repository.paymentOrderId(id);
+    } catch {
+      /* Preserve the payment error when the DB is unavailable. */
+    }
+    const response = error instanceof ApiException ? error.getResponse() : null;
+    const code =
+      response && typeof response === 'object' && 'code' in response ? response.code : null;
+    await this.audit.recordFailure(
+      {
+        actorId: null,
+        actorType: 'SYSTEM',
+        targetType: 'ORDER',
+        targetId: orderId,
+        action,
+        requestId,
+        metadata: {
+          reason:
+            code === 'PAYMENT_FAILED'
+              ? 'PAYMENT_DECLINED'
+              : code === 'PAYMENT_RESULT_UNKNOWN'
+                ? 'PAYMENT_RESULT_UNKNOWN'
+                : 'PAYMENT_REQUEST_FAILED',
+        },
+      },
+      error,
+    );
+  }
+
+  async claimCardApproval(id: string): Promise<CardApprovalClaim> {
+    const existing = await this.database.transaction((client) =>
+      this.prepareCardApproval(client, id),
+    );
+    if (existing) return existing;
+    let claim: CardApprovalClaim | undefined;
+    let pending: Promise<void> | undefined;
+    const scopeId = randomUUID();
+    await this.cardScopes.run(
+      scopeId,
+      {
+        id,
+        prepare: (owner) => {
+          if (!pending)
+            pending = this.database
+              .transaction((client) => this.prepareCardApproval(client, id, owner))
+              .then((prepared) => {
+                claim = prepared;
+              });
+          return pending;
+        },
+      },
+      () =>
+        requestCardApprovalScope(
+          this.config.get('CUSTOMER_URL', { infer: true }) +
+            '/internal/call-read-references/parcel-draft-write/card-approval',
+          this.config.get('CUSTOMER_AUTH_TOKEN', { infer: true }),
+          {
+            eventId: scopeId,
+            source: 'order',
+            eventType: 'OrderCardApprovalRequested',
+            payload: {
+              paymentRequestId: id,
+              orderAddress: this.config.get('MSA_INSTANCE_IP', { infer: true }) ?? null,
+            },
+          },
+        ).catch((error: unknown) => this.scope.failure(error)),
+    );
+    if (!claim)
+      throw new ApiException(
+        503,
+        'DEPENDENCY_UNAVAILABLE',
+        '서비스를 일시적으로 사용할 수 없습니다.',
+      );
+    return claim;
+  }
+
+  cardApprovalScope(event: CardApprovalScopeEvent) {
+    return this.cardScopes.use(event.eventId, async (state) => {
+      if (state.id !== event.payload.paymentRequestId)
+        throw new ApiException(403, 'FORBIDDEN', '카드 결제 요청 범위를 확인해 주세요.');
+      await state.prepare({ id: event.eventId, address: event.payload.customerAddress ?? null });
+      return { eventId: event.eventId, status: 'processed', payload: true };
+    });
+  }
+
+  private async prepareCardApproval(
+    client: PoolClient,
+    id: string,
+    owner?: CustomerReferenceScope,
+  ): Promise<CardApprovalClaim | undefined> {
+    await client.query("SET LOCAL lock_timeout='2s'");
+    const request = await this.repository.request(client, id);
+    if (!request || request.order.retentionExpired)
+      throw new ApiException(404, 'NOT_FOUND', '결제 요청을 찾을 수 없습니다.');
+    if (request.completedAt) return { done: true };
+    if (
+      !request.paymentCardSeq ||
+      request.invalidatedAt ||
+      request.order.status !== 'notPaid' ||
+      request.amount !== request.order.totalAmount ||
+      (!request.approvalStartedAt && request.expiresAt.getTime() <= Date.now())
+    )
+      throw new ApiException(409, 'INVALID_STATE', '유효한 등록 카드 결제 요청이 아닙니다.');
+    if (request.approvalClaimedUntil && request.approvalClaimedUntil.getTime() > Date.now())
+      throw new ApiException(409, 'REQUEST_IN_PROGRESS', '카드 승인 결과를 확인 중입니다.');
+    let card: StoredPaymentCard | undefined;
+    if (!request.approvalStartedAt) {
+      if (request.order.customerSeq === null)
+        throw new ApiException(403, 'FORBIDDEN', '현재 고객의 카드 결제 자격이 없습니다.');
+      if (!owner) return;
+      const policy = await this.scope.paymentPolicy(request.order.customerSeq, owner);
+      const customer = await this.scope.orderCustomer(request.order.customerSeq, owner);
+      if (
+        !customer?.active ||
+        (request.order.paymentMethodType === 'groupBilling' &&
+          (!policy.group || policy.organizationSeq !== request.order.billingOrganizationSeq))
+      )
+        throw new ApiException(403, 'FORBIDDEN', '현재 고객의 카드 결제 자격이 없습니다.');
+      card =
+        request.order.paymentMethodType === 'billing' ||
+        request.order.paymentMethodType === 'groupBilling'
+          ? ((await this.scope.approvalCard(
+              request.order.paymentMethodType === 'billing' ? request.order.customerSeq : null,
+              request.order.paymentMethodType === 'groupBilling'
+                ? request.order.billingOrganizationSeq
+                : null,
+              owner,
+            )) ?? undefined)
+          : undefined;
+      if (!card || (request.cardPaymentFailed && card.paymentCardSeq === request.paymentCardSeq))
+        throw new ApiException(409, 'INVALID_STATE', '결제 카드가 변경되었습니다.');
+      if (card.paymentCardSeq !== request.paymentCardSeq) {
+        const orderId = randomUUID();
+        await this.repository.retryCard(client, id, card.paymentCardSeq, orderId);
+        request.paymentCardSeq = card.paymentCardSeq;
+        request.cardPaymentOrderId = orderId;
+      }
+      const snapshot = await this.ordersRepository.detail(client, request.orderSeq, null);
+      if (!snapshot) throw new ApiException(404, 'NOT_FOUND', '주문을 찾을 수 없습니다.');
+      const errors = snapshot.parcels.flatMap((parcel, index) => {
+        const reason = parcel.status !== 'CANCELLED' && orderItemPriceError(parcel.itemPrice);
+        return reason ? [{ field: `parcels.${index}.itemPrice`, reason }] : [];
+      });
+      if (errors.length)
+        throw new ApiException(422, 'VALIDATION_FAILED', '물품가액을 확인해 주세요.', errors);
+    }
+    const claimId = randomUUID();
+    const billingKey = card ? this.decryptCard(card) : undefined;
+    await this.repository.reserveCardApproval(client, id, claimId);
+    return {
+      done: false,
+      amount: request.amount,
+      orderId: request.cardPaymentOrderId,
+      lookupOnly: !!request.approvalStartedAt,
+      card,
+      billingKey,
+      claimId,
+    };
+  }
+
+  private decryptCard(card: StoredPaymentCard) {
+    const secret = this.config.get('TOSS_BILLING_SECRET_KEY', { infer: true });
+    if (!secret)
+      throw new ApiException(
+        503,
+        'DEPENDENCY_UNAVAILABLE',
+        '카드 자동결제 연동이 설정되지 않았습니다.',
+      );
+    if (
+      card.providerEnvironment !== (secret.startsWith('live_') ? 'live' : 'test') ||
+      !card.encryptedBillingKey
+    )
+      throw new ApiException(409, 'INVALID_STATE', '현재 결제 환경에서 사용할 수 없는 카드입니다.');
+    const encryption = this.config.get('PAYMENT_CARD_ENCRYPTION_KEY', { infer: true });
+    if (!encryption)
+      throw new ApiException(
+        503,
+        'DEPENDENCY_UNAVAILABLE',
+        '카드 저장 암호화가 설정되지 않았습니다.',
+      );
+    try {
+      const bytes = Buffer.from(card.encryptedBillingKey, 'base64');
+      const decipher = createDecipheriv(
+        'aes-256-gcm',
+        Buffer.from(encryption, 'hex'),
+        bytes.subarray(0, 12),
+      );
+      decipher.setAAD(Buffer.from(String(card.paymentCardSeq)));
+      decipher.setAuthTag(bytes.subarray(-16));
+      return Buffer.concat([decipher.update(bytes.subarray(12, -16)), decipher.final()]).toString(
+        'utf8',
+      );
+    } catch {
+      throw new ApiException(
+        503,
+        'DEPENDENCY_UNAVAILABLE',
+        '등록 카드의 암호화 설정을 확인해 주세요.',
+      );
+    }
+  }
+
   ensureEnabled() {
     if (!this.config.get('ORDER_PAYMENTS_ENABLED', { infer: true }))
       throw new ApiException(
@@ -54,10 +296,115 @@ export class PaymentsService {
     return promise;
   }
   async reconcile(id: string, requestId: string) {
-    const view = await this.read(id);
-    return this.process(id, view.amount, undefined, requestId);
+    try {
+      const view = await this.read(id);
+      if (view.autoCharge) return await this.processCard(id, requestId);
+      return await this.process(id, view.amount, undefined, requestId, 'ORDER_PAYMENT_RECONCILED');
+    } catch (error: unknown) {
+      await this.recordPaymentFailure(id, requestId, error, 'ORDER_PAYMENT_RECONCILED');
+      throw error;
+    }
   }
-  private async process(id: string, amount: number, key: string | undefined, requestId: string) {
+
+  async forOrder(id: number, requestId: string) {
+    if (!this.config.get('ORDER_PAYMENTS_ENABLED', { infer: true })) return;
+    const request = await this.repository.pendingCardForOrder(id);
+    if (!request) return;
+    try {
+      return await this.approveCard(request.id, requestId);
+    } catch {
+      this.logger.warn({ event: 'card_payment_deferred', orderSeq: id });
+    }
+  }
+
+  async processCard(id: string, requestId: string) {
+    this.ensureEnabled();
+    await this.approveCard(id, requestId);
+    return this.repository.read(id);
+  }
+
+  private async approveCard(id: string, requestId: string) {
+    try {
+      return await this.approveCardResult(id, requestId);
+    } catch (error: unknown) {
+      await this.recordPaymentFailure(id, requestId, error, 'ORDER_CARD_PAYMENT');
+      throw error;
+    }
+  }
+  private async approveCardResult(id: string, requestId: string) {
+    const claim = await this.claimCardApproval(id);
+    if (claim.done) return;
+    try {
+      const response = claim.lookupOnly
+        ? await this.client.cardLookup(claim.orderId)
+        : await this.client.cardApprove(
+            claim.orderId,
+            claim.amount,
+            claim.billingKey!,
+            claim.card!.providerCustomerKey,
+          );
+      const payment = response.data;
+      if (
+        response.status === 200 &&
+        payment.status === 'DONE' &&
+        payment.orderId === claim.orderId &&
+        payment.totalAmount === claim.amount &&
+        payment.currency === 'KRW' &&
+        typeof payment.paymentKey === 'string' &&
+        payment.paymentKey.length > 0 &&
+        payment.paymentKey.length <= 200 &&
+        typeof payment.approvedAt === 'string' &&
+        isZonedDate(payment.approvedAt)
+      ) {
+        await this.repository.recordCardApproval(id, payment.paymentKey, payment.approvedAt);
+        return this.confirmPayment(
+          id,
+          claim.amount,
+          payment.paymentKey,
+          requestId,
+          payment.approvedAt,
+        );
+      }
+      if (
+        !claim.lookupOnly &&
+        response.status >= 400 &&
+        response.status < 500 &&
+        ![401, 403, 408, 409, 429].includes(response.status)
+      ) {
+        await this.repository.failCardApproval(id, claim.claimId);
+        throw new ApiException(422, 'PAYMENT_FAILED', '등록 카드 결제가 승인되지 않았습니다.');
+      }
+      throw new ApiException(
+        502,
+        'PAYMENT_RESULT_UNKNOWN',
+        '기존 카드 거래의 결과를 확인해 주세요.',
+      );
+    } finally {
+      await this.repository.releaseClaim(id, claim.claimId);
+    }
+  }
+  private async process(
+    id: string,
+    amount: number,
+    key: string | undefined,
+    requestId: string,
+    action:
+      'ORDER_PAYMENT_CONFIRMATION' | 'ORDER_PAYMENT_RECONCILED' = 'ORDER_PAYMENT_CONFIRMATION',
+  ) {
+    try {
+      return await this.processApproval(id, amount, key, requestId);
+    } catch (error: unknown) {
+      await this.recordPaymentFailure(id, requestId, error, action);
+      throw error;
+    }
+  }
+
+  private async processApproval(
+    id: string,
+    amount: number,
+    key: string | undefined,
+    requestId: string,
+  ) {
     const claim = await this.claimApproval(id, amount, key);
     if (claim.done) return this.repository.read(id);
     try {
@@ -111,6 +458,12 @@ export class PaymentsService {
       const r = await this.repository.request(client, id);
       if (!r || r.order.retentionExpired)
         throw new ApiException(404, 'NOT_FOUND', '결제 요청을 찾을 수 없습니다.');
+      if (r.paymentCardSeq !== null)
+        throw new ApiException(
+          409,
+          'INVALID_STATE',
+          '등록 카드 결제는 기존 거래 결과를 확인해 주세요.',
+        );
       if (r.amount !== amount || (key && r.providerPaymentKey && r.providerPaymentKey !== key))
         throw new ApiException(409, 'INVALID_STATE', '결제 정보가 일치하지 않습니다.');
       if (r.completedAt) return { done: true as const, claimId: null };
@@ -166,6 +519,7 @@ export class PaymentsService {
       }
       if (
         !request.approvalStartedAt ||
+        (request.paymentCardSeq !== null && request.providerPaymentKey !== providerReference) ||
         request.invalidatedAt ||
         request.order.status !== 'notPaid' ||
         request.amount !== amount ||
@@ -173,7 +527,14 @@ export class PaymentsService {
       )
         throw new ApiException(409, 'INVALID_STATE', '결제 승인 대상이 변경되었습니다.');
       await this.repository.complete(client, id, providerReference);
-      await this.repository.markPaid(client, request.orderSeq, approvedAt);
+      const snapshot =
+        request.order.paymentMethodType === 'groupBilling'
+          ? await this.scope.billingSnapshot(
+              request.order.billingOrganizationSeq,
+              request.order.billingDepartmentSeq,
+            )
+          : undefined;
+      await this.repository.markPaid(client, request.orderSeq, approvedAt, snapshot);
       await this.billing.recordCharge(client, request.orderSeq, requestId);
       await this.audit.recordSuccess(
         {

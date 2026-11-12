@@ -37,7 +37,8 @@ const instant = value => text(value) && Number.isFinite(Date.parse(value));
 const ORDER_STATUSES = ['COLLECTING','notPaid','PAID','SUBMITTING','SUBMITTING_FAILED','ACCEPTED','SUBMISSION_FAILED','CANCELLED'];
 const amount = value => Number.isSafeInteger(value) && value >= 0;
 const paymentRequest = request =>
-  keys(request, 'amount,expiresAt,notificationStatus,paymentRequestId') &&
+  keys(request, 'amount,autoCharge,cardPaymentFailed,expiresAt,notificationStatus,paymentRequestId') &&
+  typeof request.autoCharge === 'boolean' && typeof request.cardPaymentFailed === 'boolean' &&
   id(request.amount) && instant(request.expiresAt) &&
   text(request.paymentRequestId) && /^[0-9a-f-]{36}$/i.test(request.paymentRequestId) &&
   ['PENDING','SENDING','SENT','FAILED','UNKNOWN'].includes(request.notificationStatus);
@@ -121,7 +122,8 @@ async function requestRead(url, token, event, mode) {
     ? event.source === 'order' ? 15000 : event.source === 'consultation' ? 10000 : 5000
     : 30000;
   const response = await fetch(endpoint, {
-    method: 'POST', redirect: 'error', signal: AbortSignal.timeout(timeout),
+    // Deletion holds call locks until every draft change and audit has finished.
+    method: 'POST', redirect: 'error', signal: mode==='draft-delete'?undefined:AbortSignal.timeout(timeout),
     headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token }, body: JSON.stringify(event),
   });
   if (!/^application\/json(?:\s*;|$)/i.test(response.headers.get('content-type') ?? '')) {

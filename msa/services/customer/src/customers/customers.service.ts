@@ -1,3 +1,4 @@
+import { PaymentCardsService } from '../payments/payment-cards.service';
 import { OrderCustomerWritesService } from './order-customer-writes.service';
 import { CallScopeService } from '../call-scope/call-scope.service';
 import { CallContextClient } from './call-context.client';
@@ -29,6 +30,7 @@ export class CustomersService {
             'NOT_FOUND',
             '삭제할 고객 중 찾을 수 없거나 이미 삭제된 고객이 있습니다.',
           );
+        await this.cards.softDelete(client, 'CUSTOMER', sorted, actorId, requestId);
         await this.repository.removeMany(client, sorted);
         for (const id of sorted)
           await this.audit.recordSuccess(
@@ -65,6 +67,7 @@ export class CustomersService {
     private readonly calls: CallContextClient,
     private readonly scope: CallScopeService,
     private readonly orderWrites: OrderCustomerWritesService,
+    private readonly cards: PaymentCardsService,
   ) {}
 
   lockOrderPhones(client: PoolClient, phones: string[]) {

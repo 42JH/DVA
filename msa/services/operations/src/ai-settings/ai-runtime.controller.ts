@@ -15,7 +15,7 @@ const aiVersion = (version: PersonaVersion) =>
   Object.fromEntries(Object.entries(version).filter(([key]) => !adminFields.has(key)));
 
 @ApiTags('AI Settings')
-@Roles('SYSTEM_ADMIN')
+@Roles('OPERATOR', 'SYSTEM_ADMIN')
 @ApiResponse({
   status: 400,
   description: '상태·버전 번호·적용 결과 형식 오류.',

@@ -8,7 +8,7 @@ import { AgentFaqListResponseDto } from './dto/faq-response.dto';
 import { FaqsService } from './faqs.service';
 
 @ApiTags('AI FAQs')
-@Roles('OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN')
+@Roles('OPERATOR', 'SYSTEM_ADMIN')
 @ApiResponse({ status: 400, description: '조회 조건 또는 번호 오류.', type: ErrorResponseDto })
 @ApiResponse({
   status: 401,

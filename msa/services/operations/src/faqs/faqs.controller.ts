@@ -38,7 +38,7 @@ import { FaqsService } from './faqs.service';
 
 @ApiTags('FAQs')
 @ApiCookieAuth('adminSession')
-@Roles('OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN')
+@Roles('OPERATOR', 'SYSTEM_ADMIN')
 @ApiResponse({
   status: 400,
   description: '요청 형식·필수 분류·질문·답변·검색 조건 오류.',

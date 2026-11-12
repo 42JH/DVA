@@ -1,3 +1,4 @@
+import { CardCallScopeController } from './card-call-scope.controller';
 import { OrderDeletionCheckController } from './order-deletion-check.controller';
 import { OrderReadScopeController } from './order-read-scope.controller';
 import { CallScopeController } from './call-scope.controller';
@@ -12,6 +13,7 @@ import { CustomerContextClient } from './customer-context.client';
   imports: [DatabaseModule, ConsultationsModule],
   controllers: [
     OrderReadScopeController,
+    CardCallScopeController,
     OrderDeletionCheckController,
     CallerContextCommandController,
     CallScopeController,

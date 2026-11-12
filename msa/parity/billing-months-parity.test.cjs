@@ -38,7 +38,7 @@ test('billing HTTP, snapshots, monthly initialization and audit groups match the
   }
   for(const side of sides){
     const adminDb=side.audit;
-    for(const [n,role] of ['OPERATOR','SUPERVISOR','SYSTEM_ADMIN'].entries()){
+    for(const [n,role] of ['OPERATOR','OPERATOR','SYSTEM_ADMIN'].entries()){
       await adminDb.query("INSERT INTO admin_users(admin_user_seq,login_id,name,password_hash,role,status) OVERRIDING SYSTEM VALUE VALUES($1,$2,'청구 검증 관리자','fixture-not-for-login',$3,'ACTIVE') ON CONFLICT(admin_user_seq) DO UPDATE SET status='ACTIVE',deleted_at=NULL,role=EXCLUDED.role",[n+1,'billingvalidation'+n,role]);
       await adminDb.query("INSERT INTO admin_sessions(session_token_hash,admin_user_seq,expires_at) VALUES($1,$2,'2094-01-01Z') ON CONFLICT(session_token_hash) DO UPDATE SET expires_at=EXCLUDED.expires_at",[createHash('sha256').update(['a','b','c'][n].repeat(64)).digest('hex'),n+1]);
     }

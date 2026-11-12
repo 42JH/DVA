@@ -3,7 +3,7 @@ import type {RecipientReceipt} from './order-recipient-pins.cjs';
 import type { Event } from './index.cjs';
 
 export interface DraftWriteCommand {
-  operation: 'OrderCreated' | 'ParcelDraftCreated' | 'ParcelDraftUpdated' | 'OrderIntakeSealed' | 'OrderIntakeFinalized' | 'OrderUpdated' | 'OrderSubmitted' | 'AdminParcelDraftSubmitted';
+  operation: 'OrderCreated' | 'ManualOrderCreated' | 'ParcelDraftCreated' | 'ParcelDraftUpdated' | 'OrderIntakeSealed' | 'OrderIntakeFinalized' | 'OrderUpdated' | 'OrderSubmitted' | 'AdminParcelDraftSubmitted';
   key?: string;
   id: number | null;
   adminId: number | null;
@@ -69,8 +69,8 @@ export interface WriteReferenceEvent extends Event {
   source: 'order' | 'customer' | 'consultation';
   eventType: 'ParcelDraftWriteReferenceRequested';
   payload: {
-    operation: 'CustomerOrderResolved' | 'CustomerCreationApplied' | 'CallCustomerRead' | 'CallEnsured' | 'LegacyCallApplied' | 'CallCreationChecked' | 'CustomerPreparationOutcomeRead' | 'RecipientPinsPrepared' | 'OrderRecipientsRead' | 'RecipientReceiptRead' | 'OrderCustomerRead' | 'CallOrderLinked' | 'IntakeCallRead' | 'IntakeCallSealed' | 'IntakeFinalizationRead' | 'CustomerPaymentPolicyRead' | 'CustomerRead' | 'CustomerPhoneRead' | 'PinChecked' | 'CallRead' |
-      'CallBumped' | 'CallCustomerResolved' | 'PendingCallWritesRead';
+    operation: 'CustomerOrderResolved' | 'CustomerCreationApplied' | 'CallCustomerRead' | 'CallEnsured' | 'LegacyCallApplied' | 'CallCreationChecked' | 'CustomerPreparationOutcomeRead' | 'RecipientPinsPrepared' | 'OrderRecipientsRead' | 'RecipientReceiptRead' | 'OrderCustomerRead' | 'CallOrderLinked' | 'IntakeCallRead' | 'IntakeCallSealed' | 'IntakeFinalizationRead' | 'CustomerPaymentPolicyRead' | 'CustomerPaymentCardRead' | 'CustomerApprovalCardRead' | 'CustomerRead' | 'CustomerPhoneRead' | 'PinChecked' | 'CallRead' |
+      'CallBumped' | 'CallCustomerResolved' | 'PendingCallWritesRead' | 'OrderBillingSnapshotRead' | 'OrderPendingCardApprovalRead';
     input: Record<string, unknown>;
   };
 }
@@ -84,3 +84,21 @@ export function validateReceipt(value: unknown): asserts value is OwnerCallWrite
 
 export function validateOrderCallLink(value:unknown):asserts value is CallOrderLink;
 export function validateLegacyCallWrite(value:unknown):asserts value is LegacyCallWrite;
+
+export interface StoredPaymentCard {
+  paymentCardSeq: number;
+  encryptedBillingKey: string | null;
+  providerCustomerKey: string;
+  providerEnvironment: 'test' | 'live';
+}
+export interface CardApprovalScopeEvent extends Event {
+  source: 'order' | 'customer';
+  eventType: 'OrderCardApprovalRequested';
+  payload: {
+    paymentRequestId: string;
+    orderAddress: string | null;
+    customerAddress?: string | null;
+  };
+}
+export function validateCardApprovalScope(event: unknown, source: CardApprovalScopeEvent['source']): asserts event is CardApprovalScopeEvent;
+export function requestCardApprovalScope(url: string, token: string, event: CardApprovalScopeEvent): Promise<true>;

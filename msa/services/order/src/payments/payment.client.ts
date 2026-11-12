@@ -24,6 +24,51 @@ async function responseText(response: Response) {
 export class PaymentClient {
   timeout = 10000;
   constructor(private readonly config: ConfigService<Environment, true>) {}
+
+  private async cardRequest(path: string, orderId: string, body?: object) {
+    const secret = this.config.get('TOSS_BILLING_SECRET_KEY', { infer: true });
+    if (!secret)
+      throw new ApiException(
+        503,
+        'DEPENDENCY_UNAVAILABLE',
+        '카드 자동결제 연동이 설정되지 않았습니다.',
+      );
+    try {
+      const response = await fetch(
+        this.config.get('PAYMENT_TOSS_BASE_URL', { infer: true }) + path,
+        {
+          method: body ? 'POST' : 'GET',
+          redirect: 'error',
+          signal: AbortSignal.timeout(65000),
+          headers: {
+            Authorization: 'Basic ' + Buffer.from(secret + ':').toString('base64'),
+            ...(body ? { 'Content-Type': 'application/json', 'Idempotency-Key': orderId } : {}),
+          },
+          ...(body ? { body: JSON.stringify(body) } : {}),
+        },
+      );
+      const text = await responseText(response);
+      const data: unknown = text ? JSON.parse(text) : {};
+      if (!data || typeof data !== 'object' || Array.isArray(data))
+        throw new Error('invalid_card_response');
+      return { status: response.status, data: data as Record<string, unknown> };
+    } catch {
+      throw new ApiException(502, 'PAYMENT_RESULT_UNKNOWN', '카드 처리 결과를 확인해 주세요.');
+    }
+  }
+
+  cardApprove(orderId: string, amount: number, billingKey: string, customerKey: string) {
+    return this.cardRequest('/v1/billing/' + encodeURIComponent(billingKey), orderId, {
+      customerKey,
+      amount,
+      orderId,
+      orderName: 'DVA 택배 결제',
+    });
+  }
+
+  cardLookup(orderId: string) {
+    return this.cardRequest('/v1/payments/orders/' + encodeURIComponent(orderId), orderId);
+  }
   async toss(id: string, amount: number, key: string, lookupOnly: boolean) {
     try {
       const response = await fetch(

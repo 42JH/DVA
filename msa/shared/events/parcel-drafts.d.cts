@@ -34,8 +34,9 @@ export function validateDraftReadResult(value:unknown,command:DraftReadCommand):
 
 export interface DraftDeletionEvent extends Event {
  source:'order'|'consultation';eventType:'ParcelDraftDeletionRequested';
- payload:{command:{id:number;adminId:number;requestId:string};orderAddress?:string|null;phase?:'hint'|'delete';callFinalized?:boolean|null;consultationAddress?:string|null};
+ payload:{command:{ids:number[];adminId:number;requestId:string};orderAddress?:string|null;phase?:'hint'|'delete';callFinalized?:Array<DraftDeletionHint & {finalized:boolean|null}>|null;consultationAddress?:string|null};
 }
-export type DraftDeletionResult={callSessionSeq:number|null}|null|true;
+export interface DraftDeletionHint {draftSeq:number;callSessionSeq:number|null}
+export type DraftDeletionResult=DraftDeletionHint[]|null|true;
 export function validateDraftDeletion(event:unknown,source:DraftDeletionEvent['source']):asserts event is DraftDeletionEvent;
 export function validateDraftDeletionResult(value:unknown,event:DraftDeletionEvent):asserts value is DraftDeletionResult;

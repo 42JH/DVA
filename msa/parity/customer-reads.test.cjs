@@ -31,7 +31,7 @@ test('customer reads match monolith with independent operations sessions and imm
   for (const side of sides) {
     await truncateFixture(side.identity, 'TRUNCATE admin_users,audit_logs RESTART IDENTITY CASCADE');
     for (const [login, role, status] of [['root','SYSTEM_ADMIN','ACTIVE'], ['operator','OPERATOR','ACTIVE'],
-      ['supervisor','SUPERVISOR','ACTIVE'], ['pending','OPERATOR','PENDING'], ['inactive','OPERATOR','INACTIVE']]) {
+      ['supervisor','OPERATOR','ACTIVE'], ['pending','OPERATOR','PENDING'], ['inactive','OPERATOR','INACTIVE']]) {
       await side.identity.query(`INSERT INTO admin_users(login_id,name,password_hash,role,status,created_at)
         VALUES($1,$2,$3,$4,$5,'2025-10-01T00:00:00Z')`, [login, '테스트 '+login, hash, role, status]);
     }
@@ -57,7 +57,7 @@ test('customer reads match monolith with independent operations sessions and imm
       'SELECT customer_seq,name,phone_number,status,monthly_billing_enabled,address_data,deleted_at,anonymized_at FROM customers ORDER BY customer_seq',
       'SELECT organization_seq,name,status,monthly_billing_enabled,created_at,deleted_at FROM organizations ORDER BY organization_seq',
       'SELECT department_seq,organization_seq,name,group_billing_enabled,created_at,deleted_at FROM departments ORDER BY department_seq',
-      'SELECT membership_seq,customer_seq,organization_seq,department_seq,employee_no,role,status,deleted_at FROM memberships ORDER BY membership_seq',
+      'SELECT membership_seq,customer_seq,organization_seq,department_seq,employee_no,role,status,monthly_billing_enabled,group_billing_enabled,deleted_at FROM memberships ORDER BY membership_seq',
     ]) values.push((await db.query(query)).rows);
     return values;
   }
@@ -167,7 +167,7 @@ test('customer reads match monolith with independent operations sessions and imm
   await request('GET','/api/companies/search?q=한빛','operator',401);
   await request('GET','/api/companies/search?q=한빛',undefined,200);
   await login('operator');
-  await request('DELETE','/api/admins/2','root',204);
+  await request('DELETE','/api/admins','root',204,{adminUserSeqs:[2]});
   await request('GET','/api/customers','operator',401);
   const docs = await Promise.all(sides.map(async side => (await (await fetch(side.base+'/api/docs-json')).json())));
   for(const q of ['', '  ', '검색', '0000', '010-0000', '%', '_'])

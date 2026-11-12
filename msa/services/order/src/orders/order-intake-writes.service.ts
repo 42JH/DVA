@@ -18,6 +18,7 @@ import { CompleteOrderIntakeDto } from './dto/complete-order-intake.dto';
 import { orderDraft } from './order-draft';
 import { assertOrderAmount } from './order-pricing';
 import type { ParcelDraftRow } from './parcel-drafts.types';
+import { PaymentsService } from '../payments/payments.service';
 
 @Injectable()
 export class OrderIntakeWritesService {
@@ -28,6 +29,7 @@ export class OrderIntakeWritesService {
     private readonly orders: OrdersRepository,
     private readonly audit: AuditService,
     private readonly submissions: OrderSubmissionService,
+    private readonly payments: PaymentsService,
   ) {}
 
   execute(event: DraftWriteEvent) {
@@ -62,6 +64,7 @@ export class OrderIntakeWritesService {
     );
   }
   async submitPaidOrder(id: number, requestId: string) {
+    await this.payments.forOrder(id, requestId);
     await this.submissions.submitPaidOrder(id, requestId);
   }
 
@@ -111,12 +114,6 @@ export class OrderIntakeWritesService {
       );
     await this.drafts.lockScope(client, call.customerSeq, call.callerPhoneNumber);
     const ready = (await this.lockDrafts(client, id)).filter((row) => row.status === 'READY');
-    if (ready.length && !input.paymentMethodType)
-      throw new ApiException(
-        422,
-        'VALIDATION_FAILED',
-        '완성된 배송 초안에는 결제수단이 필요합니다.',
-      );
     if (ready.length) {
       assertOrderAmount({
         totalAmount: ready.reduce((sum, row) => sum + (row.parcel.notifiedPrice ?? 0), 0),
@@ -125,6 +122,12 @@ export class OrderIntakeWritesService {
       if (call.customerSeq === null || !(await this.drafts.customer(client, call.customerSeq)))
         throw new ApiException(403, 'FORBIDDEN', '통화에 연결된 활성 고객이 필요합니다.');
       const policy = await this.scope.paymentPolicy(call.customerSeq);
+      if (!input.paymentMethodType && !(policy.organizationSeq !== null && policy.monthly))
+        throw new ApiException(
+          422,
+          'VALIDATION_FAILED',
+          '완성된 배송 초안에는 결제수단이 필요합니다.',
+        );
       if (
         (input.paymentMethodType === 'credit' && !policy.monthly) ||
         (input.paymentMethodType === 'groupBilling' && !policy.group)

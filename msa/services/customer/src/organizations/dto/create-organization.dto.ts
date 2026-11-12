@@ -31,7 +31,7 @@ export class OrganizationMemberDto extends OmitType(InlineMemberDto, ['departmen
 }
 
 export class CreateOrganizationDto {
-  @ApiPropertyOptional({ description: '기업 전체 월결제 자격. 미입력 시 false.', default: false })
+  @ApiPropertyOptional({ description: '기업 전체 월결제 자격. 미입력 시 true.', default: true })
   @ValidateIf((_o, value) => value !== undefined)
   @IsBoolean()
   monthlyBillingEnabled?: boolean;

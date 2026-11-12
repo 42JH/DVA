@@ -32,6 +32,7 @@ import {
   type DraftWriteEvent,
   type DraftWriteResult,
   type WriteReferenceEvent,
+  type StoredPaymentCard,
 } from '@dva/events/parcel-draft-write.cjs';
 import { AuditService } from '../audit/audit.service';
 import { ApiException, type ErrorCode } from '../common/errors/api.exception';
@@ -41,8 +42,14 @@ import type {
   IntakeCall,
   IntakeCompletion,
   PaymentPolicy,
+  BillingSnapshot,
 } from '@dva/events/order-intake-write.cjs';
 import { writeOrder } from './order-write';
+
+export interface CustomerReferenceScope {
+  id: string;
+  address: string | null;
+}
 
 type ActiveWrite = {
   event: DraftWriteEvent;
@@ -119,7 +126,7 @@ export class ParcelDraftWriteScope {
   private result(data: Record<string, unknown>): DraftWriteResult {
     const state = this.active;
     const result = { data, receipt: state.receipt };
-    if (state.event.payload.command.operation === 'OrderCreated')
+    if (['OrderCreated', 'ManualOrderCreated'].includes(state.event.payload.command.operation))
       return {
         ...result,
         customerReceipt: state.customerReceipt,
@@ -203,7 +210,9 @@ export class ParcelDraftWriteScope {
           event.eventType,
           {
             requestHash: hash,
-            ...(command.operation === 'OrderCreated' ? { creationKey: command.key } : {}),
+            ...(['OrderCreated', 'ManualOrderCreated'].includes(command.operation)
+              ? { creationKey: command.key }
+              : {}),
           },
         ],
       );
@@ -231,9 +240,24 @@ export class ParcelDraftWriteScope {
         state.receipt = existing.payload.result.receipt;
         state.customerReceipt = existing.payload.result.customerReceipt ?? null;
         state.customerCreationReceipt = existing.payload.result.customerCreationReceipt ?? null;
-        return existing.payload.result.data as T;
+        const data = existing.payload.result.data as T;
+        const order = (data.result ?? data) as { paymentRequest?: Record<string, unknown> };
+        const request = order?.paymentRequest;
+        // Receipts written before card support have neither a card attachment nor a card failure.
+        if (
+          request &&
+          !Object.hasOwn(request, 'autoCharge') &&
+          !Object.hasOwn(request, 'cardPaymentFailed')
+        ) {
+          const restored = {
+            ...order,
+            paymentRequest: { ...request, autoCharge: false, cardPaymentFailed: false },
+          };
+          return (data.result ? { ...data, result: restored } : restored) as T;
+        }
+        return data;
       }
-      if (command.operation === 'OrderCreated')
+      if (['OrderCreated', 'ManualOrderCreated'].includes(command.operation))
         await client.query('SELECT pg_advisory_xact_lock($1,hashtext($2))', [
           ORDER_CREATION_LOCK,
           event.eventId,
@@ -293,8 +317,9 @@ export class ParcelDraftWriteScope {
     owner: 'customer' | 'consultation',
     operation: WriteReferenceEvent['payload']['operation'],
     input: Record<string, unknown>,
+    referenceScope?: CustomerReferenceScope,
   ): Promise<T> {
-    const event = this.active.event;
+    const event = this.local.getStore()?.event;
     return requestWriteReference<T>(
       readCallbackUrl(
         this.config.get(owner === 'customer' ? 'CUSTOMER_URL' : 'CONSULTATION_URL', {
@@ -303,9 +328,11 @@ export class ParcelDraftWriteScope {
         owner === 'customer'
           ? '/internal/call-read-references/parcel-draft-write/reference'
           : '/internal/parcel-draft-write/reference',
-        (owner === 'customer'
-          ? event.payload.customerAddress
-          : event.payload.consultationAddress) ?? null,
+        referenceScope
+          ? referenceScope.address
+          : ((owner === 'customer'
+              ? event?.payload.customerAddress
+              : event?.payload.consultationAddress) ?? null),
       ),
       this.config.get('CUSTOMER_AUTH_TOKEN', { infer: true }),
       {
@@ -314,7 +341,7 @@ export class ParcelDraftWriteScope {
         eventType: 'ParcelDraftWriteReferenceRequested',
         payload: { operation, input },
       },
-      event.eventId,
+      referenceScope?.id ?? event?.eventId,
     ).catch((error: unknown) => this.failure(error));
   }
 
@@ -425,8 +452,37 @@ export class ParcelDraftWriteScope {
     return this.reference<boolean>('customer', 'PinChecked', { customerSeq, pinSeq });
   }
 
-  paymentPolicy(id: number) {
-    return this.reference<PaymentPolicy>('customer', 'CustomerPaymentPolicyRead', { id });
+  paymentPolicy(id: number, referenceScope?: CustomerReferenceScope) {
+    return this.reference<PaymentPolicy>(
+      'customer',
+      'CustomerPaymentPolicyRead',
+      { id },
+      referenceScope,
+    );
+  }
+  paymentCard(customerSeq: number | null, organizationSeq: number | null) {
+    return this.reference<number | null>('customer', 'CustomerPaymentCardRead', {
+      customerSeq,
+      organizationSeq,
+    });
+  }
+  billingSnapshot(organizationSeq: number | null, departmentSeq: number | null) {
+    return this.reference<BillingSnapshot>('customer', 'OrderBillingSnapshotRead', {
+      organizationSeq,
+      departmentSeq,
+    });
+  }
+  approvalCard(
+    customerSeq: number | null,
+    organizationSeq: number | null,
+    referenceScope: CustomerReferenceScope,
+  ) {
+    return this.reference<StoredPaymentCard | null>(
+      'customer',
+      'CustomerApprovalCardRead',
+      { customerSeq, organizationSeq },
+      referenceScope,
+    );
   }
   intakeCall(id: number) {
     return this.reference<IntakeCall | null>('consultation', 'IntakeCallRead', { id });
@@ -434,8 +490,13 @@ export class ParcelDraftWriteScope {
   sealIntake(id: number, payload: IntakeCompletion) {
     return this.reference<IntakeCall | null>('consultation', 'IntakeCallSealed', { id, payload });
   }
-  orderCustomer(id: number) {
-    return this.reference<CustomerReference | null>('customer', 'OrderCustomerRead', { id });
+  orderCustomer(id: number, referenceScope?: CustomerReferenceScope) {
+    return this.reference<CustomerReference | null>(
+      'customer',
+      'OrderCustomerRead',
+      { id },
+      referenceScope,
+    );
   }
   async linkOrder(id: number, orderSeq: number, customerSeq: number) {
     const before = this.active.call;
@@ -461,7 +522,9 @@ export class ParcelDraftWriteScope {
     const call = await this.reference<DraftWriteCall | null>('consultation', 'CallRead', { id });
     this.active.call = call;
     if (
-      this.active.event.payload.command.operation === 'OrderCreated' &&
+      ['OrderCreated', 'ManualOrderCreated'].includes(
+        this.active.event.payload.command.operation,
+      ) &&
       !this.active.before &&
       call
     )

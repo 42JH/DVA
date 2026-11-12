@@ -12,7 +12,7 @@ test('a missing consultation service fails scoped reads closed while local admin
   }
   const screen=await fetch(base+'/api/admin/orders',{headers:{Cookie:'dva_session='+'a'.repeat(64)},signal:AbortSignal.timeout(40000)});
   assert.equal(screen.status,503);assert.equal((await screen.json()).error.code,'DEPENDENCY_UNAVAILABLE');
-  const failedDelete=await fetch(base+'/api/orders/1001',{method:'DELETE',headers:{Cookie:'dva_session='+'a'.repeat(64),Origin:'http://localhost:5173'},signal:AbortSignal.timeout(20000)});
+  const failedDelete=await fetch(base+'/api/orders',{method:'DELETE',headers:{Cookie:'dva_session='+'a'.repeat(64),Origin:'http://localhost:5173','Content-Type':'application/json'},body:JSON.stringify({orderSeqs:[1001]}),signal:AbortSignal.timeout(20000)});
   assert.equal(failedDelete.status,503);assert.equal((await failedDelete.json()).error.code,'DEPENDENCY_UNAVAILABLE');
   const failedCancel=await fetch(base+'/api/orders/1001/cancel',{method:'POST',headers:{Authorization:'Bearer '+process.env.PGPASSWORD,call_session_seq:'1011'},signal:AbortSignal.timeout(40000)});
   assert.equal(failedCancel.status,503);assert.equal((await failedCancel.json()).error.code,'DEPENDENCY_UNAVAILABLE');
