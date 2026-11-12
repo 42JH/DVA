@@ -1,7 +1,9 @@
 // 화면 틀 — 왼쪽 글자 메뉴(처리할 건수 같이) + 오른쪽 화면. 화면 위 줄(제목 · 상태)은 화면이 PageHead로 그림
+import { useState } from 'react'
 import { Link, NavLink, Outlet, useLocation, useNavigation } from 'react-router'
 import logo from '@/shared/assets/logo-dva.webp'
 import { Icon, type IconName } from '@/shared/ui'
+import { Confirm } from '@/shared/ui/Modal'
 import { ShellContext } from '@/shared/lib/shell'
 import { useTrackHistory } from '@/shared/lib/keepScroll'
 import { useShellState } from './useShellState'
@@ -19,6 +21,7 @@ export function AppLayout() {
   const { pathname } = useLocation()
   const nav = useNavigation()
   useTrackHistory()
+  const [askLogout, setAskLogout] = useState(false) // 로그아웃은 한 번 더 물음 (11/12 사용자: 잘못 누르면 바로 나가짐)
   const groups: { title: string; items: Item[] }[] = [
     {
       title: '운영',
@@ -122,7 +125,7 @@ export function AppLayout() {
             </NavLink>
             <button
               type="button"
-              onClick={s.logout}
+              onClick={() => setAskLogout(true)}
               aria-label="로그아웃"
               className="grid size-7 place-items-center rounded text-ops-sub hover:bg-ops-paper hover:text-ops-ink"
             >
@@ -149,6 +152,17 @@ export function AppLayout() {
           </div>
         </main>
       </div>
+      {askLogout && (
+        <Confirm
+          title="로그아웃할까요?"
+          ok="로그아웃"
+          onOk={() => {
+            setAskLogout(false)
+            s.logout()
+          }}
+          onClose={() => setAskLogout(false)}
+        />
+      )}
     </ShellContext.Provider>
   )
 }
