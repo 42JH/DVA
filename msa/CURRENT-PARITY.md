@@ -989,3 +989,11 @@ MSA #55는 operations 실패 뒤의 실제 신규 이미지 전달·DB 전달·�
 - 기존 FAQ 검사 안에 실제 양쪽 OpenAPI의 security 비교와 무토큰/잘못된 토큰 401·정상 관리자 세션 200을 추가했다. 변경 전 실제 응답의 인증 생략 배열을 같은 단언이 거절하는 것을 확인했다. 테스트 파일을 추가하지 않았다.
 - 새 operations checks·운영 이미지의 lint·Jest 10·Node/보안 21건과 실제 전체 operations 드라이버 198단계가 통과했다. 원본 fa0e4a2f와 기존의 다른 서비스/DB 이미지 ID를 재사용했고 로컬 1 CPU·3GB 조건이다. 원본 계약 검사 11건도 새로 통과했다. 근거는 faq-security-red.log·faq-security-build.log와 faq-security-native/verification.json·validated-inputs.json이다.
 - 이 단위는 FAQ 계약 보강이며 Jenkins #62 성공을 뜻하지 않는다. 사용자 실패 보고 후 실제 콘솔을 읽었고 공통 이벤트 검증의 PostgreSQL 시작 중 CREATE DATABASE 실패를 별도 단위로 추적한다. Jenkins 설정·슬롯·Job은 변경하지 않았다.
+
+### 102. 실제 Jenkins #62의 임시 PostgreSQL 준비 판정 수정
+
+- 기존 SSH 연결로 실제 dva-msa #62 콘솔을 읽었다. 100e050e 빌드는 Verify Event Transport에서 psql의 Unix 소켓 접속이 `FATAL: the database system is starting up`으로 실패했다. 이후 이미지·서비스 검증·배포는 실행되지 않았다. 다른 최신 완료 Job은 BE #141·FE #181·AI #178 성공이며 AI #179는 당시 실행 중이었다. Jenkins 설정·슬롯·Job은 수정하거나 새로 실행하지 않았다.
+- 공통 이벤트 검사만 pg_isready가 호스트를 지정하지 않아 Docker PostgreSQL 초기화용 임시 Unix 소켓 서버도 준비 완료로 판단했다. 초기화 스크립트의 대기를 고정한 실제 DB에서 수정 전 소켓 검사는 0을 반환하지만 실제 애플리케이션 TCP는 아직 응답하지 않음을 확인했다. 너무 이른 준비 완료를 거절하는 재현 단언이 수정 전 코드에서 실패했다. 운영 #62의 FATAL 자체는 실제 콘솔 근거이며 로컬에서는 그 원인이 되는 초기화 단계를 고정해 검증했다.
+- 이벤트 검사와 같은 패턴이 남은 수동 전환 검사의 준비 확인·psql을 모두 127.0.0.1 TCP로 맞췄다. 이벤트 DB에는 이미 생성한 임시 비밀번호를 해당 psql 프로세스에만 전달한다. 다른 MSA/DB 검사 진입점의 pg_isready는 이미 TCP를 명시했다. 제한 시간·DB/업무 기대값·재시도 횟수는 늘리지 않았다.
+- 동일한 초기화 게이트·DB 1 CPU/3GB 제한에서 수정 후에는 최종 TCP 서버까지 기다리고 공통 Node 37·실제 PostgreSQL/HTTP 16건을 모두 통과했다. 배포·선택·이력·롤백 130건, 실제 전환 fixture의 백업 두 개·업무 테이블 여섯 개 복원 비교·늦은 이벤트 차단도 통과했다. 배포/DB 셸 문법과 Python 30파일 문법을 확인했다. 테스트 파일 69개와 Jenkins 설정은 그대로다.
+- 근거는 jenkins-after-603-builds.jsonl·jenkins-62-console-clean.log·event-bootstrap-{old,fixed}.{log,json}·build62-deployment-tests.log·build62-cutover.log·build62-pipeline-checks.log다. 별도 로컬 격리 데몬의 외부 DNS 제한으로 시작하지 못한 첫 재현과 비결정적 전환 시도도 별도 로그로 보존했다. 이 단위는 공통 시작 경합과 전환 검사의 수정이며, 수정 커밋의 CI 진입점·서비스/이미지·패키징 최종 확인과 새 MR 제출을 이어간다. 실제 새 Jenkins/운영 배포는 아직 미검증이다.
