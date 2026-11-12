@@ -89,7 +89,7 @@ export function Player({
               aria-label="재생 위치"
               className={`flex-1 ${range}`}
             />
-            {/* 판정 눈금 — 막대 바로 위. 누르는 자리는 눈금보다 넓게 */}
+            {/* 판정 눈금 — 막대 바로 위. 누르는 자리는 24×24(접근성 최소 크기, 11/12 Lighthouse), 보이는 눈금은 그대로 */}
             {player.marks?.map((m) => (
               <button
                 key={m.key}
@@ -98,7 +98,7 @@ export function Player({
                 aria-label={m.title}
                 onClick={m.onClick}
                 style={{ left: `${m.at * 100}%` }}
-                className="absolute -top-4 grid h-3.5 w-3 -translate-x-1/2 place-items-center rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ops-route"
+                className="absolute -top-6 grid size-6 -translate-x-1/2 place-items-center rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ops-route"
               >
                 <i
                   className={`block h-2.5 w-[3px] rounded-full ${m.tone === 'stop' ? 'bg-ops-stop' : 'bg-ops-wait'}`}
