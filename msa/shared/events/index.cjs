@@ -129,6 +129,11 @@ async function acknowledged(response, eventId) {
   return object(ack) && ack.eventId === eventId && ['processed', 'duplicate'].includes(ack.status);
 }
 
+function requestId(eventId, payload) {
+  const incoming = payload?.command?.requestId ?? payload?.requestId;
+  return typeof incoming === 'string' && uuid.test(incoming) ? incoming : eventId;
+}
+
 function createRelay({ pool, source, destinations, timeoutMs = 5000, eventTypes }) {
   if (!services.has(source) || !Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 30000)
     throw new Error('Invalid event relay configuration');
@@ -141,7 +146,7 @@ function createRelay({ pool, source, destinations, timeoutMs = 5000, eventTypes 
     checkToken(config.token);
     return [destination, { url, token: config.token }];
   }));
-  return () => transaction(pool, async client => {
+  async function deliver(client) {
     const { rows } = await client.query(
       `SELECT pending.* FROM outbox_events pending
        WHERE destination=ANY($1::text[]) AND delivered_at IS NULL AND next_attempt_at<=clock_timestamp()
@@ -155,11 +160,12 @@ function createRelay({ pool, source, destinations, timeoutMs = 5000, eventTypes 
     );
     if (!rows.length) return false;
     const event = rows[0], endpoint = endpoints.get(event.destination);
+    const traceId = requestId(event.event_id, event.payload);
     let ok = false, status = null;
     if (endpoint) {
       try {
         const response = await fetch(endpoint.url, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(timeoutMs),
-          headers: { Authorization: `Bearer ${endpoint.token}`, 'Content-Type': 'application/json' },
+          headers: { Authorization: `Bearer ${endpoint.token}`, 'Content-Type': 'application/json', 'X-Request-Id': traceId },
           body: JSON.stringify({ eventId: event.event_id, source, eventType: event.event_type, payload: event.payload }) });
         status = response.status;
         ok = await acknowledged(response, event.event_id);
@@ -171,8 +177,16 @@ function createRelay({ pool, source, destinations, timeoutMs = 5000, eventTypes 
       `UPDATE outbox_events SET attempt_count=LEAST(attempt_count,2147483646)+1,
        next_attempt_at=clock_timestamp()+($2::int*interval '1 millisecond'),last_http_status=$3 WHERE event_id=$1`,
       [event.event_id, Math.min(60000, 250 * 2 ** Math.min(event.attempt_count, 8)), status]);
+    return { event: 'outbox_delivery', requestId: traceId, eventId: event.event_id, outcome: ok ? 'delivered' : 'retry' };
+  }
+  return async () => {
+    const result = await transaction(pool, deliver);
+    if (!result) return false;
+    if (process.env.NODE_ENV === 'production') {
+      try { console.log(JSON.stringify(result)); } catch { /* Logging does not affect committed delivery. */ }
+    }
     return true;
-  });
+  };
 }
 
 async function sendEvent(url, token, event, signal = AbortSignal.timeout(5000)) {
@@ -180,7 +194,7 @@ async function sendEvent(url, token, event, signal = AbortSignal.timeout(5000)) 
   checkToken(token);
   url = endpoint(url);
   const response = await fetch(url, { method: 'POST', redirect: 'error', signal,
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(event) });
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'X-Request-Id': requestId(event.eventId, event.payload) }, body: JSON.stringify(event) });
   if (!await acknowledged(response, event.eventId)) throw new Error('Event acknowledgement unavailable');
 }
 

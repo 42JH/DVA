@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { outboxMetrics } from '@dva/events/observability.cjs';
 import { DatabaseService } from '../database/database.service';
 import { httpMetrics } from './http-metrics';
 
@@ -81,6 +82,9 @@ export class ObservabilityService {
         `dva_orders_stale_submitting ${stale}`,
       );
     }
-    return lines.join('\n') + '\n';
+    const outbox = databaseUp
+      ? await outboxMetrics(this.database.pool)
+      : 'dva_outbox_metrics_success 0\n';
+    return lines.join('\n') + '\n' + outbox;
   }
 }
