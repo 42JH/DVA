@@ -46,7 +46,7 @@ export function MemberFormModal({
   member: Member | null // null = 추가
   onClose: () => void
   initialDept?: number | null
-  onCsv?: () => void // 추가 창에서 CSV로 여러 명 등록 창으로 바꿈 (11/11: 화면의 CSV 버튼을 이 창 안으로)
+  onCsv?: () => void // 추가 창에서 CSV 일괄 등록 창으로 바꿈 (11/11: 화면의 CSV 버튼을 이 창 안으로)
 }) {
   const vm = useMemberForm(companyId, member, onClose, initialDept)
   return (
@@ -90,7 +90,7 @@ export function MemberFormModal({
           {!vm.editing && onCsv && (
             <Btn onClick={onCsv} className="self-start">
               <Icon name="sheet" />
-              CSV 파일로 여러 명 등록
+              CSV 파일로 일괄 등록
             </Btn>
           )}
           <div className="grid grid-cols-2 gap-3">
