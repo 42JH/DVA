@@ -1,6 +1,6 @@
 // 실행: npx tsx src/features/persona/api/scenarioTestMap.test.ts  (프레임워크 없이 assert만)
 import assert from 'node:assert/strict'
-import { runsToTests, tagOf, type RunDto } from './scenarioTestMap'
+import { runsToTests, tagOf, unwrap, type RunDto } from './scenarioTestMap'
 
 type Item = RunDto['items'][number]
 const item = (scenario: string, status: Item['status'], passed: boolean | null = null): Item => ({
@@ -81,4 +81,14 @@ const same = runsToTests([
 ])
 assert.equal(same[0].items[0].runId, 'b')
 assert.deepEqual(runsToTests([]), [])
+// 응답 알맹이 — 백엔드가 감싼 것({ data, meta })과 감싸지 않은 것(창구 직접 · 가짜 창구)을 둘 다 받음
+const runList = [run('r1', '2026-11-12T09:00:00.000', '1:7', [])]
+assert.deepEqual(unwrap({ data: runList, meta: { requestId: 'x' } }), runList) // 백엔드 기본 모양
+assert.deepEqual(unwrap({ data: runList }), runList)
+assert.deepEqual(unwrap(runList), runList) // 감싸지 않은 배열
+assert.equal(unwrap({ data: null, meta: { requestId: 'x' } }), null)
+const verdict = { scenario: 'F1', passed: false, checks: [] }
+assert.deepEqual(unwrap(verdict), verdict) // 감싸지 않은 객체
+const odd = { data: 1, other: 2 }
+assert.deepEqual(unwrap(odd), odd) // data 말고 다른 칸이 있으면 창구의 응답으로 봄
 console.log('scenarioTestMap ok')

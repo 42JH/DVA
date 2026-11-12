@@ -71,3 +71,14 @@ export function runsToTests(runs: RunDto[]): VersionTest[] {
     }
   })
 }
+
+/** 응답에서 알맹이 꺼내기. 백엔드는 JSON을 { data, meta: { requestId } }로 감싸 넘기고(ResponseEnvelopeInterceptor),
+ *  이 PC에서 창구에 바로 붙일 때(개발 서버 프록시)와 가짜 창구는 감싸지 않은 응답을 줌 → 둘 다 받음
+ *  창구의 응답(시나리오 · 묶음 · 판정 · 기록)에는 맨 위에 data라는 칸이 없어서 헷갈릴 일이 없음 */
+export function unwrap<T>(body: unknown): T {
+  if (body && typeof body === 'object' && !Array.isArray(body) && 'data' in body) {
+    const others = Object.keys(body).filter((k) => k !== 'data' && k !== 'meta')
+    if (others.length === 0) return (body as { data: T }).data
+  }
+  return body as T
+}
