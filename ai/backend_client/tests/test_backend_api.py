@@ -281,6 +281,7 @@ def test_find_parcels_reads_details_without_name_in_url():
         if req.url.path == "/api/orders/101":
             order = detail(101, "notPaid", [(301, "ACTIVE", "박민수", "대구로 1"),
                                             (302, "CANCELLED", "최지우", "서울로 2")])
+            order["pickupRequestedAt"] = "2026-11-12T05:00:00+00:00"  # BE는 UTC로 표기한다
             order["parcels"][0]["origin"] = {"roadAddress": "부산로 3", "detailAddress": "201호", "phoneNumber": CALLER}
             order["parcels"][0]["destination"].update(detailAddress="", phoneNumber=CALLER)
             return httpx2.Response(200, json={"data": order})
@@ -291,9 +292,11 @@ def test_find_parcels_reads_details_without_name_in_url():
     assert parcels == [
         {"order_seq": 101, "order_parcel_seq": 301, "receiver_name": "박민수", "receiver_address": "대구로 1",
          "status": "notPaid", "details": {"sender_address": "부산로 3", "sender_address_detail": "201호",
-                                           "receiver_address": "대구로 1", "receiver_address_detail": ""}},
+                                           "receiver_address": "대구로 1", "receiver_address_detail": "",
+                                           "pickup_requested_at": "2026-11-12T14:00:00+09:00"}},
         {"order_seq": 101, "order_parcel_seq": 302, "receiver_name": "최지우", "receiver_address": "서울로 2",
-         "status": "CANCELLED", "details": {"receiver_address": "서울로 2"}}]  # 취소한 상세는 CANCELLED, 없는 주문(404)은 뺀다
+         "status": "CANCELLED", "details": {"receiver_address": "서울로 2",
+                                             "pickup_requested_at": "2026-11-12T14:00:00+09:00"}}]  # 취소한 상세는 CANCELLED, 없는 주문(404)은 뺀다
     assert dict(seen[0].url.params) == {"limit": "5"}  # 받는 분 이름(개인정보)을 URL에 넣지 않는다
     assert all(r.headers["call_session_seq"] == "20" for r in seen)
     assert run(client.parcel(20, 101, 302))["status"] == "CANCELLED" and run(client.parcel(20, 9, 1)) is None
