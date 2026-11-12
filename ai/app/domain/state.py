@@ -228,7 +228,8 @@ class ConversationState:
     agent_transferred: bool = False       # 상담원 연결 요구(분석 hasHandoffRequest — 연결 성공 여부 아님)
     callback_offered: bool = False        # 상담원 근무 시간 밖이라 콜백을 제안함(답을 기다림)
     callback_requested: bool = False      # 고객이 콜백에 동의(분석 hasCallbackRequest)
-    address_offer: dict | None = None     # 저장 대상 {name, sender, receiver, parcel(담은 택배 id)}. 담을 때 묻지 않고 저장
+    address_offer: dict | None = None     # 저장 대상 {name, sender, receiver, parcel(담은 택배 id)}. 받는 곳은 담을 때 묻지 않고 저장
+    sender_address_consent: tuple[str, str, bool] | None = None  # (발송 기본주소, 상세, 등록 주소로 저장 동의). 통화 단위
     origin_offered: bool = False          # 출발지 후보에서 보내는지 물음(인사 또는 접수 시작 때)
     origin_mentioned_in_greeting: bool = False  # 인사에서 발송 주소를 언급함(등록 주소와의 대조 결과와 별개)
     origin_answer: bool | None = None     # 그 출발지에서 보냄 = True, 다른 곳 = False

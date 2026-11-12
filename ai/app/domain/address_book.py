@@ -2,8 +2,9 @@
 
 BE: 주문 저장은 고객 정보·PIN을 자동 갱신하지 않는다. AI가 택배를 담을 때 해당 저장 작업을 실행한다.
 - 성함: 등록 고객이 이번 택배의 보내는 분 성함을 등록 이름에도 쓰는 데 동의했고 두 이름이 다르면 고객 이름 갱신
-  (동의 즉시 LiveFlow._maybe_save_name이 확정된 발송 주소와 함께 먼저 저장한다. 여기서는 그 저장이 실패했을 때 다시 시도한다)
-- 보내는 곳: 등록 고객이고 확정 주소(지번·우편번호 포함)가 고객 기본 주소와 다르면 기본 주소 갱신
+- 보내는 곳: 등록 고객의 확정 주소(지번·우편번호 포함)가 고객 기본 주소와 다르면 등록 주소도 바꿀지 묻고(ask_address_save)
+  동의했을 때만 기본 주소 갱신
+  (성함·보내는 곳은 동의 즉시 LiveFlow._maybe_save_profile이 저장한다. 담을 때는 그 저장이 실패했을 때 다시 시도한다)
 - 받는 곳: 주소록·이전 주문에서 고른 곳이 아니고 확정 주소면 주소록 추가
 shortcut: 주소록에서 고른 받는 곳을 고친 경우는 새 PIN으로 추가한다(PIN 번호를 지금 들고 있지 않음) — 기존 PIN 수정이 필요하면 PIN 번호를 Place에 싣는다.
 """
@@ -59,7 +60,21 @@ def sender_change_next(state: ConversationState) -> str | None:
         return "ask_address_change"
     if draft.ask_customer_name_save and draft["sender_name"].valid and draft["sender_name"].value != state.customer.name:
         return "ask_name_save"
+    if (key := new_sender_address(state)) and (state.sender_address_consent or (None, None))[:2] != key:
+        return "ask_address_save"
     return None
+
+
+def new_sender_address(state: ConversationState) -> tuple[str, str] | None:
+    """등록 고객의 확정 발송 주소(상세까지 기록)가 등록 주소와 다르면 (기본주소, 상세)."""
+    c, draft = state.customer, state.current
+    if not c.customer_seq or draft is None or not draft.sender_geo:
+        return None
+    address, detail = draft["sender_address"], draft["sender_address_detail"]
+    if not (address.valid and detail.valid):
+        return None
+    key = (address.value, detail.value or "")
+    return key if key != (c.default_address, c.default_address_detail or "") else None
 
 
 def origin_place(state: ConversationState) -> Place | None:
@@ -99,10 +114,8 @@ def save_offer(state: ConversationState) -> dict:
     if cur.save_sender_name and sn.valid \
             and (sn.value or "").strip() and sn.value.strip() != (c.name or "").strip():
         out["name"] = True
-    sa = cur["sender_address"]
-    # 상세주소는 되읽기 전에 반드시 채워진다(없다고 하면 ""). 상세만 바뀐 경우(101호→102호)도 저장 제안
-    if sa.valid and cur.sender_geo and \
-            (sa.value, cur["sender_address_detail"].value or "") != (c.default_address, c.default_address_detail or ""):
+    # 상세만 바뀐 경우(101호→102호)도 등록 주소 변경 대상. 고객이 바로 그 주소에 동의했을 때만 저장
+    if (key := new_sender_address(state)) and state.sender_address_consent == (*key, True):
         out["sender"] = True
     ra = cur["receiver_address"]
     if ra.valid and cur.receiver_geo and ra.source not in (Source.PIN, Source.HISTORY, Source.COMPANY):
