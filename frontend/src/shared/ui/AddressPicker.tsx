@@ -22,7 +22,8 @@ export function AddressPicker({
           취소
         </Btn>
       </div>
-      <div className="overflow-hidden rounded-md ring-1 ring-ops-line ring-inset">
+      {/* 테두리는 border로 — 안쪽 ring(inset)은 iframe에 가려 안 보였음 (11/13 사용자: 테두리 · 회색 빈 칸) */}
+      <div className="overflow-hidden rounded-md border border-ops-line">
         <KakaoPostcodeEmbed
           defaultQuery={query || undefined}
           onComplete={(a) =>
@@ -33,7 +34,11 @@ export function AddressPicker({
               postalCode: a.zonecode,
             })
           }
-          style={{ height: 440 }}
+          style={{ height: 480 }}
+          // 카카오 기본 회색 바탕 → 흰 바탕 · 선은 화면 선 색. 지도 · 영문 버튼은 관리 화면에 안 씀
+          theme={{ bgColor: '#FFFFFF', pageBgColor: '#FFFFFF', outlineColor: '#e3e6eb' }}
+          hideMapBtn
+          hideEngBtn
           errorMessage={
             <p className="py-10 text-center text-[14px] text-ops-sub">
               주소 검색을 불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.
