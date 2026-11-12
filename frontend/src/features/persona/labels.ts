@@ -4,7 +4,7 @@ import type { Tone } from '@/shared/ui'
 import { PROMPT_KEYS, type PromptFields, type PromptKey } from './api/personaApi'
 
 // 프롬프트 칸 제목 — 서버가 합친 글(persona-prompt.ts)과 같은 말. 사용자가 못 고치는 글 (11/10)
-export const PROMPT_LABEL: Record<PromptKey, string> = {
+const PROMPT_LABEL: Record<PromptKey, string> = {
   role: '역할',
   personality: '성격',
   tone: '톤',

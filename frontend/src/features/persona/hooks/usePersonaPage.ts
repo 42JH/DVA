@@ -130,7 +130,7 @@ export function usePersonaPage() {
   useEffect(() => {
     if (SCENARIO_TEST) keep(key, { personaSeq, historyOpen, version })
   }, [key, personaSeq, historyOpen, version])
-  const gate = useTestGate() // 전체 시나리오 시험이 끝나야 [통화에 사용하기] (가짜 모드에서만, 아니면 null)
+  const gate = useTestGate() // 전체 시나리오 시험이 끝나야 [통화에 사용하기] (시나리오 시험이 꺼진 환경이면 null)
   const [editing, setEditing] = useState(false) // 수정 화면
   const [confirming, setConfirming] = useState<Confirming>(null)
   const [adding, setAdding] = useState(false)

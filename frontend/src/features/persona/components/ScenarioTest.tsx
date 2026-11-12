@@ -16,7 +16,7 @@ import {
 
 export function ScenarioTestPage() {
   const { personaSeq, version } = useParams()
-  if (!SCENARIO_TEST) return <Navigate to="/personas" replace /> // 가짜 모드에서만 있는 화면
+  if (!SCENARIO_TEST) return <Navigate to="/personas" replace /> // 시나리오 시험이 꺼진 환경
   return (
     <Page
       key={`${personaSeq}-${version}`}

@@ -12,11 +12,10 @@ import { SCRIPTS } from './scenarioScripts'
 //   친절형은 v1만 시험해 둠 → 최신 v2를 보면 '고치기 전 글의 결과'
 // 판정 · 대화는 실제 결과 세 건(scenarioSamples.ts)을 돌려 씀 — 통과는 조회, 실패는 취소(B3만 제 것) 통화가 나옴
 // 실제와 다른 것: 녹음 주소를 기록에 넣어 줌(브라우저 안에서 만든 무음). 실제 창구는 …/audio를 따로 부름
-const SCENARIOS = Object.values(SCRIPTS).map(({ id, name, group, core }) => ({
+const SCENARIOS = Object.values(SCRIPTS).map(({ id, name, group }) => ({
   id,
   name,
   group,
-  core,
   available: true,
 }))
 const NEW_FAILS = ['B3', 'F1']
