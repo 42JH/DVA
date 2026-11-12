@@ -254,7 +254,8 @@ export function ComplaintCard({ c }: { c: CardState<ComplaintView> }) {
             </Headline>
             <div className="grid min-h-0 flex-1 grid-cols-[clamp(140px,36%,244px)_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] gap-4 pt-1">
               <div className="grid min-h-0 place-items-center">
-                <Donut slices={v.slices} total={v.total} />
+                {/* 탭마다 새로 그려 한 바퀴 채우기를 다시 (가림막 하나라 그대로 두면 처음 한 번만 돎) */}
+                <Donut key={tab} slices={v.slices} total={v.total} />
               </div>
               {/* 범례 머리 줄 · 아래 설명은 뺌 (11/11 사용자: 설명이 너무 많음) */}
               <div className="flex min-h-0 [scrollbar-width:thin] flex-col justify-center overflow-y-auto">
