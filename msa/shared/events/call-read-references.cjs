@@ -25,6 +25,11 @@ function validatePurgedCallsEvent(value) {
   if(value.source!=='consultation'||value.eventType!=='ConsultationCallsPurged'||
      !keys(value.payload,'ids')||!retentionIds(value.payload.ids)||value.payload.ids.length>100)throw new Error('Invalid purged calls');
 }
+function validatePurgedParcelsEvent(value) {
+  validateEvent(value);
+  if(value.source!=='order'||value.eventType!=='OrderParcelsPurged'||
+     !keys(value.payload,'orderParcelSeqs')||!retentionIds(value.payload.orderParcelSeqs))throw new Error('Invalid purged order parcels');
+}
 function validateRetainedCustomersQuery(value) {
   validateEvent(value);
   if(value.source!=='customer'||value.eventType!=='CustomerOrderReferencesReadRequested'||
@@ -153,4 +158,4 @@ function requestHomeOrders(url,token,observedAt,consultationAddress,readScopeId)
   return requestSnapshot(url,token,'HomeOrdersReadRequested',validateHomeOrdersResult,'consultation',
     {observedAt,consultationAddress},readScopeId);
 }
-module.exports={validateReferenceQuery,validateReferenceRows,requestReferences,validatePersonaComparisonQuery,validatePersonaComparisonRows,requestPersonaComparison,validateComplaintFaqQuery,validateComplaintFaqRows,requestComplaintFaqs,validateOrderOrganizationQuery,validateOrderOrganizationRows,requestOrderOrganization,validateHomeOrdersQuery,validateHomeOrdersResult,requestHomeOrders,validateRetainedCustomersQuery,validateRetainedCustomers,requestRetainedCustomers,validatePurgedCardsEvent,validatePurgedCallsEvent,validateRetainedOrdersQuery,requestRetainedOrders};
+module.exports={validateReferenceQuery,validateReferenceRows,requestReferences,validatePersonaComparisonQuery,validatePersonaComparisonRows,requestPersonaComparison,validateComplaintFaqQuery,validateComplaintFaqRows,requestComplaintFaqs,validateOrderOrganizationQuery,validateOrderOrganizationRows,requestOrderOrganization,validateHomeOrdersQuery,validateHomeOrdersResult,requestHomeOrders,validateRetainedCustomersQuery,validateRetainedCustomers,requestRetainedCustomers,validatePurgedCardsEvent,validatePurgedCallsEvent,validateRetainedOrdersQuery,requestRetainedOrders,validatePurgedParcelsEvent};

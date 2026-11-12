@@ -916,6 +916,76 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
       try{for(const db of [reference,databases.consultation])await db.query('DELETE FROM call_sessions WHERE call_session_seq BETWEEN 29901 AND 29903');for(const db of [reference,databases.order])await db.query('DELETE FROM orders WHERE order_seq BETWEEN 29911 AND 29913');}finally{await guard.query("SELECT pg_advisory_unlock(hashtextextended('call-end:'||$1,0))",[phone]);retention.splice(retention.indexOf(guard),1);guard.release();}
     }
   });
+  await t.test('delivery retention matches original shipment removal and prevents delayed or racing recreation',async()=>{
+    const delivery=new Pool({host:'delivery-db',user:'delivery_app'}),ids=[30011,30012,30013,30014];
+    const token=process.env.CUSTOMER_AUTH_TOKEN,url='http://delivery-app:3003/internal/order-accepted';
+    const post=async(body,credential=token)=>{const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+credential},body:JSON.stringify(body),signal:AbortSignal.timeout(20000)});return{status:response.status,body:await response.json()};};
+    const packet=orderParcelSeqs=>({eventId:randomUUID(),source:'order',eventType:'OrderParcelsPurged',payload:{orderParcelSeqs}});
+    const rows=async db=>({shipments:(await db.query('SELECT to_jsonb(s) AS row FROM shipments s WHERE order_parcel_seq=ANY($1::int[]) ORDER BY order_parcel_seq',[ids])).rows,
+      history:(await db.query('SELECT to_jsonb(h) AS row FROM shipment_status_history h WHERE shipment_seq=ANY($1::int[]) ORDER BY shipment_seq',[ids])).rows});
+    try{
+      for(const db of [reference,databases.order]){
+        const client=await db.connect();try{await client.query('BEGIN');await client.query("SET LOCAL session_replication_role='replica'");
+          await client.query(`INSERT INTO orders(order_seq,customer_seq,status,payment_method_type,creation_source,total_amount,paid_at,created_at,updated_at)
+            OVERRIDING SYSTEM VALUE VALUES(30001,1,'PAID','billing','ADMIN',8000,'2030-01-01Z','2030-01-01Z','2030-01-01Z')`);
+          for(const [index,id]of ids.entries())await client.query('INSERT INTO order_parcels(order_parcel_seq,order_seq,parcel_position,notified_price) OVERRIDING SYSTEM VALUE VALUES($1,30001,$2,2000)',[id,index+1]);
+          await client.query('COMMIT');
+        }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
+      }
+      for(const db of [reference,delivery])for(const id of ids.slice(0,3)){
+        await db.query(`INSERT INTO shipments(shipment_seq,order_parcel_seq,tracking_number,status,status_changed_at,created_at)
+          OVERRIDING SYSTEM VALUE VALUES($1,$1,$2,'paid','2030-01-01Z','2030-01-01Z')`,[id,'retention-shipment-'+id]);
+        await db.query(`INSERT INTO shipment_status_history(shipment_status_history_seq,shipment_seq,request_id,to_status,actor_type,occurred_at)
+          OVERRIDING SYSTEM VALUE VALUES($1,$1,$2,'paid','SYSTEM','2030-01-01Z')`,[id,'30000000-0000-4000-8000-'+String(id).padStart(12,'0')]);
+      }
+      const event=packet(ids.slice(0,2)),before=await rows(delivery),receipts=await snapshot(delivery,['inbox_events']);
+      assert.deepEqual(before,await rows(reference));
+      assert.equal((await post(event,'invalid')).status,401);
+      assert.equal((await post({...event,source:'customer'})).status,401);
+      for(const values of [[],[30011,30011],['30011']])assert.equal((await post({...event,payload:{orderParcelSeqs:values}})).status,422);
+      assert.deepEqual(await snapshot(delivery,['inbox_events']),receipts);
+      await delivery.query("CREATE FUNCTION retention_shipment_fault() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'controlled shipment deletion failure'; END $$; CREATE TRIGGER retention_shipment_fault BEFORE DELETE ON shipments FOR EACH ROW EXECUTE FUNCTION retention_shipment_fault()");
+      try{assert.equal((await post(event)).status,500);assert.deepEqual(await rows(delivery),before);assert.deepEqual(await snapshot(delivery,['inbox_events']),receipts);}
+      finally{await delivery.query('DROP TRIGGER retention_shipment_fault ON shipments; DROP FUNCTION retention_shipment_fault()');}
+      await reference.query('DELETE FROM shipment_status_history WHERE shipment_seq IN (SELECT shipment_seq FROM shipments WHERE order_parcel_seq=ANY($1::int[]))',[event.payload.orderParcelSeqs]);
+      await reference.query('DELETE FROM shipments WHERE order_parcel_seq=ANY($1::int[])',[event.payload.orderParcelSeqs]);
+      assert.deepEqual(await post(event),{status:200,body:{eventId:event.eventId,status:'processed'}});
+      assert.deepEqual(await rows(delivery),await rows(reference));
+      assert.deepEqual(await post(event),{status:200,body:{eventId:event.eventId,status:'duplicate'}});
+      assert.equal((await post({...event,payload:{orderParcelSeqs:[30013]}})).status,409);
+      for(let attempt=0;attempt<2;attempt++){
+        const late={...event,eventId:randomUUID(),eventType:'OrderSubmissionDeliveryRequested'};
+        assert.deepEqual(await post(late),{status:200,body:{eventId:late.eventId,status:'processed'}});
+        assert.deepEqual(await rows(delivery),await rows(reference));
+      }
+      const gate=await delivery.connect();let creating,purging;
+      try{
+        await gate.query('SELECT pg_advisory_lock(20261113,30014)');
+        await delivery.query("CREATE FUNCTION retention_shipment_gate() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.order_parcel_seq=30014 THEN PERFORM pg_advisory_xact_lock(20261113,30014); END IF; RETURN NEW; END $$; CREATE TRIGGER retention_shipment_gate BEFORE INSERT ON shipments FOR EACH ROW EXECUTE FUNCTION retention_shipment_gate()");
+        creating=post({...packet([30014]),eventType:'OrderSubmissionDeliveryRequested'});
+        for(let attempt=0;;attempt++){
+          const waiting=(await delivery.query("SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid() AND wait_event_type='Lock' AND query LIKE '%INSERT INTO shipments%' AND query NOT LIKE '%pg_stat_activity%'")).rowCount;
+          if(waiting)break;assert.ok(attempt<100,'creation reaches its controlled insert');await pause(20);
+        }
+        let finished=false;purging=post(packet([30014])).then(result=>{finished=true;return result;});
+        await pause(75);assert.equal(finished,false,'purge waits for the same parcel creation transaction');
+        await gate.query('SELECT pg_advisory_unlock(20261113,30014)');
+        assert.equal((await creating).status,200);assert.equal((await purging).status,200);
+        assert.deepEqual(await rows(delivery),await rows(reference));
+      }finally{
+        await gate.query('SELECT pg_advisory_unlock(20261113,30014)');gate.release();
+        await Promise.allSettled([creating,purging].filter(Boolean));
+        await delivery.query('DROP TRIGGER IF EXISTS retention_shipment_gate ON shipments; DROP FUNCTION IF EXISTS retention_shipment_gate()');
+      }
+    }finally{
+      try{
+        for(const db of [reference,delivery]){await db.query('DELETE FROM shipment_status_history WHERE shipment_seq IN (SELECT shipment_seq FROM shipments WHERE order_parcel_seq=ANY($1::int[]))',[ids]);await db.query('DELETE FROM shipments WHERE order_parcel_seq=ANY($1::int[])',[ids]);}
+        for(const db of [reference,databases.order]){
+          const client=await db.connect();try{await client.query('BEGIN');await client.query("SET LOCAL session_replication_role='replica'");await client.query('DELETE FROM order_parcels WHERE order_seq=30001');await client.query('DELETE FROM orders WHERE order_seq=30001');await client.query('COMMIT');}catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
+        }
+      }finally{await delivery.end();}
+    }
+  });
   await t.test('private queries reject forged tokens/sources and replay reads current state without writes',async()=> {
     const command={operation:'OrdersListed',id:null,callSessionSeq:1011,query:{limit:20,offset:0}};
     const event={eventId:randomUUID(),source:'order',eventType:'OrderReadRequested',payload:{command}};

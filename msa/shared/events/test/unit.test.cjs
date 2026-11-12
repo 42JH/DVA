@@ -12,6 +12,13 @@ test('retention order references reject forged queries and invalid customer subs
   validatePurgedCardsEvent(purge);
   const {validatePurgedCallsEvent}=require('../call-read-references.cjs');
   const calls={...purge,source:'consultation',eventType:'ConsultationCallsPurged'};validatePurgedCallsEvent(calls);
+  const {validatePurgedParcelsEvent}=require('../call-read-references.cjs');
+  const parcels={...purge,source:'order',eventType:'OrderParcelsPurged',payload:{orderParcelSeqs:[1,2]}};
+  validatePurgedParcelsEvent(parcels);
+  validatePurgedParcelsEvent({...parcels,payload:{orderParcelSeqs:Array.from({length:1000},(_,n)=>n+1)}});
+  for(const changed of [{...parcels,source:'customer'},{...parcels,eventType:'OrderSubmissionDeliveryRequested'},
+    ...[[0],[1,1],['1'],[],[2147483648],Array.from({length:1001},(_,n)=>n+1)].map(orderParcelSeqs=>({...parcels,payload:{orderParcelSeqs}})),
+    {...parcels,payload:{orderParcelSeqs:[1],extra:true}}])assert.throws(()=>validatePurgedParcelsEvent(changed));
   for(const changed of [{...calls,source:'customer'},{...calls,eventType:purge.eventType},...[[0],[1,1],['1'],[],Array.from({length:101},(_,n)=>n+1)].map(ids=>({...calls,payload:{ids}})),{...calls,payload:{ids:[1],extra:true}}])assert.throws(()=>validatePurgedCallsEvent(changed));
   for(const changed of [{...purge,source:'order'},{...purge,eventType:'CustomerOrderReferencesReadRequested'},...[[0],[1,1],['1'],[],Array.from({length:101},(_,n)=>n+1)].map(ids=>({...purge,payload:{ids}})),{...purge,payload:{ids:[1],extra:true}}])assert.throws(()=>validatePurgedCardsEvent(changed));
   const query={eventId:randomUUID(),source:'customer',eventType:'CustomerOrderReferencesReadRequested',payload:{ids:[2,7,11]}};
