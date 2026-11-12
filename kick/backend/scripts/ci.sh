@@ -28,3 +28,5 @@ docker build --tag "$KICK_BACKEND_IMAGE" .
 docker compose -p "$project" --env-file "$env_file" up -d --no-build --wait --wait-timeout 90
 docker compose -p "$project" --env-file "$env_file" exec -T backend \
   node --input-type=module < test/calls.integration.mjs
+docker compose -p "$project" --env-file "$env_file" exec -T backend \
+  node --input-type=module < test/voice.integration.mjs
