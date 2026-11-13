@@ -199,7 +199,7 @@ function Call({ runId, scenario }: { runId: string; scenario: string }) {
           <table className="mt-2 w-full table-fixed text-[13px]">
             <thead className="text-left text-ops-sub">
               {/* 다른 목록과 같은 표 머리 색 (ops-table) — 판정만 가운데 */}
-              <tr className="h-9 bg-[#e8eff8] text-ops-ink [&>th]:px-3 [&>th]:font-semibold">
+              <tr className="h-9 bg-[#e8eff8] text-ops-ink [&>th]:px-3 [&>th]:font-semibold [&>th:not(:last-child)]:border-r [&>th:not(:last-child)]:border-[#c5d6ec] [&>th:not(:last-child)]:text-left!">
                 <th scope="col" className="w-[30%]">
                   항목
                 </th>
@@ -217,7 +217,7 @@ function Call({ runId, scenario }: { runId: string; scenario: string }) {
                 return (
                   <tr
                     key={c.key}
-                    className={`border-b border-ops-line/60 align-top [&>td]:px-3 [&>td]:py-2 ${skip ? 'text-ops-sub' : ''}`}
+                    className={`border-b border-ops-line/60 align-top [&>td]:px-3 [&>td]:py-2 [&>td:not(:last-child)]:border-r [&>td:not(:last-child)]:border-[#c5d6ec] ${skip ? 'text-ops-sub' : ''}`}
                   >
                     {c.behaviour ? (
                       <td colSpan={3}>

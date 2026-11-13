@@ -192,7 +192,17 @@ export function useScenarioCall(runId: string, scenarioId: string) {
     })),
     focusKey: here >= 0 ? here : null,
     jump: jumped ?? opened,
-    counts: `통과 ${count('pass')}, 실패 ${count('fail')}, 채점 안 함 ${count('skip')}`,
+    // 0인 것은 빼고 (시안 '통과 4, 실패 1')
+    counts: (
+      [
+        ['통과', count('pass')],
+        ['실패', count('fail')],
+        ['채점 안 함', count('skip')],
+      ] as const
+    )
+      .filter(([, n]) => n > 0)
+      .map(([k, n]) => `${k} ${n}`)
+      .join(', '),
     checks: checks.map((c, i) => {
       const at = spots[i]
       return {
