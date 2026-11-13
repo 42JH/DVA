@@ -10,7 +10,7 @@ import { orderNo, priceBand } from '@/shared/order/labels'
 import { fmtPhone } from '@/shared/lib/format'
 import { useFollowScroll } from '@/shared/call/useFollowScroll'
 import { PageHead } from '@/shared/ui'
-import { Badge, Btn, Kinds } from '@/shared/ui'
+import { Badge, Kinds } from '@/shared/ui'
 import { itemsText, STATUS_LOOK, won } from '@/shared/order/look'
 import { dateTime } from '@/shared/lib/when'
 import { useCallView, type CallView } from '../hooks/useCallView'
@@ -67,25 +67,6 @@ function CallBody({ callId }: { callId: number }) {
                 <span className="flex gap-1">
                   <Kinds kinds={s.kinds} />
                 </span>
-              )}
-              {/* 판정 수 — 오른쪽 아래라 스크롤해야 보여서 위에도 (11/11 검수). 누르면 그 칸으로
-                  누르는 것이라 상태 칩 모양이 아니라 회색 테두리 버튼 (11/11 버튼 모양) */}
-              {[
-                { id: 'customer-complaints', n: s.customer.length, label: '고객 불만' },
-                { id: 'ai-errors', n: s.errors.length, label: 'AI 오류' },
-              ].map(
-                (x) =>
-                  x.n > 0 && (
-                    <Btn
-                      key={x.id}
-                      kind="plainBadge"
-                      onClick={() =>
-                        document.getElementById(`c-${x.id}`)?.scrollIntoView({ behavior: 'smooth' })
-                      }
-                    >
-                      {x.label} {x.n}
-                    </Btn>
-                  ),
               )}
               <span className="ml-auto">
                 <AiToggle on={showAi} onChange={setShowAi} />
@@ -169,7 +150,7 @@ function Chat({ vm, arrival, showAi }: { vm: CallView; arrival: Arrival; showAi:
       className="relative flex min-h-0 min-w-0 flex-1 [scrollbar-width:thin] flex-col gap-0.5 overflow-y-auto bg-white px-4 py-4"
     >
       {lines.length === 0 && (
-        <p className="py-10 text-center text-[14px] text-ops-sub">
+        <p className="m-auto text-center text-[14px] text-ops-sub">
           {vm.isLoading ? '불러오는 중…' : vm.scriptEmpty}
         </p>
       )}
@@ -331,8 +312,13 @@ function Contents({ vm }: { vm: CallView }) {
               ) : (
                 <ul className="flex flex-col gap-1.5 text-[13px]">
                   {s.customer.map((c, i) => (
-                    <Judged key={i} tone="stop" head={c.label} time={c.time} go={c.go}>
-                      {c.level && <p className="text-[12px] text-ops-stop">{c.level}</p>}
+                    <Judged
+                      key={i}
+                      tone="stop"
+                      head={c.level ? `${c.label} (${c.level})` : c.label}
+                      time={c.time}
+                      go={c.go}
+                    >
                       <p className="text-ops-ink/80">“{c.quote}”</p>
                     </Judged>
                   ))}

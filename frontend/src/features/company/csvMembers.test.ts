@@ -289,7 +289,7 @@ assert.match(errs('사번,사원명,전화번호,부서\n1,가,01011112222,개�
 // 엑셀이 0을 지우지 않게: 맨 앞 BOM(한글) · 사번 · 우편번호는 ="001" · 전화번호는 010-0000-0001 형식
 const exText = exampleCsv()
 assert.equal(exText.charCodeAt(0), 0xfeff)
-assert.ok(exText.includes(`"=""001""",김예시,010-0000-0001,Y,`))
+assert.ok(exText.includes(`"=""001""",김샘플,010-0000-0001,Y,`))
 assert.ok(exText.includes(`,"=""04524""",`))
 assert.deepEqual(
   ok(exText).map((m) => [m.employeeNo, m.phoneNumber, m.address.postalCode]),
@@ -305,7 +305,7 @@ const coText = exampleCsv('companies')
 assert.ok(coText.startsWith('﻿기업명,사번,'))
 const co = readMembersCsv(coText, 'companies')
 assert.ok(co.ok)
-assert.deepEqual([...new Set(co.members.map((m) => m.company))], ['예시상사'])
+assert.deepEqual([...new Set(co.members.map((m) => m.company))], ['샘플상사'])
 assert.deepEqual([...new Set(co.members.map((m) => m.department))], ['경영지원팀', '개발팀']) // 부서 2곳
 assert.equal(co.members.filter((m) => m.leader).length, 1)
 assert.equal(co.members[0]!.employeeNo, '001') // 사원 칸이 한 칸씩 밀려 읽히지 않음

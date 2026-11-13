@@ -1,5 +1,5 @@
 // 기업 창 — 사원 추가 · 수정, CSV로 사원 추가, CSV로 기업 등록, 이름 하나 입력(기업명 · 부서명). 규칙 · 요청은 기존 훅 그대로
-// 파일 칸 규칙은 긴 설명 대신 [예시 파일 받기]로 (예시 파일에 칸 이름 · 형식이 다 들어 있음)
+// 파일 칸 규칙은 긴 설명 대신 [샘플 파일 받기]로 (샘플 파일에 칸 이름 · 형식이 다 들어 있음)
 import type { Member } from '@/features/company/api/companyApi'
 import { downloadExample, type CsvKind, type CsvMember } from '@/features/company/csvMembers'
 import { fmtPhone } from '@/shared/lib/format'
@@ -29,7 +29,7 @@ const FootNote = ({ error, hint }: { error?: string | null; hint?: string | null
 const Example = ({ kind = 'members' }: { kind?: CsvKind }) => (
   <Btn kind="plain" onClick={() => downloadExample(kind)} className="self-start">
     <Icon name="download" />
-    예시 파일 받기
+    샘플 파일 받기
   </Btn>
 )
 
@@ -46,7 +46,7 @@ export function MemberFormModal({
   member: Member | null // null = 추가
   onClose: () => void
   initialDept?: number | null
-  onCsv?: () => void // 추가 창에서 CSV로 여러 명 등록 창으로 바꿈 (11/11: 화면의 CSV 버튼을 이 창 안으로)
+  onCsv?: () => void // 추가 창에서 CSV 일괄 등록 창으로 바꿈 (11/11: 화면의 CSV 버튼을 이 창 안으로)
 }) {
   const vm = useMemberForm(companyId, member, onClose, initialDept)
   return (
@@ -90,7 +90,7 @@ export function MemberFormModal({
           {!vm.editing && onCsv && (
             <Btn onClick={onCsv} className="self-start">
               <Icon name="sheet" />
-              CSV 파일로 여러 명 등록
+              CSV 파일로 일괄 등록
             </Btn>
           )}
           <div className="grid grid-cols-2 gap-3">
