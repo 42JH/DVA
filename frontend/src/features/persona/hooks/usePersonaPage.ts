@@ -15,6 +15,7 @@ import type { EditTarget } from '@/features/persona/hooks/usePromptEditor'
 import { inlineDiff, type Part } from '@/features/persona/hooks/lineDiff'
 import { useVoiceOptions } from '@/features/persona/hooks/useVoiceOptions'
 import { useTestGate } from '@/features/persona/hooks/useScenarioTest'
+import { useApplyTest } from '@/features/persona/hooks/useApplyTest'
 import { SCENARIO_TEST } from '@/features/persona/api/scenarioTestApi'
 import {
   ConfirmError,
@@ -73,6 +74,7 @@ type Confirming =
   | { kind: 'use'; personaSeq: number }
   | { kind: 'reuse'; version: number }
   | { kind: 'delete'; personaSeq: number }
+  | { kind: 'test' } // 띠의 [통화에 반영] — 시험하고 반영 (모두 통과면 저절로 반영)
   | null
 
 // 시나리오 시험에 다녀오거나 새로고침해도 보던 상담가 · 버전 그대로 — 기록(location.key)마다 세션 저장소에 기억
@@ -181,6 +183,42 @@ export function usePersonaPage() {
   // 남은 초안이 없고 내용도 같으면 보낼 게 없음 (서버는 빈 저장을 400으로 거절)
   const reuseSame = (v: PersonaVersion) => !!reuseDiff(v)?.same && !persona?.draftRevision
 
+  // 현재 버전이 아직 통화에 안 쓰임 (적용 대기 중이면 기다림)
+  const newerThanCall = (p: (typeof list)[number]) =>
+    p.inUse && !p.applyingVersion && p.head.version !== p.appliedVersion
+
+  // 반영 전 띠 (11/13 새 안 1번) — 사용 중 상담가의 현재 버전이 아직 통화에 안 쓰일 때. 지난 버전을 볼 땐 없음
+  const unapplied = !!persona && newerThanCall(persona)
+  // 토글 '통화에 쓰는 내용' — 그 버전을 못 찾으면(목록 밖) 토글 없음
+  const callVersion = unapplied
+    ? (all.find((v) => v.version === persona.appliedVersion) ?? null)
+    : null
+  // 띠의 시험 → 반영 (11/13 새 안 1번) — 반영 전인 고친 내용(현재 버전)
+  const applyTarget =
+    unapplied && head && !head.isDraft
+      ? {
+          personaSeq: persona.personaSeq,
+          head: persona.head,
+          promptText: head.promptText,
+          voiceId: head.voice.voice || null,
+        }
+      : null
+  const applyTest = useApplyTest(applyTarget)
+  // 반영 중 = 사용 중 상담가의 새 버전을 AI가 확인하는 중 (다른 상담가로 바꾸는 중은 6번)
+  const applyingVersion =
+    persona?.inUse && persona.applyingVersion
+      ? (all.find((v) => v.version === persona.applyingVersion) ?? null)
+      : null
+  const step: 'unapplied' | 'testing' | 'applying' | null = applyingVersion
+    ? 'applying'
+    : !unapplied
+      ? null
+      : applyTest.state === 'running'
+        ? 'testing'
+        : 'unapplied'
+  // 시험 · 반영 중엔 입력 칸 · 목소리 · 이름 · 수정 기록 보기를 막음 — 고치면 새 버전이 생겨 시험하던 글과 달라짐
+  const locked = step === 'testing' || step === 'applying'
+  const comparing = showCall && callVersion !== null && !locked
   const confirm = useMutation({
     mutationFn: async (c: NonNullable<Confirming>) => {
       if (c.kind === 'use') {
@@ -189,6 +227,10 @@ export function usePersonaPage() {
         return
       }
       if (c.kind === 'delete') return deletePersona(c.personaSeq)
+      if (c.kind === 'test') {
+        if (applyTarget) await applyTest.start(applyTarget)
+        return
+      }
       const v = all.find((x) => x.version === c.version)
       const d = v && reuseDiff(v)
       if (!persona || !d) return
@@ -218,6 +260,8 @@ export function usePersonaPage() {
       }
     },
     onError: (e, c) => {
+      // 시험 시작은 응답을 못 받아도 걸렸을 수 있음 → 창을 닫고 띠에서 알림 (다시 누르면 요금이 두 번)
+      if (c.kind === 'test') return setConfirming(null)
       if (e instanceof ConfirmError) void qc.invalidateQueries({ queryKey: personaQueries.all() })
       // 삭제는 그새 바뀐 경우(404 이미 지움 · 409 그새 적용됨) 최신 목록을 다시 받음. 이미 없으면 창도 닫음
       if (c.kind === 'delete' && e instanceof ApiError && (e.status === 404 || e.status === 409)) {
@@ -242,8 +286,12 @@ export function usePersonaPage() {
   }
 
   // [수정]은 늘 맨 위에서 시작 — 남은 초안이 있으면 그 내용, 없으면 현재 버전 (11/02 결정)
+  // 저장 직후 목록(현재 버전 번호)이 버전 기록보다 먼저 오면 옛 글로 입력 칸이 새로 떠 '고치는 중'처럼 보였음
+  // → 버전 기록이 따라올 때까지 입력 칸을 띄우지 않음 (남은 초안이 있으면 맨 위가 초안이라 비교 안 함)
+  const fresh =
+    !!persona && !!latest && (!!persona.draftRevision || latest.version === persona.head.version)
   const editTarget: EditTarget | null =
-    persona && latest
+    persona && latest && fresh
       ? {
           personaSeq: persona.personaSeq,
           personaName: latest.name,
@@ -276,6 +324,14 @@ export function usePersonaPage() {
         danger: true,
       }
     }
+    if (confirming?.kind === 'test') {
+      const n = applyTest.toRun
+      return {
+        title: '시험하고 통화에 반영할까요?',
+        note: `${applyTest.resume ? `남은 시나리오 ${n}개를` : `시나리오 ${n}개를 모두`} 돌립니다. 모두 통과하면 바로 반영하고, 실패가 있으면 결과를 확인한 뒤 반영할 수 있습니다.`,
+        okLabel: '시험하고 반영',
+      }
+    }
     if (confirming?.kind === 'use') {
       const p = list.find((x) => x.personaSeq === confirming.personaSeq)
       if (!p) return null
@@ -293,7 +349,7 @@ export function usePersonaPage() {
         note: blocked
           ? '이 버전은 아직 전체 시나리오 시험을 하지 않았습니다. 시험을 마치면 통화에 반영할 수 있습니다.'
           : `진행 중인 통화가 끝나면(AI 확인 후) ${p.name}의 현재 버전으로 응대합니다.${until}`,
-        okLabel: p.inUse ? '적용' : '사용하기',
+        okLabel: p.inUse ? '반영' : '사용하기',
         changes: g?.state === 'done' ? { fail: g.newFail, pass: g.newPass } : null, // 시험한 버전만 변화 수
         testTo: g ? `/personas/${p.personaSeq}/tests/${p.head.version}` : undefined,
         blocked,
@@ -306,17 +362,6 @@ export function usePersonaPage() {
     confirm.reset() // 지난번 실패 문구가 새 창에 먼저 뜨지 않게
     setConfirming({ kind: 'use', personaSeq: seq })
   }
-  // 현재 버전이 아직 통화에 안 쓰임 (적용 대기 중이면 기다림)
-  const newerThanCall = (p: (typeof list)[number]) =>
-    p.inUse && !p.applyingVersion && p.head.version !== p.appliedVersion
-
-  // 반영 전 띠 (11/13 새 안 1번) — 사용 중 상담가의 현재 버전이 아직 통화에 안 쓰일 때. 지난 버전을 볼 땐 없음
-  const unapplied = !!persona && newerThanCall(persona)
-  // 토글 '통화에 쓰는 내용' — 그 버전을 못 찾으면(목록 밖) 토글 없음
-  const callVersion = unapplied
-    ? (all.find((v) => v.version === persona.appliedVersion) ?? null)
-    : null
-  const comparing = showCall && callVersion !== null
   // 수정 기록 창의 비교 기준 = 통화에 쓰는 내용 (안 쓰는 상담가는 appliedVersion = 현재 버전)
   const base = persona ? (all.find((v) => v.version === persona.appliedVersion) ?? head) : null
 
@@ -354,7 +399,7 @@ export function usePersonaPage() {
             sections: diff!.sections,
             // 토글이 '통화에 쓰는 내용'이면 그 버전 글 (읽기만)
             callSections: comparing ? promptSections(callVersion).sections : null,
-            canEdit: canManage,
+            canEdit: canManage && !locked,
           } satisfies PromptView)
         : null,
 
@@ -381,18 +426,40 @@ export function usePersonaPage() {
         : null,
     loadPicked: () => picked && confirm.mutate({ kind: 'reuse', version: picked.version }),
     loading: confirm.isPending,
+    // 띠 — 반영 전 · 시험 중 · 반영 중 (11/13 새 안 1번). 고친 내용 = 반영 중이면 그 버전, 아니면 현재 버전
     band:
-      unapplied && head
+      step && (applyingVersion ?? head)
         ? {
-            time: fmtVersionTime(head.savedAt),
-            author: head.author,
+            step,
+            time: fmtVersionTime((applyingVersion ?? head)!.savedAt),
+            author: (applyingVersion ?? head)!.author,
             canApply: canManage,
-            canCompare: callVersion !== null,
+            canCompare: callVersion !== null && !locked,
+            // 시험 중 — 시나리오 4 / 10 · 통과 3 · 실패 1 (연결 실패는 끝난 수에만)
+            progress:
+              step === 'testing'
+                ? {
+                    ended: applyTest.ended,
+                    total: applyTest.total,
+                    pass: applyTest.pass,
+                    fail: applyTest.fail,
+                  }
+                : null,
+            applyError: step === 'applying' ? (persona?.applyError ?? null) : null,
+            error: applyTest.startError ?? applyTest.applyError,
           }
         : null,
+    locked,
     showCall: comparing,
     setShowCall,
-    applyHead: () => persona && askUse(persona.personaSeq),
+    // [통화에 반영] — 시나리오 시험이 꺼진 환경 · 이미 모두 통과 = 바로 반영 확인, 아니면 시험하고 반영 확인
+    applyHead: () => {
+      if (!persona) return
+      if (!applyTest.on || applyTest.allPass) return askUse(persona.personaSeq)
+      confirm.reset()
+      applyTest.resetStart()
+      setConfirming({ kind: 'test' })
+    },
     openHistory: () => {
       confirm.reset() // 지난번 불러오기 실패 문구가 먼저 뜨지 않게
       setVersion(null)

@@ -7,7 +7,7 @@ import { API_BASE_URL } from '@/shared/api/client'
 const PERSONA_SEQ = 1
 const ver = (
   version: number,
-  status: 'ACTIVE' | 'INACTIVE',
+  status: 'ACTIVE' | 'INACTIVE' | 'PENDING',
   appliedAt: string | null,
   createdAt: string,
 ) => ({
@@ -57,8 +57,17 @@ const KIND_VERSIONS = [
 ].map((v) => ({ ...v, aiPersonaSeq: KIND_SEQ, code: 'kind', name: '친절형' }))
 const page = <T>(items: T[]) => ({ data: items, hasNext: false, total_count: items.length })
 
+type Ver = ReturnType<typeof ver>
 // 목록 · 상세가 같은 페르소나 (상세 GET /personas/:id — 화면이 고른 페르소나를 다시 받음, 11/06 가짜에 추가)
-const personas = () => [
+// 저장 · 통화에 사용하기도 받음 (11/13 — AI 상담가 흐름 확인용, 새로고침하면 처음으로)
+const PERSONAS: {
+  aiPersonaSeq: number
+  code: string
+  headVersion: Ver
+  activeVersion: Ver | null
+  pendingVersion: Ver | null
+  draft: null
+}[] = [
   // 지금 API 모양 (PersonaDto — headVersion · activeVersion · pendingVersion · draft 객체, 11/04 맞춤)
   {
     aiPersonaSeq: PERSONA_SEQ,
@@ -77,8 +86,64 @@ const personas = () => [
     draft: null,
   },
 ]
+const personas = () => PERSONAS
+const versionsOf = (seq: number): Ver[] | null =>
+  seq === PERSONA_SEQ ? VERSIONS : seq === KIND_SEQ ? KIND_VERSIONS : null
+const nowIso = () => new Date().toISOString()
+const drafts = new Map<number, Record<string, unknown>>() // 고친 칸 (PATCH) → 확정(POST versions)하면 새 버전
+const APPLY_MS = 4000 // 적용 대기 → AI 확인 끝 (반영 중 띠가 보이게)
 
 export const personaHandlers = [
+  // 초안 저장 — 고친 칸만 옴 (expected* 는 보지 않음)
+  http.patch(`${API_BASE_URL}/personas/:id`, async ({ params, request }) => {
+    const changed = (await request.json()) as Record<string, unknown>
+    delete changed.expectedVersion
+    delete changed.expectedDraftRevision
+    drafts.set(Number(params.id), changed)
+    return HttpResponse.json({ data: { draftRevision: `mock-${Date.now()}` } })
+  }),
+  // 확정 = 새 현재 버전 (통화엔 안 씀)
+  http.post(`${API_BASE_URL}/personas/:id/versions`, ({ params }) => {
+    const seq = Number(params.id)
+    const p = PERSONAS.find((x) => x.aiPersonaSeq === seq)
+    const list = versionsOf(seq)
+    if (!p || !list) return HttpResponse.json({}, { status: 404 })
+    const v: Ver = {
+      ...p.headVersion,
+      ...(drafts.get(seq) as Partial<Ver>),
+      version: p.headVersion.version + 1,
+      aiPersonaVersionSeq: Date.now(),
+      status: 'INACTIVE',
+      createdAt: nowIso(),
+      appliedAt: null,
+      requestedAt: null,
+    }
+    drafts.delete(seq)
+    list.unshift(v)
+    p.headVersion = v
+    return HttpResponse.json({ data: v }, { status: 201 })
+  }),
+  // 통화에 사용하기 — 적용 대기(PENDING) → APPLY_MS 뒤 AI 확인 끝(ACTIVE, 다른 상담가는 내려감)
+  http.post(`${API_BASE_URL}/personas/:id/activate`, ({ params }) => {
+    const p = PERSONAS.find((x) => x.aiPersonaSeq === Number(params.id))
+    if (!p) return HttpResponse.json({}, { status: 404 })
+    const head = p.headVersion
+    head.status = 'PENDING'
+    head.requestedAt = nowIso()
+    p.pendingVersion = head
+    setTimeout(() => {
+      for (const o of PERSONAS) {
+        o.activeVersion = null
+        for (const v of versionsOf(o.aiPersonaSeq) ?? [])
+          if (v.status !== 'PENDING') v.status = 'INACTIVE'
+      }
+      head.status = 'ACTIVE'
+      head.appliedAt = nowIso()
+      p.activeVersion = head
+      p.pendingVersion = null
+    }, APPLY_MS)
+    return HttpResponse.json({ data: null }, { status: 202 })
+  }),
   // AI가 지원하는 음성 설정 (GET /api/ai/options) — 없으면 목업에서 진짜 서버로 넘어가 401 → 로그아웃 (11/11 QA)
   http.get(`${API_BASE_URL}/ai/options`, () =>
     HttpResponse.json({
@@ -102,14 +167,13 @@ export const personaHandlers = [
           { status: 404 },
         )
   }),
-  http.get(`${API_BASE_URL}/personas/:id/versions`, ({ params }) =>
-    Number(params.id) === PERSONA_SEQ
-      ? HttpResponse.json(page(VERSIONS))
-      : Number(params.id) === KIND_SEQ
-        ? HttpResponse.json(page(KIND_VERSIONS))
-        : HttpResponse.json(
-            { error: { code: 'NOT_FOUND', message: '페르소나가 없습니다.', details: [] } },
-            { status: 404 },
-          ),
-  ),
+  http.get(`${API_BASE_URL}/personas/:id/versions`, ({ params }) => {
+    const list = versionsOf(Number(params.id))
+    return list
+      ? HttpResponse.json(page(list))
+      : HttpResponse.json(
+          { error: { code: 'NOT_FOUND', message: '페르소나가 없습니다.', details: [] } },
+          { status: 404 },
+        )
+  }),
 ]
