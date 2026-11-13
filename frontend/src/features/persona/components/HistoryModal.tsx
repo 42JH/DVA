@@ -68,11 +68,6 @@ export function HistoryModal({ vm }: { vm: Vm }) {
                   : '통화에 쓰는 내용과 같습니다'}
               </span>
             </h3>
-            {d.same && d.changed.length > 0 && (
-              <p className="mt-1 text-[13px] text-ops-sub">
-                지금 내용과 같아 불러올 것이 없습니다.
-              </p>
-            )}
             {d.changed.map((s) => (
               <div key={s.key} className="border-b border-ops-line py-4">
                 <h4 className="mb-2 text-[14px] font-bold">{s.title}</h4>
