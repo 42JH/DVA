@@ -17,7 +17,9 @@ class AccessTokenInterceptor @Inject constructor(
         val isApiRequest = url.scheme == apiUrl.scheme && url.host == NetworkConfig.API_HOST &&
             url.port == apiUrl.port && url.encodedPath.startsWith(apiUrl.encodedPath)
         // Account selection supplies its own token before a session is established.
-        if (!isApiRequest || request.header("Authorization") != null) return chain.proceed(request)
+        if (!isApiRequest || request.tag(UnauthenticatedRequest::class.java) != null ||
+            request.header("Authorization") != null
+        ) return chain.proceed(request)
         val token = accessTokenProvider.getAccessToken()?.takeIf(String::isNotBlank)
             ?: return chain.proceed(request)
         return chain.proceed(request.newBuilder().header("Authorization", "Bearer $token").build())

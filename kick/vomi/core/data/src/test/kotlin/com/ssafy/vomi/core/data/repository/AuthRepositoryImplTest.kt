@@ -8,6 +8,9 @@ import com.ssafy.vomi.core.model.auth.TestAccount
 import com.ssafy.vomi.core.network.service.account.AccountService
 import com.ssafy.vomi.core.network.service.account.AccountClient
 import com.ssafy.vomi.core.data.auth.SessionAccessTokenProvider
+import com.ssafy.vomi.core.network.auth.UnauthenticatedRequest
+import com.ssafy.vomi.core.network.model.account.CreateAccountRequest
+import com.ssafy.vomi.core.network.model.account.CreateAccountResponse
 import com.ssafy.vomi.core.network.model.account.AccountResponse
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
@@ -25,6 +28,11 @@ class AuthRepositoryImplTest {
     private fun newRepository(api: AccountService, credentials: TestAccountCredentials) =
         AuthRepositoryImpl(AccountClient(api), credentials, tokenProvider)
     private class Api : AccountService {
+        override suspend fun createAccount(
+            request: CreateAccountRequest,
+            unauthenticated: UnauthenticatedRequest,
+        ): CreateAccountResponse = error("Not used by test-account login")
+
         val headers = mutableListOf<String?>()
         var failure: Exception? = null
         var forcedId: String? = null
