@@ -20,6 +20,7 @@ export function PersonasPage() {
 
 function PersonasView() {
   const vm = usePersonaPage()
+  const navigate = useNavigate()
   return (
     <>
       <PageHead title="AI 상담가">
@@ -83,6 +84,19 @@ function PersonasView() {
           ok={vm.confirm.okLabel}
           danger={vm.confirm.danger}
           busy={vm.confirmBusy}
+          disabled={vm.confirm.blocked}
+          extra={
+            vm.confirm.testTo && (
+              // 시험 전이면 이 버튼이 주 버튼 + 첫 초점 (끈 확인 버튼엔 초점이 못 감)
+              <Btn
+                kind={vm.confirm.blocked ? 'primary' : 'line'}
+                data-autofocus={vm.confirm.blocked || undefined}
+                onClick={() => void navigate(vm.confirm!.testTo!)}
+              >
+                시나리오 시험
+              </Btn>
+            )
+          }
           error={vm.confirmError}
           onOk={vm.confirmOk}
           onClose={vm.confirmCancel}
@@ -161,7 +175,7 @@ function Personas({ vm }: { vm: Vm }) {
   )
 }
 
-// 이름 · 태그 → 음성 → [통화에 사용하기] · [삭제](빨강, 사용 중 · 적용 대기가 아닐 때)
+// 이름 · 태그 → 음성 → [통화에 사용하기](통화에 안 쓰는 상담가) · [삭제](빨강, 사용 중 · 적용 대기가 아닐 때)
 function PersonaCard({ p, vm }: { p: PersonaItem; vm: Vm }) {
   return (
     <div
@@ -181,11 +195,11 @@ function PersonaCard({ p, vm }: { p: PersonaItem; vm: Vm }) {
         </span>
         <span className="mt-1 block text-[13px] text-ops-sub">{p.voice}</span>
       </button>
-      {(p.useLabel || p.deletable) && (
+      {(p.canUse || p.deletable) && (
         <div className="mt-3 flex gap-2">
-          {p.useLabel && (
-            <Btn kind="lineBadge" disabled={p.useDisabled} onClick={() => vm.askUse(p.personaSeq)}>
-              {p.useLabel}
+          {p.canUse && (
+            <Btn kind="lineBadge" onClick={() => vm.askUse(p.personaSeq)}>
+              통화에 사용하기
             </Btn>
           )}
           {p.deletable && (
@@ -200,18 +214,22 @@ function PersonaCard({ p, vm }: { p: PersonaItem; vm: Vm }) {
 }
 
 // 버전 기록 (11/11, Notion 버전 기록처럼) — 저장 시각 · 태그 → 그 버전의 음성 → 수정한 사람(모르면 줄 숨김). 누르면 가운데에 그 버전
+// 통화에 아직 안 쓰인 현재 버전 줄엔 [통화에 반영하기] (11/13) — 줄 버튼 안에 버튼을 못 넣어 형제로 둠 (카드와 같은 모양)
 function History({ vm }: { vm: Vm }) {
   return (
     <div className="flex flex-col gap-2 pt-1">
       <p className="truncate px-1 text-[13px] text-ops-sub">{vm.historyTitle}</p>
       <ol className="flex flex-col gap-1">
         {vm.history.map((h) => (
-          <li key={h.version}>
+          <li
+            key={h.version}
+            className={`rounded-xl px-4 py-3 ${h.selected ? 'bg-ops-route-soft' : 'hover:bg-ops-paper'}`}
+          >
             <button
               type="button"
               aria-current={h.selected || undefined}
               onClick={() => vm.selectVersion(h.version)}
-              className={`w-full rounded-xl px-4 py-3 text-left ${h.selected ? 'bg-ops-route-soft' : 'hover:bg-ops-paper'}`}
+              className="w-full text-left"
             >
               <span className="flex flex-wrap items-center gap-2">
                 <span className={`text-[15px] ${h.selected ? 'font-bold text-ops-route' : ''}`}>
@@ -231,6 +249,11 @@ function History({ vm }: { vm: Vm }) {
                 </span>
               )}
             </button>
+            {h.apply && (
+              <Btn kind="lineBadge" className="mt-3" onClick={vm.applyHead}>
+                통화에 반영하기
+              </Btn>
+            )}
           </li>
         ))}
       </ol>
