@@ -1,16 +1,18 @@
 import { useAddPersona } from '@/features/persona/hooks/useAddPersona'
+import type { usePersonaPage } from '@/features/persona/hooks/usePersonaPage'
 import { PersonaForm } from './PersonaForm'
+import { PersonaTabs } from './PersonaTabs'
 import { VoiceFields } from './VoiceFields'
 
-// 07 상담가 등록 (11/11 — 창 대신 수정과 같은 넓은 화면, 음성은 이름 아래 드롭다운)
+// 07 상담가 등록 (11/13 새 안 7번) — 위 탭은 그대로, 아래 카드가 '새 상담가' 폼
 // 이름 · 시스템 프롬프트(고정 제목 여섯 칸) · 음성 → [등록] = v1 저장됨 (통화엔 아직 안 씀). API의 code는 자동 (useAddPersona)
-export function AddPersona({
-  onDone,
-  onClose,
-}: {
-  onDone: (personaSeq: number) => void
-  onClose: () => void
-}) {
-  const vm = useAddPersona(onDone, onClose)
-  return <PersonaForm vm={vm} voiceFields={<VoiceFields vm={vm} />} />
+export function AddPersona({ vm }: { vm: ReturnType<typeof usePersonaPage> }) {
+  const f = useAddPersona(vm.added, vm.closeAdd)
+  return (
+    <>
+      {/* 쓰던 게 있으면 탭을 눌러도 먼저 물음 */}
+      <PersonaTabs vm={vm} adding go={f.leave} />
+      <PersonaForm vm={f} voiceFields={<VoiceFields vm={f} />} />
+    </>
+  )
 }

@@ -1,12 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { ApiError } from '@/shared/api/client'
-import {
-  DRAFT_TAG,
-  emptyPromptNotice,
-  PROMPT_SECTIONS,
-  unsupportedText,
-} from '@/features/persona/labels'
+import { emptyPromptNotice, PROMPT_SECTIONS, unsupportedText } from '@/features/persona/labels'
 import {
   personaQueries,
   PROMPT_KEYS,
@@ -75,7 +70,6 @@ export function usePromptEditor(target: EditTarget, onDone: (savedVersion?: numb
   const guard = useLeaveGuard(dirty, mutation.isPending || mutation.isSuccess, () => onDone())
 
   return {
-    tag: DRAFT_TAG,
     subtitle: target.personaName,
     name,
     setName,
@@ -91,6 +85,7 @@ export function usePromptEditor(target: EditTarget, onDone: (savedVersion?: numb
     // 음성 드롭다운
     ...voiceDraft,
 
+    dirty, // 고치기 시작하면 머리 줄 버튼이 [취소] [저장]으로 (11/13 새 안)
     saveLabel: mutation.isPending ? '저장 중…' : '저장',
     canSave:
       (dirty || target.draftRevision !== null) && // 남은 초안은 고치지 않아도 확정할 수 있게
