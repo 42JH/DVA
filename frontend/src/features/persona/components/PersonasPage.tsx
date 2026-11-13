@@ -242,6 +242,14 @@ function History({ vm }: { vm: Vm }) {
                 ))}
               </span>
               <span className="mt-1 block text-[13px] text-ops-sub">{h.voice}</span>
+              {h.rename && (
+                <span className="mt-1 block text-[13px] break-all text-ops-sub">
+                  <span className="sr-only">이름 변경: </span>
+                  {h.rename.from} <span aria-hidden>→</span>
+                  <span className="sr-only">에서</span>{' '}
+                  <span className="text-ops-route">{h.rename.to}</span>
+                </span>
+              )}
               {h.author && (
                 <span className="mt-1 flex items-center gap-1.5 text-[13px] text-ops-sub">
                   <span aria-hidden className="size-2 rounded-full bg-ops-route" />

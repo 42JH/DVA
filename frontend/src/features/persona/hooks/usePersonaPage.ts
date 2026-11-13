@@ -46,6 +46,7 @@ type Badge = { label: string; tone: Tone }
 export interface HistoryRow {
   version: number
   time: string // '오늘 오후 3:07'
+  rename: { from: string; to: string } | null // 바로 직전 버전과 이름이 다를 때만 (11/13 — 이름만 바꾼 버전도 무엇이 바뀌었는지 보이게)
   voice: string // 'marin' — 그 버전에 쓰인 음성 이름 (11/11)
   author: string // 모르면 ''
   badges: Badge[] // 통화에 사용 중 · 적용 대기
@@ -358,9 +359,12 @@ export function usePersonaPage() {
     historyTitle: persona?.name ?? '',
     history: all
       .filter((v) => !v.isDraft) // 남은 초안은 기록이 아님 — [프롬프트 수정]에서 이어 쓰고 [저장]하면 버전이 됨
-      .map((v): HistoryRow => ({
+      // arr는 높은 번호가 위 → 다음 칸이 바로 직전 버전 (가장 오래된 버전은 비교 없음)
+      .map((v, i, arr): HistoryRow => ({
         version: v.version,
         time: fmtVersionTime(v.savedAt),
+        rename:
+          arr[i + 1] && arr[i + 1].name !== v.name ? { from: arr[i + 1].name, to: v.name } : null,
         voice: voiceName(v.voice.voice),
         author: v.author,
         badges: badges(v),
