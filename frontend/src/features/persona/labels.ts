@@ -33,7 +33,7 @@ export function emptyPromptNotice(p: PromptFields): string | null {
 // 버전 표시 (11/11 — 저장 = 새 버전, [적용] 없음): 통화에 쓰는 버전 · AI 확인을 기다리는 버전
 export const VERSION_BADGE = {
   ACTIVE: { label: '통화에 사용 중', tone: 'done' },
-  PENDING: { label: '적용 대기', tone: 'wait' }, // AI가 확인하면 통화에 사용 중 (그동안 이전 버전이 계속 쓰임)
+  PENDING: { label: '반영 중', tone: 'wait' }, // AI가 확인하면 통화에 사용 중 (그동안 이전 버전이 계속 쓰임) — 띠의 '반영 중'과 같은 말
   UNAPPLIED: { label: '반영 전', tone: 'wait' }, // 저장했지만 아직 통화에 안 쓰임 (11/13 새 안)
 } satisfies Record<string, { label: string; tone: Tone }>
 

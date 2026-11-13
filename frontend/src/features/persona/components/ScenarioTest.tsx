@@ -34,7 +34,7 @@ function Page(p: { personaSeq: number; version: number }) {
       <PageHead title="시나리오 시험" back={vm.back}>
         <span className="truncate text-[13px] text-ops-sub">{vm.sub}</span>
       </PageHead>
-      <div className="flex min-h-0 flex-1 flex-col gap-4 px-6 py-4">
+      <div className="flex min-h-0 flex-1 flex-col gap-4 px-6 pt-4 pb-6">
         {vm.me ? (
           <ScenarioTest me={vm.me} dateOf={vm.dateOf} label={vm.label} />
         ) : (
@@ -112,35 +112,24 @@ function ScenarioTest({
           시험 뒤에 프롬프트를 고쳤습니다. 아래는 고치기 전 글의 결과입니다.
         </p>
       )}
-      <div className="flex min-h-16 shrink-0 flex-wrap items-center gap-x-10 gap-y-2">
-        {vm.state === 'none' && (
-          <p className="text-[16px] font-bold">이 버전은 아직 시험하지 않았습니다</p>
-        )}
+      {/* 숫자 줄 (시안): 이름 13 · 숫자 24, 숫자 사이 36, 줄 높이 46 — 시험 전 · 중 · 뒤에도 표가 안 움직이게 높이를 잡아 둠 */}
+      <div className="flex min-h-[46px] shrink-0 flex-wrap items-center gap-2">
+        {vm.state === 'none' && <p className="text-[16px] font-bold">아직 시험하지 않았습니다</p>}
         {vm.progress && (
-          <div className="flex flex-wrap items-end gap-x-6 gap-y-2">
-            <dl>
-              <dt className="text-[13px] text-ops-sub">진행</dt>
-              <dd className="text-[28px] leading-9 font-bold tabular-nums">
-                {vm.progress.value} / {vm.progress.max}
-              </dd>
-            </dl>
+          <>
+            <Stat label="진행" value={`${vm.progress.value} / ${vm.progress.max}`} />
             <progress
               aria-label="시험 진행"
               value={vm.progress.value}
               max={vm.progress.max}
-              className="mb-3.5 h-2 w-[280px] appearance-none overflow-hidden rounded-full [&::-webkit-progress-bar]:bg-ops-line [&::-webkit-progress-value]:bg-ops-route"
+              className="mr-3 h-2 w-[280px] appearance-none overflow-hidden rounded-full bg-ops-idle-soft [&::-moz-progress-bar]:bg-ops-route [&::-webkit-progress-bar]:bg-ops-idle-soft [&::-webkit-progress-value]:bg-ops-route"
             />
-            <span className="mb-2 flex gap-3 text-[14px] tabular-nums">
-              <span className="text-ops-sub">통과 {vm.progress.pass}</span>
-              <span className="text-ops-stop">실패 {vm.progress.fail}</span>
-            </span>
-          </div>
+            <span className="text-[14px] text-ops-faint tabular-nums">통과 {vm.progress.pass}</span>
+            <span className="text-[14px] text-ops-stop tabular-nums">실패 {vm.progress.fail}</span>
+          </>
         )}
         {vm.summary?.map((s) => (
-          <dl key={s.label} className={dim}>
-            <dt className="text-[13px] text-ops-sub">{s.label}</dt>
-            <dd className={`text-[28px] leading-9 font-bold tabular-nums ${s.tone}`}>{s.value}</dd>
-          </dl>
+          <Stat key={s.label} label={s.label} value={s.value} tone={s.tone} className={dim} />
         ))}
         <span className="ml-auto flex flex-wrap items-center gap-2">
           {vm.stop && (
@@ -168,7 +157,7 @@ function ScenarioTest({
           <table className={`ops-table ${dim}`}>
             <thead>
               <tr>
-                <th scope="col" className="w-32">
+                <th scope="col" className="w-[120px]">
                   업무
                 </th>
                 <th scope="col" className="pl-[15px]! text-left!">
@@ -183,7 +172,7 @@ function ScenarioTest({
                   {label} <Date_>{vm.nowDate}</Date_>
                 </th>
                 {compare && (
-                  <th scope="col" className="w-36">
+                  <th scope="col" className="w-[140px]">
                     변화
                   </th>
                 )}
@@ -236,6 +225,23 @@ function ScenarioTest({
     </>
   )
 }
+
+const Stat = ({
+  label,
+  value,
+  tone = '',
+  className = '',
+}: {
+  label: string
+  value: string | number
+  tone?: string // 숫자 색
+  className?: string
+}) => (
+  <dl className={`mr-7 flex flex-col gap-0.5 ${className}`}>
+    <dt className="text-[13px] leading-[15px] font-medium text-ops-sub">{label}</dt>
+    <dd className={`text-[24px] leading-[29px] font-bold tabular-nums ${tone}`}>{value}</dd>
+  </dl>
+)
 
 const Date_ = ({ children }: { children: string }) => (
   <span className="ml-1 font-normal text-ops-faint">{children}</span>

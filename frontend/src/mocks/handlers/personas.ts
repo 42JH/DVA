@@ -1,8 +1,7 @@
 import { http, HttpResponse } from 'msw'
 import { API_BASE_URL } from '@/shared/api/client'
 
-// 가짜 페르소나 목록 · 버전 이력 — API-60 · 64 (연동 상세명세 10/31 §8) 모양. 02 대시보드 '버전별 기록'이 씀
-// 07 페르소나 관리(팀원)는 아직 자기 메모리 가짜를 쓰므로 여기와 따로 — 07이 MSW로 옮기면 그쪽 데이터로 합칠 것
+// 가짜 페르소나 목록 · 버전 이력 — API-60 · 64 (연동 상세명세 10/31 §8) 모양. 07 AI 상담가 · 02 대시보드 '버전별 기록'이 씀
 // 빠른 접수형: v6 적용 중(10.02~) · v5(09.17~10.02) · v4(09.01~09.17) · v7 저장만(미적용). 통화 가짜는 전부 v6(calls.ts PERSONA_SEQ)
 const PERSONA_SEQ = 1
 const ver = (
@@ -38,83 +37,125 @@ const ver = (
   lastNotifiedAt: appliedAt,
   applyErrorCode: null,
 })
-const VERSIONS = [
-  ver(7, 'INACTIVE', null, '2026-10-29T10:00:00+09:00'),
-  ver(6, 'ACTIVE', '2026-10-02T09:00:00+09:00', '2026-10-01T18:00:00+09:00'),
-  ver(5, 'INACTIVE', '2026-09-17T09:00:00+09:00', '2026-09-16T18:00:00+09:00'),
-  ver(4, 'INACTIVE', '2026-09-01T09:00:00+09:00', '2026-08-31T18:00:00+09:00'),
-]
+type Ver = ReturnType<typeof ver>
+
 // 친절형: 9월까지 쓰던 상담가 (지금 안 씀) — 04 상담가 토글에서 고르면 가짜 통화(전부 빠른 접수형 v6)가 다 빠짐
 const KIND_SEQ = 2
-const KIND_VERSIONS = [
-  {
-    ...ver(2, 'INACTIVE', '2026-08-20T09:00:00+09:00', '2026-08-19T18:00:00+09:00'),
-    aiPersonaVersionSeq: 22,
-  },
-  {
-    ...ver(1, 'INACTIVE', '2026-08-01T09:00:00+09:00', '2026-07-31T18:00:00+09:00'),
-    aiPersonaVersionSeq: 21,
-  },
-].map((v) => ({ ...v, aiPersonaSeq: KIND_SEQ, code: 'kind', name: '친절형' }))
-const page = <T>(items: T[]) => ({ data: items, hasNext: false, total_count: items.length })
+const kind = (v: Ver, seq: number): Ver => ({
+  ...v,
+  aiPersonaSeq: KIND_SEQ,
+  aiPersonaVersionSeq: seq,
+  code: 'kind',
+  name: '친절형',
+})
 
-type Ver = ReturnType<typeof ver>
-// 목록 · 상세가 같은 페르소나 (상세 GET /personas/:id — 화면이 고른 페르소나를 다시 받음, 11/06 가짜에 추가)
-// 저장 · 통화에 사용하기도 받음 (11/13 — AI 상담가 흐름 확인용, 새로고침하면 처음으로)
-const PERSONAS: {
+/** 상담가 한 명 — 현재 · 통화에 쓰는 · 적용 대기 버전은 번호로 (버전 내용은 versions에) */
+interface Row {
   aiPersonaSeq: number
   code: string
-  headVersion: Ver
-  activeVersion: Ver | null
-  pendingVersion: Ver | null
-  draft: null
-}[] = [
-  // 지금 API 모양 (PersonaDto — headVersion · activeVersion · pendingVersion · draft 객체, 11/04 맞춤)
-  {
-    aiPersonaSeq: PERSONA_SEQ,
-    code: 'parcel',
-    headVersion: VERSIONS[0], // v7 확정만(미적용)
-    activeVersion: VERSIONS[1], // v6 적용 중 → 상단바 '빠른 접수형 AI 상담가'
-    pendingVersion: null,
-    draft: null,
+  head: number
+  active: number | null
+  pending: number | null
+}
+interface State {
+  personas: Row[]
+  versions: Record<number, Ver[]> // 상담가 번호 → 버전들 (높은 번호가 위)
+}
+const initial = (): State => ({
+  personas: [
+    { aiPersonaSeq: PERSONA_SEQ, code: 'parcel', head: 7, active: 6, pending: null }, // v7 저장만(반영 전), v6 통화 중 → 상단바 '빠른 접수형 AI 상담가'
+    { aiPersonaSeq: KIND_SEQ, code: 'kind', head: 2, active: null, pending: null },
+  ],
+  versions: {
+    [PERSONA_SEQ]: [
+      // 고친 내용(반영 전)은 통화에 쓰는 v6과 글이 다름 — 같으면 토글 · 수정 기록 비교에 볼 것이 없고 '시험 없이 반영'으로 넘어감
+      {
+        ...ver(7, 'INACTIVE', null, '2026-10-29T10:00:00+09:00'),
+        role: '택배 접수와 수거 일정 확인을 돕는 AI 상담원',
+      },
+      ver(6, 'ACTIVE', '2026-10-02T09:00:00+09:00', '2026-10-01T18:00:00+09:00'),
+      ver(5, 'INACTIVE', '2026-09-17T09:00:00+09:00', '2026-09-16T18:00:00+09:00'),
+      ver(4, 'INACTIVE', '2026-09-01T09:00:00+09:00', '2026-08-31T18:00:00+09:00'),
+    ],
+    [KIND_SEQ]: [
+      kind(ver(2, 'INACTIVE', '2026-08-20T09:00:00+09:00', '2026-08-19T18:00:00+09:00'), 22),
+      kind(ver(1, 'INACTIVE', '2026-08-01T09:00:00+09:00', '2026-07-31T18:00:00+09:00'), 21),
+    ],
   },
-  {
-    aiPersonaSeq: KIND_SEQ,
-    code: 'kind',
-    headVersion: KIND_VERSIONS[0],
-    activeVersion: null,
-    pendingVersion: null,
-    draft: null,
-  },
-]
-const personas = () => PERSONAS
-const ADDED = new Map<number, Ver[]>() // 등록(POST /personas)한 상담가의 버전 이력
-const versionsOf = (seq: number): Ver[] | null =>
-  seq === PERSONA_SEQ ? VERSIONS : seq === KIND_SEQ ? KIND_VERSIONS : (ADDED.get(seq) ?? null)
+})
+
+// 저장 · 반영 · 등록 · 삭제한 상태는 세션 저장소에 — 새로고침해도 남고, 탭을 닫으면 처음으로 (시험 결과 scenarioTests.ts와 같게).
+// 상담가만 처음으로 돌아가면 번호가 같은 다른 내용에 전 시험 결과가 붙음
+const STORE = 'mock:personas'
+const load = (): State | null => {
+  try {
+    return JSON.parse(sessionStorage.getItem(STORE) ?? 'null') as State | null
+  } catch {
+    return null
+  }
+}
+const state = load() ?? initial()
+const save = () => {
+  try {
+    sessionStorage.setItem(STORE, JSON.stringify(state))
+  } catch {
+    // 못 쓰면 새로고침 때 처음 상태로 돌아갈 뿐
+  }
+}
 const nowIso = () => new Date().toISOString()
+const row = (seq: number) => state.personas.find((p) => p.aiPersonaSeq === seq)
+const versionOf = (p: Row, n: number | null) =>
+  n === null ? null : (state.versions[p.aiPersonaSeq].find((v) => v.version === n) ?? null)
+// 지금 API 모양 (PersonaDto — headVersion · activeVersion · pendingVersion · draft 객체, 11/04 맞춤)
+const dto = (p: Row) => ({
+  aiPersonaSeq: p.aiPersonaSeq,
+  code: p.code,
+  headVersion: versionOf(p, p.head)!,
+  activeVersion: versionOf(p, p.active),
+  pendingVersion: versionOf(p, p.pending),
+  draft: null,
+})
+/** AI 확인 끝 — 적용 대기 버전이 통화에 쓰는 버전이 되고 다른 상담가는 내려감 */
+const finish = (p: Row) => {
+  const next = versionOf(p, p.pending)
+  if (!next) return
+  for (const o of state.personas) {
+    o.active = null
+    for (const v of state.versions[o.aiPersonaSeq])
+      if (v.status !== 'PENDING') v.status = 'INACTIVE'
+  }
+  next.status = 'ACTIVE'
+  next.appliedAt = nowIso()
+  p.active = next.version
+  p.pending = null
+  save()
+}
+// 새로고침으로 기다리던 타이머가 사라진 적용 대기는 끝난 것으로
+for (const p of state.personas) finish(p)
+
+const page = <T>(items: T[]) => ({ data: items, hasNext: false, total_count: items.length })
 const drafts = new Map<number, Record<string, unknown>>() // 고친 칸 (PATCH) → 확정(POST versions)하면 새 버전
 const APPLY_MS = 4000 // 적용 대기 → AI 확인 끝 (반영 중 띠가 보이게)
+const missing = () =>
+  HttpResponse.json(
+    { error: { code: 'NOT_FOUND', message: '페르소나가 없습니다.', details: [] } },
+    { status: 404 },
+  )
 
 export const personaHandlers = [
   // 등록 — v1 저장만(통화엔 안 씀). 없으면 목업에서 진짜 서버로 넘어가 401 → 로그아웃 (11/13 7번 확인)
   http.post(`${API_BASE_URL}/personas`, async ({ request }) => {
     const body = (await request.json()) as Partial<Ver>
-    const seq = Math.max(0, ...PERSONAS.map((x) => x.aiPersonaSeq)) + 1
+    const seq = Math.max(0, ...state.personas.map((x) => x.aiPersonaSeq)) + 1
     const v: Ver = {
       ...ver(1, 'INACTIVE', null, nowIso()),
       ...body,
       aiPersonaSeq: seq,
       aiPersonaVersionSeq: Date.now(),
     }
-    ADDED.set(seq, [v])
-    PERSONAS.push({
-      aiPersonaSeq: seq,
-      code: v.code,
-      headVersion: v,
-      activeVersion: null,
-      pendingVersion: null,
-      draft: null,
-    })
+    state.versions[seq] = [v]
+    state.personas.push({ aiPersonaSeq: seq, code: v.code, head: 1, active: null, pending: null })
+    save()
     return HttpResponse.json({ data: { aiPersonaSeq: seq } }, { status: 201 })
   }),
   // 초안 저장 — 고친 칸만 옴 (expected* 는 보지 않음)
@@ -127,58 +168,46 @@ export const personaHandlers = [
   }),
   // 확정 = 새 현재 버전 (통화엔 안 씀)
   http.post(`${API_BASE_URL}/personas/:id/versions`, ({ params }) => {
-    const seq = Number(params.id)
-    const p = PERSONAS.find((x) => x.aiPersonaSeq === seq)
-    const list = versionsOf(seq)
-    if (!p || !list) return HttpResponse.json({}, { status: 404 })
+    const p = row(Number(params.id))
+    if (!p) return HttpResponse.json({}, { status: 404 })
     const v: Ver = {
-      ...p.headVersion,
-      ...(drafts.get(seq) as Partial<Ver>),
-      version: p.headVersion.version + 1,
+      ...versionOf(p, p.head)!,
+      ...(drafts.get(p.aiPersonaSeq) as Partial<Ver>),
+      version: p.head + 1,
       aiPersonaVersionSeq: Date.now(),
       status: 'INACTIVE',
       createdAt: nowIso(),
       appliedAt: null,
       requestedAt: null,
     }
-    drafts.delete(seq)
-    list.unshift(v)
-    p.headVersion = v
+    drafts.delete(p.aiPersonaSeq)
+    state.versions[p.aiPersonaSeq].unshift(v)
+    p.head = v.version
+    save()
     return HttpResponse.json({ data: v }, { status: 201 })
   }),
   // 통화에 사용하기 — 적용 대기(PENDING) → APPLY_MS 뒤 AI 확인 끝(ACTIVE, 다른 상담가는 내려감)
   http.post(`${API_BASE_URL}/personas/:id/activate`, ({ params }) => {
-    const p = PERSONAS.find((x) => x.aiPersonaSeq === Number(params.id))
+    const p = row(Number(params.id))
     if (!p) return HttpResponse.json({}, { status: 404 })
-    const head = p.headVersion
+    const head = versionOf(p, p.head)!
     head.status = 'PENDING'
     head.requestedAt = nowIso()
-    p.pendingVersion = head
-    setTimeout(() => {
-      for (const o of PERSONAS) {
-        o.activeVersion = null
-        for (const v of versionsOf(o.aiPersonaSeq) ?? [])
-          if (v.status !== 'PENDING') v.status = 'INACTIVE'
-      }
-      head.status = 'ACTIVE'
-      head.appliedAt = nowIso()
-      p.activeVersion = head
-      p.pendingVersion = null
-    }, APPLY_MS)
+    p.pending = p.head
+    save()
+    setTimeout(() => finish(p), APPLY_MS)
     return HttpResponse.json({ data: null }, { status: 202 })
   }),
   // 삭제 — 목록에서 뺌. 서버처럼 통화에 사용 중 · 적용 대기면 409, 없으면 404 (없으면 목업에서 진짜 서버로 넘어가 401 → 로그아웃)
   http.delete(`${API_BASE_URL}/personas`, async ({ request }) => {
     const { aiPersonaSeqs } = (await request.json()) as { aiPersonaSeqs: number[] }
-    const found = aiPersonaSeqs.map((s) => PERSONAS.findIndex((x) => x.aiPersonaSeq === s))
-    if (found.some((i) => i < 0)) return HttpResponse.json({}, { status: 404 })
-    if (found.some((i) => PERSONAS[i].activeVersion || PERSONAS[i].pendingVersion))
+    const found = aiPersonaSeqs.map(row)
+    if (found.some((p) => !p)) return HttpResponse.json({}, { status: 404 })
+    if (found.some((p) => p!.active !== null || p!.pending !== null))
       return HttpResponse.json({}, { status: 409 })
-    for (const s of aiPersonaSeqs)
-      PERSONAS.splice(
-        PERSONAS.findIndex((x) => x.aiPersonaSeq === s),
-        1,
-      )
+    state.personas = state.personas.filter((p) => !aiPersonaSeqs.includes(p.aiPersonaSeq))
+    for (const seq of aiPersonaSeqs) delete state.versions[seq]
+    save()
     return new HttpResponse(null, { status: 204 })
   }),
   // AI가 지원하는 음성 설정 (GET /api/ai/options) — 없으면 목업에서 진짜 서버로 넘어가 401 → 로그아웃 (11/11 QA)
@@ -194,23 +223,14 @@ export const personaHandlers = [
       },
     }),
   ),
-  http.get(`${API_BASE_URL}/personas`, () => HttpResponse.json(page(personas()))),
+  http.get(`${API_BASE_URL}/personas`, () => HttpResponse.json(page(state.personas.map(dto)))),
+  // 상세 — 화면이 고른 페르소나를 다시 받음 (11/06 가짜에 추가)
   http.get(`${API_BASE_URL}/personas/:id`, ({ params }) => {
-    const p = personas().find((x) => x.aiPersonaSeq === Number(params.id))
-    return p
-      ? HttpResponse.json({ data: p })
-      : HttpResponse.json(
-          { error: { code: 'NOT_FOUND', message: '페르소나가 없습니다.', details: [] } },
-          { status: 404 },
-        )
+    const p = row(Number(params.id))
+    return p ? HttpResponse.json({ data: dto(p) }) : missing()
   }),
   http.get(`${API_BASE_URL}/personas/:id/versions`, ({ params }) => {
-    const list = versionsOf(Number(params.id))
-    return list
-      ? HttpResponse.json(page(list))
-      : HttpResponse.json(
-          { error: { code: 'NOT_FOUND', message: '페르소나가 없습니다.', details: [] } },
-          { status: 404 },
-        )
+    const list = state.versions[Number(params.id)]
+    return list ? HttpResponse.json(page(list)) : missing()
   }),
 ]

@@ -6,16 +6,10 @@ import { ApiError } from '@/shared/api/client'
 import { useSession } from '@/shared/auth/useSession'
 import { useShell } from '@/shared/lib/shell'
 import type { Tone } from '@/shared/ui'
-import {
-  DEFAULT_VOICE_LABEL,
-  PROMPT_SECTIONS,
-  unsupportedText,
-  VERSION_BADGE,
-} from '@/features/persona/labels'
+import { PROMPT_SECTIONS, unsupportedText, VERSION_BADGE } from '@/features/persona/labels'
 import type { EditTarget } from '@/features/persona/hooks/usePromptEditor'
 import { inlineDiff, type Part } from '@/features/persona/hooks/lineDiff'
 import { useVoiceOptions } from '@/features/persona/hooks/useVoiceOptions'
-import { useTestGate } from '@/features/persona/hooks/useScenarioTest'
 import { useApplyTest } from '@/features/persona/hooks/useApplyTest'
 import {
   SCENARIO_TEST,
@@ -41,7 +35,6 @@ export interface PersonaItem {
   selected: boolean
   inUse: boolean // '통화에 사용 중' 태그
   applying: string | null // '적용 대기' — 통화에 쓰려고 AI 확인을 기다리는 중
-  voice: string // 'marin' — 음성 이름만
   canUse: boolean // [통화에 사용하기] — 통화에 안 쓰는 상담가만. 사용 중 상담가의 새 버전은 버전 기록의 [통화에 반영하기] (11/13)
   deletable: boolean // [삭제] 버튼 — 관리 권한 + 통화에 사용 중도 적용 대기도 아닐 때만
 }
@@ -60,7 +53,7 @@ export interface HistoryRow {
 /** 가운데 프롬프트 카드 */
 interface PromptView {
   time: string
-  author: string
+  voice: string // 목소리 이름 '기본 음성' · '여성 1' — 못 고칠 때(시험 · 반영 중) 머리 줄에
   sections: {
     key: PromptKey
     group: string | null
@@ -86,7 +79,12 @@ type Confirming =
 
 // 시나리오 시험에 다녀오거나 새로고침해도 보던 상담가 · 버전 그대로 — 기록(location.key)마다 세션 저장소에 기억
 // (메모리에만 두면 새로고침 때 처음 화면으로 돌아감, 11/12 사용자). 사이드바로 새로 들어오면 새 기록이라 처음 화면
-type Kept = { personaSeq: number | null; historyOpen: boolean; version: number | null }
+type Kept = {
+  personaSeq: number | null
+  historyOpen: boolean
+  version: number | null
+  showCall?: boolean // 반영 전 띠의 토글 (통화에 쓰는 내용을 보던 중)
+}
 const KEEP = 'personas:view:'
 const kept = (key: string): Kept | null => {
   try {
@@ -120,7 +118,7 @@ const hasBatchim = (name: string) => {
 const nameEul = (name: string) => `${name}${hasBatchim(name) ? '을' : '를'}`
 const nameI = (name: string) => `${name}${hasBatchim(name) ? '이' : '가'}`
 const conflictText =
-  '그새 다른 관리자가 이 상담가를 저장했습니다. 창을 닫고 최신 버전을 확인해 주세요.'
+  '그새 다른 관리자가 이 상담가를 저장했습니다. 창을 닫고 최신 내용을 확인해 주세요.'
 
 /** 07 AI 상담가 훅 (11/13 새 안 — 저장 = 새 버전)
  * 카드 = 위 탭에서 고른 상담가의 현재 버전(그 자리에서 고침). 사용 중 상담가의 새 버전이 통화에 안 쓰이면 반영 전 띠
@@ -132,11 +130,10 @@ export function usePersonaPage() {
   const [personaSeq, setPersonaSeq] = useState<number | null>(back?.personaSeq ?? null) // null = 통화에 사용 중인 상담가
   const [historyOpen, setHistoryOpen] = useState(back?.historyOpen ?? false) // 수정 기록 창 (11/13 새 안 5번)
   const [version, setVersion] = useState<number | null>(back?.version ?? null) // 창에서 고른 버전 (null = 현재 버전)
-  const [showCall, setShowCall] = useState(false) // 반영 전 띠의 토글 — true = 통화에 쓰는 내용
+  const [showCall, setShowCall] = useState(back?.showCall ?? false) // 반영 전 띠의 토글 — true = 통화에 쓰는 내용
   useEffect(() => {
-    if (SCENARIO_TEST) keep(key, { personaSeq, historyOpen, version })
-  }, [key, personaSeq, historyOpen, version])
-  const gate = useTestGate() // 전체 시나리오 시험이 끝나야 [통화에 사용하기] (시나리오 시험이 꺼진 환경이면 null)
+    if (SCENARIO_TEST) keep(key, { personaSeq, historyOpen, version, showCall })
+  }, [key, personaSeq, historyOpen, version, showCall])
   const [confirming, setConfirming] = useState<Confirming>(null)
   const [adding, setAdding] = useState(false)
   const qc = useQueryClient()
@@ -165,7 +162,8 @@ export function usePersonaPage() {
   const viewing = head // 카드는 늘 현재 버전 — 지난 버전은 수정 기록 창 안에서만 (11/13 새 안)
   const picked = historyOpen ? (all.find((v) => v.version === version) ?? head) : null
   const inUse = list.find((p) => p.inUse) ?? null
-  const voiceName = (v: string) => v || DEFAULT_VOICE_LABEL
+  // 목소리 값 → 이름 ('' = 기본 음성, AI 목록에 없으면 값 그대로)
+  const voiceLabel = (v: string) => options.voiceOptions(v).find((o) => o.value === v)?.label ?? v
   const badges = (v: PersonaVersion) => {
     const b: Badge[] = []
     if (v.status === 'ACTIVE') b.push(VERSION_BADGE.ACTIVE)
@@ -201,6 +199,14 @@ export function usePersonaPage() {
   const callVersion = unapplied
     ? (all.find((v) => v.version === persona.appliedVersion) ?? null)
     : null
+  // 프롬프트 · 목소리가 통화에 쓰는 내용과 같은 고친 내용 (이름만 바꿈 · 고쳤다가 되돌림) — AI가 받는 것이 그대로라 시험할 것이 없음 → [통화에 반영]이 바로 묻고 반영
+  const sameTalk =
+    !!callVersion &&
+    !!head &&
+    PROMPT_KEYS.every((k) => head.prompt[k] === callVersion.prompt[k]) &&
+    head.voice.voice === callVersion.voice.voice &&
+    head.voice.speed === callVersion.voice.speed &&
+    head.voice.waitTime === callVersion.voice.waitTime
   // 6번 — 통화에 안 쓰는 상담가를 통화에 쓰기: 현재 버전을 먼저 시험. 모두 통과해도 저절로 바꾸지 않음(담당자가 [통화에 사용하기])
   const switching = !!persona && !persona.inUse
   // 띠의 시험 → 반영 (11/13 새 안 1번) — 반영 전인 고친 내용(현재 버전) · 6번은 안 쓰는 상담가의 현재 버전
@@ -351,10 +357,7 @@ export function usePersonaPage() {
     title: string
     note: string
     okLabel: string
-    changes?: { fail: number; pass: number } | null // 통화에 사용 중인 버전과 달라진 시나리오 수 (사용하기 확인 창)
     danger?: boolean // 확인 버튼을 빨간색으로
-    testTo?: string // [시나리오 시험] — 통화에 쓸 버전의 시험 화면 (시나리오 시험이 꺼진 환경이면 없음)
-    blocked?: boolean // 전체 시험 전 → 확인 버튼 끔, [시나리오 시험]으로 유도
     failed?: string[] // 실패한 시나리오 이름 — 확인하고 반영 창 (4번, 피그마 2368:5978)
   } | null => {
     if (confirming?.kind === 'review') {
@@ -410,31 +413,20 @@ export function usePersonaPage() {
     if (confirming?.kind === 'use') {
       const p = list.find((x) => x.personaSeq === confirming.personaSeq)
       if (!p) return null
-      // 6번 시험 통과 → 바꾸기 확인 (피그마 6번 줄 '통화에 사용 확인')
-      if (switching && step === 'passed' && p.personaSeq === persona.personaSeq)
+      // 다른 상담가로 바꾸기 — 6번 시험 통과 뒤 (피그마 6번 줄 '통화에 사용 확인') · 시나리오 시험이 꺼진 환경
+      if (!p.inUse)
         return {
           title: `${nameEul(p.name)} 통화에 사용할까요?`,
           note: `다음 통화부터 ${inUse ? `${inUse.name} 대신 ` : ''}${nameI(p.name)} 응대합니다.${liveCalls ? ` 지금 통화 중인 ${liveCalls}건은 바뀌지 않습니다.` : ''}`,
           okLabel: '사용하기',
         }
-      const until = p.inUse
-        ? ' 그 전까지는 이전 버전이 계속 쓰입니다.'
-        : inUse
-          ? ` 그 전까지는 ${nameI(inUse.name)} 계속 쓰입니다.`
-          : ''
-      // 저장만으로는 통화에 안 감 → 저장 직후에도 이 창 (11/13 사용자: 저장 = 바로 반영으로 오해)
-      const g = gate?.(p.personaSeq, p.head.version)
-      // 11/13 페르소나 전면 수정 동안 시험 없이도 적용 (시험할 때마다 비용). 다시 막으려면 !!g && g.state !== 'done'
-      const blocked = false
+      // 사용 중 상담가의 고친 내용을 시험 없이 반영 — 프롬프트 · 목소리가 그대로 · 이미 모두 통과(시험 화면에서 따로 돌림) · 시나리오 시험이 꺼진 환경
       return {
-        title: p.inUse ? '새 버전을 통화에 반영할까요?' : `${nameEul(p.name)} 통화에 쓸까요?`,
-        note: blocked
-          ? '이 버전은 아직 전체 시나리오 시험을 하지 않았습니다. 시험을 마치면 통화에 반영할 수 있습니다.'
-          : `진행 중인 통화가 끝나면(AI 확인 후) ${p.name}의 현재 버전으로 응대합니다.${until}`,
-        okLabel: p.inUse ? '반영' : '사용하기',
-        changes: g?.state === 'done' ? { fail: g.newFail, pass: g.newPass } : null, // 시험한 버전만 변화 수
-        testTo: g ? `/personas/${p.personaSeq}/tests/${p.head.version}` : undefined,
-        blocked,
+        title: '통화에 반영할까요?',
+        note: sameTalk
+          ? '프롬프트와 목소리가 통화에 쓰는 내용과 같아 시험 없이 반영합니다.'
+          : `${applyTest.allPass ? `시나리오 ${applyTest.total}개를 모두 통과했습니다. ` : ''}반영하면 다음 통화부터 고친 내용으로 응대합니다.`,
+        okLabel: '반영',
       }
     }
     return null
@@ -465,9 +457,8 @@ export function usePersonaPage() {
         applying: p.applyingVersion
           ? `${VERSION_BADGE.PENDING.label}${p.applyError ? ' · AI 반영 오류' : ''}`
           : null,
-        voice: voiceName(p.voice.voice),
         deletable: canManage && !p.inUse && !p.applyingVersion && !(mine && step === 'testing'),
-        // 시험 전이어도 켬 — 누르면 확인 창이 [시나리오 시험]으로 유도 (11/13, 11/12의 '말없이 끔'을 바꿈)
+        // 시험 전이어도 켬 — 누르면 시험부터 묻는 확인 창 (6번)
         canUse: canManage && !p.inUse && !p.applyingVersion && !(mine && step !== null),
       }
     })
@@ -484,7 +475,7 @@ export function usePersonaPage() {
         ? ({
             // 띠가 있으면 머리 줄 = 통화에 쓰는 버전의 저장 시각, 띠 = 고친 버전 (피그마처럼)
             time: fmtVersionTime((callVersion ?? viewing).savedAt),
-            author: (callVersion ?? viewing).author,
+            voice: voiceLabel(viewing.voice.voice),
             sections: diff!.sections,
             // 토글이 '통화에 쓰는 내용'이면 그 버전 글 (읽기만)
             callSections: comparing ? promptSections(callVersion).sections : null,
@@ -507,6 +498,21 @@ export function usePersonaPage() {
       picked && base
         ? {
             title: `${fmtVersionTime(picked.savedAt)} 내용`,
+            // 이름 · 목소리가 다르면 프롬프트 칸 앞에 한 줄씩 — 프롬프트만 비교하면 이름만 바꾼 날짜가 '같습니다'로 보임
+            meta: [
+              ...(picked.name !== base.name
+                ? [{ label: '이름', from: base.name, to: picked.name }]
+                : []),
+              ...(picked.voice.voice !== base.voice.voice
+                ? [
+                    {
+                      label: '목소리',
+                      from: voiceLabel(base.voice.voice),
+                      to: voiceLabel(picked.voice.voice),
+                    },
+                  ]
+                : []),
+            ],
             changed: promptSections(picked, base).sections.filter((x) => x.rows),
             // [이 내용 불러오기] — 지금 내용과 같으면 보낼 게 없음
             canLoad: canManage && !reuseSame(picked),
@@ -565,7 +571,6 @@ export function usePersonaPage() {
     locked,
     showCall: comparing,
     setShowCall,
-    // [통화에 반영] — 시나리오 시험이 꺼진 환경 · 이미 모두 통과 = 바로 반영 확인, 아니면 시험하고 반영 확인
     // [시험 중단] — 확인 창 (2번)
     askStop: () => {
       confirm.reset()
@@ -576,9 +581,10 @@ export function usePersonaPage() {
       confirm.reset()
       setConfirming({ kind: 'review' })
     },
+    // [통화에 반영] — 시험할 것이 없으면(시나리오 시험이 꺼진 환경 · 이미 모두 통과 · 프롬프트와 목소리가 그대로) 바로 반영 확인, 아니면 시험하고 반영 확인
     applyHead: () => {
       if (!persona) return
-      if (!applyTest.on || applyTest.allPass) return askUse(persona.personaSeq)
+      if (!applyTest.on || applyTest.allPass || sameTalk) return askUse(persona.personaSeq)
       confirm.reset()
       applyTest.resetStart()
       setConfirming({ kind: 'test' })
@@ -611,11 +617,11 @@ export function usePersonaPage() {
       : confirming?.kind === 'stop'
         ? '시험을 중단하지 못했습니다. 다시 시도해 주세요.'
         : confirm.error instanceof ConfirmError
-          ? '내용은 저장됐지만 새 버전으로 올리지 못했습니다. 다시 시도해 주세요.'
+          ? '저장을 마치지 못했습니다. 다시 시도해 주세요.'
           : (unsupportedText(confirm.error) ??
             (confirm.error instanceof ApiError && confirm.error.status === 409
               ? confirming?.kind === 'delete'
-                ? '통화에 사용 중이거나 적용 대기 중인 상담가는 삭제할 수 없습니다.'
+                ? '통화에 사용 중이거나 반영 중인 상담가는 삭제할 수 없습니다.'
                 : conflictText
               : '요청을 보내지 못했습니다. 잠시 뒤 다시 시도해 주세요.')),
 

@@ -44,15 +44,15 @@ function Detail(p: { personaSeq: number; version: number; scenario: string }) {
       >
         <span className="truncate text-[13px] text-ops-sub">{vm.sub}</span>
       </PageHead>
-      <div className="flex min-h-0 flex-1 flex-col px-6 py-4">
-        <article className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-ops-line bg-white">
+      <div className="flex min-h-0 flex-1 flex-col px-6 pt-4 pb-6">
+        <article className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-ops-line bg-white">
           {vm.note ? (
             <Note>{vm.note}</Note>
           ) : (
             <>
-              <div className="flex shrink-0 flex-wrap items-center gap-4 border-b border-ops-line px-6 py-3">
+              <div className="flex shrink-0 flex-wrap items-center gap-4 border-b border-ops-line px-7 py-3">
                 {/* 회색 받침 위 탭 — 글자만 있으면 눌리는 곳으로 안 보임 (11/13) */}
-                <div className="rounded-lg bg-ops-paper p-1">
+                <div className="rounded-lg bg-ops-idle-soft p-1">
                   <Segments
                     label="보는 결과"
                     value={String(vm.tabs.findIndex((t) => t.on))}
@@ -62,7 +62,7 @@ function Detail(p: { personaSeq: number; version: number; scenario: string }) {
                         label: t.label,
                         badge: (
                           <>
-                            <span className="font-normal text-ops-sub">{t.date}</span>
+                            <span className="font-normal text-ops-faint">{t.date}</span>
                             <Result cell={t.cell} none="결과 없음" />
                           </>
                         ),
@@ -72,7 +72,7 @@ function Detail(p: { personaSeq: number; version: number; scenario: string }) {
                     onPick={(v) => (v === '-1' ? vm.script.pick() : vm.tabs[Number(v)].pick())}
                   />
                 </div>
-                <span className="ml-auto text-[13px] text-ops-sub tabular-nums">{cur?.when}</span>
+                <span className="ml-auto text-[14px] text-ops-faint tabular-nums">{cur?.when}</span>
               </div>
               {!cur ? (
                 <Script scenario={p.scenario} />
@@ -192,11 +192,12 @@ function Call({ runId, scenario }: { runId: string; scenario: string }) {
           ))}
         </div>
         <section aria-label="결과표" className={SIDE}>
-          <h2 className="text-[15px] font-bold">
+          {/* 시안: 제목 16 · 흐린 글 14, 표 글자 14 · 칸 여백 10 12 · 줄 사이 점선 */}
+          <h2 className="text-[16px] font-bold">
             결과표
-            <span className="ml-2 text-[13px] font-normal text-ops-sub">{vm.counts}</span>
+            <span className="ml-2.5 text-[14px] font-normal text-ops-faint">{vm.counts}</span>
           </h2>
-          <table className="mt-2 w-full table-fixed text-[13px]">
+          <table className="mt-2.5 w-full table-fixed text-[14px]">
             <thead className="text-left text-ops-sub">
               {/* 다른 목록과 같은 표 머리 색 (ops-table) — 판정만 가운데 */}
               <tr className="h-9 bg-[#e8eff8] text-ops-ink [&>th]:px-3 [&>th]:font-semibold [&>th:not(:last-child)]:border-r [&>th:not(:last-child)]:border-[#c5d6ec] [&>th:not(:last-child)]:text-left!">
@@ -205,7 +206,7 @@ function Call({ runId, scenario }: { runId: string; scenario: string }) {
                 </th>
                 <th scope="col">정답</th>
                 <th scope="col">통화 결과</th>
-                <th scope="col" className="w-[76px] text-center!">
+                <th scope="col" className="w-[72px] text-center!">
                   판정
                 </th>
               </tr>
@@ -217,7 +218,7 @@ function Call({ runId, scenario }: { runId: string; scenario: string }) {
                 return (
                   <tr
                     key={c.key}
-                    className={`border-b border-ops-line/60 align-top [&>td]:px-3 [&>td]:py-2 [&>td:not(:last-child)]:border-r [&>td:not(:last-child)]:border-[#c5d6ec] ${skip ? 'text-ops-sub' : ''}`}
+                    className={`border-b border-dashed border-[#c5d6ec] align-top [&>td]:px-3 [&>td]:py-2.5 [&>td:not(:last-child)]:border-r [&>td:not(:last-child)]:border-solid [&>td:not(:last-child)]:border-[#c5d6ec] ${skip ? 'text-ops-sub' : ''}`}
                   >
                     {c.behaviour ? (
                       <td colSpan={3}>

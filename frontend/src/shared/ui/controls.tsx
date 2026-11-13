@@ -108,7 +108,7 @@ export function Segments<T extends string>({
             role="tab"
             aria-selected={on}
             onClick={() => onPick(it.value)}
-            className={`relative inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-[13px] font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ops-route ${bar ? 'before:absolute before:top-1/2 before:-left-[2.5px] before:h-3 before:w-px before:-translate-y-1/2 before:bg-ops-line' : ''} ${on ? 'bg-white text-ops-ink shadow-[0_0_0_1px_var(--color-ops-line)]' : 'text-ops-sub hover:text-ops-ink'}`}
+            className={`relative inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-[13px] font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ops-route ${bar ? 'before:absolute before:top-1/2 before:-left-[2.5px] before:h-3.5 before:w-px before:-translate-y-1/2 before:bg-[#c5ccd6]' : ''} ${on ? 'bg-white text-ops-ink shadow-[0_0_0_1px_var(--color-ops-line)]' : 'text-ops-sub hover:text-ops-ink'}`}
           >
             {it.label}
             {it.badge}
