@@ -33,3 +33,6 @@ include(":core:navigation")
 include(":core:notifications")
 include(":feature:home:api")
 include(":feature:home:impl")
+
+include(":feature:call:api")
+include(":feature:call:impl")
