@@ -4,6 +4,7 @@ import type { usePersonaPage } from '@/features/persona/hooks/usePersonaPage'
 import { usePromptEditor, type EditTarget } from '@/features/persona/hooks/usePromptEditor'
 import { Badge, Btn } from '@/shared/ui'
 import { Confirm } from '@/shared/ui/Modal'
+import { ApplyBand } from './ApplyBand'
 import { PersonaName } from './PersonaName'
 import { PersonaTabs } from './PersonaTabs'
 import { PromptBody } from './PromptBody'
@@ -27,9 +28,7 @@ function Editable({ vm, target }: { vm: Vm; target: EditTarget }) {
 }
 
 function EditRound({ vm, target, reset }: { vm: Vm; target: EditTarget; reset: () => void }) {
-  const ed = usePromptEditor(target, (saved) =>
-    saved === undefined ? reset() : vm.finishEdit(saved),
-  )
+  const ed = usePromptEditor(target, (saved) => (saved === undefined ? reset() : vm.finishEdit()))
   // 남은 초안은 안 고쳐도 [저장]으로 확정할 수 있게 처음부터 [취소] [저장]
   return <View vm={vm} ed={ed} editing={ed.dirty || target.draftRevision !== null} />
 }
@@ -141,16 +140,24 @@ function Card({ vm, ed, editing }: { vm: Vm; ed: Ed | null; editing: boolean }) 
                 통화에 사용하기
               </Btn>
             )}
-            {vm.canApply && (
-              // 4단계 반영 전 띠 전까지 임시
-              <Btn kind="line" onClick={vm.applyHead}>
-                통화에 반영
-              </Btn>
-            )}
           </span>
         )}
       </header>
-      <PromptBody p={p} ed={ed} />
+      {vm.band && (
+        <ApplyBand
+          band={vm.band}
+          showCall={vm.showCall}
+          setShowCall={vm.setShowCall}
+          onApply={vm.applyHead}
+          busy={editing}
+        />
+      )}
+      {/* '통화에 쓰는 내용'은 읽기만 — 고치던 글은 편집 훅에 그대로 남아 '고친 내용'으로 돌아오면 이어짐 */}
+      {p.callSections ? (
+        <PromptBody p={{ ...p, sections: p.callSections }} ed={null} />
+      ) : (
+        <PromptBody p={p} ed={ed} />
+      )}
     </article>
   )
 }

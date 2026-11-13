@@ -68,7 +68,8 @@ interface PromptView {
     // 버전 기록에서 볼 때만(가장 오래된 버전 빼고) — 바로 직전 버전 기준 비교. 한 문단 안에 del(이 버전에서 빠진 말) · add(이 버전에서 더해진 말)가 이어 붙음
     rows: { key: string; parts: Part[] }[] | null
   }[]
-  canEdit: boolean // [프롬프트 수정] — 현재 버전을 볼 때만
+  callSections: PromptView['sections'] | null // 반영 전 띠 토글 '통화에 쓰는 내용' — 읽기만
+  canEdit: boolean // 그 자리에서 고치기 — 현재 버전을 볼 때만
   past: boolean // 기록에서 고른 지난 버전 → 현재 버전 기준 차이 표시 · [이 버전 다시 쓰기]
   reuse: { disabled: boolean; hint: string | undefined } | null // [이 버전 다시 쓰기] — 관리자가 지난 버전을 볼 때만
 }
@@ -128,6 +129,7 @@ export function usePersonaPage() {
   const [personaSeq, setPersonaSeq] = useState<number | null>(back?.personaSeq ?? null) // null = 통화에 사용 중인 상담가
   const [historyOpen, setHistoryOpen] = useState(back?.historyOpen ?? false) // 오른쪽 = 버전 기록
   const [version, setVersion] = useState<number | null>(back?.version ?? null) // 기록에서 고른 버전 (null = 현재 버전)
+  const [showCall, setShowCall] = useState(false) // 반영 전 띠의 토글 — true = 통화에 쓰는 내용
   useEffect(() => {
     if (SCENARIO_TEST) keep(key, { personaSeq, historyOpen, version })
   }, [key, personaSeq, historyOpen, version])
@@ -323,6 +325,14 @@ export function usePersonaPage() {
   const newerThanCall = (p: (typeof list)[number]) =>
     p.inUse && !p.applyingVersion && p.head.version !== p.appliedVersion
 
+  // 반영 전 띠 (11/13 새 안 1번) — 사용 중 상담가의 현재 버전이 아직 통화에 안 쓰일 때. 지난 버전을 볼 땐 없음
+  const unapplied = !!persona && !past && newerThanCall(persona)
+  // 토글 '통화에 쓰는 내용' — 그 버전을 못 찾으면(목록 밖) 토글 없음
+  const callVersion = unapplied
+    ? (all.find((v) => v.version === persona.appliedVersion) ?? null)
+    : null
+  const comparing = showCall && callVersion !== null
+
   const items = [...list]
     .sort((a, b) => Number(b.inUse) - Number(a.inUse))
     .map((p): PersonaItem => {
@@ -351,10 +361,13 @@ export function usePersonaPage() {
     prompt:
       persona && viewing
         ? ({
-            time: fmtVersionTime(viewing.savedAt),
-            author: viewing.author,
+            // 띠가 있으면 머리 줄 = 통화에 쓰는 버전의 저장 시각, 띠 = 고친 버전 (피그마처럼)
+            time: fmtVersionTime((callVersion ?? viewing).savedAt),
+            author: (callVersion ?? viewing).author,
             badges: badges(viewing),
             sections: diff!.sections,
+            // 토글이 '통화에 쓰는 내용'이면 그 버전 글 (읽기만)
+            callSections: comparing ? promptSections(callVersion).sections : null,
             canEdit: canManage && !past,
             past,
             reuse:
@@ -384,8 +397,17 @@ export function usePersonaPage() {
         selected: v === viewing,
         apply: canManage && v === head && !!persona && newerThanCall(persona),
       })),
-    // 머리 줄 [통화에 반영] — 4단계 반영 전 띠가 오기 전까지 기록 줄의 버튼을 대신함
-    canApply: canManage && !!persona && newerThanCall(persona),
+    band:
+      unapplied && head
+        ? {
+            time: fmtVersionTime(head.savedAt),
+            author: head.author,
+            canApply: canManage,
+            canCompare: callVersion !== null,
+          }
+        : null,
+    showCall: comparing,
+    setShowCall,
     applyHead: () => persona && askUse(persona.personaSeq),
     openHistory: () => {
       setVersion(null)
@@ -443,12 +465,10 @@ export function usePersonaPage() {
         : null,
 
     editTarget,
-    // 저장하면 새로 생긴 현재 버전을 보여 줌 (취소면 그대로)
-    // 통화에 사용 중인 상담가를 저장했으면 바로 반영할지 물음. 이 함수는 저장 전 화면의 것이라 head는 옛 값일 수 있음 → inUse만 봄
-    // (창 내용은 다음 그리기에서 계산 — 저장이 목록을 다시 받은 뒤라 새 버전 기준)
-    finishEdit: (saved?: number) => {
+    // 저장하면 새로 생긴 현재 버전(고친 내용)을 보여 줌. 반영은 띠의 [통화에 반영]으로 (11/13 새 안 — 저장 직후 확인 창 없음)
+    finishEdit: () => {
       setVersion(null)
-      if (saved !== undefined && canManage && persona?.inUse) askUse(persona.personaSeq)
+      setShowCall(false)
     },
 
     // 통화에 사용 중인 상담가는 늘 맨 위 (나머지는 서버가 준 순서 그대로)
@@ -458,6 +478,7 @@ export function usePersonaPage() {
     selectPersona: (seq: number) => {
       setPersonaSeq(seq)
       setVersion(null)
+      setShowCall(false)
     },
   }
 }
