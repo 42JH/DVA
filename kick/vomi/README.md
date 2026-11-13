@@ -37,3 +37,19 @@ app은 Hilt 구현 수집을 위해 data를 참조합니다.
 화면의 중심에 앱 이름만 표시하는 실행 확인용 구성이며, ViewModel, Repository, API 서비스,
 DB 테이블, Proto 메시지, Firebase 설정 등 실제 기능은 포함하지 않습니다.
 빈 소스 디렉터리는 Git에 저장되지 않으며, 기능 추가 시 소스 파일과 함께 생성하면 됩니다.
+
+## 디자인 시스템
+
+Compose Material 3에 직접 의존하지 않고 Motif에서 이식한 Foundation 기반 컴포넌트를 사용합니다.
+`VomiTheme`은 자체 색상, Pretendard / Paytone One 타이포그래피, 기본 본문 스타일과 글자색을 제공합니다.
+`Text`, `Surface`, `Button`, `Icon`, `IconButton`, `Scaffold`, Divider, Tab / TabRow,
+LoadingWheel, BottomSheet 및 GlassSurface를 `core:designsystem`에서 재사용할 수 있습니다.
+
+`VomiBackground`를 화면 컨테이너로 사용하면 검정에서 푸른 회색과 갈색으로 이어지는 통화 배경이 적용됩니다.
+배경은 화면 전체에 그려지고, 자체 `Scaffold`는 safeDrawing 인셋을 콘텐츠에 전달합니다.
+현재 시작 화면에는 배경과 기존 앱 이름만 표시합니다. 친구 목록과 통화 화면은 아직 구현하지 않았습니다.
+`DesignSystemPreview`에서 이식한 기본 컴포넌트를 미리 볼 수 있습니다.
+
+Android Studio Preview에 필요한 ui-tooling은 debugImplementation으로만 연결합니다.
+해당 디버그 도구가 Material 3를 간접 포함하지만, 앱 UI는 이를 사용하지 않으며
+releaseRuntimeClasspath에는 Material 3 컴포넌트 라이브러리가 포함되지 않습니다.
