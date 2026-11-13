@@ -23,7 +23,7 @@ export function OrdersPage() {
         <SearchBox
           value={vm.q}
           onChange={vm.setQ}
-          placeholder="이름, 전화번호, 주소로 검색"
+          placeholder="주문번호, 이름, 전화번호, 주소로 검색"
           label="주문 검색"
         />
         <Btn kind="primary" onClick={() => setAdding(true)} className="ml-auto">
