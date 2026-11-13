@@ -6,6 +6,7 @@ android { namespace = "com.ssafy.vomi.core.data" }
 dependencies {
     implementation(libs.retrofit)
     testImplementation(libs.okhttp.logging.interceptor)
+    testImplementation(libs.kotlinx.serialization.json)
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     api(projects.core.model)

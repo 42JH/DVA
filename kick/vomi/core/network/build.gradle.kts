@@ -3,8 +3,13 @@ plugins {
     alias(libs.plugins.vomi.hilt)
     alias(libs.plugins.kotlinx.serialization)
 }
-android { namespace = "com.ssafy.vomi.core.network" }
+android {
+    namespace = "com.ssafy.vomi.core.network"
+    buildFeatures { buildConfig = true }
+}
 dependencies {
+    testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
     implementation(projects.core.common)
     implementation(projects.core.model)
     implementation(libs.kotlinx.serialization.json)

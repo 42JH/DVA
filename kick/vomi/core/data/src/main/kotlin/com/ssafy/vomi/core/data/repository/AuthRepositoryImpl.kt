@@ -5,8 +5,8 @@ import com.ssafy.vomi.core.data.auth.TestAccountCredentials
 import com.ssafy.vomi.core.model.auth.LoginError
 import com.ssafy.vomi.core.model.auth.TestAccount
 import com.ssafy.vomi.core.model.auth.UserSession
-import com.ssafy.vomi.core.network.auth.AccessTokenProvider
-import com.ssafy.vomi.core.network.auth.AccountApi
+import com.ssafy.vomi.core.data.auth.SessionAccessTokenProvider
+import com.ssafy.vomi.core.network.service.account.AccountClient
 import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -21,28 +21,27 @@ import retrofit2.HttpException
 
 @Singleton
 class AuthRepositoryImpl @Inject constructor(
-    private val api: AccountApi,
+    private val accountClient: AccountClient,
     private val credentials: TestAccountCredentials,
-) : AuthRepository, AccessTokenProvider {
+    private val sessionAccessTokenProvider: SessionAccessTokenProvider,
+) : AuthRepository {
     private val mutableUser = MutableStateFlow<UserSession?>(null)
     override val currentUser = mutableUser.asStateFlow()
-    @Volatile private var token: String? = null
 
     override fun login(account: TestAccount): Flow<UserSession> = flow {
         val selectedToken = credentials.tokenFor(account).trim()
         if (selectedToken.isEmpty()) throw LoginException(LoginError.MissingToken)
-        val response = try { api.me("Bearer $selectedToken") }
+        val response = try { accountClient.getCurrentAccount(selectedToken) }
         catch (e: CancellationException) { throw e }
         catch (e: HttpException) { throw LoginException(if (e.code() in listOf(401, 403)) LoginError.InvalidToken else LoginError.Server) }
         catch (e: IOException) { throw LoginException(LoginError.Network) }
         currentCoroutineContext().ensureActive()
         if (response.id != account.accountId) throw LoginException(LoginError.UnexpectedAccount)
-        token = selectedToken
+        sessionAccessTokenProvider.updateAccessToken(selectedToken)
         val user = UserSession(response.id, response.displayName, account)
         mutableUser.value = user
         emit(user)
     }
 
-    override fun accessToken(): String? = token
-    override fun logout() { token = null; mutableUser.value = null }
+    override fun logout() { sessionAccessTokenProvider.clearAccessToken(); mutableUser.value = null }
 }
