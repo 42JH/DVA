@@ -38,7 +38,8 @@ const tagOf = (t: ApplyTarget) => `${t.personaSeq}:${t.head.version}`
 /** 띠의 시험 → 반영 (11/13 새 안 1번, 피그마 2368:3023 · 3212 · 3388)
  *  [통화에 반영] → 그 버전 시험 상태에 따라: 모두 통과 = 바로 반영 / 아니면 시험하고 반영(못 한 것만 — 일부 시험이면 남은 것)
  *  시험이 끝나 모두 통과 + 이 브라우저가 건 시험이면 저절로 반영. 실패가 있으면 확인 필요 띠(담당자가 정함) */
-export function useApplyTest(target: ApplyTarget | null) {
+// auto false = 모두 통과해도 저절로 반영하지 않음 (6번 다른 상담가를 통화에 쓰기 — 담당자가 [통화에 사용하기])
+export function useApplyTest(target: ApplyTarget | null, { auto = true }: { auto?: boolean } = {}) {
   const on = SCENARIO_TEST && target !== null
   const qc = useQueryClient()
   const scenarios = useQuery({ ...scenarioTestQueries.scenarios(), enabled: on })
@@ -74,7 +75,7 @@ export function useApplyTest(target: ApplyTarget | null) {
     // 목록을 다시 받은 뒤(시험 중이 보인 뒤)에 약속을 남김 — 먼저 남기면 옛 목록(시험 전)을 보고 바로 지워짐
     onSuccess: async (_, t) => {
       await qc.invalidateQueries({ queryKey: scenarioTestQueries.tests().queryKey })
-      write([...read().filter((x) => x !== tagOf(t)), tagOf(t)])
+      if (auto) write([...read().filter((x) => x !== tagOf(t)), tagOf(t)])
     },
     // 응답을 못 받아도 창구는 걸기 시작했을 수 있음 → 다시 보내지 않고 목록만 다시 받음 (시험 중이면 띠가 시험 중으로 바뀜)
     onError: () => qc.invalidateQueries({ queryKey: scenarioTestQueries.tests().queryKey }),
