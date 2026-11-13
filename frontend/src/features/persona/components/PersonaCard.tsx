@@ -5,6 +5,7 @@ import { usePromptEditor, type EditTarget } from '@/features/persona/hooks/usePr
 import { Badge, Btn } from '@/shared/ui'
 import { Confirm } from '@/shared/ui/Modal'
 import { ApplyBand } from './ApplyBand'
+import { HistoryModal } from './HistoryModal'
 import { PersonaName } from './PersonaName'
 import { PersonaTabs } from './PersonaTabs'
 import { PromptBody } from './PromptBody'
@@ -74,31 +75,23 @@ function Card({ vm, ed, editing }: { vm: Vm; ed: Ed | null; editing: boolean }) 
           <div className="flex flex-wrap items-center gap-2">
             {/* 프롬프트를 고치는 중엔 연필 없음 — 이름 저장이 새 버전을 만들어 고치던 글이 사라지므로 */}
             <PersonaName name={c.name} target={ed && !editing ? vm.editTarget : null} />
-            {/* 지난 버전을 볼 땐 그 버전의 배지, 아니면 상담가의 배지 */}
-            {p.past ? (
-              p.badges.map((b) => (
-                <Badge key={b.label} tone={b.tone}>
-                  {b.label}
-                </Badge>
-              ))
-            ) : (
-              <>
-                {c.inUse && <Badge tone="done">통화에 사용 중</Badge>}
-                {c.applying && <Badge tone="wait">{c.applying}</Badge>}
-              </>
-            )}
+            {c.inUse && <Badge tone="done">통화에 사용 중</Badge>}
+            {c.applying && <Badge tone="wait">{c.applying}</Badge>}
           </div>
           <div className="flex flex-wrap items-end gap-4 text-[14px] text-ops-sub">
             {ed ? <VoiceFields vm={ed} /> : <span>목소리 {c.voice}</span>}
             <span>
               {p.time} 저장{p.author && ` · ${p.author}`}
             </span>
-            {p.past && (
-              // 시나리오 시험에서 지난 버전으로 돌아왔을 때만 — 기록 창(5단계) 전까지 빠져나갈 길
-              <button type="button" className="underline" onClick={vm.closeHistory}>
-                지난 버전 보는 중 · 현재 버전 보기
-              </button>
-            )}
+            {/* 고치는 중엔 막음 — 불러오기가 새 버전을 만들어 고치던 글이 사라지므로 */}
+            <button
+              type="button"
+              disabled={editing}
+              onClick={vm.openHistory}
+              className="underline outline-none hover:text-ops-ink focus-visible:ring-2 focus-visible:ring-ops-route disabled:text-ops-faint disabled:no-underline"
+            >
+              수정 기록 보기
+            </button>
           </div>
         </div>
         {ed && editing ? (
@@ -115,16 +108,6 @@ function Card({ vm, ed, editing }: { vm: Vm; ed: Ed | null; editing: boolean }) 
           </span>
         ) : (
           <span className="ml-auto flex flex-wrap gap-2">
-            {p.reuse && (
-              <Btn
-                kind="edit"
-                disabled={p.reuse.disabled}
-                title={p.reuse.hint}
-                onClick={vm.askReuse}
-              >
-                이 버전 다시 쓰기
-              </Btn>
-            )}
             {c.deletable && (
               <Btn kind="danger" onClick={() => vm.askDelete(c.personaSeq)}>
                 삭제
@@ -158,6 +141,7 @@ function Card({ vm, ed, editing }: { vm: Vm; ed: Ed | null; editing: boolean }) 
       ) : (
         <PromptBody p={p} ed={ed} />
       )}
+      {vm.historyOpen && <HistoryModal vm={vm} />}
     </article>
   )
 }

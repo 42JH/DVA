@@ -46,35 +46,29 @@ type Badge = { label: string; tone: Tone }
 export interface HistoryRow {
   version: number
   time: string // '오늘 오후 3:07'
-  rename: { from: string; to: string } | null // 바로 직전 버전과 이름이 다를 때만 (11/13 — 이름만 바꾼 버전도 무엇이 바뀌었는지 보이게)
-  voice: string // 'marin' — 그 버전에 쓰인 음성 이름 (11/11)
   author: string // 모르면 ''
-  badges: Badge[] // 통화에 사용 중 · 적용 대기
+  badges: Badge[] // 반영 전 · 통화에 사용 중 · 적용 대기
   selected: boolean
-  apply: boolean // [통화에 반영하기] — 통화에 사용 중인 상담가의 현재 버전이 아직 통화에 안 쓰일 때 그 줄에만
 }
 
 /** 가운데 프롬프트 카드 */
 interface PromptView {
   time: string
   author: string
-  badges: Badge[]
   sections: {
     key: PromptKey
     group: string | null
     sub: boolean
     title: string
     text: string
-    // 버전 기록에서 볼 때만(가장 오래된 버전 빼고) — 바로 직전 버전 기준 비교. 한 문단 안에 del(이 버전에서 빠진 말) · add(이 버전에서 더해진 말)가 이어 붙음
+    // 수정 기록 창에서만 — 통화에 쓰는 내용 기준 비교. 한 문단 안에 del(빠진 말) · add(더해진 말)가 이어 붙음
     rows: { key: string; parts: Part[] }[] | null
   }[]
   callSections: PromptView['sections'] | null // 반영 전 띠 토글 '통화에 쓰는 내용' — 읽기만
-  canEdit: boolean // 그 자리에서 고치기 — 현재 버전을 볼 때만
-  past: boolean // 기록에서 고른 지난 버전 → 현재 버전 기준 차이 표시 · [이 버전 다시 쓰기]
-  reuse: { disabled: boolean; hint: string | undefined } | null // [이 버전 다시 쓰기] — 관리자가 지난 버전을 볼 때만
+  canEdit: boolean // 그 자리에서 고치기 — 관리 권한
 }
 
-/** [통화에 사용하기] · [이 버전 다시 쓰기] · [삭제] 확인 창 */
+/** [통화에 사용하기] · [삭제] 확인 창, 수정 기록 창 [이 내용 불러오기](reuse — 확인 창 없이 바로) */
 type Confirming =
   | { kind: 'use'; personaSeq: number }
   | { kind: 'reuse'; version: number }
@@ -119,16 +113,16 @@ const nameI = (name: string) => `${name}${hasBatchim(name) ? '이' : '가'}`
 const conflictText =
   '그새 다른 관리자가 이 상담가를 저장했습니다. 창을 닫고 최신 버전을 확인해 주세요.'
 
-/** 07 AI 상담가 훅 (11/11 — 저장 = 새 버전, [적용] 없음)
- * 가운데 = 고른 상담가의 현재 버전(확정된 최신). 오른쪽 위 탭 [버전 히스토리] → 오른쪽이 고른 상담가의 버전 기록, 고른 버전이 가운데
- * 지난 버전: 현재 버전 기준 차이 표시 · [이 버전 다시 쓰기](그 내용을 새 버전으로 저장)
- * 통화 상담가 바꾸기 · 새 버전 반영은 [통화에 사용하기]로만. 시나리오 시험은 따로 화면 */
+/** 07 AI 상담가 훅 (11/13 새 안 — 저장 = 새 버전)
+ * 카드 = 위 탭에서 고른 상담가의 현재 버전(그 자리에서 고침). 사용 중 상담가의 새 버전이 통화에 안 쓰이면 반영 전 띠
+ * 수정 기록 창: 고른 날짜 내용을 통화에 쓰는 내용과 비교 · [이 내용 불러오기](그 내용을 새 버전으로 저장)
+ * 통화 상담가 바꾸기 · 새 버전 반영은 확인 창으로만. 시나리오 시험은 따로 화면 */
 export function usePersonaPage() {
   const { key, state } = useLocation()
   const [back] = useState(() => (SCENARIO_TEST ? (kept(key) ?? fromTest(state)) : null))
   const [personaSeq, setPersonaSeq] = useState<number | null>(back?.personaSeq ?? null) // null = 통화에 사용 중인 상담가
-  const [historyOpen, setHistoryOpen] = useState(back?.historyOpen ?? false) // 오른쪽 = 버전 기록
-  const [version, setVersion] = useState<number | null>(back?.version ?? null) // 기록에서 고른 버전 (null = 현재 버전)
+  const [historyOpen, setHistoryOpen] = useState(back?.historyOpen ?? false) // 수정 기록 창 (11/13 새 안 5번)
+  const [version, setVersion] = useState<number | null>(back?.version ?? null) // 창에서 고른 버전 (null = 현재 버전)
   const [showCall, setShowCall] = useState(false) // 반영 전 띠의 토글 — true = 통화에 쓰는 내용
   useEffect(() => {
     if (SCENARIO_TEST) keep(key, { personaSeq, historyOpen, version })
@@ -158,8 +152,8 @@ export function usePersonaPage() {
   const all = versions.data ?? [] // 높은 번호가 위 (personaMap이 정렬). 남은 초안이 있으면 맨 위
   const latest = all[0] ?? null // 수정의 시작점 — 남은 초안이 있으면 초안
   const head = all.find((v) => v.isHead) ?? latest // 현재 버전
-  const viewing = (historyOpen && all.find((v) => v.version === version)) || head
-  const past = !!viewing && viewing !== head
+  const viewing = head // 카드는 늘 현재 버전 — 지난 버전은 수정 기록 창 안에서만 (11/13 새 안)
+  const picked = historyOpen ? (all.find((v) => v.version === version) ?? head) : null
   const inUse = list.find((p) => p.inUse) ?? null
   const voiceName = (v: string) => v || DEFAULT_VOICE_LABEL
   const badges = (v: PersonaVersion) => {
@@ -184,9 +178,8 @@ export function usePersonaPage() {
     const same = name === undefined && !Object.keys(prompt).length && !Object.keys(voice).length
     return { name, prompt, voice, same }
   }
-  const viewingDiff = past && viewing ? reuseDiff(viewing) : null
   // 남은 초안이 없고 내용도 같으면 보낼 게 없음 (서버는 빈 저장을 400으로 거절)
-  const reuseSame = !!viewingDiff?.same && !persona?.draftRevision
+  const reuseSame = (v: PersonaVersion) => !!reuseDiff(v)?.same && !persona?.draftRevision
 
   const confirm = useMutation({
     mutationFn: async (c: NonNullable<Confirming>) => {
@@ -212,7 +205,10 @@ export function usePersonaPage() {
       await qc.invalidateQueries({ queryKey: personaQueries.all() })
       setConfirming(null)
       if (c.kind === 'reuse') {
-        setVersion(null) // 새로 생긴 현재 버전을 보여 줌
+        // 창을 닫고 새로 생긴 현재 버전(고친 내용)을 보여 줌 → 사용 중 상담가면 반영 전 띠
+        setHistoryOpen(false)
+        setVersion(null)
+        setShowCall(false)
       }
       if (c.kind === 'delete' && c.personaSeq === persona?.personaSeq) {
         // 지운 상담가를 보고 있었으면 통화에 사용 중인 상담가로 돌아감 (persona 계산이 못 찾으면 inUse로 넘김)
@@ -231,13 +227,11 @@ export function usePersonaPage() {
     },
   })
 
-  // 칸마다 따로 비교 — 한 칸의 줄이 다른 칸 줄과 짝지어지지 않게. 바로 직전 버전 → 고른 버전 (11/11 문서 비교처럼 한 화면에)
-  // all은 높은 번호가 위 → 처음 만나는 더 낮은 번호가 바로 직전 버전. 남은 초안은 기록이 아님
-  const promptSections = (v: PersonaVersion) => {
-    const before = historyOpen ? all.find((x) => !x.isDraft && x.version < v.version) : undefined
+  // 칸마다 따로 비교 — 한 칸의 줄이 다른 칸 줄과 짝지어지지 않게. before → v (before가 없으면 비교 없음)
+  const promptSections = (v: PersonaVersion, before?: PersonaVersion) => {
     const sections = PROMPT_SECTIONS.map((s) => {
       let rows: { key: string; parts: Part[] }[] | null = null
-      // 안 바뀐 칸은 rows 없이 → 상담가 유형 화면처럼 마크다운 (비교 조각은 마크다운 문법이 잘려 글자 그대로만 가능)
+      // 안 바뀐 칸은 rows 없이 → 글 그대로
       if (before && before.prompt[s.key] !== v.prompt[s.key]) {
         const d = inlineDiff(before.prompt[s.key].split('\n'), v.prompt[s.key].split('\n'))
         rows = d.blocks.map((parts, i) => ({ key: String(i), parts }))
@@ -305,15 +299,6 @@ export function usePersonaPage() {
         blocked,
       }
     }
-    if (confirming?.kind === 'reuse') {
-      const v = all.find((x) => x.version === confirming.version)
-      if (!v) return null
-      return {
-        title: `${fmtVersionTime(v.savedAt)} 버전을 다시 쓸까요?`,
-        note: '이 버전 내용으로 새 버전을 저장합니다. 지금 버전도 기록에 남습니다. 통화에는 [통화에 사용하기]로 반영됩니다.',
-        okLabel: '다시 쓰기',
-      }
-    }
     return null
   })()
 
@@ -326,12 +311,14 @@ export function usePersonaPage() {
     p.inUse && !p.applyingVersion && p.head.version !== p.appliedVersion
 
   // 반영 전 띠 (11/13 새 안 1번) — 사용 중 상담가의 현재 버전이 아직 통화에 안 쓰일 때. 지난 버전을 볼 땐 없음
-  const unapplied = !!persona && !past && newerThanCall(persona)
+  const unapplied = !!persona && newerThanCall(persona)
   // 토글 '통화에 쓰는 내용' — 그 버전을 못 찾으면(목록 밖) 토글 없음
   const callVersion = unapplied
     ? (all.find((v) => v.version === persona.appliedVersion) ?? null)
     : null
   const comparing = showCall && callVersion !== null
+  // 수정 기록 창의 비교 기준 = 통화에 쓰는 내용 (안 쓰는 상담가는 appliedVersion = 현재 버전)
+  const base = persona ? (all.find((v) => v.version === persona.appliedVersion) ?? head) : null
 
   const items = [...list]
     .sort((a, b) => Number(b.inUse) - Number(a.inUse))
@@ -364,39 +351,36 @@ export function usePersonaPage() {
             // 띠가 있으면 머리 줄 = 통화에 쓰는 버전의 저장 시각, 띠 = 고친 버전 (피그마처럼)
             time: fmtVersionTime((callVersion ?? viewing).savedAt),
             author: (callVersion ?? viewing).author,
-            badges: badges(viewing),
             sections: diff!.sections,
             // 토글이 '통화에 쓰는 내용'이면 그 버전 글 (읽기만)
             callSections: comparing ? promptSections(callVersion).sections : null,
-            canEdit: canManage && !past,
-            past,
-            reuse:
-              canManage && past
-                ? {
-                    disabled: reuseSame,
-                    hint: reuseSame ? '최신 버전과 내용이 같습니다' : undefined,
-                  }
-                : null,
+            canEdit: canManage,
           } satisfies PromptView)
         : null,
 
-    // 버전 기록 (오른쪽 위 탭)
+    // 수정 기록 창 (11/13 새 안 5번, 피그마 2368:6500) — 왼쪽 날짜별 목록, 오른쪽은 통화에 쓰는 내용과 다른 칸만
     historyOpen,
-    historyTitle: persona?.name ?? '',
     history: all
-      .filter((v) => !v.isDraft) // 남은 초안은 기록이 아님 — [프롬프트 수정]에서 이어 쓰고 [저장]하면 버전이 됨
-      // arr는 높은 번호가 위 → 다음 칸이 바로 직전 버전 (가장 오래된 버전은 비교 없음)
-      .map((v, i, arr): HistoryRow => ({
+      .filter((v) => !v.isDraft) // 남은 초안은 기록이 아님 — 고쳐서 [저장]하면 버전이 됨
+      .map((v): HistoryRow => ({
         version: v.version,
         time: fmtVersionTime(v.savedAt),
-        rename:
-          arr[i + 1] && arr[i + 1].name !== v.name ? { from: arr[i + 1].name, to: v.name } : null,
-        voice: voiceName(v.voice.voice),
         author: v.author,
-        badges: badges(v),
-        selected: v === viewing,
-        apply: canManage && v === head && !!persona && newerThanCall(persona),
+        badges: [...(unapplied && v === head ? [VERSION_BADGE.UNAPPLIED] : []), ...badges(v)],
+        selected: v === picked,
       })),
+    picked:
+      picked && base
+        ? {
+            title: `${fmtVersionTime(picked.savedAt)} 내용`,
+            changed: promptSections(picked, base).sections.filter((x) => x.rows),
+            // [이 내용 불러오기] — 지금 내용과 같으면 보낼 게 없음
+            canLoad: canManage && !reuseSame(picked),
+            same: reuseSame(picked),
+          }
+        : null,
+    loadPicked: () => picked && confirm.mutate({ kind: 'reuse', version: picked.version }),
+    loading: confirm.isPending,
     band:
       unapplied && head
         ? {
@@ -410,6 +394,7 @@ export function usePersonaPage() {
     setShowCall,
     applyHead: () => persona && askUse(persona.personaSeq),
     openHistory: () => {
+      confirm.reset() // 지난번 불러오기 실패 문구가 먼저 뜨지 않게
       setVersion(null)
       setHistoryOpen(true)
     },
@@ -421,13 +406,9 @@ export function usePersonaPage() {
       setVersion(v)
     },
 
-    // 확인 창 — [통화에 사용하기] · [이 버전 다시 쓰기]
+    // 확인 창 — [통화에 사용하기] · [삭제]
     confirm: confirmView,
     askUse,
-    askReuse: () => {
-      confirm.reset()
-      if (viewing) setConfirming({ kind: 'reuse', version: viewing.version })
-    },
     askDelete: (seq: number) => {
       confirm.reset()
       setConfirming({ kind: 'delete', personaSeq: seq })

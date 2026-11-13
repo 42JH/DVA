@@ -29,33 +29,7 @@ export function PromptBody({ p, ed }: Props) {
           : p?.sections.map((s) => (
               <section key={s.key}>
                 <h4 className={STRIP}>{s.title}</h4>
-                <p className="px-3 py-3 text-[14px] leading-6 whitespace-pre-wrap">
-                  {s.rows
-                    ? // 지난 버전: 바로 직전 버전 기준 빠진 말 = 파란 취소선, 더한 말 = 파란 강조
-                      s.rows.map((r) => (
-                        <span key={r.key} className="block">
-                          {r.parts.map((x, i) =>
-                            x.kind === 'del' ? (
-                              <del key={i} className="decoration-ops-route">
-                                <span className="sr-only">빠진 말: </span>
-                                {x.text}
-                              </del>
-                            ) : x.kind === 'add' ? (
-                              <ins
-                                key={i}
-                                className="bg-ops-route-soft text-ops-route no-underline"
-                              >
-                                <span className="sr-only">더한 말: </span>
-                                {x.text}
-                              </ins>
-                            ) : (
-                              x.text || ' '
-                            ),
-                          )}
-                        </span>
-                      ))
-                    : s.text}
-                </p>
+                <p className="px-3 py-3 text-[14px] leading-6 whitespace-pre-wrap">{s.text}</p>
               </section>
             ))}
       </div>
