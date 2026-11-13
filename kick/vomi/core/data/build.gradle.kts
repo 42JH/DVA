@@ -5,10 +5,22 @@ plugins {
 android { namespace = "com.ssafy.vomi.core.data" }
 dependencies {
     implementation(libs.retrofit)
+    testImplementation(libs.okhttp.logging.interceptor)
+    testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
     api(projects.core.model)
     implementation(projects.core.common)
     implementation(projects.core.network)
     implementation(projects.core.database)
     implementation(projects.core.datastore)
     implementation(libs.kotlinx.coroutines.android)
+}
+
+android.testOptions.unitTests.all { test ->
+    val runLive = providers.environmentVariable("VOMI_RUN_AUTH_LIVE_TESTS").getOrElse("0")
+    test.inputs.property("runAuthLiveTests", runLive)
+    if (runLive == "1") {
+        test.outputs.upToDateWhen { false }
+        test.outputs.doNotCacheIf("Read-only live authentication check") { true }
+    }
 }
