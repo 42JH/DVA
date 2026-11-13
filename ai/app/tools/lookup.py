@@ -33,6 +33,8 @@ log = logging.getLogger(__name__)
 # --- find_destination ---
 
 class DestinationArgs(Args):
+    recent: bool = Field(False, description="고객이 '전에 보냈던 곳으로', '최근 보낸 곳 보여 주세요'처럼 "
+                                           "이전 도착지 재사용을 요청하면 true. 기업 검색은 false")
     name: str | None = Field(None, max_length=30, description="고객이 말한 받는 분 이름(조사·호칭 빼고)")
     place: str | None = Field(None, max_length=80, description="고객이 말한 지역·도로명·건물명(조사 빼고)")
     detail: str | None = Field(None, max_length=40, description="고객이 말한 층·동·호수. 없다고 답하면 빈 문자열")
@@ -56,13 +58,17 @@ def _from_be(p: BEPlace, source: Source) -> Place:
             "주소록·이전 도착지와 기업·사원 배송지에서 고객이 말한 받는 곳을 찾는다. 상호·건물명·도로명은 place에(실제 주소로 바꿔 "
             "현재 택배의 받는 분과 맞는 주소록 후보만 찾고, 없으면 그 주소를 기록한다). 받는 분을 정정할 때는 record_fields를 사용한다. "
             "기업명은 organization, 부서는 department. "
-            "고객이 말한 문자열만 채우고 나머지는 null.", DestinationArgs)
+            "이전 도착지를 다시 쓰거나 최근 보낸 곳을 요청하면 recent=true. 이름·주소를 몰라도 호출할 수 있다. "
+            "문자열은 고객이 말한 것만 채우고 나머지는 null.", DestinationArgs)
 async def find_destination(ctx: ToolContext, args: DestinationArgs) -> ToolOutcome:
-    said = {k: v.strip() for k, v in args.model_dump().items() if v and v.strip()}
-    if not said:
+    said = {k: v.strip() for k, v in args.model_dump(exclude={"recent"}).items() if v and v.strip()}
+    if not said and not args.recent:
         return ToolOutcome("needs_input", "NOTHING_TO_RECORD")
     name, place, detail = said.get("name"), said.get("place"), said.get("detail")
     company = said.get("organization") or said.get("department")
+    if args.recent and company:
+        return ToolOutcome("needs_input", "TOOL_ARGS_INVALID", needs=[{
+            "field": "recent", "reason": "기업 검색은 recent=false로 호출한다"}])
     async with ctx.lock:
         spoken_fields = {key: value for key, value in (("receiver_name", name), ("receiver_address", place),
                         ("receiver_address_detail", args.detail)) if value is not None}
@@ -85,6 +91,19 @@ async def find_destination(ctx: ToolContext, args: DestinationArgs) -> ToolOutco
         draft.destination_search_id += 1
         search = (draft, draft.destination_search_id)
         places = list(ctx.state.customer.places)
+        if args.recent:
+            # 최근순·중복 제거는 address_history와 _apply_context가 보장한다. 개인 핀을 이력에 섞지 않는다.
+            found = book_matches([p for p in places if p.source == Source.HISTORY], known_name or name, place, detail)
+            if found:
+                outcome = offer_destination(ctx.state, found, ctx.max_pin_options)
+                outcome.summary = state_summary(ctx.state, ctx.policy)
+                return outcome
+            if ctx.state.candidates and ctx.state.candidates.kind == "destination":
+                reject_candidates(ctx.state)
+            return ToolOutcome("needs_input", "DEST_NONE", {
+                "found": 0, "guidance": "불러온 최근 도착지 중 조건에 맞는 곳이 없다. 개인 주소록이나 기업 검색 결과로 대신하지 않는다. "
+                                        "최신 summary의 발송지 질문이 있으면 먼저 따르고, 그 밖에는 받는 분 성함이나 주소를 묻는다."},
+                summary=state_summary(ctx.state, ctx.policy))
         started_deferred = receiver_questions_deferred(ctx.state)
     recipient_name = known_name or name
     # 상호·건물명·도로명 → 실제 주소(주소DB, 없으면 카카오 키워드). 핀 문자열은 상호를 담지 않으므로 주소로 대조한다
@@ -220,7 +239,10 @@ def offer_destination(state, found: list[Place], max_options: int, be_places: li
         state.current.deferred_destination = candidates
         if state.candidates and state.candidates.kind == "destination":
             state.candidates = None
-        return ToolOutcome("ok")
+        return ToolOutcome("ok", "DEST_DEFERRED", {
+            "found": len(found),
+            "guidance": "받는 곳 후보를 찾았지만 발송지 확인·기록을 먼저 마칠 때까지 제시를 보류했다. "
+                        "검색 결과가 없다고 말하지 않고 최신 summary의 질문만 안내한다."})
     return _activate_destination(state, candidates)
 
 

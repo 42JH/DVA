@@ -754,6 +754,86 @@ def place(name, address_, source=Source.PIN, detail="101호"):
     return Place(name, "01098765432", address_, detail, Geo("x", "y", "00000"), source)
 
 
+def test_recent_destinations_offer_history_in_order_and_require_selection():
+    from app.calls.service import _apply_context
+    from backend_client.api import CallerContext
+    from backend_client.order import Place as BEPlace
+
+    history = [BEPlace(name=f"받는분{i}", phone="01098765432", address=f"서울 도착로 {i}",
+                       address_detail=f"{i}층") for i in range(1, 5)]
+    c = ctx()
+    _apply_context(c.state, CallerContext(status="REGISTERED", recent_destinations=history,
+                                        places=[history[0], BEPlace(name="핀만", phone="01098765432",
+                                                                  address="서울 주소록로 1", address_detail="")]), CALLER)
+    complete_sender_address(c)
+    sender = c.state.current["sender_address"].value
+    out = call(c, "find_destination", {"recent": True})
+    assert out["status"] == "needs_choice" and out["facts"]["found"] == 4
+    candidates = c.state.candidates
+    assert [p.name for p in candidates.items] == ["받는분1", "받는분2", "받는분3"]
+    assert all(p.source == Source.HISTORY for p in candidates.items)
+    assert not c.state.current["receiver_address"].valid
+    assert c.state.current["sender_address"].value == sender
+    assert apply_pick(c.state, candidates.labels[0])
+    assert c.state.current["receiver_address"].value == history[0].address
+    assert c.state.current["receiver_address"].source == Source.HISTORY
+
+
+def test_recent_destination_can_be_filtered_without_falling_back_to_pins_or_company():
+    class NoSearch(MockBackend):
+        async def search_company_places(self, *args, **kwargs):
+            raise AssertionError("최근 도착지 조회는 기업을 검색하지 않는다")
+
+    history = place("김미리", "서울 도착로 1", Source.HISTORY)
+    c = ctx(backend=NoSearch(), customer=Customer(caller_phone=CALLER, places=(
+        history, place("핀만", "서울 주소록로 1"))))
+    complete_sender_address(c)
+    out = call(c, "find_destination", {"recent": True, "name": "김미리"})
+    assert out["status"] == "needs_choice" and c.state.candidates.items == (history,)
+    assert "맞나요" in out["facts"]["guidance"]
+    assert call(c, "find_destination", {"recent": True})["status"] == "needs_choice"
+    assert not c.state.current["receiver_name"].valid  # 목록을 다시 묻는 것은 후보 선택이 아니다.
+    out = call(c, "find_destination", {"recent": True, "name": "핀만"})
+    assert out["code"] == "DEST_NONE" and out["facts"]["found"] == 0
+    assert c.state.candidates is None
+
+
+@pytest.mark.parametrize("pins", [(), (place("핀만", "서울 주소록로 1"),)])
+def test_recent_destinations_empty_is_explicit_and_null_call_still_requires_input(pins):
+    c = ctx(customer=Customer(caller_phone=CALLER, places=pins))
+    complete_sender_address(c)
+    version = c.state.state_version
+    assert call(c, "find_destination", {})["code"] == "NOTHING_TO_RECORD"
+    assert c.state.state_version == version
+    out = call(c, "find_destination", {"recent": True})
+    assert out["status"] == "needs_input" and out["code"] == "DEST_NONE"
+    assert out["facts"]["found"] == 0 and "최근 도착지" in out["facts"]["guidance"]
+    assert c.state.candidates is None
+
+
+def test_recent_destination_deferred_reports_found_then_resumes():
+    from app.tools.lookup import resume_destination
+
+    history = place("김미리", "서울 도착로 1", Source.HISTORY)
+    c = ctx(customer=Customer(customer_seq=12, name="김철수", caller_phone=CALLER, places=(history,)))
+    out = call(c, "find_destination", {"recent": True})
+    assert out["code"] == "DEST_DEFERRED" and out["facts"]["found"] == 1
+    assert out["missing"][0] == "sender_address"
+    assert "labels" not in out["facts"] and c.state.candidates is None
+    assert c.state.current.deferred_destination.items == (history,)
+    complete_sender_address(c)
+    assert resume_destination(c.state).status == "needs_choice"
+    assert c.state.candidates.items == (history,) and not c.state.current["receiver_name"].valid
+
+
+@pytest.mark.parametrize("args", [{"recent": "true"}, {"recent": 1}, {"recent": True, "organization": "기업"}])
+def test_recent_destinations_reject_invalid_arguments_without_changing_state(args):
+    c = ctx()
+    version = c.state.state_version
+    assert call(c, "find_destination", args)["code"] == "TOOL_ARGS_INVALID"
+    assert c.state.state_version == version and c.state.current is None
+
+
 def test_personal_place_found_first_and_pick_applies():
     c = ctx(customer=Customer(caller_phone=CALLER, places=(place("이영희", "부산 해운대구 센텀로 10"),
                                                            place("김엄마", "대구 수성구 달구벌대로 2450"))))
