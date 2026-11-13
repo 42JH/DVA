@@ -57,7 +57,7 @@ internal fun CallQuickReplies(
     Column(
         modifier = modifier.fillMaxWidth(),
     ) {
-        // The saved replies stay immediately available, including while the microphone is on.
+        // Saved replies follow the same microphone lock as text and AI suggestions.
         QuickReplyRow(
             label = stringResource(R.string.call_backchannels),
             height = rowHeight,
@@ -65,7 +65,7 @@ internal fun CallQuickReplies(
             items(state.backchannels, key = { it.id }) { reply ->
                 ReplyChip(
                     text = reply.text,
-                    enabled = true,
+                    enabled = state.canType,
                     containerColor = Color(0xFFFFE4A3).copy(alpha = 0.16f),
                     contentColor = Color.White,
                     modifier = Modifier.widthIn(min = 60.dp, max = chipMaxWidth),

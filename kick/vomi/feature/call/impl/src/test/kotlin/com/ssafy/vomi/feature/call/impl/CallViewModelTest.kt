@@ -53,12 +53,19 @@ class CallViewModelTest {
     }
 
     @Test
-    fun backchannelIsImmediateEvenWithMicrophoneOnAndPreservesTheDraft() {
+    fun backchannelIsBlockedWithMicrophoneOnAndResumesWithoutLosingDraft() {
         val vm = newCall()
         vm.updateDraft("나중에 보낼 답변")
-        vm.toggleMicrophone()
+        val originalMessages = vm.uiState.value.messages
         val selectedBackchannel = vm.uiState.value.backchannels.first()
+        vm.toggleMicrophone()
         vm.selectBackchannel(selectedBackchannel.id)
+        assertEquals(originalMessages, vm.uiState.value.messages)
+        assertEquals("나중에 보낼 답변", vm.uiState.value.draft)
+
+        vm.toggleMicrophone()
+        vm.selectBackchannel(selectedBackchannel.id)
+        assertEquals(originalMessages.size + 1, vm.uiState.value.messages.size)
         assertEquals(selectedBackchannel.text, vm.uiState.value.messages.last().text)
         assertEquals("나중에 보낼 답변", vm.uiState.value.draft)
     }

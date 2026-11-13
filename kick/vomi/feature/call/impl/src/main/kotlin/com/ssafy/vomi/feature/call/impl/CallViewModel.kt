@@ -59,7 +59,7 @@ internal class CallViewModel @Inject constructor() : ViewModel() {
     fun selectBackchannel(id: Long) {
         _uiState.update { state ->
             val backchannel = state.backchannels.find { it.id == id }
-            if (state.phase == CallPhase.Active && backchannel != null) state.appendLocalMessage(backchannel.text) else state
+            if (state.canType && backchannel != null) state.appendLocalMessage(backchannel.text) else state
         }
     }
 
