@@ -329,6 +329,24 @@ export function usePersonaPage() {
     setEditing(true)
   }
 
+  const items = [...list]
+    .sort((a, b) => Number(b.inUse) - Number(a.inUse))
+    .map((p): PersonaItem => {
+      return {
+        personaSeq: p.personaSeq,
+        name: p.name,
+        selected: p.personaSeq === persona?.personaSeq,
+        inUse: p.inUse,
+        applying: p.applyingVersion
+          ? `${VERSION_BADGE.PENDING.label}${p.applyError ? ' · AI 반영 오류' : ''}`
+          : null,
+        voice: voiceName(p.voice.voice),
+        deletable: canManage && !p.inUse && !p.applyingVersion,
+        // 시험 전이어도 켬 — 누르면 확인 창이 [시나리오 시험]으로 유도 (11/13, 11/12의 '말없이 끔'을 바꿈)
+        canUse: canManage && !p.inUse && !p.applyingVersion,
+      }
+    })
+
   return {
     demo: PERSONA_DEMO, // 시연 모드 — 저장 · 사용하기가 실서버에 안 감
     isLoading: personas.isPending, // 처음 들어올 때만 화면 전체
@@ -372,6 +390,8 @@ export function usePersonaPage() {
         selected: v === viewing,
         apply: canManage && v === head && !!persona && newerThanCall(persona),
       })),
+    // 머리 줄 [통화에 반영] — 4단계 반영 전 띠가 오기 전까지 기록 줄의 버튼을 대신함
+    canApply: canManage && !!persona && newerThanCall(persona),
     applyHead: () => persona && askUse(persona.personaSeq),
     openHistory: () => {
       setVersion(null)
@@ -441,23 +461,9 @@ export function usePersonaPage() {
     },
 
     // 통화에 사용 중인 상담가는 늘 맨 위 (나머지는 서버가 준 순서 그대로)
-    personas: [...list]
-      .sort((a, b) => Number(b.inUse) - Number(a.inUse))
-      .map((p): PersonaItem => {
-        return {
-          personaSeq: p.personaSeq,
-          name: p.name,
-          selected: p.personaSeq === persona?.personaSeq,
-          inUse: p.inUse,
-          applying: p.applyingVersion
-            ? `${VERSION_BADGE.PENDING.label}${p.applyError ? ' · AI 반영 오류' : ''}`
-            : null,
-          voice: voiceName(p.voice.voice),
-          deletable: canManage && !p.inUse && !p.applyingVersion,
-          // 시험 전이어도 켬 — 누르면 확인 창이 [시나리오 시험]으로 유도 (11/13, 11/12의 '말없이 끔'을 바꿈)
-          canUse: canManage && !p.inUse && !p.applyingVersion,
-        }
-      }),
+    personas: items,
+    // 머리 줄 (11/13 새 안 — 이름 · 배지 · 목소리 · [삭제] · [통화에 사용하기]는 탭에서 고른 상담가 것)
+    current: items.find((p) => p.selected) ?? null,
     selectPersona: (seq: number) => {
       setPersonaSeq(seq)
       setVersion(null)
