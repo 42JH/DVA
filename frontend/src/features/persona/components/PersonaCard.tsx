@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router'
 import type { usePersonaPage } from '@/features/persona/hooks/usePersonaPage'
 import { usePromptEditor, type EditTarget } from '@/features/persona/hooks/usePromptEditor'
-import { Badge, Btn } from '@/shared/ui'
+import { Badge, Btn, Icon } from '@/shared/ui'
 import { Confirm } from '@/shared/ui/Modal'
 import { ApplyBand } from './ApplyBand'
 import { HistoryModal } from './HistoryModal'
@@ -76,17 +76,31 @@ function Card({ vm, ed, editing }: { vm: Vm; ed: Ed | null; editing: boolean }) 
             {/* 프롬프트를 고치는 중엔 연필 없음 — 이름 저장이 새 버전을 만들어 고치던 글이 사라지므로 */}
             <PersonaName name={c.name} target={ed && !editing ? vm.editTarget : null} />
             {c.inUse && <Badge tone="done">통화에 사용 중</Badge>}
-            {c.applying && <Badge tone="wait">{c.applying}</Badge>}
+            {/* 사용 중 상담가의 반영 중은 띠가 알림 */}
+            {c.applying && !c.inUse && <Badge tone="wait">{c.applying}</Badge>}
           </div>
           <div className="flex flex-wrap items-end gap-4 text-[14px] text-ops-sub">
-            {ed ? <VoiceFields vm={ed} /> : <span>목소리 {c.voice}</span>}
+            {ed ? (
+              <VoiceFields vm={ed} />
+            ) : vm.locked ? (
+              // 시험 · 반영 중 — 드롭다운 모양 그대로 흐리게 (피그마 2368:3212)
+              <span
+                aria-disabled
+                className="flex h-7 items-center gap-1.5 rounded-md border border-ops-line bg-ops-paper pr-2 pl-2.5 text-[13px] text-ops-faint"
+              >
+                목소리 <span className="font-semibold">{c.voice}</span>
+                <Icon name="chevron" className="size-3.5" />
+              </span>
+            ) : (
+              <span>목소리 {c.voice}</span>
+            )}
             <span>
               {p.time} 저장{p.author && ` · ${p.author}`}
             </span>
-            {/* 고치는 중엔 막음 — 불러오기가 새 버전을 만들어 고치던 글이 사라지므로 */}
+            {/* 고치는 중엔 막음 — 불러오기가 새 버전을 만들어 고치던 글이 사라지므로. 시험 · 반영 중도 (시험하던 글과 달라짐) */}
             <button
               type="button"
-              disabled={editing}
+              disabled={editing || vm.locked}
               onClick={vm.openHistory}
               className="underline outline-none hover:text-ops-ink focus-visible:ring-2 focus-visible:ring-ops-route disabled:text-ops-faint disabled:no-underline"
             >
@@ -132,6 +146,7 @@ function Card({ vm, ed, editing }: { vm: Vm; ed: Ed | null; editing: boolean }) 
           showCall={vm.showCall}
           setShowCall={vm.setShowCall}
           onApply={vm.applyHead}
+          onProgress={vm.testTo ? () => void navigate(vm.testTo!) : undefined}
           busy={editing}
         />
       )}
