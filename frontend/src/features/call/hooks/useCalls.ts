@@ -118,5 +118,5 @@ export function useCalls() {
   }
 }
 
-export type CallsVm = ReturnType<typeof useCalls>
+type CallsVm = ReturnType<typeof useCalls>
 export type CallsRow = CallsVm['rows'][number]

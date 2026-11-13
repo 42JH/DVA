@@ -6,8 +6,6 @@ import {
   utteranceAt,
   utteranceForAction,
   toCallRow,
-  matchCall,
-  type CallFilter,
   type CallDetailDto,
   type CallListItemDto,
 } from './callDto'
@@ -95,18 +93,6 @@ assert.deepEqual(bare.complaints, [])
 assert.equal(bare.durationSec, null)
 assert.equal(bare.callerNumber, '')
 assert.equal(durationSec(null, call.endedAt), null)
-
-// 04 화면 거르기 — 신규 · 상담 유형(하나라도) · 통화 시간
-const none: CallFilter = { newOnly: false, kinds: [], minSec: 0, maxSec: null }
-assert.equal(matchCall(row, none), true)
-assert.equal(matchCall(row, { ...none, newOnly: true }), true)
-assert.equal(matchCall(old, { ...none, newOnly: true }), false) // 신규인지 모름
-assert.equal(matchCall(row, { ...none, kinds: ['lookup', 'faq'] }), true) // FAQ 2
-assert.equal(matchCall(row, { ...none, kinds: ['lookup', 'cancel'] }), false) // 조회 0 · 취소 모름
-assert.equal(matchCall(row, { ...none, minSec: 180, maxSec: 600 }), true) // 220초
-assert.equal(matchCall(row, { ...none, minSec: 240 }), false)
-assert.equal(matchCall(row, { ...none, maxSec: 200 }), false)
-assert.equal(matchCall(bare, { ...none, minSec: 60 }), false) // 통화 시간 모름
 
 // 상세: 녹취는 url 있는 것 우선, 페르소나 null 처리, 세 목록 변환
 const detail: CallDetailDto = {

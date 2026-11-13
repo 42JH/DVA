@@ -17,32 +17,26 @@ export const Label = ({ children }: { children: ReactNode }) => (
 
 export function TextInput({
   label,
-  labelClassName,
   value,
   onChange,
   error,
-  suffix,
   placeholder,
   inputMode,
   readOnly,
   invalid,
-  autoFocus,
 }: {
   label: string
-  labelClassName?: string // 칸 이름을 제목처럼 크게 (TextAreaInput과 같음, 07 상담가 등록 · 수정)
   value: string
   onChange: (v: string) => void
   error?: string
-  suffix?: string
   placeholder?: string
   inputMode?: 'numeric' | 'tel'
   readOnly?: boolean // 바꿀 수 없는 칸 (회색 바탕)
   invalid?: boolean // 글 없이 빨간 테두리만 (오류 글은 묶음 아래에 한 번)
-  autoFocus?: boolean // 누르면 바로 칸이 열리는 곳 (07 상담가 이름 연필)
 }) {
   return (
     <label className="flex min-w-0 flex-col gap-1">
-      {labelClassName ? <span className={labelClassName}>{label}</span> : <Label>{label}</Label>}
+      <Label>{label}</Label>
       <span className={`${box(error || invalid)} ${readOnly ? 'bg-ops-paper! text-ops-sub' : ''}`}>
         <input
           value={value}
@@ -50,47 +44,41 @@ export function TextInput({
           placeholder={placeholder}
           inputMode={inputMode}
           readOnly={readOnly}
-          autoFocus={autoFocus}
           aria-invalid={!!error || invalid}
           className="min-w-0 flex-1 bg-transparent text-[14px] outline-none placeholder:text-ops-faint"
         />
-        {suffix && <span className="text-[13px] text-ops-sub">{suffix}</span>}
       </span>
       {error && <Err>{error}</Err>}
     </label>
   )
 }
 
-/** 여러 줄 입력 칸 (TextInput과 같은 선 · 글자). labelClassName = 칸 이름을 제목처럼 크게 (07 프롬프트 수정) */
+/** 여러 줄 입력 칸 (07 프롬프트 수정). labelClassName = 칸 이름의 모양(제목 줄) */
 export function TextAreaInput({
   label,
   labelClassName,
   value,
   onChange,
-  error,
   placeholder,
   className = '',
 }: {
   label: string
-  labelClassName?: string
+  labelClassName: string
   value: string
   onChange: (v: string) => void
-  error?: string
   placeholder?: string
   className?: string // 높이 등 (예: 글만큼 늘리기 [field-sizing:content])
 }) {
   return (
     <label className="flex min-w-0 flex-col gap-1">
-      {labelClassName ? <span className={labelClassName}>{label}</span> : <Label>{label}</Label>}
+      <span className={labelClassName}>{label}</span>
       <textarea
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         spellCheck={false}
-        aria-invalid={!!error}
-        className={`min-h-20 resize-none rounded-md bg-white px-3 py-2 text-[14px] leading-6 ring-1 outline-none ring-inset placeholder:text-ops-faint focus:ring-ops-route ${error ? 'ring-ops-stop' : 'ring-ops-line'} ${className}`}
+        className={`min-h-20 resize-none rounded-md bg-white px-3 py-2 text-[14px] leading-6 ring-1 ring-ops-line outline-none ring-inset placeholder:text-ops-faint focus:ring-ops-route ${className}`}
       />
-      {error && <Err>{error}</Err>}
     </label>
   )
 }
@@ -103,7 +91,6 @@ export function SuggestInput<T>({
   error,
   placeholder,
   inputMode,
-  invalid,
   items,
   itemKey,
   renderItem,
@@ -115,7 +102,6 @@ export function SuggestInput<T>({
   error?: string
   placeholder?: string
   inputMode?: 'numeric' | 'tel'
-  invalid?: boolean
   items: T[]
   itemKey: (item: T) => string | number
   renderItem: (item: T) => ReactNode
@@ -134,7 +120,7 @@ export function SuggestInput<T>({
   return (
     <label className="flex min-w-0 flex-col gap-1">
       <Label>{label}</Label>
-      <span className={`relative ${box(error || invalid)}`}>
+      <span className={`relative ${box(error)}`}>
         <input
           role="combobox"
           aria-expanded={shown}
@@ -168,7 +154,7 @@ export function SuggestInput<T>({
           placeholder={placeholder}
           inputMode={inputMode}
           autoComplete="off"
-          aria-invalid={!!error || invalid}
+          aria-invalid={!!error}
           className="min-w-0 flex-1 bg-transparent text-[14px] outline-none placeholder:text-ops-faint"
         />
         {shown && (

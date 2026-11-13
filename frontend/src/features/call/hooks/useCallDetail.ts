@@ -217,13 +217,6 @@ export function useCallDetail(callId: number, fromFaq?: number) {
 
     // 상단바 (11/05 새 디자인): 경로 '통화 > “김민수”님 통화' · 발신번호
     customer: call?.customerName ?? null,
-    // 검색 창 '최근 조회' (shared/lib/recentViews) — 받으면 기록, 404면 기록에서 뺌
-    recent: call
-      ? {
-          label: call.customerName ?? '이름 없음',
-          sub: call.callerNumber ? [fmtPhone(call.callerNumber)] : undefined,
-        }
-      : null,
     notFound: detail.error instanceof ApiError && detail.error.status === 404,
     caller: call?.callerNumber ? fmtPhone(call.callerNumber) : '',
 
@@ -282,12 +275,6 @@ export function useCallDetail(callId: number, fromFaq?: number) {
       '대화를 불러오는 중…',
       '대화를 받지 못했어요. 잠시 뒤 다시 받아요.',
       '발화가 없습니다.',
-    ),
-    actionsEmpty: emptyText(
-      actionsQ,
-      'AI 동작을 불러오는 중…',
-      'AI 동작을 받지 못했어요. 잠시 뒤 다시 받아요.',
-      '기록이 없습니다.',
     ),
     focusKey, // 하이라이트하는 줄 (발화 순번)
     jump, // 그 줄로 스크롤 (AI 동작 · 이전 · 다음을 눌렀을 때만 — 재생 중엔 하이라이트만 따라가고 스크롤은 안 함)

@@ -45,14 +45,6 @@ const ASK = {
   },
 } as const
 
-// 탭 — 계정 상태 이름 그대로 (활성화 · 비활성화 · 승인 대기). 옛 화면 탭 이름(features/admin/labels)은 그대로
-const TAB_ORDER = ['ACTIVE', 'INACTIVE', 'PENDING'] as const
-const TAB_LABEL: Record<(typeof TAB_ORDER)[number], string> = {
-  ACTIVE: '활성화',
-  INACTIVE: '비활성화',
-  PENDING: '승인 대기',
-}
-
 export function AdminsPage() {
   const [size, setSize] = usePageSize()
   const vm = useAdminList(size)
@@ -78,11 +70,7 @@ export function AdminsPage() {
           <Segments
             label="상태"
             value={vm.tab}
-            items={TAB_ORDER.flatMap((key) =>
-              vm.tabs
-                .filter((t) => t.key === key)
-                .map((t) => ({ value: t.key, label: TAB_LABEL[key], count: t.count ?? null })),
-            )}
+            items={vm.tabs.map((t) => ({ value: t.key, label: t.label, count: t.count ?? null }))}
             onPick={vm.setTab}
           />
           {vm.jobError && <span className="text-[13px] text-ops-stop">{vm.jobError}</span>}

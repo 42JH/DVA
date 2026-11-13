@@ -5,7 +5,6 @@ import { FETCH_ALL_MAX } from '@/shared/api/paging'
 import { ymd } from '@/shared/lib/dateRange'
 import { fmtListTime, fmtMonthDay, fmtPhone, fmtTime } from '@/shared/lib/format'
 import { matchKo, phoneDigits } from '@/shared/lib/search'
-import { originOf } from '@/shared/lib/unansweredReason'
 import { useListParams } from '@/shared/lib/useListParams'
 import {
   deleteUnanswered,
@@ -20,7 +19,7 @@ export type UnansweredRow = UnansweredQuestion & { time: string; phone: string }
 
 // URL 쿼리 기본값 (모듈 상수 — useListParams 규칙). call = 06 '처리 내용 › AI 미답변 보기'로 오면 그 통화 번호 → 그 통화의 질문만
 // from = 이동 전 화면 주소 (경로 첫 칸, 11/05 — 검색 · 쪽을 바꿔도 남음)
-const DEFAULTS = { q: '', call: '', from: '' }
+const DEFAULTS = { q: '', call: '' }
 
 type Group = { day: string; label: string; rows: UnansweredRow[] }
 
@@ -84,9 +83,8 @@ export function useUnansweredList() {
     setQ: (v: string) => {
       if (v !== q) set({ q: v })
     },
-    origin: originOf(params.from), // 경로 첫 칸 = 이동 전 화면 (모르면 FAQ)
     callChip, // 적용된 필터 칩 (06에서 왔을 때만)
-    clearCall: () => set({ call: '' }), // ✕ → 전체 미답변으로 (이동 전 화면은 그대로)
+    clearCall: () => set({ call: '' }), // ✕ → 전체 미답변으로
     groups,
     count: hit.length, // 검색 중엔 결과 수
     // 서버가 오래된 것부터 주고 2,000개까지만 받음 → 그 뒤(최신) 질문은 목록에 없음. 넘으면 서버 쪽 넘김으로 바꿔야 함 (11/02)

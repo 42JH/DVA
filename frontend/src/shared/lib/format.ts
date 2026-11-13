@@ -1,11 +1,10 @@
 // 날짜 · 번호 표시 규칙 (와이어프레임 10/23 결정 #7)
 // 목록의 활동 시각 = 'MM.DD HH:MM' · 오래 남는 날짜(등록일 · 가입 신청일 · 버전 생성일) = 'YYYY.MM.DD'
-// 상세 화면의 시각 = 'MM.DD (요일) HH:MM' (06 · 05 상세) — 서버는 ISO 8601(타임존 포함), 화면은 Asia/Seoul
+// 서버는 ISO 8601(타임존 포함), 화면은 Asia/Seoul
 // 10/30 연도 규칙 (모든 페이지): 올해면 연도 생략, 다른 해(작년 포함)면 'YYYY.MM.DD' → 새 목록은 fmtListTime
 import { ymd, type Ymd } from './dateRange'
 
 const two = (n: number) => String(n).padStart(2, '0')
-const DAY = ['일', '월', '화', '수', '목', '금', '토']
 
 /** 날짜만 '11월 4일' (03 주문 11/06 시안 — 머리줄 날짜 · 날이 바뀌는 줄 왼쪽). 요일 없음, 'YYYY-MM-DD' 그대로 읽음(시간대 무관) */
 export const fmtMonthDay = (day: Ymd) =>
@@ -14,25 +13,6 @@ export const fmtMonthDay = (day: Ymd) =>
 /** 표 줄 앞 시각 '오후 3:02' — 날은 머리줄 · 표 왼쪽 날짜가 보여 줌 (11/06 시안 03 주문 · 04 통화 · 09 미답변 같은 형식) */
 export const fmtTime = (iso: string) =>
   new Date(iso).toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit' })
-
-/** 상세 화면 시각 (10/30 연도 규칙): 올해 '10.20 (화) 13:12', 다른 해 '2025.12.29 (월) 13:12'. seconds면 '13:12:08' (06 통화 시작 시각)
- * year를 주면 그대로 (기간처럼 여러 날짜의 연도 표시를 맞출 때) */
-export function fmtDetailTime(
-  iso: string,
-  {
-    seconds = false,
-    now = new Date(),
-    year,
-  }: { seconds?: boolean; now?: Date; year?: boolean } = {},
-): string {
-  const d = new Date(iso)
-  const date =
-    (year ?? d.getFullYear() !== now.getFullYear())
-      ? fmtDate(iso)
-      : `${two(d.getMonth() + 1)}-${two(d.getDate())}`
-  const time = `${two(d.getHours())}:${two(d.getMinutes())}${seconds ? `:${two(d.getSeconds())}` : ''}`
-  return `${date} (${DAY[d.getDay()]}) ${time}`
-}
 
 /** 목록 시각 칸 (10/30 연도 규칙): 올해면 ['10.20 14:33'] 한 줄, 다른 해면 ['2025.12.29', '13:40'] 날짜 위 · 시각 아래 두 줄 (칸 폭 그대로) */
 export function fmtListTime(iso: string, now = new Date()): [string] | [string, string] {
@@ -51,11 +31,6 @@ export function fmtDateTime(iso: string): string {
 export function fmtDate(iso: string): string {
   const d = new Date(iso)
   return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}`
-}
-
-export function fmtDateTimeDay(iso: string): string {
-  const d = new Date(iso)
-  return `${two(d.getMonth() + 1)}-${two(d.getDate())} (${DAY[d.getDay()]}) ${two(d.getHours())}:${two(d.getMinutes())}`
 }
 
 /** 초 → '3분 40초', 한 시간부터 '1시간 5분 03초' (04 통화 시간 · 02 평균 · CSV) */

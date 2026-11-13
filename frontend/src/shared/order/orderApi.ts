@@ -58,7 +58,7 @@ export interface OrderDetail {
 }
 
 /** 배송 상세 하나 — 보내는 분 1 + 받는 분 1 */
-export interface ParcelDetail {
+interface ParcelDetail {
   orderParcelSeq: number
   cancelled: boolean
   sender: Party

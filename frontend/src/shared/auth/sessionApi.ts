@@ -32,7 +32,7 @@ async function fetchMe(signal?: AbortSignal): Promise<AdminMe> {
   return (await api.get<ApiItem<AdminMe>>('/auth/me', { signal })).data
 }
 
-/** API-03 — 204 뒤 로그인 표시를 지움(최근 검색어도 clearSession이 같이). 401은 이미 끝난 세션이라 성공으로.
+/** API-03 — 204 뒤 로그인 표시를 지움. 401은 이미 끝난 세션이라 성공으로.
  * 그 밖의 실패(503 세션 삭제 실패 등)는 서버 세션이 남으므로 지우지 않고 던짐 (성공하는 척 금지, 명세 §10) */
 export async function logout(): Promise<void> {
   try {

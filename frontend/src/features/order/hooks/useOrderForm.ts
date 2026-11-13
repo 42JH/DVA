@@ -81,7 +81,10 @@ const draftOf = (p: Party): PartyDraft => ({
 const digits = (v: string, max: number) => v.replace(/\D/g, '').slice(0, max)
 // 서버 규칙 (11/11): 보내는 분 = 휴대전화만, 받는 분 = 휴대전화 + 02(9~10) + 기타 지역번호(10~11) + 070(11)
 const PHONE_RULE: Record<Side, { re: RegExp; message: string }> = {
-  sender: { re: /^01[016-9]\d{8}$/, message: '010 등으로 시작하는 휴대전화 11자리로 입력해 주세요.' },
+  sender: {
+    re: /^01[016-9]\d{8}$/,
+    message: '010 등으로 시작하는 휴대전화 11자리로 입력해 주세요.',
+  },
   receiver: {
     re: /^(?:01[016-9]\d{8}|02\d{7,8}|0[3-6][1-5]\d{7,8}|070\d{8})$/,
     message: '휴대전화 또는 지역번호를 포함한 전화번호로 입력해 주세요.',
@@ -395,7 +398,6 @@ export function useOrderForm(
   }
 
   return {
-    isEdit: order !== undefined,
     showFee, // 배송비 칸
     submitLabel: order === undefined || collecting ? '접수' : '저장',
     missing, // '접수하려면: 배송비 · 받는 분 주소(다시 검색)'
@@ -515,7 +517,6 @@ export function useOrderForm(
       submitNow(addingMonthly)
     },
     asking,
-    cancelAsk: () => setAsking(false),
     answer: (alsoCustomer: boolean) => {
       setAsking(false)
       if (pickupStillOk()) mutation.mutate({ alsoCustomer, monthly: addingMonthly }) // 묻는 창을 띄워 둔 사이에도 시간이 흐름

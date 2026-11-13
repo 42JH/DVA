@@ -57,7 +57,7 @@ export interface PersonaDraftDto extends PromptFields {
 export interface PersonaDto {
   aiPersonaSeq: number
   code: string
-  headVersion: PersonaVersionDto // 마지막 확정 버전 = 적용본 (= latestVersion)
+  headVersion: PersonaVersionDto // 마지막 확정 버전 = 적용본
   activeVersion: PersonaVersionDto | null // 지금 통화에 쓰는 버전 — 서비스 전체에서 한 페르소나만
   pendingVersion: PersonaVersionDto | null
   draft: PersonaDraftDto | null // 저장만 하고 적용 안 한 수정본

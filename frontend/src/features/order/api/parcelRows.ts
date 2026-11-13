@@ -1,5 +1,5 @@
 // 03 주문 목록 — 주문 하나를 화면 줄들로 · 검색칸 거르기. React · 네트워크를 모르는 순수 함수 (parcelRows.test.ts에서 확인)
-import type { ListParcel, ListParty, OrderListItem, OrderStatus } from './orderApi'
+import type { ListParcel, OrderListItem, OrderStatus } from './orderApi'
 
 /** 화면 한 줄 = 배송 상세 하나 (보내는 분 1 + 받는 분 1, 11/01 결정) */
 interface ParcelRow {
@@ -26,19 +26,4 @@ export function parcelRows(o: OrderListItem): ParcelRow[] {
     status: p.status === 'CANCELLED' ? 'CANCELLED' : o.status,
     parcel: p,
   }))
-}
-
-/** 보내는 분 · 받는 분 검색칸 (Figma '주문' 11/04) — 서버 q와 같은 규칙으로 그 사람만 봄: 이름 · 전화번호 · 주소 칸 중 하나가
- *  검색어를 포함(대소문자 무시)하거나, 숫자 · 기호만 쳤으면 전화번호에 그 숫자가 있음. 빈 검색어는 다 맞음 */
-export function partyHas(p: ListParty | undefined, q: string): boolean {
-  if (!q) return true
-  if (!p) return false // 상세가 아직 없는 미완료 주문
-  const t = q.normalize('NFC').toLowerCase()
-  const digits = /^[0-9+() -]+$/.test(q) ? q.replace(/\D/g, '') : ''
-  return (
-    [p.name, p.phoneNumber, p.roadAddress, p.jibunAddress, p.detailAddress].some((v) =>
-      v?.normalize('NFC').toLowerCase().includes(t),
-    ) ||
-    (!!digits && !!p.phoneNumber?.includes(digits))
-  )
 }

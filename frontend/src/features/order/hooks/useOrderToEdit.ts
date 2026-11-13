@@ -22,7 +22,7 @@ export function useOrderToEdit(orderId: number, parcelSeq: number | null) {
     order: q.data ? pickParcel(q.data, parcelSeq) : null,
     notice: q.isPending
       ? '불러오는 중…'
-      : q.error instanceof ApiError && q.error.status === 404 // 상세가 실서버로 바뀌며 NotFoundError → 404
+      : q.error instanceof ApiError && q.error.status === 404 // 없는 주문
         ? '주문을 찾을 수 없습니다.'
         : q.error
           ? '불러오지 못했습니다. 다시 시도해 주세요.'

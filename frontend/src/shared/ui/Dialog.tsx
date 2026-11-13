@@ -1,12 +1,10 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 import { useExitGhost } from '@/shared/lib/useExitGhost'
 import { Button } from './Button'
 
-// 오버레이 (와이어프레임 13 · 14 + 새 디자인 11/04~)
-// ConfirmDialog: 560 폭 · 제목(24/700) · 대상 한 줄(20 회색) · 안내 또는 빨간 경고 · [취소] [삭제/거절]. big = 새 디자인 버튼 · 글자
-// FormModal:     600(08 사원 수정) / 680(09 질의) / 960(03 송장표 · 주문 추가) 폭 · 제목 + ✕ · 내용 · 아래 버튼 — 안쪽 여백 32
-// Dialog:        새 디자인 창 (03 주문 상세 · 추가 · 수정, Figma에 없어 '주문' · '통화' 화면 말투로) — 작은 글 + 제목 + 옆 | ✕ · 몸 · 버튼 줄
-// 둘 다 뒤 화면을 #2B2F36 40%로 가리고, Esc로 닫힘. 창 자체는 DOM 흐름 밖(fixed)
+// 확인 창 (와이어프레임 13 · 14) — 560 폭 · 제목 · 대상 한 줄(회색) · 빨간 경고 · [취소] [확정]
+// 지금은 고객 탈퇴 확인에서만 씀 (다른 확인 창은 Modal.tsx의 Confirm)
+// 뒤 화면을 #2B2F36 40%로 가리고, Esc로 닫힘. 창 자체는 DOM 흐름 밖(fixed)
 // 키보드: 열면 창 안 첫 칸으로 포커스, Tab은 창 안에서만 돎, 닫으면 연 버튼으로 돌아감. 창이 겹치면 맨 위 창만 키를 받음
 
 const FOCUSABLE =
@@ -19,32 +17,18 @@ const EXIT_SWAP = [
   ['motion-safe:animate-pop-in', 'animate-pop-out'],
 ] as const
 
-// top = 화면 위쪽에 붙어 뜸(검색 창), boxClass = 창 모양 덧붙임 (기본은 가운데 · 안쪽 여백 32)
-// dim = 뒤 화면을 어둡게(기본). 끄면 투명 — 바깥을 누르면 닫히는 건 같음 (09 FAQ 검색 창, 11/04 사용자)
-// movable = 창 안의 data-drag 칸(예: 검색 창 윗줄)을 잡고 끌어 옮김. 그 안의 입력칸 · 버튼 · 링크 · 고를 줄은 원래대로
-//   화면 밖으로 다 나가지 않게: 위는 화면 안, 옆 · 아래는 80px 남김
 function Overlay({
   onClose,
   children,
   label,
-  top,
-  boxClass = 'p-8',
-  dim = true,
-  movable,
 }: {
   onClose: () => void
   children: ReactNode
   label: string
-  top?: boolean
-  boxClass?: string
-  dim?: boolean
-  movable?: boolean
 }) {
   const root = useRef<HTMLDivElement>(null)
   const box = useRef<HTMLDivElement>(null)
   const downOnDim = useRef(false) // 누르기 시작한 곳이 어두운 배경일 때만 닫음 (창 안에서 끌다가 밖에서 놓으면 안 닫힘)
-  const [at, setAt] = useState({ x: 0, y: 0 }) // 끌어서 옮긴 만큼 (movable)
-  const drag = useRef<{ dx: number; dy: number; left: number; top: number; w: number } | null>(null)
   useExitGhost(root, EXIT_SWAP, 200)
 
   // 열 때 한 번 (onClose가 렌더마다 새 함수여도 다시 안 돎)
@@ -85,7 +69,7 @@ function Overlay({
   return (
     <div
       ref={root}
-      className={`fixed inset-0 z-50 grid ${dim ? 'bg-ink/40 motion-safe:animate-dim-in' : ''} ${top ? 'place-items-start justify-items-center pt-[12dvh]' : 'place-items-center'}`}
+      className="fixed inset-0 z-50 grid place-items-center bg-ink/40 motion-safe:animate-dim-in"
       onMouseDown={(e) => (downOnDim.current = e.target === e.currentTarget)}
       onClick={(e) => downOnDim.current && e.target === e.currentTarget && onClose()}
     >
@@ -96,36 +80,8 @@ function Overlay({
         aria-modal="true"
         aria-label={label}
         onClick={(e) => e.stopPropagation()} // 창이 클릭되는 줄 안에 그려져도 그 줄의 클릭으로 안 번지게
-        // translate 속성(transform 아님) — 열고 닫히는 pop 애니메이션(transform)과 겹치지 않음
-        style={movable ? { translate: `${at.x}px ${at.y}px` } : undefined}
-        onPointerDown={(e) => {
-          const t = e.target as Element
-          if (!movable || !t.closest('[data-drag]')) return
-          if (t.closest('input,textarea,select,button,a,[role="option"]')) return
-          e.preventDefault() // 글자 선택 · 검색칸 포커스가 빠지지 않게
-          e.currentTarget.setPointerCapture(e.pointerId)
-          const r = e.currentTarget.getBoundingClientRect()
-          drag.current = {
-            dx: e.clientX - at.x,
-            dy: e.clientY - at.y,
-            left: r.left - at.x,
-            top: r.top - at.y,
-            w: r.width,
-          }
-        }}
-        onPointerMove={(e) => {
-          const d = drag.current
-          if (!d) return
-          const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
-          setAt({
-            x: clamp(e.clientX - d.dx, 80 - d.left - d.w, window.innerWidth - d.left - 80),
-            y: clamp(e.clientY - d.dy, -d.top, window.innerHeight - d.top - 80),
-          })
-        }}
-        onPointerUp={() => (drag.current = null)}
-        onPointerCancel={() => (drag.current = null)}
-        // 창 높이 = 브라우저 높이 - 위아래 32씩까지. 넘치면 FormModal의 내용 칸만 스크롤 (주문 상세처럼 긴 창)
-        className={`flex max-h-[calc(100dvh-64px)] flex-col rounded-xl bg-surface shadow-[0_12px_40px_rgba(43,47,54,0.16)] outline-none motion-safe:animate-pop-in ${boxClass}`}
+        // 창 높이 = 브라우저 높이 - 위아래 32씩까지
+        className={`flex max-h-[calc(100dvh-64px)] flex-col rounded-xl bg-surface p-8 shadow-[0_12px_40px_rgba(43,47,54,0.16)] outline-none motion-safe:animate-pop-in`}
       >
         {children}
       </div>
@@ -136,43 +92,32 @@ function Overlay({
 export function ConfirmDialog({
   title,
   target,
-  note,
   warn,
   okLabel,
-  okKind = 'danger',
   onOk,
   onClose,
   pending,
-  big,
 }: {
-  title: string // '정말로 삭제하시겠습니까?'
-  target?: string // '선택한 통화 3건' · '김지훈 · jihoon.kim@example.com'
-  note?: string // 회색 안내 (거절: '신청이 지워지며 …')
-  warn?: string // 빨간 경고 (되돌릴 수 없음 · 미처리 질문 있음)
-  okLabel: string // '삭제' · '거절'
-  okKind?: 'danger' | 'primary' // 되돌릴 수 없는 일(삭제 · 거절) = 빨강(기본), 아닌 일(07 적용) = 남색
+  title: string // '이 고객을 탈퇴 처리할까요?'
+  target?: string // '김지훈 · 010-1234-5678'
+  warn?: string // 빨간 경고 (되돌릴 수 없음)
+  okLabel: string // '탈퇴'
   onOk: () => void
   onClose: () => void
   pending?: boolean
-  big?: boolean // 새 디자인 (11/04~ 03 주문): 제목 24 · 글자 한 단계 크게 · 버튼 높이 32 / 글자 20 · 확인 남색 대신 파랑
 }) {
   return (
     <Overlay onClose={onClose} label={title}>
       <div className="flex w-[496px] flex-col gap-2">
-        <h2 className={`font-bold ${big ? 'text-title' : 'text-card'}`}>{title}</h2>
+        <h2 className="text-card font-bold">{title}</h2>
         {target && (
           // 질문 전문이 올 수 있음(최대 1,000자) — 세 줄까지만, 나머지는 title (11/02)
-          <p
-            className={`line-clamp-3 break-words text-sub ${big ? 'text-strong' : 'text-body'}`}
-            title={target}
-          >
+          <p className="line-clamp-3 text-body break-words text-sub" title={target}>
             {target}
           </p>
         )}
         {warn && (
-          <p
-            className={`mt-3 flex items-start gap-2 font-semibold text-danger ${big ? 'text-body' : 'text-label'}`}
-          >
+          <p className="mt-3 flex items-start gap-2 text-label font-semibold text-danger">
             {/* 아이콘은 첫 줄 높이(1.4em) 칸 가운데 — 글꼴이 바뀌어도 첫 줄과 나란히 */}
             <span className="flex h-[1.4em] shrink-0 items-center">
               <svg
@@ -191,20 +136,9 @@ export function ConfirmDialog({
             {warn}
           </p>
         )}
-        {note && !warn && (
-          <p className={`mt-3 text-sub ${big ? 'text-body' : 'text-label'}`}>{note}</p>
-        )}
         <div className="mt-8 flex justify-end gap-3">
-          <Button big={big} onClick={onClose}>
-            취소
-          </Button>
-          <Button
-            big={big}
-            kind={okLabel === '삭제' ? 'danger' : big && okKind === 'primary' ? 'brand' : okKind}
-            onClick={onOk}
-            disabled={pending}
-            data-autofocus
-          >
+          <Button onClick={onClose}>취소</Button>
+          <Button kind="danger" onClick={onOk} disabled={pending} data-autofocus>
             {okLabel}
           </Button>
         </div>

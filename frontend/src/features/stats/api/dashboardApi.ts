@@ -19,7 +19,7 @@ export type Stage =
   | 'ORDER_LOOKUP'
   | 'ORDER_CANCEL'
 // 11/11 백엔드 !476: AI 응대 오류 네 유형 + AI 응대 고객 불만 (근거 없는 답변은 빠짐)
-export type ComplaintType =
+type ComplaintType =
   | 'INFORMATION_RECOGNITION_ERROR'
   | 'INTENT_RECOGNITION_ERROR'
   | 'SLOW_RESPONSE'

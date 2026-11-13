@@ -435,14 +435,6 @@ export const companyHandlers = [
     }
     return noContent()
   }),
-  http.delete(`${API_BASE_URL}/companies/:id`, ({ params }) => {
-    const i = orgs.findIndex((o) => o.organizationSeq === Number(params.id))
-    if (i < 0) return notFound()
-    orgs.splice(i, 1)
-    for (let k = members.length - 1; k >= 0; k--)
-      if (members[k].membership.organizationSeq === Number(params.id)) members.splice(k, 1)
-    return noContent()
-  }),
   http.get(`${API_BASE_URL}/companies/:id/members`, ({ params, request }) => {
     if (!orgOf(params.id)) return notFound()
     const url = new URL(request.url)

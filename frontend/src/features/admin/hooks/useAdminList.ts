@@ -116,7 +116,6 @@ export function useAdminList(size = PAGE_SIZE) {
       label: t.label,
       // 관리자 탭 숫자는 나를 뺀 수 (로그인한 나는 늘 ACTIVE)
       count: withoutMe(t.key, counts[i]?.data?.total_count),
-      countKind: t.key === 'PENDING' ? ('red' as const) : undefined, // 승인 대기 = 빨간 숫자
     })),
     tab,
     setTab: (key: AdminStatus) => set({ tab: key }),

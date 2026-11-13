@@ -5,7 +5,8 @@ import type { PaymentMethod, PaymentState } from './orderApi'
 export const orderNo = (orderSeq: number) => `DV-${String(orderSeq).padStart(5, '0')}`
 
 /** 상태 묶음 = 서버 statusGroup (11/01) — 03 목록 칩 · '주문 상태' 고르기 · 주문 상세 머리 칩 (Figma '주문' 11/04 문구) */
-export type OrderGroup = 'COLLECTING' | 'notPaid' | 'PAID' | 'ACCEPTED' | 'SUBMISSION_FAILED' | 'CANCELLED'
+export type OrderGroup =
+  'COLLECTING' | 'notPaid' | 'PAID' | 'ACCEPTED' | 'SUBMISSION_FAILED' | 'CANCELLED'
 
 export const PAYMENT_METHOD_LABEL: Record<PaymentMethod, string> = {
   MONTHLY: '월결제',

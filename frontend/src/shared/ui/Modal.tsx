@@ -11,7 +11,6 @@ const OK =
 
 export function Modal({
   title,
-  extra,
   sub,
   onClose,
   footer,
@@ -19,7 +18,6 @@ export function Modal({
   children,
 }: {
   title: string
-  extra?: ReactNode // 제목 바로 옆 뱃지 · 숫자 ('통화 중 00:12', 07 시험 통화)
   sub?: string // 제목 옆 흐린 글 (어느 기업의 창인지 등)
   onClose: () => void
   footer?: ReactNode
@@ -71,7 +69,6 @@ export function Modal({
       {/* min-h + py: 제목이 길어 두 줄이 되어도 위아래 여유가 남음. 한 줄이면 예전처럼 56 */}
       <div className="flex min-h-14 shrink-0 items-center gap-2 border-b border-ops-line px-6 py-3">
         <h2 className="min-w-0 text-[16px] font-bold break-words">{title}</h2>
-        {extra}
         {sub && <span className="truncate text-[13px] text-ops-sub">{sub}</span>}
         <button
           type="button"
@@ -109,8 +106,6 @@ export function Confirm({
   closeLabel = '취소',
   danger,
   busy,
-  disabled,
-  extra,
   error,
   onOk,
   onClose,
@@ -121,8 +116,6 @@ export function Confirm({
   closeLabel?: string // 확인 버튼에도 '취소'가 들어가면 '닫기'로 (주문 취소)
   danger?: boolean // 되돌릴 수 없는 일이면 빨간 버튼
   busy?: boolean
-  disabled?: boolean // 확인 버튼만 끔 (busy와 달리 '… 중' 문구 없음)
-  extra?: ReactNode // [취소]와 확인 사이 버튼 (예: [시나리오 시험])
   error?: string | null
   onOk: () => void
   onClose: () => void
@@ -142,10 +135,9 @@ export function Confirm({
           <Btn className="ml-auto" onClick={onClose}>
             {closeLabel}
           </Btn>
-          {extra}
           <Btn
             kind={ok === '삭제' || danger ? 'dangerSolid' : 'primary'}
-            disabled={busy || disabled}
+            disabled={busy}
             onClick={onOk}
             data-autofocus // 열면 확정 버튼에 초점 — Enter = 확인 (OS 확인 창과 같게)
           >

@@ -27,7 +27,7 @@ export const BOX_TYPES = [
 export type BoxKey = (typeof BOX_TYPES)[number]['key']
 
 /** OrderListParty — 수집 중이면 칸마다 null일 수 있음 */
-export interface ListParty {
+interface ListParty {
   name: string | null
   phoneNumber: string | null // 숫자만, 앞 0 보존
   roadAddress: string | null

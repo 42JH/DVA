@@ -27,7 +27,7 @@ export function pickSource(
 
 type Resume = { at: number; play: boolean }
 
-/** 녹취 재생 (06 왼쪽 ▶ · 진행 바, 11/01 배속 뺌) — <audio>는 CallScript가 그리고, 여기는 상태 · 조작만
+/** 녹취 재생 (06 왼쪽 ▶ · 진행 바, 11/01 배속 뺌) — <audio>는 Player가 그리고, 여기는 상태 · 조작만
  * 서명 URL은 최대 5분(명세 §5.3): 만료 뒤 재생을 누르면 onExpired(상세 재조회) → 새 URL이 오면 듣던 위치에서 이어 감
  * 재생 오류도 상세를 다시 받아 새 URL로 바꾸고 같은 위치부터 */
 export function useRecordingPlayer(recording: Recording | null, onExpired: () => void) {

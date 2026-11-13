@@ -94,7 +94,6 @@ export function useApplyTest(
     toRun: rest.length || list.length, // 확인 창의 'N개를 돌립니다'
     resume: rest.length > 0,
     start: (t: ApplyTarget) => start.mutateAsync(t),
-    starting: start.isPending,
     startError: start.isError
       ? '시작을 확인하지 못했습니다. 띠가 시험 중으로 바뀌지 않을 때만 다시 시도해 주세요.'
       : null,
