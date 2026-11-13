@@ -12,7 +12,7 @@ import {
   type Check,
   type VersionTest,
 } from '@/features/persona/api/scenarioTestApi'
-import { cellOf, failLine, type Cell } from './scenarioTest'
+import { cellOf, failLine, shownCheck, type Cell } from './scenarioTest'
 
 const EMPTY: Record<Cell, string> = {
   pass: '',
@@ -115,16 +115,19 @@ const text = (v: unknown): string =>
           .join(', ')
       : String(v)
 
-const checkRow = (c: Check, key: number) => ({
-  key,
-  name: c.name,
-  // 행동 확인(정답이 '지킴')은 이름이 문장이라 한 줄을 다 쓰고, 어겼으면 AI가 한 말(actual)을 아래에
-  behaviour: c.expected === '지킴',
-  expected: text(c.expected),
-  actual: text(c.actual),
-  status: c.status,
-  note: c.note ?? '',
-})
+const checkRow = (c: Check, key: number, script: string[]) => {
+  const s = shownCheck(c, script)
+  return {
+    key,
+    name: s.name,
+    // 행동 확인(정답이 '지킴')은 이름이 문장이라 한 줄을 다 쓰고, 어겼으면 AI가 한 말(actual)을 아래에
+    behaviour: c.expected === '지킴',
+    expected: text(s.expected),
+    actual: text(s.actual),
+    status: c.status,
+    note: c.note ?? '',
+  }
+}
 
 /** 통화 한 건 — 대화(누르면 그 말부터 듣기) · 결과표 · 녹음 재생
  *  실패한 판정이 난 말은 통화 상세의 불만처럼: 대화에 빨갛게 + 항목 이름, 재생 막대 눈금, 결과표의 시각(누르면 그 말로). 열면 첫 실패로 스크롤 */
@@ -155,7 +158,11 @@ export function useScenarioCall(runId: string, scenarioId: string) {
   const spots = checks.map((c) => failLine(c, lines, scriptLines))
   const flags = new Map<number, string>()
   spots.forEach((at, i) => {
-    if (at !== null) flags.set(at, [flags.get(at), checks[i].name].filter(Boolean).join(', '))
+    if (at !== null)
+      flags.set(
+        at,
+        [flags.get(at), shownCheck(checks[i], scriptLines).flag].filter(Boolean).join(', '),
+      )
   })
   const first = flags.size ? Math.min(...flags.keys()) : null
   const opened = useMemo(() => (first === null ? null : { key: first, n: 0 }), [first])
@@ -188,7 +195,7 @@ export function useScenarioCall(runId: string, scenarioId: string) {
     checks: checks.map((c, i) => {
       const at = spots[i]
       return {
-        ...checkRow(c, i),
+        ...checkRow(c, i, scriptLines),
         spot: at === null ? null : { time: clock(at), go: () => goSpot(at) },
       }
     }),

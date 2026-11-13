@@ -1,7 +1,7 @@
 // 실행: npx tsx src/features/persona/hooks/scenarioTest.test.ts  (프레임워크 없이 assert만)
 import assert from 'node:assert/strict'
 import type { Scenario, TestItem, VersionTest } from '@/features/persona/api/scenarioTestApi'
-import { changeOf, failLine, restOf, rowsOf, testOf, type Cell } from './scenarioTest'
+import { changeOf, failLine, restOf, rowsOf, shownCheck, testOf, type Cell } from './scenarioTest'
 
 const scenarios: Scenario[] = ['A1', 'B3', 'E1'].map((id) => ({
   id,
@@ -117,4 +117,23 @@ const noLines = (name: string, actual: unknown) =>
   failLine({ name, status: 'fail', expected: '', actual }, [], script)
 assert.equal(noLines('대본 진행', '말하지 못한 발화: [3]'), null)
 assert.equal(noLines('연락처를 묻지 않는다', '어김: 보내는 분 연락처를 알려 주세요.'), null)
+// 대본 진행 → 화면 문구 (판정기 문구는 그대로, 11/13)
+const shown = (status: 'pass' | 'fail', actual: unknown) =>
+  shownCheck({ name: '대본 진행', status, expected: '필수 발화를 모두 말함', actual }, script)
+assert.deepEqual(shown('fail', '말하지 못한 발화: [3]'), {
+  name: '고객 대본 완료',
+  expected: '모든 대사 진행',
+  actual: '진행 못 한 대사: 대전 유성구요.',
+  flag: '이후 대본 중단',
+})
+assert.equal(
+  shown('fail', '말하지 못한 발화: [2, 3]').actual,
+  '진행 못 한 대사: 010-7777-8888이요.\n대전 유성구요.',
+)
+assert.equal(shown('fail', '말하지 못한 발화: [9]').actual, '진행 못 한 대사: 9번 대사') // 대본을 아직 못 불러옴
+assert.equal(shown('pass', '필수 발화를 모두 말함').actual, '모든 대사 진행')
+assert.equal(
+  shownCheck({ name: '물품', status: 'fail', expected: 'a', actual: 'b' }, script).name,
+  '물품',
+)
 console.log('scenarioTest ok')
