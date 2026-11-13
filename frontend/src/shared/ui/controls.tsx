@@ -97,8 +97,10 @@ export function Segments<T extends string>({
 }) {
   return (
     <div role="tablist" aria-label={label} className="flex flex-wrap items-center gap-1">
-      {items.map((it) => {
+      {items.map((it, i) => {
         const on = it.value === value
+        // 나란한 고르지 않은 탭 사이 짧은 세로줄 (11/13 시안) — 가상 요소라 폭 · 높이는 그대로
+        const bar = i > 0 && !on && items[i - 1].value !== value
         return (
           <button
             key={it.value}
@@ -106,7 +108,7 @@ export function Segments<T extends string>({
             role="tab"
             aria-selected={on}
             onClick={() => onPick(it.value)}
-            className={`inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-[13px] font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ops-route ${on ? 'bg-white text-ops-ink shadow-[0_0_0_1px_var(--color-ops-line)]' : 'text-ops-sub hover:text-ops-ink'}`}
+            className={`relative inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-[13px] font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ops-route ${bar ? 'before:absolute before:top-1/2 before:-left-[2.5px] before:h-3 before:w-px before:-translate-y-1/2 before:bg-ops-line' : ''} ${on ? 'bg-white text-ops-ink shadow-[0_0_0_1px_var(--color-ops-line)]' : 'text-ops-sub hover:text-ops-ink'}`}
           >
             {it.label}
             {it.badge}

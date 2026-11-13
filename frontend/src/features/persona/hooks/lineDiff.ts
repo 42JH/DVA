@@ -46,7 +46,7 @@ export function inlineDiff(before: string[], after: string[]) {
   let removed = 0
   let added = 0
   const rows = lineDiff(before, after)
-  for (let i = 0; i < rows.length; ) {
+  for (let i = 0; i < rows.length;) {
     if (rows[i].kind === 'same') {
       blocks.push([{ kind: 'same', text: rows[i++].text }])
       continue

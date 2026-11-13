@@ -4,18 +4,28 @@ import { Icon } from '@/shared/ui'
 
 // 머리 줄 이름 + 연필 (11/13 새 안 10번, 피그마 2384:2) — 누르면 이름 자리만 입력 칸
 // Enter = 저장, Esc · 칸 밖 = 원래 이름. target이 null이면 연필 없음 (권한 없음 · 지난 버전 · 프롬프트 고치는 중)
-export function PersonaName({ name, target }: { name: string; target: EditTarget | null }) {
+// locked: 시험 · 반영 중 — 연필은 보이되 흐리고 못 누름 (피그마 2368:3212)
+export function PersonaName({
+  name,
+  target,
+  locked = false,
+}: {
+  name: string
+  target: EditTarget | null
+  locked?: boolean
+}) {
   const r = useRenamePersona(target)
   if (!r.renaming)
     return (
       <span className="flex items-center gap-1">
         <h2 className="text-[22px] font-bold">{name}</h2>
-        {r.canRename && (
+        {(r.canRename || locked) && (
           <button
             type="button"
             aria-label="이름 바꾸기"
+            disabled={locked}
             onClick={r.start}
-            className="rounded p-1 text-ops-sub outline-none hover:text-ops-ink focus-visible:ring-2 focus-visible:ring-ops-route"
+            className="rounded p-1 text-ops-sub outline-none hover:text-ops-ink focus-visible:ring-2 focus-visible:ring-ops-route disabled:text-ops-faint"
           >
             <Icon name="pen" />
           </button>

@@ -221,7 +221,7 @@ export function usePersonaPage() {
   // stopped = 시험을 멈춤(2번) — [통화에 반영] 대신 [다시 시험하고 반영], 입력 칸은 다시 열림
   // review = 시험이 끝났는데 실패가 있음(4번) — 바로 반영하지 않고 담당자가 [확인하고 반영]
   // 연결 실패가 섞인 일부 시험(partial)도 실패가 있으면 확인 필요 (피그마 3 · 4번: 통과 7 · 실패 2 · 연결 실패 1)
-  // passed = 6번 시험 통과 — 띠의 [통화에 사용하기]. 6번의 실패 · 중단은 시안에 없어 띠 없이 머리 줄 [통화에 사용하기](다시 시험)
+  // passed = 6번 시험 통과 — 띠의 [통화에 사용하기]. 6번의 실패 · 중단은 4번 확인 필요 · 2번 시험 중단 띠를 그대로 (11/13 사용자)
   const step: 'unapplied' | 'testing' | 'stopped' | 'review' | 'applying' | 'passed' | null =
     applyingVersion
       ? 'applying'
@@ -230,7 +230,11 @@ export function usePersonaPage() {
           ? 'testing'
           : applyTest.allPass
             ? 'passed'
-            : null
+            : applyTest.stopped
+              ? 'stopped'
+              : (applyTest.state === 'done' || applyTest.state === 'partial') && applyTest.fail > 0
+                ? 'review'
+                : null
         : !unapplied
           ? null
           : applyTest.state === 'running'
@@ -355,6 +359,14 @@ export function usePersonaPage() {
   } | null => {
     if (confirming?.kind === 'review') {
       if (step !== 'review') return null // 그새 반영 · 다시 고침이면 창을 닫음
+      // 6번 — 마지막 확인은 사용 확인 창 모양 그대로 + 실패 이름
+      if (switching)
+        return {
+          title: `실패한 시나리오 ${applyTest.failed.length}개가 있습니다. ${nameEul(persona.name)} 통화에 사용할까요?`,
+          note: `다음 통화부터 ${inUse ? `${inUse.name} 대신 ` : ''}${nameI(persona.name)} 응대합니다.${liveCalls ? ` 지금 통화 중인 ${liveCalls}건은 바뀌지 않습니다.` : ''}`,
+          okLabel: '사용하기',
+          failed: applyTest.failed,
+        }
       return {
         title: `실패한 시나리오 ${applyTest.failed.length}개가 있습니다. 통화에 반영할까요?`,
         note: '반영하면 다음 통화부터 고친 내용으로 응대합니다.',

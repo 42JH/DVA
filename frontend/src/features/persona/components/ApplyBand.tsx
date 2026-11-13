@@ -55,7 +55,10 @@ export function ApplyBand({
               className="h-1.5 w-40 appearance-none overflow-hidden rounded-full [&::-moz-progress-bar]:bg-ops-wait [&::-webkit-progress-bar]:bg-ops-line [&::-webkit-progress-value]:bg-ops-wait"
             />
             <span className="text-[13px] text-ops-sub">통과 {p.pass}</span>
-            {p.fail > 0 && <span className="text-[13px] text-ops-stop">실패 {p.fail}</span>}
+            {/* 0개도 보임 (시안) — 0이면 회색 */}
+            <span className={`text-[13px] ${p.fail ? 'text-ops-stop' : 'text-ops-sub'}`}>
+              실패 {p.fail}
+            </span>
           </>
         ) : band.switchNote ? (
           <span className="text-[13px] text-ops-sub">
@@ -129,7 +132,16 @@ export function ApplyBand({
               title={busy ? '고친 내용을 먼저 저장해 주세요' : undefined}
               onClick={r ? onReview : onApply}
             >
-              {r ? '확인하고 반영' : s ? '다시 시험하고 반영' : '통화에 반영'}
+              {/* 6번(다른 상담가로 바꾸기)은 반영 대신 사용 · 다시 시험만 (통과해도 저절로 안 바꿈) */}
+              {r
+                ? band.switchNote
+                  ? '확인하고 사용하기'
+                  : '확인하고 반영'
+                : s
+                  ? band.switchNote
+                    ? '다시 시험'
+                    : '다시 시험하고 반영'
+                  : '통화에 반영'}
             </Btn>
           )}
         </span>

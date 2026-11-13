@@ -29,6 +29,7 @@ const ver = (
   turnWaitLevel: 'NORMAL',
   status,
   createdByAdminUserSeq: 1,
+  createdByAdminUserName: '김관리', // 수정 기록 · 반영 전 띠의 저장한 사람
   createdAt,
   applicationId: null,
   requestedByAdminUserSeq: null,

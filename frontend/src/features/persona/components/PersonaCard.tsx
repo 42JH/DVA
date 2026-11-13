@@ -75,7 +75,12 @@ function Card({ vm, ed, editing }: { vm: Vm; ed: Ed | null; editing: boolean }) 
         <div className="flex min-w-0 flex-col gap-2">
           <div className="flex flex-wrap items-center gap-2">
             {/* 프롬프트를 고치는 중엔 연필 없음 — 이름 저장이 새 버전을 만들어 고치던 글이 사라지므로 */}
-            <PersonaName name={c.name} target={ed && !editing ? vm.editTarget : null} />
+            {/* 시험 · 반영 중엔 연필을 흐리게 보여 줌 (시안) — 이름 저장도 새 버전이라 막음 */}
+            <PersonaName
+              name={c.name}
+              target={ed && !editing ? vm.editTarget : null}
+              locked={vm.locked && vm.canAdd}
+            />
             {c.inUse && <Badge tone="done">통화에 사용 중</Badge>}
             {/* 반영 중은 띠가 알림 (1번 사용 중 상담가 · 6번 다른 상담가로 바꾸기). 띠를 못 그릴 때만 배지 */}
             {c.applying && !vm.band && <Badge tone="wait">{c.applying}</Badge>}
@@ -128,8 +133,8 @@ function Card({ vm, ed, editing }: { vm: Vm; ed: Ed | null; editing: boolean }) 
                 삭제
               </Btn>
             )}
-            {/* 6번 시험 중 · 반영 중엔 머리 줄 버튼 없음 — [진행 보기]는 띠에 (피그마 6번 줄) */}
-            {vm.testTo && !(vm.locked && !c.inUse) && (
+            {/* 시험 중 · 반영 중엔 머리 줄 버튼 없음 — [진행 보기]는 띠에 (피그마 1번 · 6번 줄) */}
+            {vm.testTo && !vm.locked && (
               <Btn kind="plain" onClick={() => void navigate(vm.testTo!)}>
                 시나리오 시험
               </Btn>
