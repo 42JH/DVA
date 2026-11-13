@@ -634,6 +634,79 @@ def test_readback_handoff_or_end_takes_priority_over_yes(customer_request, inten
     assert state.pending is pending and not state.parcels and lf.rt(session).commit is None
 
 
+@pytest.mark.parametrize("tool_first", [False, True])
+def test_readback_correction_does_not_open_an_already_confirmed_parcel(tool_first):
+    from app.calls.live import Spoken
+    from app.calls.session import CallSession
+    from app.domain.confirm import issue_parcel_confirmation
+    from app.tests.test_calls import INCOMING_AT
+    from app.tests.test_domain import confirm_once, filled
+    from app.tools.context import ToolContext
+
+    svc, _ = flow()
+    lf = LiveFlow(svc)
+    lf.notify = AsyncMock()
+    state = filled("첫 번째")
+    confirm_once(state)
+    state.current = filled("두 번째").current
+    current = state.current
+    pending = issue_parcel_confirmation(state, svc.d.policy, 100)
+    session = CallSession("live_1", "t", CALLER, INCOMING_AT,
+                          ToolContext("live_1", state, svc.d.policy, None))
+    if tool_first:
+        state.record("receiver_address", "새 주소")
+        state.pending = None
+    utterance = Spoken(2, "주소를 바꿔 주세요", 2000, 2800, 102, 103)
+    run(lf.apply(session, utterance, None,
+                 {"confirm": ("change", 0.99, {"change": 0.99}), "switch": ("edit_parcel", 0.99)},
+                 pending.id, candidate_draft=current))
+
+    assert state.current is current and state.editing is None
+    assert len(state.parcels) == 1 and state.parcels[0].draft["receiver_name"].value == "첫 번째"
+    assert state.pending is None
+    state.record("receiver_address", "새 주소")
+    state.awaiting_fix = False
+    confirm_once(state)
+    assert len(state.parcels) == 2
+    assert state.parcels[0].draft["receiver_address"].value != "새 주소"
+    assert state.parcels[1].confirmed_snapshot["receiver_address"] == "새 주소"
+
+
+@pytest.mark.parametrize("has_current", [False, True])
+def test_edit_parcel_asks_for_target_even_with_one_confirmed_parcel(has_current):
+    from app.calls.live import Spoken
+    from app.calls.session import CallSession
+    from app.tests.test_calls import INCOMING_AT
+    from app.tests.test_domain import confirm_once, filled
+    from app.tools.context import ToolContext
+
+    svc, _ = flow()
+    lf = LiveFlow(svc)
+    state = filled("첫 번째")
+    pid = confirm_once(state)
+    if has_current:
+        state.current = filled("두 번째").current
+    current = state.current
+    session = CallSession("live_1", "t", CALLER, INCOMING_AT,
+                          ToolContext("live_1", state, svc.d.policy, None))
+    lf._sync_intake = lambda s: None
+    lf.notify = AsyncMock()
+    run(lf.apply(session, Spoken(1, "아까 담은 첫 번째 택배를 수정해 주세요", 1000, 1800, 100, 101), None,
+                 {"confirm": ("not_answer", 0.99), "switch": ("edit_parcel", 0.99)}, None,
+                 candidate_draft=current))
+    assert lf.notify.await_args.args[2]["edit_parcel"] == "choose"
+    assert state.current is current and state.editing is None
+    candidates = state.candidates
+    run(lf.apply(session, Spoken(2, "첫 번째 택배요", 2000, 2800, 102, 103), None,
+                 {"pick": (candidates.labels[0], 0.99), "switch": ("edit_parcel", 0.99)}, None,
+                 candidates=candidates, candidate_draft=current))
+    assert state.editing == pid and state.current["receiver_name"].value == "첫 번째"
+    assert state.candidates is None
+    if has_current:
+        assert state.parcels[-1].draft["receiver_name"].value == "두 번째"
+        assert state.parcels[-1].confirmed_snapshot is None
+
+
 def _agent_flow(uri="", now=None):
     from datetime import datetime, timedelta, timezone
     lf = LiveFlow.__new__(LiveFlow)
