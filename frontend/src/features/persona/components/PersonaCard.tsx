@@ -79,7 +79,7 @@ function Card({ vm, ed, editing }: { vm: Vm; ed: Ed | null; editing: boolean }) 
             {/* 사용 중 상담가의 반영 중은 띠가 알림 */}
             {c.applying && !c.inUse && <Badge tone="wait">{c.applying}</Badge>}
           </div>
-          <div className="flex flex-wrap items-end gap-4 text-[14px] text-ops-sub">
+          <div className="flex flex-wrap items-center gap-4 text-[14px] text-ops-sub">
             {ed ? (
               <VoiceFields vm={ed} />
             ) : vm.locked ? (

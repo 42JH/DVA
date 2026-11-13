@@ -56,7 +56,8 @@ export function PersonaForm({
         </Btn>
       </header>
 
-      <div className="mx-8 grid grid-cols-[3fr_2fr] items-end gap-4 border-b border-ops-line pt-5 pb-5">
+      {/* 피그마: 이름 898 · 목소리 520, 오른쪽은 비움 */}
+      <div className="mx-8 grid grid-cols-[5fr_3fr_2fr] items-start gap-4 border-b border-ops-line pt-5 pb-5">
         <TextInput
           label="이름"
           placeholder="예: 꼼꼼 확인형"

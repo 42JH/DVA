@@ -87,13 +87,35 @@ const PERSONAS: {
   },
 ]
 const personas = () => PERSONAS
+const ADDED = new Map<number, Ver[]>() // 등록(POST /personas)한 상담가의 버전 이력
 const versionsOf = (seq: number): Ver[] | null =>
-  seq === PERSONA_SEQ ? VERSIONS : seq === KIND_SEQ ? KIND_VERSIONS : null
+  seq === PERSONA_SEQ ? VERSIONS : seq === KIND_SEQ ? KIND_VERSIONS : (ADDED.get(seq) ?? null)
 const nowIso = () => new Date().toISOString()
 const drafts = new Map<number, Record<string, unknown>>() // 고친 칸 (PATCH) → 확정(POST versions)하면 새 버전
 const APPLY_MS = 4000 // 적용 대기 → AI 확인 끝 (반영 중 띠가 보이게)
 
 export const personaHandlers = [
+  // 등록 — v1 저장만(통화엔 안 씀). 없으면 목업에서 진짜 서버로 넘어가 401 → 로그아웃 (11/13 7번 확인)
+  http.post(`${API_BASE_URL}/personas`, async ({ request }) => {
+    const body = (await request.json()) as Partial<Ver>
+    const seq = Math.max(0, ...PERSONAS.map((x) => x.aiPersonaSeq)) + 1
+    const v: Ver = {
+      ...ver(1, 'INACTIVE', null, nowIso()),
+      ...body,
+      aiPersonaSeq: seq,
+      aiPersonaVersionSeq: Date.now(),
+    }
+    ADDED.set(seq, [v])
+    PERSONAS.push({
+      aiPersonaSeq: seq,
+      code: v.code,
+      headVersion: v,
+      activeVersion: null,
+      pendingVersion: null,
+      draft: null,
+    })
+    return HttpResponse.json({ data: { aiPersonaSeq: seq } }, { status: 201 })
+  }),
   // 초안 저장 — 고친 칸만 옴 (expected* 는 보지 않음)
   http.patch(`${API_BASE_URL}/personas/:id`, async ({ params, request }) => {
     const changed = (await request.json()) as Record<string, unknown>
@@ -152,7 +174,10 @@ export const personaHandlers = [
     if (found.some((i) => PERSONAS[i].activeVersion || PERSONAS[i].pendingVersion))
       return HttpResponse.json({}, { status: 409 })
     for (const s of aiPersonaSeqs)
-      PERSONAS.splice(PERSONAS.findIndex((x) => x.aiPersonaSeq === s), 1)
+      PERSONAS.splice(
+        PERSONAS.findIndex((x) => x.aiPersonaSeq === s),
+        1,
+      )
     return new HttpResponse(null, { status: 204 })
   }),
   // AI가 지원하는 음성 설정 (GET /api/ai/options) — 없으면 목업에서 진짜 서버로 넘어가 401 → 로그아웃 (11/11 QA)
