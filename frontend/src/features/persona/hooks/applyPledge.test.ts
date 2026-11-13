@@ -2,7 +2,8 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { Scenario, VersionTest } from '@/features/persona/api/scenarioTestApi'
-import { pledgeStep, type Pledge } from './applyPledge'
+import { pledgeStep } from './applyPledge'
+import type { Pledge } from './pledgeStore'
 
 const scenarios: Scenario[] = [
   { id: 'A1', name: '접수', group: '접수' },

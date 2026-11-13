@@ -2,10 +2,11 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useSyncExternalStore } from 'react'
 import { personaQueries, requestApply } from '@/features/persona/api/personaApi'
 import { SCENARIO_TEST, scenarioTestQueries } from '@/features/persona/api/scenarioTestApi'
-import { pledges, pledgeStep } from './applyPledge'
+import { pledgeStep } from './applyPledge'
+import { pledges } from './pledgeStore'
 
-/** '모두 통과하면 반영' 약속 지키기 — 앱 틀(useShellState)이 한 번 부름
- *  약속이 있을 때만 시험 목록을 받음 (도는 동안 2초마다 — scenarioTestQueries.tests). 어느 화면에 있든 시험이 끝나면 반영 */
+/** '모두 통과하면 반영' 약속 지키기 — 앱 틀이 약속이 있을 때만 불러옴 (components/ApplyAfterTest)
+ *  어느 화면에 있든 시험이 끝나면 반영. 시험 목록은 도는 동안 2초마다 다시 받음 (scenarioTestQueries.tests) */
 export function useApplyAfterTest() {
   const raw = useSyncExternalStore(pledges.subscribe, pledges.raw)
   const list = useMemo(() => pledges.parse(raw), [raw])

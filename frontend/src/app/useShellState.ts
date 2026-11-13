@@ -6,14 +6,12 @@ import { useSession } from '@/shared/auth/useSession'
 import { unansweredQueries } from '@/features/faq/api/unansweredApi'
 import { useActiveCallCount } from '@/features/call/hooks/useActiveCallCount'
 import { useActivePersonaName } from '@/features/persona/hooks/useActivePersonaName'
-import { useApplyAfterTest } from '@/features/persona/hooks/useApplyAfterTest'
 import type { Shell } from '@/shared/lib/shell'
 
 export function useShellState(): Shell {
   const session = useSession()
   const calls = useActiveCallCount()
   const persona = useActivePersonaName()
-  useApplyAfterTest() // 시험이 모두 통과하면 반영 — 어느 화면에 있든 (AI 상담가 1번)
   // 사이드바 숫자 (기업 피드백: 미답변이 숨어 있음 → 메뉴 옆에 늘 보이게)
   // 미완료 = 배송 초안 (055)
   const incomplete = useQuery({
