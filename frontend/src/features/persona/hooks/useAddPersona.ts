@@ -12,12 +12,7 @@ import {
 } from '@/features/persona/api/personaApi'
 import { useLeaveGuard } from '@/features/persona/hooks/useLeaveGuard'
 import { useVoiceDraft } from '@/features/persona/hooks/useVoiceDraft'
-import {
-  DRAFT_TAG,
-  emptyPromptNotice,
-  PROMPT_SECTIONS,
-  unsupportedText,
-} from '@/features/persona/labels'
+import { emptyPromptNotice, PROMPT_SECTIONS, unsupportedText } from '@/features/persona/labels'
 
 // Swagger 등록 API의 code(바꿀 수 없는 고유 코드)는 화면에서 받지 않고 자동으로 (10/31 결정 — 관리자가 정할 이유가 없음)
 // 화면을 열 때 한 번 만들어 재시도에도 같은 값 → 첫 요청이 사실 성공했으면 두 번째는 409(중복)로 막혀 페르소나가 둘 생기지 않음
@@ -67,7 +62,6 @@ export function useAddPersona(onDone: (personaSeq: number) => void, onClose: () 
   const guard = useLeaveGuard(dirty, mutation.isPending || mutation.isSuccess, onClose)
 
   return {
-    tag: DRAFT_TAG,
     subtitle: '새 상담가',
     name,
     setName,

@@ -132,7 +132,6 @@ export function usePersonaPage() {
     if (SCENARIO_TEST) keep(key, { personaSeq, historyOpen, version })
   }, [key, personaSeq, historyOpen, version])
   const gate = useTestGate() // 전체 시나리오 시험이 끝나야 [통화에 사용하기] (시나리오 시험이 꺼진 환경이면 null)
-  const [editing, setEditing] = useState(false) // 수정 화면
   const [confirming, setConfirming] = useState<Confirming>(null)
   const [adding, setAdding] = useState(false)
   const qc = useQueryClient()
@@ -324,11 +323,6 @@ export function usePersonaPage() {
   const newerThanCall = (p: (typeof list)[number]) =>
     p.inUse && !p.applyingVersion && p.head.version !== p.appliedVersion
 
-  const startEdit = () => {
-    setVersion(null)
-    setEditing(true)
-  }
-
   const items = [...list]
     .sort((a, b) => Number(b.inUse) - Number(a.inUse))
     .map((p): PersonaItem => {
@@ -448,14 +442,11 @@ export function usePersonaPage() {
         ? `/personas/${persona.personaSeq}/tests/${viewing.version}`
         : null,
 
-    editing,
     editTarget,
-    startEdit,
     // 저장하면 새로 생긴 현재 버전을 보여 줌 (취소면 그대로)
     // 통화에 사용 중인 상담가를 저장했으면 바로 반영할지 물음. 이 함수는 저장 전 화면의 것이라 head는 옛 값일 수 있음 → inUse만 봄
     // (창 내용은 다음 그리기에서 계산 — 저장이 목록을 다시 받은 뒤라 새 버전 기준)
     finishEdit: (saved?: number) => {
-      setEditing(false)
       setVersion(null)
       if (saved !== undefined && canManage && persona?.inUse) askUse(persona.personaSeq)
     },

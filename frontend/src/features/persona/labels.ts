@@ -36,8 +36,6 @@ export const VERSION_BADGE = {
   PENDING: { label: '적용 대기', tone: 'wait' }, // AI가 확인하면 통화에 사용 중 (그동안 이전 버전이 계속 쓰임)
 } satisfies Record<string, { label: string; tone: Tone }>
 
-export const DRAFT_TAG = '작성 중' // 수정 화면에서 저장하기 전
-
 export const DEFAULT_VOICE_LABEL = '기본 음성' // 서버 voiceId null (목소리 '' )
 
 const SETTING_LABEL: Record<string, string> = {
