@@ -13,6 +13,42 @@ from app.policy.render import business_rules, decision_questions, default_person
 POLICY = load_policy()
 
 
+@pytest.mark.parametrize("persona", [None, "운영 페르소나"])
+def test_live_delegation_distinguishes_new_values_choices_and_current_results(persona):
+    from app.tools import function_specs
+
+    tools = tuple((t["name"], t["description"]) for t in function_specs(policy=POLICY))
+    text = render_live(persona, POLICY, tools=tools)
+    generate, no_generate = text.split("Generate <|SpawnThinking|> when:")[1].split(
+        "Do not generate <|SpawnThinking|> when:")
+    assert "정상 범위의 새 값을 제공하거나 기존 값을 고칠 때" in generate
+    assert "최신의 유효한 서버 결과에 답이 없을 때" in generate
+    assert "제시된 이름·주소·수량을 그대로 되풀이해 선택하는 답도 새 값이 아닙니다" in no_generate
+    assert "실제 새 값이나 정정이 함께 있으면 그 부분만 위임합니다" in no_generate
+    assert "상세주소가 없다는 답은 기록할 값이므로 생성합니다" in no_generate
+    assert "그 뒤 관련 정보나 조회 범위가 바뀌지 않은 질문·반복 요청" in no_generate
+    assert "서버의 다음 안내가 온 뒤에 이어갑니다" in text
+    assert "답이 없거나 조건이 바뀌었으면 매뉴얼 검색을 요청" in text
+    assert "질문은 직접 답하지 말고 매뉴얼 검색을 요청" not in text
+
+
+def test_route_correction_collects_a_value_before_recording():
+    for text in (render_live(None, POLICY), render_backend(POLICY)):
+        assert "정정할 값을 아직 말하지 않았으면" in text or "실제로 들은 값만" in text
+    text = render_live(None, POLICY)
+    assert "대상만 답했으면 새 주소를 묻고, 실제 새 주소 값을 들은 뒤 기록을 요청한다" in text
+    assert "어느 주소가 틀렸는지 묻고 그 답으로 기록을 요청한다" not in text
+
+
+def test_backend_server_handled_answers_do_not_request_a_waiting_message():
+    text = render_backend(POLICY)
+    assert "이 발화에서는 도구 호출과 텍스트 출력 없이 종료합니다" in text
+    assert "동의·거절의 요약이나 대기 안내도 출력하지 않습니다" in text
+    assert "confirmation=await_server이면 텍스트 출력 없이 종료합니다" in text
+    assert "확인과 함께 새 정보나 정정 내용을 들었으면 record_fields에 그 값만 넣습니다" in text
+    assert "Live에 서버의 다음 안내를 기다리라고 전달" not in text
+
+
 def raw() -> dict:
     with (ROOT / "policy" / "workflow.toml").open("rb") as f:
         return tomllib.load(f)
