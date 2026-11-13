@@ -4,6 +4,8 @@ import type { usePersonaPage } from '@/features/persona/hooks/usePersonaPage'
 import { usePromptEditor, type EditTarget } from '@/features/persona/hooks/usePromptEditor'
 import { Badge, Btn } from '@/shared/ui'
 import { Confirm } from '@/shared/ui/Modal'
+import { ApplyBand } from './ApplyBand'
+import { HistoryModal } from './HistoryModal'
 import { PersonaName } from './PersonaName'
 import { PersonaTabs } from './PersonaTabs'
 import { PromptBody } from './PromptBody'
@@ -27,9 +29,7 @@ function Editable({ vm, target }: { vm: Vm; target: EditTarget }) {
 }
 
 function EditRound({ vm, target, reset }: { vm: Vm; target: EditTarget; reset: () => void }) {
-  const ed = usePromptEditor(target, (saved) =>
-    saved === undefined ? reset() : vm.finishEdit(saved),
-  )
+  const ed = usePromptEditor(target, (saved) => (saved === undefined ? reset() : vm.finishEdit()))
   // 남은 초안은 안 고쳐도 [저장]으로 확정할 수 있게 처음부터 [취소] [저장]
   return <View vm={vm} ed={ed} editing={ed.dirty || target.draftRevision !== null} />
 }
@@ -75,31 +75,23 @@ function Card({ vm, ed, editing }: { vm: Vm; ed: Ed | null; editing: boolean }) 
           <div className="flex flex-wrap items-center gap-2">
             {/* 프롬프트를 고치는 중엔 연필 없음 — 이름 저장이 새 버전을 만들어 고치던 글이 사라지므로 */}
             <PersonaName name={c.name} target={ed && !editing ? vm.editTarget : null} />
-            {/* 지난 버전을 볼 땐 그 버전의 배지, 아니면 상담가의 배지 */}
-            {p.past ? (
-              p.badges.map((b) => (
-                <Badge key={b.label} tone={b.tone}>
-                  {b.label}
-                </Badge>
-              ))
-            ) : (
-              <>
-                {c.inUse && <Badge tone="done">통화에 사용 중</Badge>}
-                {c.applying && <Badge tone="wait">{c.applying}</Badge>}
-              </>
-            )}
+            {c.inUse && <Badge tone="done">통화에 사용 중</Badge>}
+            {c.applying && <Badge tone="wait">{c.applying}</Badge>}
           </div>
           <div className="flex flex-wrap items-end gap-4 text-[14px] text-ops-sub">
             {ed ? <VoiceFields vm={ed} /> : <span>목소리 {c.voice}</span>}
             <span>
               {p.time} 저장{p.author && ` · ${p.author}`}
             </span>
-            {p.past && (
-              // 시나리오 시험에서 지난 버전으로 돌아왔을 때만 — 기록 창(5단계) 전까지 빠져나갈 길
-              <button type="button" className="underline" onClick={vm.closeHistory}>
-                지난 버전 보는 중 · 현재 버전 보기
-              </button>
-            )}
+            {/* 고치는 중엔 막음 — 불러오기가 새 버전을 만들어 고치던 글이 사라지므로 */}
+            <button
+              type="button"
+              disabled={editing}
+              onClick={vm.openHistory}
+              className="underline outline-none hover:text-ops-ink focus-visible:ring-2 focus-visible:ring-ops-route disabled:text-ops-faint disabled:no-underline"
+            >
+              수정 기록 보기
+            </button>
           </div>
         </div>
         {ed && editing ? (
@@ -116,16 +108,6 @@ function Card({ vm, ed, editing }: { vm: Vm; ed: Ed | null; editing: boolean }) 
           </span>
         ) : (
           <span className="ml-auto flex flex-wrap gap-2">
-            {p.reuse && (
-              <Btn
-                kind="edit"
-                disabled={p.reuse.disabled}
-                title={p.reuse.hint}
-                onClick={vm.askReuse}
-              >
-                이 버전 다시 쓰기
-              </Btn>
-            )}
             {c.deletable && (
               <Btn kind="danger" onClick={() => vm.askDelete(c.personaSeq)}>
                 삭제
@@ -141,16 +123,25 @@ function Card({ vm, ed, editing }: { vm: Vm; ed: Ed | null; editing: boolean }) 
                 통화에 사용하기
               </Btn>
             )}
-            {vm.canApply && (
-              // 4단계 반영 전 띠 전까지 임시
-              <Btn kind="line" onClick={vm.applyHead}>
-                통화에 반영
-              </Btn>
-            )}
           </span>
         )}
       </header>
-      <PromptBody p={p} ed={ed} />
+      {vm.band && (
+        <ApplyBand
+          band={vm.band}
+          showCall={vm.showCall}
+          setShowCall={vm.setShowCall}
+          onApply={vm.applyHead}
+          busy={editing}
+        />
+      )}
+      {/* '통화에 쓰는 내용'은 읽기만 — 고치던 글은 편집 훅에 그대로 남아 '고친 내용'으로 돌아오면 이어짐 */}
+      {p.callSections ? (
+        <PromptBody p={{ ...p, sections: p.callSections }} ed={null} />
+      ) : (
+        <PromptBody p={p} ed={ed} />
+      )}
+      {vm.historyOpen && <HistoryModal vm={vm} />}
     </article>
   )
 }

@@ -34,6 +34,7 @@ export function emptyPromptNotice(p: PromptFields): string | null {
 export const VERSION_BADGE = {
   ACTIVE: { label: '통화에 사용 중', tone: 'done' },
   PENDING: { label: '적용 대기', tone: 'wait' }, // AI가 확인하면 통화에 사용 중 (그동안 이전 버전이 계속 쓰임)
+  UNAPPLIED: { label: '반영 전', tone: 'wait' }, // 저장했지만 아직 통화에 안 쓰임 (11/13 새 안)
 } satisfies Record<string, { label: string; tone: Tone }>
 
 export const DEFAULT_VOICE_LABEL = '기본 음성' // 서버 voiceId null (목소리 '' )
