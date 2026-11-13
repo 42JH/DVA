@@ -337,7 +337,7 @@ export function usePersonaPage() {
       if (!p) return null
       return {
         title: `${nameEul(p.name)} 삭제할까요?`,
-        note: '삭제하면 상담가 목록에서 사라집니다.',
+        note: '삭제하면 되돌릴 수 없습니다.',
         okLabel: '삭제',
         danger: true,
       }

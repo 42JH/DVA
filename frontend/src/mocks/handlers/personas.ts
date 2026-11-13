@@ -144,6 +144,17 @@ export const personaHandlers = [
     }, APPLY_MS)
     return HttpResponse.json({ data: null }, { status: 202 })
   }),
+  // 삭제 — 목록에서 뺌. 서버처럼 통화에 사용 중 · 적용 대기면 409, 없으면 404 (없으면 목업에서 진짜 서버로 넘어가 401 → 로그아웃)
+  http.delete(`${API_BASE_URL}/personas`, async ({ request }) => {
+    const { aiPersonaSeqs } = (await request.json()) as { aiPersonaSeqs: number[] }
+    const found = aiPersonaSeqs.map((s) => PERSONAS.findIndex((x) => x.aiPersonaSeq === s))
+    if (found.some((i) => i < 0)) return HttpResponse.json({}, { status: 404 })
+    if (found.some((i) => PERSONAS[i].activeVersion || PERSONAS[i].pendingVersion))
+      return HttpResponse.json({}, { status: 409 })
+    for (const s of aiPersonaSeqs)
+      PERSONAS.splice(PERSONAS.findIndex((x) => x.aiPersonaSeq === s), 1)
+    return new HttpResponse(null, { status: 204 })
+  }),
   // AI가 지원하는 음성 설정 (GET /api/ai/options) — 없으면 목업에서 진짜 서버로 넘어가 401 → 로그아웃 (11/11 QA)
   http.get(`${API_BASE_URL}/ai/options`, () =>
     HttpResponse.json({
