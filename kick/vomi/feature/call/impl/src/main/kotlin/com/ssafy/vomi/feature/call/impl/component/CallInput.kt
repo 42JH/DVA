@@ -15,7 +15,11 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -28,7 +32,9 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import com.ssafy.vomi.core.designsystem.component.Text
@@ -48,11 +54,24 @@ internal fun CallInput(
     isDropTargetActive: Boolean = false,
     focusRequest: Int = 0,
 ) {
+    var editingValue by remember {
+        mutableStateOf(TextFieldValue(state.draft, selection = TextRange(state.draft.length)))
+    }
+    // External drafts start at the end; ordinary edits retain selection and IME composition.
+    val inputValue = if (editingValue.text == state.draft) editingValue else {
+        TextFieldValue(state.draft, selection = TextRange(state.draft.length))
+    }
+    SideEffect { editingValue = inputValue }
     val focusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     LaunchedEffect(focusRequest) {
         if (focusRequest > 0 && state.canType) {
+            // Re-selecting the same suggestion must also move a manually repositioned cursor.
+            editingValue = inputValue.copy(
+                selection = TextRange(inputValue.text.length),
+                composition = null,
+            )
             focusRequester.requestFocus()
             keyboard?.show()
         }
@@ -96,8 +115,11 @@ internal fun CallInput(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             BasicTextField(
-                value = state.draft,
-                onValueChange = onDraftChange,
+                value = inputValue,
+                onValueChange = { value ->
+                    editingValue = value
+                    if (value.text != state.draft) onDraftChange(value.text)
+                },
                 enabled = state.canType,
                 textStyle = VomiTheme.typography.bodyR14.copy(color = Color.White.copy(alpha = if (state.canType) 1f else 0.45f)),
                 cursorBrush = SolidColor(Color(0xFFB9D7FA)),
