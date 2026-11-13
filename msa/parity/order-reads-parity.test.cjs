@@ -243,8 +243,15 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
       for(const child of Object.values(value)) schemas(child);
     }
     for(const path of ['/api/orders','/api/orders/{id}','/api/admin/orders','/api/customers/{id}/addresses','/api/payments/requests/{id}','/api/parcel-drafts','/api/parcel-drafts/{id}']) {
-      assert.deepEqual(documents[1].paths[path].get,documents[0].paths[path].get,path);
-      schemas(documents[0].paths[path].get);
+      const source = structuredClone(documents[0].paths[path].get);
+      // The pinned monolith predates the number search in !672.
+      const description = {
+        '/api/admin/orders': '표시 주문번호(DV-00140 또는 140) 정확히 일치. 발송인·수령인 이름·전화번호·주소 부분 검색도 지원합니다. NFC·대소문자 무시. %·_는 일반 문자.',
+        '/api/parcel-drafts': '관리자는 예약 주문번호(DV-00140 또는 140)로 정확히 일치 검색할 수 있습니다. 발송·수령 이름/전화/주소 부분 검색. 전화번호는 하이픈 허용.',
+      }[path];
+      if (description) source.parameters.find(parameter => parameter.name === 'q').description = description;
+      assert.deepEqual(documents[1].paths[path].get, source, path);
+      schemas(source);
     }
     assert.ok(visited.size>5);
   });
@@ -546,6 +553,18 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
   await t.test('admin screen searches NFC, formatted phones and literal special characters and groups states',async()=> {
     for(const query of ['', '?limit=1','?offset=999','?q=한글','?q=010-9876-5432','?q=%25','?q=_','?q=%27%20OR%201%3D1--',
       '?from=2030-02-01T00:00:00Z&to=2030-02-10T00:00:00Z&limit=2']) await compare('/api/admin/orders'+query);
+    const byNumber = async (q, filters = {}) => request(
+      sides[1], '/api/admin/orders?' + new URLSearchParams({ q, ...filters }), 200, headers, randomUUID(),
+    );
+    for (const q of ['1001', ' dv-01001 ']) {
+      const body = await byNumber(q);
+      assert.deepEqual(body.data.map(row => [row.orderSeq, row.draftSeq, row.parcels.length]), [[1001, null, 0]]);
+      assert.equal(body.total_count, 1);
+      assert.equal(body.statusCounts.all, 1);
+    }
+    for (const q of ['DV-01012', 'DV-01013', 'DV-2147483648'])
+      assert.equal((await byNumber(q)).total_count, 0);
+    assert.equal((await byNumber('DV-01001', { from: '2030-02-02T00:00:00Z' })).total_count, 0);
     for(const group of ['COLLECTING','notPaid','PAID','ACCEPTED','SUBMISSION_FAILED','CANCELLED']) await compare('/api/admin/orders?statusGroup='+group);
     for(const organization of [6001,6002,6003,2147483647])for(const group of ['', '&statusGroup=COLLECTING','&statusGroup=PAID','&statusGroup=CANCELLED'])await compare('/api/admin/orders?organizationSeq='+organization+group+'&limit=1&offset=1');
     for(const query of ['?organizationSeq=0','?organizationSeq=2147483648','?organizationSeq=1&organizationSeq=2'])await compare('/api/admin/orders'+query,400);
@@ -558,6 +577,13 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
       for(const db of [reference,databases.order])await db.query(`INSERT INTO order_parcel_drafts(draft_seq,reserved_order_seq,client_parcel_id,created_by_admin_user_seq,creation_payload,parcel_data,status,created_at,updated_at,retention_started_at)
         OVERRIDING SYSTEM VALUE SELECT 14000+n,40000+n,gen_random_uuid(),1,'{}','{"origin":{"name":"분할 초안 한글_%","phoneNumber":"01098765432"},"documentCount":2,"otherItemDescription":"메모"}'::jsonb,
         'INCOMPLETE','2030-01-01Z','2030-01-01Z','2030-01-01Z' FROM generate_series(1,251) n`);
+      const draft = await byNumber('DV-40001', { statusGroup: 'COLLECTING' });
+      assert.deepEqual(draft.data.map(row => [row.orderSeq, row.draftSeq]), [[40001, 14001]]);
+      assert.equal(draft.total_count, 1);
+      assert.deepEqual(draft.statusCounts, { all: 1, incomplete: 1, notPaid: 0, paid: 0, accepted: 0, submissionFailed: 0, cancelled: 0 });
+      const wrongGroup = await byNumber('40001', { statusGroup: 'notPaid' });
+      assert.equal(wrongGroup.total_count, 0);
+      assert.deepEqual(wrongGroup.statusCounts, draft.statusCounts);
       for(const query of ['?q='+encodeURIComponent('분할 초안 한글_%'),'','?statusGroup=COLLECTING','?q=010-9876-5432'])for(const offset of [0,249,250,251])await compare('/api/admin/orders'+(query||'?')+(query?'&':'')+'limit=1&offset='+offset);
     } finally {for(const db of [reference,databases.order])await db.query('DELETE FROM order_parcel_drafts WHERE draft_seq BETWEEN 14001 AND 14251');}
 
@@ -610,6 +636,17 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
       }
       for(const query of ['', '?status=ALL','?limit=1','?offset=999','?status=ALL&limit=2&offset=1','?customerSeq=1','?customerSeq=4','?callSessionSeq=16001','?legacyOrderSeq=999999',
         '?q='+encodeURIComponent('한글'),'?q=010-9876-5432','?q=%25','?q=_','?q=%27%20OR%201%3D1--','?from=2032-01-01T00:00:00Z&to=2033-01-01T00:00:00Z'])await compare('/api/parcel-drafts'+query);
+      const byNumber = (q, extra = headers) => request(
+        sides[1], '/api/parcel-drafts?' + new URLSearchParams({ q, status: 'ALL' }), 200, extra, randomUUID(),
+      );
+      for (const q of ['DV-72001', '72001']) {
+        const body = await byNumber(q);
+        assert.deepEqual(body.data.map(row => [row.reservedOrderSeq, row.draftSeq]), [[72001, 17001]]);
+        assert.equal(body.total_count, 1);
+        assert.equal((await byNumber(q, ai(16001))).total_count, 0);
+      }
+      for (const q of ['DV-72016', 'DV-72017', 'DV-2147483648'])
+        assert.equal((await byNumber(q)).total_count, 0);
       for(const status of ['READY','EDITING','INCOMPLETE','CONVERTED','CANCELLED','RESUMED'])await compare('/api/parcel-drafts?status='+status);
       for(const company of [6001,6002,6003,2147483647])await compare('/api/parcel-drafts?status=ALL&organizationSeq='+company);
       for(const row of rows)await compare('/api/parcel-drafts/'+row.id,[17016,17017,17018,17019,17022].includes(row.id)?404:200);

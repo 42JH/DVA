@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import type { DraftReadCall, DraftCallReferences } from '@dva/events/parcel-drafts.cjs';
 import { readPage } from '../common/pagination-query';
+import { searchOrderSequence } from '../common/search-order-sequence';
 import { ParcelDraftQueryDto } from './dto/parcel-draft.dto';
 import type { ParcelDraftRow } from './parcel-drafts.types';
 import { availableDraftIds, availableDraftSql } from './parcel-draft-reads';
@@ -33,7 +34,7 @@ export class ParcelDraftReadsRepository {
         (d.customer_seq IS NULL AND (d.call_session_seq=$7 OR (d.status='INCOMPLETE' AND d.caller_phone_number=$8))))
        AND ($2::text='ALL' OR d.status=$2)
        AND ($3::int IS NULL OR d.call_session_seq=$3) AND ($4::int IS NULL OR d.call_session_seq=$4)
-       AND ($6::int IS NULL OR d.legacy_order_seq=$6) AND ($5::text IS NULL OR strpos(lower(normalize(concat_ws(' ',
+       AND ($6::int IS NULL OR d.legacy_order_seq=$6) AND ($5::text IS NULL OR d.reserved_order_seq=$13::int OR strpos(lower(normalize(concat_ws(' ',
         d.parcel_data->'origin'->>'name',d.parcel_data->'origin'->>'phoneNumber',d.parcel_data->'origin'->>'roadAddress',d.parcel_data->'origin'->>'jibunAddress',
         d.parcel_data->'destination'->>'name',d.parcel_data->'destination'->>'phoneNumber',d.parcel_data->'destination'->>'roadAddress',d.parcel_data->'destination'->>'jibunAddress',
         d.parcel_data->'origin'->>'detailAddress',d.parcel_data->'destination'->>'detailAddress'),NFC)),lower(normalize($5,NFC)))>0
@@ -53,6 +54,7 @@ export class ParcelDraftReadsRepository {
         query.to ?? null,
         organizationCustomers,
         phoneQuery || null,
+        call === null ? searchOrderSequence(query.q) : null,
       ],
     };
   }

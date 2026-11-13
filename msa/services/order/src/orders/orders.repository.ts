@@ -9,6 +9,7 @@ import { Injectable } from '@nestjs/common';
 import { Pool, PoolClient } from 'pg';
 import type { IntakeOrderResult } from '@dva/events/order-read.cjs';
 import { readPage } from '../common/pagination-query';
+import { searchOrderSequence } from '../common/search-order-sequence';
 import {
   AdminOrderListItemDto,
   AdminOrderListQueryDto,
@@ -204,7 +205,7 @@ export class OrdersRepository {
     return {
       sql: `FROM orders o
        WHERE o.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM order_parcel_drafts d WHERE d.legacy_order_seq=o.order_seq) AND COALESCE(o.closed_at,o.created_at)>transaction_timestamp()-interval '5 years'
-        AND ($1::text IS NULL OR EXISTS(SELECT 1 FROM order_parcels p WHERE p.order_seq=o.order_seq AND (
+        AND ($1::text IS NULL OR o.order_seq=$7::int OR EXISTS(SELECT 1 FROM order_parcels p WHERE p.order_seq=o.order_seq AND (
          EXISTS(SELECT 1 FROM unnest(ARRAY[p.origin_name,p.origin_phone_number,p.origin_road_address,p.origin_jibun_address,p.origin_detail_address,
            p.destination_name,p.destination_phone_number,p.destination_road_address,p.destination_jibun_address,p.destination_detail_address]) AS v(value)
            WHERE strpos(lower(normalize(v.value,NFC)),lower($1))>0)
@@ -220,6 +221,7 @@ export class OrdersRepository {
         query.statusGroup ?? null,
         phoneQuery || null,
         organizationCustomers,
+        searchOrderSequence(query.q),
       ],
     };
   }

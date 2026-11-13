@@ -1,5 +1,6 @@
 import type { PoolClient } from 'pg';
 import type { DraftCallReferences } from '@dva/events/parcel-drafts.cjs';
+import { searchOrderSequence } from '../common/search-order-sequence';
 import type { AdminOrderListQueryDto } from './dto/admin-order-list.dto';
 type ReadCalls = (input: {
   callIds: number[];
@@ -25,7 +26,7 @@ export async function incompleteDraftIds(
   return availableDraftIds(
     client,
     `d.status='INCOMPLETE'
-   AND($1::text IS NULL OR strpos(lower(normalize(concat_ws(' ',
+   AND($1::text IS NULL OR d.reserved_order_seq=$6::int OR strpos(lower(normalize(concat_ws(' ',
     d.parcel_data->'origin'->>'name',d.parcel_data->'origin'->>'phoneNumber',d.parcel_data->'origin'->>'roadAddress',d.parcel_data->'origin'->>'jibunAddress',
     d.parcel_data->'destination'->>'name',d.parcel_data->'destination'->>'phoneNumber',d.parcel_data->'destination'->>'roadAddress',d.parcel_data->'destination'->>'jibunAddress',
     d.parcel_data->'origin'->>'detailAddress',d.parcel_data->'destination'->>'detailAddress'),NFC)),lower(normalize($1,NFC)))>0
@@ -38,6 +39,7 @@ export async function incompleteDraftIds(
       query.from ?? null,
       query.to ?? null,
       organizationCustomers,
+      searchOrderSequence(query.q),
     ],
     readCalls,
   );
