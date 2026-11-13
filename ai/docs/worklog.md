@@ -1323,3 +1323,12 @@
 - 실제 모델 판단·운영 음성 통화는 미검증이다. 운영 주문 데이터·원본 Claude transcript 변경, 원격 push와 배포는 하지 않았다.
 
 - MR !656 충돌 해결: 최신 origin/develop-ai 2d8ed6e1을 병합하고 양쪽 worklog 추가 기록을 모두 보존했다. 병합 후 전체 AI 테스트 936 passed, 14 warnings(기존 의존성 deprecation). 기존 미커밋 #593 조사 기록은 MR에 포함하지 않고 별도 보존했다.
+
+## 2026-11-13 — Live 위임 조건의 결과 재사용·선택 답·주소 정정 경계 정리
+
+- 사용자 요청으로 원격 develop-ai를 fetch한 최신 cbf54007에서 별도 Orca 작업 폴더와 fix/live-delegation-policy 브랜치를 만들었다. 기존 작업 폴더의 로컬 커밋·미커밋 worklog·.claude/와 이전 provider 세션 transcript는 변경하지 않았다.
+- Live의 기록 요청은 새 값 또는 실제 정정에 적용하고, 제시된 이름·주소·수량을 그대로 선택하는 답과 구분했다. 선택 답에 새 값이 섞이면 그 부분은 계속 위임하며, 상세주소가 없다는 답도 기록 대상이라는 예외를 보존했다. 새 값 없는 서버 처리 답은 다음 서버 안내가 온 뒤 이어가도록 받는 말 규칙을 맞췄다.
+- 기록된 값은 최신의 유효한 서버 결과에 답이 없을 때 조회한다. 서비스 질문은 최신 검색 근거가 충분하고 질문 조건이 같으면 재사용하고, 답이 없거나 조건이 바뀌면 다시 검색한다. 주소 정정의 대상(발송/받는 곳)만 답한 경우 새 주소를 먼저 받고 실제 값을 들은 뒤 기록하도록 confirm_route를 수정했다.
+- 원격 기준에 남아 있던 Backend의 단순 접수 동의·추가 도움 거절 및 confirmation=await_server 대기 출력 지시도 무출력 종료로 바꿨다. 잘못된 선택 위임 뒤의 기존 get_state 복구 경로, Responses Delegation, Decision·도구·BE/PBX 계약은 유지했다.
+- 공식 GPT-Live 가이드의 유효한 결과 재사용·짧은 확인 질문 직접 처리·구체적인 Generate/Do not generate 조건을 참고했다: https://developers.openai.com/api/docs/guides/live-prompting . 상세 업무 로직의 전면 이동이나 Live 프롬프트 전체 재작성은 범위에 넣지 않았다.
+- 검증: 실제 도구 설명을 포함한 기본/운영 페르소나 렌더링, 새 값·선택 답·기존 결과 재사용·주소 정정 순서·Backend 무출력 지시 회귀 검사 포함 정책·입력 제한·세션·Live·수긍 처리 198 passed, 13 warnings(기존 의존성 deprecation). git diff --check 통과. 실제 모델·실통화 검증, 원격 push·MR·배포는 하지 않았다. 정적 지시문 검사는 실제 위임 감소나 완전한 무음을 보장하지 않는다.
