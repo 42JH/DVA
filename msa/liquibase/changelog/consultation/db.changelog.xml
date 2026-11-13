@@ -39,4 +39,7 @@
   <changeSet id="011-latest-finalized-call" author="dva" dbms="postgresql" runInTransaction="true">
     <sqlFile path="011-latest-finalized-call.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
   </changeSet>
+  <changeSet id="012-call-action-index" author="dva" dbms="postgresql" runInTransaction="true">
+    <sqlFile path="012-call-action-index.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
+  </changeSet>
 </databaseChangeLog>
