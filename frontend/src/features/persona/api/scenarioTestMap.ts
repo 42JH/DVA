@@ -25,7 +25,7 @@ export interface VersionTest {
 export interface RunDto {
   runId: string
   createdAt: string // '2026-11-12T09:07:52.123' (창구 서버의 시각)
-  status: 'running' | 'done' | 'interrupted' // interrupted = 돌던 중에 창구가 꺼짐
+  status: 'running' | 'done' | 'interrupted' | 'stopped' // interrupted = 돌던 중에 창구가 꺼짐, stopped = 관리자가 멈춤
   tag?: string | null
   items: Omit<TestItem, 'runId'>[]
 }
