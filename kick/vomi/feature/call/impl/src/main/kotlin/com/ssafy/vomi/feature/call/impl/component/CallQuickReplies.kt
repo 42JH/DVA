@@ -20,6 +20,7 @@ import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -28,8 +29,11 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.text
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.LineBreak
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -143,6 +147,7 @@ private fun ReplyChip(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val displayText = remember(text) { text.withHangulWrapOpportunities() }
     ClickableSurface(
         onClick = onClick,
         enabled = enabled,
@@ -155,13 +160,14 @@ private fun ReplyChip(
             contentAlignment = Alignment.Center
         ) {
             Text(
-                text = text,
+                text = displayText,
                 style = VomiTheme.typography.bodySB14.copy(
                     lineBreak = LineBreak.Simple
                 ),
                 color = Color.White.copy(alpha = if (enabled) 1f else 0.35f),
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.clearAndSetSemantics { this.text = AnnotatedString(text) },
             )
         }
     }
