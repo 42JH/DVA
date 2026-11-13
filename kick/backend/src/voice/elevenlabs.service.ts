@@ -4,9 +4,27 @@ const origin = 'https://api.elevenlabs.io';
 const maxSpeechBytes = 1024 * 1024;
 
 export type VoiceSample = { buffer: Buffer; mimetype: 'audio/mpeg' | 'audio/wav' };
+export type SpeechSettings = {
+  model?: 'eleven_flash_v2_5' | 'eleven_multilingual_v2';
+  speed?: number;
+  stability?: number;
+  similarityBoost?: number;
+  style?: number;
+};
+
+const fixedSpeechSettings: SpeechSettings = {
+  model: 'eleven_multilingual_v2',
+  speed: 0.92,
+  stability: 0.75,
+  similarityBoost: 0.9,
+  style: 0.05,
+};
 
 export class ElevenLabsRequestError extends BadGatewayException {
-  constructor(readonly upstreamStatus?: number) {
+  constructor(
+    readonly upstreamStatus?: number,
+    readonly requiresPaidPlan = false,
+  ) {
     super('ElevenLabs could not complete the request');
   }
 }
@@ -26,19 +44,33 @@ export class ElevenLabsService {
     const headers = new Headers(init.headers);
     headers.set('xi-api-key', this.requireApiKey());
     let response: Response;
+    const timeout = AbortSignal.timeout(45_000);
     try {
       response = await fetch(origin + path, {
         ...init,
         headers,
         redirect: 'error',
-        signal: AbortSignal.timeout(45_000),
+        signal: init.signal ? AbortSignal.any([timeout, init.signal]) : timeout,
       });
     } catch {
       throw new ElevenLabsRequestError();
     }
     if (!response.ok && !(allowNotFound && response.status === 404)) {
-      await response.body?.cancel().catch(() => undefined);
-      throw new ElevenLabsRequestError(response.status);
+      let requiresPaidPlan = false;
+      if (path === '/v1/voices/add' && [400, 402, 403].includes(response.status)) {
+        const error: unknown = await response.json().catch(() => null);
+        if (typeof error === 'object' && error !== null && 'detail' in error) {
+          const detail = error.detail;
+          requiresPaidPlan =
+            typeof detail === 'object' &&
+            detail !== null &&
+            (('code' in detail && detail.code === 'paid_plan_required') ||
+              ('status' in detail && detail.status === 'can_not_use_instant_voice_cloning'));
+        }
+      } else {
+        await response.body?.cancel().catch(() => undefined);
+      }
+      throw new ElevenLabsRequestError(response.status, requiresPaidPlan);
     }
     return response;
   }
@@ -98,13 +130,28 @@ export class ElevenLabsService {
     );
   }
 
+  private speechBody(text: string, requestedSettings?: SpeechSettings): string {
+    const settings =
+      process.env.KICK_TTS_FIXED_SETTINGS === 'true' ? fixedSpeechSettings : requestedSettings;
+    return JSON.stringify({
+      text,
+      model_id: settings?.model ?? 'eleven_flash_v2_5',
+      voice_settings: settings && {
+        speed: settings.speed,
+        stability: settings.stability,
+        similarity_boost: settings.similarityBoost,
+        style: settings.style,
+      },
+    });
+  }
+
   async speech(voiceId: string, text: string): Promise<Buffer> {
     const response = await this.request(
       `/v1/text-to-speech/${encodeURIComponent(voiceId)}?output_format=mp3_44100_128`,
       {
         method: 'POST',
         headers: { 'content-type': 'application/json', accept: 'audio/mpeg' },
-        body: JSON.stringify({ text, model_id: 'eleven_flash_v2_5' }),
+        body: this.speechBody(text),
       },
     );
     if (!response.body || response.headers.get('content-type')?.split(';')[0] !== 'audio/mpeg') {
@@ -136,6 +183,49 @@ export class ElevenLabsService {
       throw new ElevenLabsRequestError();
     }
     return Buffer.concat(chunks, bytes);
+  }
+
+  async streamSpeech(
+    voiceId: string,
+    text: string,
+    signal: AbortSignal,
+    settings?: SpeechSettings,
+  ) {
+    const response = await this.request(
+      `/v1/text-to-speech/${encodeURIComponent(voiceId)}/stream?output_format=pcm_16000`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'audio/pcm' },
+        body: this.speechBody(text, settings),
+        signal,
+      },
+    );
+    if (!response.body || response.headers.get('content-type')?.split(';')[0] !== 'audio/pcm') {
+      await response.body?.cancel().catch(() => undefined);
+      throw new ElevenLabsRequestError();
+    }
+
+    const chunks = response.body;
+    return (async function* () {
+      let bytes = 0;
+      try {
+        for await (const chunk of chunks) {
+          if (chunk.byteLength === 0) {
+            continue;
+          }
+          bytes += chunk.byteLength;
+          if (bytes > maxSpeechBytes) {
+            throw new ElevenLabsRequestError();
+          }
+          yield chunk;
+        }
+      } catch {
+        throw new ElevenLabsRequestError();
+      }
+      if (bytes === 0 || bytes % 2 !== 0) {
+        throw new ElevenLabsRequestError();
+      }
+    })();
   }
 
   async delete(voiceId: string): Promise<void> {

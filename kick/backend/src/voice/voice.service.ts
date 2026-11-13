@@ -1,7 +1,12 @@
-import { ConflictException, Injectable } from '@nestjs/common';
+import { ConflictException, HttpException, HttpStatus, Injectable } from '@nestjs/common';
 
 import { DatabaseService } from '../database/database.service';
-import { ElevenLabsRequestError, ElevenLabsService, type VoiceSample } from './elevenlabs.service';
+import {
+  ElevenLabsRequestError,
+  ElevenLabsService,
+  type SpeechSettings,
+  type VoiceSample,
+} from './elevenlabs.service';
 
 type VoiceStatus = 'CREATING' | 'VERIFICATION_REQUIRED' | 'READY';
 type Voice = { voiceId: string | null; status: VoiceStatus };
@@ -65,6 +70,12 @@ export class VoiceService {
           "DELETE FROM voice_clones WHERE user_id = $1 AND status = 'CREATING'",
           [accountId],
         );
+        if (error.requiresPaidPlan) {
+          throw new HttpException(
+            'The ElevenLabs subscription does not include Instant Voice Cloning',
+            HttpStatus.PAYMENT_REQUIRED,
+          );
+        }
       }
       throw error;
     }
@@ -77,12 +88,25 @@ export class VoiceService {
     return { status };
   }
 
-  async speech(accountId: string, text: string): Promise<Buffer> {
+  private async readyVoiceId(accountId: string): Promise<string> {
     const voice = await this.find(accountId);
     if (voice?.status !== 'READY' || !voice.voiceId) {
       throw new ConflictException('No verified voice is available for this account');
     }
-    return this.elevenLabs.speech(voice.voiceId, text);
+    return voice.voiceId;
+  }
+
+  async speech(accountId: string, text: string): Promise<Buffer> {
+    return this.elevenLabs.speech(await this.readyVoiceId(accountId), text);
+  }
+
+  async streamSpeech(
+    accountId: string,
+    text: string,
+    signal: AbortSignal,
+    settings?: SpeechSettings,
+  ) {
+    return this.elevenLabs.streamSpeech(await this.readyVoiceId(accountId), text, signal, settings);
   }
 
   async delete(accountId: string): Promise<void> {

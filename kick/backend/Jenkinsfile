@@ -3,6 +3,7 @@ pipeline {
 
     options {
         disableConcurrentBuilds()
+        skipDefaultCheckout()
         timeout(time: 20, unit: 'MINUTES')
         buildDiscarder(logRotator(numToKeepStr: '10'))
     }
@@ -16,6 +17,21 @@ pipeline {
     }
 
     stages {
+        stage('Checkout') {
+            steps {
+                script {
+                    def source = checkout(scmGit(
+                        branches: scm.branches.collect { [name: it.name] },
+                        userRemoteConfigs: scm.userRemoteConfigs.collect {
+                            [url: it.url, credentialsId: it.credentialsId]
+                        },
+                        extensions: [[$class: 'PathRestriction', includedRegions: 'kick/backend/.*', excludedRegions: '']]
+                    ))
+                    env.GIT_COMMIT = source.GIT_COMMIT
+                }
+            }
+        }
+
         stage('Build and verify') {
             steps {
                 dir('kick/backend') {
