@@ -5,7 +5,7 @@ import { SAMPLES } from './scenarioSamples'
 import { SCRIPTS } from './scenarioScripts'
 
 // 가짜 시험 창구 (11/12) — 07 AI 상담가의 [시나리오 시험]. 주소 · 모양은 실제 창구(ai/persona_check)와 같음: 묶음(run) 단위, 감싸지 않은 응답
-//   GET /scenarios · /scenarios/{id} · /runs?tag= · /runs/{runId}/{scenario}/verdict|record, POST /runs
+//   GET /scenarios · /scenarios/{id} · /runs?tag= · /runs/{runId}/{scenario}/verdict|record, POST /runs · /runs/{runId}/stop
 // 시나리오 10개는 창구의 파일을 옮긴 것 (scenarioScripts.ts)
 // 시험을 시작하면 2통씩 몇 초에 하나씩 끝남 (실제는 한 통 1~5분). 결과는 정해 둔 값:
 //   새 버전은 B3 · F1 실패, B1은 그 버전에서 처음 한 번 연결 실패(다시 시험하면 통과). 통화에 사용 중인 v6은 A4 · F1 실패 → A4 새로 통과 · B3 새로 실패
@@ -34,6 +34,7 @@ interface Run {
   tag: string | null
   createdAt: number
   slots: Record<string, Slot>
+  stoppedAt?: number // 멈춘 때 — 그 뒤로는 시간이 안 흐른 것처럼 보임(도는 통화는 running, 줄 선 것은 queued로 남음)
 }
 
 const seed = (tag: string, at: string, fails: string[]): Run => {
@@ -78,8 +79,10 @@ const sampleOf = (scenario: string, out: Out) =>
 const localIso = (ms: number) =>
   new Date(ms - new Date(ms).getTimezoneOffset() * 60_000).toISOString().slice(0, 23)
 
+const clock = (r: Run | undefined) => Math.min(Date.now(), r?.stoppedAt ?? Infinity)
+
 const view = (r: Run) => {
-  const now = Date.now()
+  const now = clock(r)
   const items = SCENARIOS.filter((s) => r.slots[s.id]).map((s) => {
     const slot = r.slots[s.id]
     const ended = now >= slot.to
@@ -100,7 +103,7 @@ const view = (r: Run) => {
   return {
     runId: r.runId,
     createdAt: localIso(r.createdAt),
-    status: finished < items.length ? 'running' : 'done',
+    status: finished === items.length ? 'done' : r.stoppedAt ? 'stopped' : 'running',
     tag: r.tag,
     total: items.length,
     finished,
@@ -112,8 +115,9 @@ const view = (r: Run) => {
 const notFound = (detail: string) => HttpResponse.json({ detail }, { status: 404 })
 /** 끝난 통화 한 건 (연결 실패 · 아직 도는 것은 기록이 없음) */
 const ended = (runId: unknown, scenario: unknown) => {
-  const slot = runs.find((r) => r.runId === runId)?.slots[String(scenario)]
-  return slot && slot.out !== 'error' && Date.now() >= slot.to
+  const run = runs.find((r) => r.runId === runId)
+  const slot = run?.slots[String(scenario)]
+  return slot && slot.out !== 'error' && clock(run) >= slot.to
     ? sampleOf(String(scenario), slot.out)
     : null
 }
@@ -151,6 +155,15 @@ export const scenarioTestHandlers = [
     runs.push({ runId, tag, createdAt: now, slots })
     store()
     return HttpResponse.json({ runId }, { status: 202 })
+  }),
+  http.post(`${at}/runs/:runId/stop`, ({ params }) => {
+    const r = runs.find((x) => x.runId === params.runId)
+    if (!r) return notFound('없는 시험 묶음')
+    if (view(r).status === 'running') {
+      r.stoppedAt = Date.now()
+      store()
+    }
+    return HttpResponse.json({ runId: r.runId }, { status: 202 })
   }),
   http.get(`${at}/runs/:runId/:scenario/verdict`, ({ params }) => {
     const s = ended(params.runId, params.scenario)

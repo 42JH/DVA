@@ -7,6 +7,7 @@ import {
   SCENARIO_TEST,
   scenarioTestQueries,
   startTest,
+  stopTest,
 } from '@/features/persona/api/scenarioTestApi'
 import { restOf, rowsOf, testOf } from './scenarioTest'
 
@@ -117,6 +118,11 @@ export function useScenarioTest(me: TestTarget, dateOf: (version: number) => str
       if (running) setAsking(null)
     },
   })
+  // 멈춤 — 실패해도 목록을 다시 받음(일부 묶음만 멈췄을 수 있음)
+  const stop = useMutation({
+    mutationFn: stopTest,
+    onSettled: () => qc.invalidateQueries({ queryKey: testsKey }),
+  })
   const r = d.read(me)
   const items = r.shown?.items ?? []
   const ended = items.filter((i) => i.status === 'done' || i.status === 'error').length
@@ -166,6 +172,15 @@ export function useScenarioTest(me: TestTarget, dateOf: (version: number) => str
     retryLabel: rest.length ? `남은 ${rest.length}개 시험` : null,
     runAll: () => ask({ title: `시나리오 ${r.rows.length}개를 시험할까요?` }),
     retry: () => ask({ title: `남은 ${rest.length}개를 시험할까요?`, scenarios: rest }),
+    // 시험 멈춤 — 도는 동안만 있음 (버튼 · 확인 창은 아직 화면에 안 붙임)
+    stop:
+      r.state === 'running'
+        ? {
+            run: () => stop.mutate({ personaSeq: me.personaSeq, version: me.version }),
+            busy: stop.isPending,
+            error: stop.isError ? '멈추지 못했습니다. 다시 시도해 주세요.' : null,
+          }
+        : null,
     // 확인 창 — [시험 시작]을 눌러야 통화가 걸림
     confirm: asking && {
       title: asking.title,
