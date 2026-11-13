@@ -1332,3 +1332,11 @@
 - 원격 기준에 남아 있던 Backend의 단순 접수 동의·추가 도움 거절 및 confirmation=await_server 대기 출력 지시도 무출력 종료로 바꿨다. 잘못된 선택 위임 뒤의 기존 get_state 복구 경로, Responses Delegation, Decision·도구·BE/PBX 계약은 유지했다.
 - 공식 GPT-Live 가이드의 유효한 결과 재사용·짧은 확인 질문 직접 처리·구체적인 Generate/Do not generate 조건을 참고했다: https://developers.openai.com/api/docs/guides/live-prompting . 상세 업무 로직의 전면 이동이나 Live 프롬프트 전체 재작성은 범위에 넣지 않았다.
 - 검증: 실제 도구 설명을 포함한 기본/운영 페르소나 렌더링, 새 값·선택 답·기존 결과 재사용·주소 정정 순서·Backend 무출력 지시 회귀 검사 포함 정책·입력 제한·세션·Live·수긍 처리 198 passed, 13 warnings(기존 의존성 deprecation). git diff --check 통과. 실제 모델·실통화 검증, 원격 push·MR·배포는 하지 않았다. 정적 지시문 검사는 실제 위임 감소나 완전한 무음을 보장하지 않는다.
+
+## 2026-11-13 — 이름·주소 없는 최근 도착지 재사용 조회
+
+- 사용자 요청으로 fetch한 origin/develop-ai 88a785fd에서 별도 fix/recent-destination-lookup 브랜치를 만들었다. 기존 develop-ai의 로컬 커밋과 .claude/ 및 원본 Claude 세션 transcript는 변경하지 않았다. sender_change 오판 수정은 별도 작업으로 제외한다.
+- find_destination에 recent(bool, 기본 false)를 추가했다. 이전 도착지 재사용을 명시하면 이름·주소가 없어도 통화 시작 때 불러온 Source.HISTORY만 조회한다. 주소 이력 API의 최근순과 _apply_context의 중복 제거를 그대로 쓰며 개인 핀·기업 검색으로 대체하지 않는다. 이름·지역·상세를 함께 말하면 조건으로 적용하고 기존 max_pin_options와 후보 선택 절차를 재사용한다. 목록을 다시 요청해도 자동 선택하지 않는다. recent 없이 빈 인수를 주면 기존 NOTHING_TO_RECORD를 유지한다.
+- 후보를 찾았지만 발송지 처리가 먼저여서 보류한 결과에 DEST_DEFERRED와 found·안내 근거를 넣었다. 후보 값은 보류 중 노출하지 않는다. 최근 이력에 맞는 곳이 없으면 DEST_NONE·found=0과 불러온 이력 범위라는 안내를 주고 이전 후보를 제거한다. Backend 규칙·도구 설명·내부 도구 계약 문서를 함께 갱신했다. BE/PBX API·인증·고객 데이터 저장·Decision은 변경하지 않았다.
+- 검증: 최근순·이력/핀 중복 제거·후보 수 제한·선택 뒤 HISTORY 반영·발송지 보존·이름 조건·반복 목록 요청·개인 핀 및 기업 검색 제외·빈 이력·빈 인수 유지·보류 후 재개·잘못된 타입/기업 동시 요청을 회귀 검사했다. 구현 전 새 recent 인수를 거절하는 실패를 확인했고 구현 후 신규 8건 및 전체 AI pytest 948 passed, 14 warnings(기존 의존성 deprecation). git diff --check 통과.
+- 실제 모델의 recent 인수 선택·실통화·운영 배포는 미검증이다. 조회 범위는 통화 시작 때 불러온 최근 이력(현재 설정 5건)으로 제한된다. sender_change가 오판하면 후보 제시는 여전히 발송지 처리 뒤로 보류되며 이 커밋으로 그 판정까지 해결되지는 않는다. 원격 push·MR·배포는 하지 않았다.
