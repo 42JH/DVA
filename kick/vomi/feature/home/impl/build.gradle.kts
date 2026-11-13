@@ -8,4 +8,8 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(projects.feature.home.api)
     implementation(projects.core.data)
+    implementation(projects.core.common)
+    implementation(libs.kotlinx.coroutines.android)
+    testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
 }
