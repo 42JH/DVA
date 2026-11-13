@@ -30,6 +30,8 @@ android {
 }
 
 dependencies {
+    implementation(projects.feature.login.api)
+    implementation(projects.feature.login.impl)
     implementation(projects.feature.call.api)
     implementation(projects.feature.call.impl)
     implementation(projects.feature.home.api)

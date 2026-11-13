@@ -1,0 +1,12 @@
+<resources>
+    <string name="login_title">사용자 선택</string>
+    <string name="login_description">테스트할 사용자를 선택해 주세요</string>
+    <string name="login_user_1">사용자 1</string>
+    <string name="login_user_2">사용자 2</string>
+    <string name="login_loading">%1$s 입장 중…</string>
+    <string name="login_missing_token">테스트 계정 토큰이 설정되지 않았어요</string>
+    <string name="login_invalid_token">사용자 인증에 실패했어요. 테스트 계정 설정을 확인해 주세요</string>
+    <string name="login_network_error">서버에 연결하지 못했어요. 네트워크를 확인하고 다시 눌러 주세요</string>
+    <string name="login_server_error">잠시 후 다시 시도해 주세요</string>
+    <string name="login_wrong_account">선택한 사용자와 서버 계정이 달라요. 테스트 계정 설정을 확인해 주세요</string>
+</resources>

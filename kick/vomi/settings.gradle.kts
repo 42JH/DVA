@@ -36,3 +36,6 @@ include(":feature:home:impl")
 
 include(":feature:call:api")
 include(":feature:call:impl")
+
+include(":feature:login:api")
+include(":feature:login:impl")
