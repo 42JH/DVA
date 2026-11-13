@@ -220,7 +220,7 @@ const check = (ok, what, extra = '') => {
     const pos = () =>
       p.evaluate(() => {
         const h = document.querySelector('article header')
-        const name = h.querySelector('h2, input')
+        const name = h.querySelector('h2:not(.sr-only), input')
         const meta = h.querySelector('button.underline')?.getBoundingClientRect()
         const r = name.getBoundingClientRect()
         const cs = getComputedStyle(name)

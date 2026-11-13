@@ -39,17 +39,22 @@ interface AiOptions {
   waitTimes: VoiceSettings['waitTime'][]
 }
 
+// 한 화면이 뜨는 동안 늦게 붙는 부품(띠 · 표)이 방금 받은 것을 또 부르지 않게 — 저장 · 반영 뒤에는 invalidate로 바로 다시 받음
+const JUST_FETCHED_MS = 5_000
+
 export const personaQueries = {
   all: () => ['personas'] as const,
   list: () =>
     queryOptions({
       queryKey: [...personaQueries.all(), 'list'],
       queryFn: ({ signal }) => fetchPersonas(signal),
+      staleTime: JUST_FETCHED_MS,
     }),
   versions: (personaSeq: number) =>
     queryOptions({
       queryKey: [...personaQueries.all(), personaSeq, 'versions'],
       queryFn: ({ signal }) => fetchVersions(personaSeq, signal),
+      staleTime: JUST_FETCHED_MS,
     }),
   options: () =>
     queryOptions({

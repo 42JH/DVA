@@ -81,6 +81,7 @@ export const scenarioTestQueries = {
       queryFn: async ({ signal }) => runsToTests(await get<RunDto[]>('/runs', signal)),
       // 시험이 도는 동안만 2초마다 다시 받음 — 표 · 카드 · 상세가 같은 규칙
       refetchInterval: (q) => (q.state.data?.some((t) => t.status === 'running') ? 2000 : false),
+      staleTime: 5_000, // 늦게 붙는 부품이 방금 받은 것을 또 부르지 않게 (personaQueries와 같은 이유). 시작 · 중단 뒤에는 invalidate
     }),
   verdict: (runId: string, scenario: string) =>
     queryOptions({

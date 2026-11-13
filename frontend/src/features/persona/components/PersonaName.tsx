@@ -46,6 +46,8 @@ export function PersonaName({
       }}
       onBlur={r.stop}
     >
+      {/* 이름을 고치는 동안에도 제목 순서(h1 → h2 → h3 프롬프트)가 이어지게 — 화면엔 입력 칸만 보임 */}
+      <h2 className="sr-only">{name}</h2>
       <input
         aria-label="상담가 이름"
         value={r.draft}
