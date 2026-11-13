@@ -2,6 +2,7 @@
 관리자 화면 · 백엔드가 붙는 자리다. 운영 AI 서버와 별도 프로그램으로 띄운다(운영 통화 · 실제 백엔드에 닿지 않는다).
 
     POST /runs                           {scenarios?: [ID], core?: 핵심만, promptText?: 글, voiceId?: 목소리, concurrency?: 수} → 202 {runId}
+    POST /runs/{runId}/stop              시험 멈춤: 돌던 통화를 끊고 남은 시나리오는 걸지 않는다 → 202 {runId}. 이미 끝난 묶음도 202(두 번 눌러도 같음)
     GET  /runs/{runId}                   진행 상황 + 시나리오별 상태 · 판정 요약
     GET  /runs/{runId}/{scenario}/verdict   판정 전체(검사 항목별 정답 · 실제)
     GET  /runs/{runId}/{scenario}/record    통화 기록: 고객이 한 말 · 고른 행동(customer), 백엔드가 받은 통화 이벤트 · 초안 · 분석(received)
@@ -73,10 +74,11 @@ class Runs:
         self.run_one = run_one or (lambda sid, persona, folder: try_call.run_call(sid, persona, bus, folder))
         self.live: dict[str, dict] = {}       # 돌고 있는 묶음(끝나면 내리고 run.json에서 읽는다)
         self.tasks: set[asyncio.Task] = set()
+        self.task_of: dict[str, asyncio.Task] = {}  # 돌고 있는 묶음의 실행 태스크(멈춤 요청이 찾는다)
         self.gate: asyncio.Semaphore | None = None  # 묶음이 여러 개여도 동시 통화는 max_concurrency까지
 
     def start(self, req: RunRequest) -> dict:
-        if req.tag and any(r.get("tag") == req.tag for r in self.live.values()):
+        if req.tag and any(r.get("tag") == req.tag and r["status"] == "running" for r in self.live.values()):
             raise Busy(f"이 표시의 시험이 이미 돌고 있음: {req.tag}")
         known = {s["id"]: s for s in judge.load_scenarios()}
         ids = req.scenarios or [i for i, s in known.items() if (s.get("core") or not req.core) and available(s)]
@@ -97,7 +99,19 @@ class Runs:
         self._save(run)
         task = asyncio.create_task(self._execute(run, {"promptText": req.promptText, "voiceId": req.voiceId}))
         self.tasks.add(task)
+        self.task_of[run["runId"]] = task
         task.add_done_callback(self.tasks.discard)
+        return run
+
+    def cancel(self, run_id: str) -> dict | None:
+        """관리자의 멈춤. 상태를 stopped로 바꾸고 실행 태스크를 취소한다 — 돌던 통화는 세션을 끊고 나오고(run_call의 finally),
+        줄 서 있던 시나리오는 걸지 않는다. 끝나지 않은 항목은 queued · running으로 남고 화면은 그것을 '시험 안 함'으로 본다(남은 것 시험으로 다시 돌림).
+        끊는 데 몇 초 걸려도 기다리지 않는다(백엔드 중계 시한 8초). 상태가 먼저 바뀌므로 같은 버전의 새 시험은 바로 받는다."""
+        run = self.get(run_id)
+        if run and (task := self.task_of.get(run_id)) and run["status"] == "running":
+            run["status"] = "stopped"
+            self._save(run)
+            task.cancel()
         return run
 
     def get(self, run_id: str) -> dict | None:
@@ -155,9 +169,10 @@ class Runs:
         try:
             await asyncio.gather(*(one(item) for item in run["items"]))
             run["status"] = "done"
-        finally:  # 종료로 취소되면 run.json은 running으로 남고, 다음에 읽을 때 interrupted로 보인다
+        finally:  # 창구 종료로 취소되면 run.json은 running으로 남고, 다음에 읽을 때 interrupted로 보인다. 멈춤은 stopped
             self._save(run)
             self.live.pop(run["runId"], None)
+            self.task_of.pop(run["runId"], None)
             faq.unlink(missing_ok=True)
 
     async def stop(self) -> None:
@@ -216,6 +231,12 @@ def create_app(runs: Runs, monitor: APIRouter | None = None) -> FastAPI:
             raise HTTPException(422, str(e)) from None
         except Busy as e:
             raise HTTPException(409, str(e)) from None
+
+    @api.post("/runs/{run_id}/stop", status_code=202)
+    async def stop_run(run_id: str) -> dict:
+        if runs.cancel(run_id) is None:
+            raise HTTPException(404, "없는 시험 묶음")
+        return {"runId": run_id}
 
     @api.get("/runs/{run_id}")
     async def status(run_id: str) -> dict:
