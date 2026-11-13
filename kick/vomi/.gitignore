@@ -11,3 +11,5 @@ captures/
 *.jks
 *.keystore
 google-services.json
+
+android-test.properties

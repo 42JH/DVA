@@ -4,8 +4,8 @@ plugins {
 }
 android { namespace = "com.ssafy.vomi.core.data" }
 dependencies {
-    implementation(projects.core.domain)
-    implementation(projects.core.model)
+    implementation(libs.retrofit)
+    api(projects.core.model)
     implementation(projects.core.common)
     implementation(projects.core.network)
     implementation(projects.core.database)
