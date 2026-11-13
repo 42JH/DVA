@@ -1,9 +1,9 @@
 // 시나리오 시험 상세 (11/12, Figma 1941:5457) — 통화 상세와 같은 한 화면. 시나리오 시험 화면의 표에서 줄을 눌러 옴
-// 위: ‹ 시나리오 이름 · 탭 [이 버전] [통화에 사용 중] [시나리오] · 시험 시각. [시나리오] = 고객 대본 | 정답 · 행동 확인 (보기만)
+// 11/13 새 안 3번(피그마 2368:5606): 흰 카드 안 — 위 탭 [고친 내용] [통화에 쓰는 내용] [시나리오] · 시험 시각, 통화 길이. [시나리오] = 고객 대본 | 정답 · 행동 확인 (보기만)
 // 왼쪽 대화(누르면 그 말부터 듣기) | 오른쪽 결과표 | 맨 아래 녹음 재생
-import { useRef, type ReactNode } from 'react'
+import { useRef } from 'react'
 import { Navigate, useLocation, useParams } from 'react-router'
-import { Badge, PageHead } from '@/shared/ui'
+import { Badge, PageHead, Segments } from '@/shared/ui'
 import { Talk } from '@/shared/call/AiSteps'
 import { Player } from '@/shared/call/Player'
 import { useFollowScroll } from '@/shared/call/useFollowScroll'
@@ -44,51 +44,48 @@ function Detail(p: { personaSeq: number; version: number; scenario: string }) {
       >
         <span className="truncate text-[13px] text-ops-sub">{vm.sub}</span>
       </PageHead>
-      {vm.note ? (
-        <Note>{vm.note}</Note>
-      ) : (
-        <>
-          <div className="flex shrink-0 items-center gap-6 border-b border-ops-line bg-white px-6">
-            <div role="tablist" aria-label="버전" className="flex gap-6">
-              {vm.tabs.map((t) => (
-                <Tab key={t.label} on={t.on} pick={t.pick}>
-                  {t.label}
-                  <span className="text-[13px] font-normal text-ops-sub">{t.date}</span>
-                  <span className="text-[13px] font-normal">
-                    <Result cell={t.cell} none="결과 없음" />
-                  </span>
-                </Tab>
-              ))}
-              <Tab on={vm.script.on} pick={vm.script.pick}>
-                시나리오
-              </Tab>
-            </div>
-            <span className="ml-auto text-[13px] text-ops-sub tabular-nums">{cur?.when}</span>
-          </div>
-          {!cur ? (
-            <Script scenario={p.scenario} />
-          ) : cur.runId ? (
-            <Call key={cur.runId} runId={cur.runId} scenario={p.scenario} />
+      <div className="flex min-h-0 flex-1 flex-col px-6 py-4">
+        <article className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-ops-line bg-white">
+          {vm.note ? (
+            <Note>{vm.note}</Note>
           ) : (
-            <Note>{cur.empty}</Note>
+            <>
+              <div className="flex shrink-0 flex-wrap items-center gap-4 border-b border-ops-line px-6 py-3">
+                {/* 회색 받침 위 탭 — 글자만 있으면 눌리는 곳으로 안 보임 (11/13) */}
+                <div className="rounded-lg bg-ops-paper p-1">
+                  <Segments
+                    label="보는 결과"
+                    value={String(vm.tabs.findIndex((t) => t.on))}
+                    items={[
+                      ...vm.tabs.map((t, i) => ({
+                        value: String(i),
+                        label: t.label,
+                        badge: (
+                          <>
+                            <span className="font-normal text-ops-sub">{t.date}</span>
+                            <Result cell={t.cell} none="결과 없음" />
+                          </>
+                        ),
+                      })),
+                      { value: '-1', label: '시나리오' }, // 결과 탭이 하나도 안 골렸으면 [시나리오]
+                    ]}
+                    onPick={(v) => (v === '-1' ? vm.script.pick() : vm.tabs[Number(v)].pick())}
+                  />
+                </div>
+                <span className="ml-auto text-[13px] text-ops-sub tabular-nums">{cur?.when}</span>
+              </div>
+              {!cur ? (
+                <Script scenario={p.scenario} />
+              ) : cur.runId ? (
+                <Call key={cur.runId} runId={cur.runId} scenario={p.scenario} />
+              ) : (
+                <Note>{cur.empty}</Note>
+              )}
+            </>
           )}
-        </>
-      )}
+        </article>
+      </div>
     </>
-  )
-}
-
-function Tab({ on, pick, children }: { on: boolean; pick: () => void; children: ReactNode }) {
-  return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={on}
-      onClick={pick}
-      className={`-mb-px flex items-center gap-2 border-b-2 py-3 text-[15px] font-bold outline-none focus-visible:text-ops-route ${on ? 'border-ops-route text-ops-route' : 'border-transparent text-ops-sub hover:text-ops-ink'}`}
-    >
-      {children}
-    </button>
   )
 }
 
@@ -201,13 +198,14 @@ function Call({ runId, scenario }: { runId: string; scenario: string }) {
           </h2>
           <table className="mt-2 w-full table-fixed text-[13px]">
             <thead className="text-left text-ops-sub">
-              <tr className="h-8 border-b border-ops-line [&>th]:text-left! [&>th]:font-medium">
+              {/* 다른 목록과 같은 표 머리 색 (ops-table) — 판정만 가운데 */}
+              <tr className="h-9 bg-[#e8eff8] text-ops-ink [&>th]:px-3 [&>th]:font-semibold [&>th:not(:last-child)]:border-r [&>th:not(:last-child)]:border-[#c5d6ec] [&>th:not(:last-child)]:text-left!">
                 <th scope="col" className="w-[30%]">
                   항목
                 </th>
                 <th scope="col">정답</th>
                 <th scope="col">통화 결과</th>
-                <th scope="col" className="w-[76px]">
+                <th scope="col" className="w-[76px] text-center!">
                   판정
                 </th>
               </tr>
@@ -219,7 +217,7 @@ function Call({ runId, scenario }: { runId: string; scenario: string }) {
                 return (
                   <tr
                     key={c.key}
-                    className={`border-b border-ops-line/60 align-top [&>td]:py-2 [&>td]:pr-3 ${skip ? 'text-ops-sub' : ''}`}
+                    className={`border-b border-ops-line/60 align-top [&>td]:px-3 [&>td]:py-2 [&>td:not(:last-child)]:border-r [&>td:not(:last-child)]:border-[#c5d6ec] ${skip ? 'text-ops-sub' : ''}`}
                   >
                     {c.behaviour ? (
                       <td colSpan={3}>
@@ -238,7 +236,7 @@ function Call({ runId, scenario }: { runId: string; scenario: string }) {
                       </>
                     )}
                     {/* 판정 사유(채점 안 한 이유 등)는 글로 붙이지 않고 칩에 올리면 보임 (11/12 사용자: 설명 문구 없이) */}
-                    <td className="pr-0!" title={c.note || undefined}>
+                    <td className="text-center!" title={c.note || undefined}>
                       <Badge tone={bad ? 'stop' : skip ? 'idle' : 'done'}>
                         {bad ? '실패' : skip ? '채점 안 함' : '통과'}
                       </Badge>

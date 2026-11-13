@@ -12,7 +12,7 @@ import {
   type Check,
   type VersionTest,
 } from '@/features/persona/api/scenarioTestApi'
-import { cellOf, failLine, shownCheck, type Cell } from './scenarioTest'
+import { cellOf, failLine, shownCheck, sideLabel, type Cell } from './scenarioTest'
 
 const EMPTY: Record<Cell, string> = {
   pass: '',
@@ -23,7 +23,7 @@ const EMPTY: Record<Cell, string> = {
   none: '시험 결과가 없습니다.',
 }
 
-/** 시나리오 한 개의 상세 — 탭 [이 버전] · [통화에 사용 중]. 어느 통화를 볼지만 정하고, 그 통화의 내용은 useScenarioCall */
+/** 시나리오 한 개의 상세 — 탭 [고친 내용] · [통화에 쓰는 내용] (sideLabel). 어느 통화를 볼지만 정하고, 그 통화의 내용은 useScenarioCall */
 export function useScenarioDetail(personaSeq: number, version: number, scenarioId: string) {
   const scenarios = useQuery(scenarioTestQueries.scenarios())
   const tests = useQuery(scenarioTestQueries.tests())
@@ -59,9 +59,11 @@ export function useScenarioDetail(personaSeq: number, version: number, scenarioI
   }
   // 보고 있는 버전이 통화에 사용 중인 버전이면 탭은 하나
   const same = active?.personaSeq === personaSeq && active.version === version
+  const persona = personas.data?.find((p) => p.personaSeq === personaSeq)
+  const isHead = !!versions.data?.find((x) => x.version === version)?.isHead
   const sides = [
-    side('이 버전', mine),
-    ...(active && !same ? [side('통화에 사용 중', active)] : []),
+    side(sideLabel({ ...mine, isHead }, active, persona?.name ?? ''), mine),
+    ...(active && !same ? [side('통화에 쓰는 내용', active)] : []),
   ]
   // 처음엔 이 버전, 이 버전에 통화가 없으면 통화가 있는 쪽, 통화가 하나도 없으면 [시나리오]
   const first = sides.findIndex((s) => s.runId)
@@ -71,7 +73,6 @@ export function useScenarioDetail(personaSeq: number, version: number, scenarioI
   const at = picked >= 0 ? picked : first < 0 ? sides.length : first
   const pick = (i: number) => setParams({ tab: names[i] }, { replace: true })
   const scenario = scenarios.data?.find((s) => s.id === scenarioId)
-  const persona = personas.data?.find((p) => p.personaSeq === personaSeq)
   const failed = scenarios.isError || tests.isError || personas.isError
 
   return {
@@ -191,7 +192,17 @@ export function useScenarioCall(runId: string, scenarioId: string) {
     })),
     focusKey: here >= 0 ? here : null,
     jump: jumped ?? opened,
-    counts: `통과 ${count('pass')}, 실패 ${count('fail')}, 채점 안 함 ${count('skip')}`,
+    // 0인 것은 빼고 (시안 '통과 4, 실패 1')
+    counts: (
+      [
+        ['통과', count('pass')],
+        ['실패', count('fail')],
+        ['채점 안 함', count('skip')],
+      ] as const
+    )
+      .filter(([, n]) => n > 0)
+      .map(([k, n]) => `${k} ${n}`)
+      .join(', '),
     checks: checks.map((c, i) => {
       const at = spots[i]
       return {

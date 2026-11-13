@@ -11,6 +11,14 @@ type Key = { personaSeq: number; version: number }
 const same = (a: Key, b: Key | null) =>
   !!b && a.personaSeq === b.personaSeq && a.version === b.version
 
+/** 버전을 부르는 말 (11/13 새 안 — 화면에 '버전'이라는 말 없음). 시험 결과 위 줄 · 표 머리 · 상세 탭이 같이 씀
+ *  통화에 쓰는 버전 = '통화에 쓰는 내용', 사용 중 상담가의 최신 = '고친 내용', 그 상담가의 더 옛 버전 = '이전 내용', 다른 상담가 = 그 이름 */
+export function sideLabel(me: Key & { isHead: boolean }, active: Key | null, name: string) {
+  if (same(me, active)) return '통화에 쓰는 내용'
+  if (me.personaSeq !== active?.personaSeq) return name
+  return me.isHead ? '고친 내용' : '이전 내용'
+}
+
 /** 묶음이 돌다가 꺼졌으면(interrupted) 못 끝낸 것은 결과 없음 */
 export function cellOf(item: TestItem | undefined, running: boolean): Cell {
   if (!item) return 'none'

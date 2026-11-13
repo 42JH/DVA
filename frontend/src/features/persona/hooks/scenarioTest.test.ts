@@ -1,7 +1,16 @@
 // 실행: npx tsx src/features/persona/hooks/scenarioTest.test.ts  (프레임워크 없이 assert만)
 import assert from 'node:assert/strict'
 import type { Scenario, TestItem, VersionTest } from '@/features/persona/api/scenarioTestApi'
-import { changeOf, failLine, restOf, rowsOf, shownCheck, testOf, type Cell } from './scenarioTest'
+import {
+  changeOf,
+  failLine,
+  restOf,
+  rowsOf,
+  shownCheck,
+  sideLabel,
+  testOf,
+  type Cell,
+} from './scenarioTest'
 
 const scenarios: Scenario[] = ['A1', 'B3', 'E1'].map((id) => ({
   id,
@@ -136,4 +145,19 @@ assert.equal(
   shownCheck({ name: '물품', status: 'fail', expected: 'a', actual: 'b' }, script).name,
   '물품',
 )
+// 버전을 부르는 말 — 통화에 쓰는 버전 · 같은 상담가의 최신 · 옛 버전 · 다른 상담가
+const live = { personaSeq: 1, version: 3 }
+assert.equal(
+  sideLabel({ personaSeq: 1, version: 3, isHead: true }, live, '빠른 접수형'),
+  '통화에 쓰는 내용',
+)
+assert.equal(
+  sideLabel({ personaSeq: 1, version: 4, isHead: true }, live, '빠른 접수형'),
+  '고친 내용',
+)
+assert.equal(
+  sideLabel({ personaSeq: 1, version: 2, isHead: false }, live, '빠른 접수형'),
+  '이전 내용',
+)
+assert.equal(sideLabel({ personaSeq: 2, version: 1, isHead: true }, live, '친절형'), '친절형')
 console.log('scenarioTest ok')
