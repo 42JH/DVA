@@ -5,6 +5,7 @@ type Vm = ReturnType<typeof usePersonaPage>
 type Band = NonNullable<Vm['band']>
 
 // 띠 (11/13 새 안 1번) — 반영 전(피그마 2368:2847) · 시험 중(3212) · 반영 중(3388) — 저장했지만 아직 통화에 안 쓰이는 버전이 있을 때
+// 6번 — 다른 상담가로 바꾸기(switchNote): 시험 중 '통화에 쓰기 전 시험' · 반영 중 '통화에 들어가는 중'. 시험 통과 띠는 PassBand
 // 2번 — 시험 중 [시험 중단](2368:3753) → 시험 중단(4355): [지금까지 결과 보기] [다시 시험하고 반영]
 // [반영 전] 고친 내용 · 저장 시각 · 수정한 사람 | [통화에 반영]  /  아래 줄 토글: 고친 내용 ↔ 통화에 쓰는 내용
 // busy: 프롬프트를 고치는 중 — 저장 안 한 글은 반영되지 않으니 [통화에 반영]을 끔
@@ -34,7 +35,13 @@ export function ApplyBand({
       <div className="flex flex-wrap items-center gap-3 border-b border-ops-wait/20 bg-ops-wait-soft px-7 py-3">
         <Badge tone="wait">{band.step === 'testing' ? '시험 중' : '반영 중'}</Badge>
         <span className="text-[15px] font-bold">
-          {band.step === 'testing' ? '통화에 반영하기 전 시험' : '고친 내용'}
+          {band.step === 'testing'
+            ? band.switchNote
+              ? '통화에 쓰기 전 시험'
+              : '통화에 반영하기 전 시험'
+            : band.switchNote
+              ? '통화에 들어가는 중'
+              : '고친 내용'}
         </span>
         {p ? (
           <>
@@ -50,6 +57,12 @@ export function ApplyBand({
             <span className="text-[13px] text-ops-sub">통과 {p.pass}</span>
             {p.fail > 0 && <span className="text-[13px] text-ops-stop">실패 {p.fail}</span>}
           </>
+        ) : band.switchNote ? (
+          <span className="text-[13px] text-ops-sub">
+            {band.applyError
+              ? 'AI 반영 오류가 있어 AI 확인을 다시 기다리는 중입니다'
+              : `AI 확인이 끝나면 ${band.switchNote}`}
+          </span>
         ) : (
           <span className="text-[13px] text-ops-sub">
             {band.time} 저장

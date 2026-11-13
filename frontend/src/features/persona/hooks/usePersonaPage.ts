@@ -4,6 +4,7 @@ import { useLocation } from 'react-router'
 import { fmtVersionTime } from '@/shared/lib/format'
 import { ApiError } from '@/shared/api/client'
 import { useSession } from '@/shared/auth/useSession'
+import { useShell } from '@/shared/lib/shell'
 import type { Tone } from '@/shared/ui'
 import {
   DEFAULT_VOICE_LABEL,
@@ -144,6 +145,7 @@ export function usePersonaPage() {
   // 내 정보를 불러오기 전(role undefined)에는 숨김
   const { role } = useSession()
   const canManage = role !== undefined
+  const { liveCalls } = useShell() // 바꾸기 확인 창 '지금 통화 중인 n건은 바뀌지 않습니다' (6번)
 
   const personas = useQuery({
     ...personaQueries.list(),
@@ -199,9 +201,11 @@ export function usePersonaPage() {
   const callVersion = unapplied
     ? (all.find((v) => v.version === persona.appliedVersion) ?? null)
     : null
-  // 띠의 시험 → 반영 (11/13 새 안 1번) — 반영 전인 고친 내용(현재 버전)
+  // 6번 — 통화에 안 쓰는 상담가를 통화에 쓰기: 현재 버전을 먼저 시험. 모두 통과해도 저절로 바꾸지 않음(담당자가 [통화에 사용하기])
+  const switching = !!persona && !persona.inUse
+  // 띠의 시험 → 반영 (11/13 새 안 1번) — 반영 전인 고친 내용(현재 버전) · 6번은 안 쓰는 상담가의 현재 버전
   const applyTarget =
-    unapplied && head && !head.isDraft
+    (unapplied || (switching && !persona.applyingVersion)) && head && !head.isDraft
       ? {
           personaSeq: persona.personaSeq,
           head: persona.head,
@@ -209,26 +213,33 @@ export function usePersonaPage() {
           voiceId: head.voice.voice || null,
         }
       : null
-  const applyTest = useApplyTest(applyTarget)
-  // 반영 중 = 사용 중 상담가의 새 버전을 AI가 확인하는 중 (다른 상담가로 바꾸는 중은 6번)
-  const applyingVersion =
-    persona?.inUse && persona.applyingVersion
-      ? (all.find((v) => v.version === persona.applyingVersion) ?? null)
-      : null
+  const applyTest = useApplyTest(applyTarget, { auto: !switching })
+  // 반영 중 = AI가 확인하는 중 — 사용 중 상담가의 새 버전(1번) · 다른 상담가로 바꾸는 중(6번)
+  const applyingVersion = persona?.applyingVersion
+    ? (all.find((v) => v.version === persona.applyingVersion) ?? head)
+    : null
   // stopped = 시험을 멈춤(2번) — [통화에 반영] 대신 [다시 시험하고 반영], 입력 칸은 다시 열림
   // review = 시험이 끝났는데 실패가 있음(4번) — 바로 반영하지 않고 담당자가 [확인하고 반영]
   // 연결 실패가 섞인 일부 시험(partial)도 실패가 있으면 확인 필요 (피그마 3 · 4번: 통과 7 · 실패 2 · 연결 실패 1)
-  const step: 'unapplied' | 'testing' | 'stopped' | 'review' | 'applying' | null = applyingVersion
-    ? 'applying'
-    : !unapplied
-      ? null
-      : applyTest.state === 'running'
-        ? 'testing'
-        : applyTest.stopped
-          ? 'stopped'
-          : (applyTest.state === 'done' || applyTest.state === 'partial') && applyTest.fail > 0
-            ? 'review'
-            : 'unapplied'
+  // passed = 6번 시험 통과 — 띠의 [통화에 사용하기]. 6번의 실패 · 중단은 시안에 없어 띠 없이 머리 줄 [통화에 사용하기](다시 시험)
+  const step: 'unapplied' | 'testing' | 'stopped' | 'review' | 'applying' | 'passed' | null =
+    applyingVersion
+      ? 'applying'
+      : switching
+        ? applyTest.state === 'running'
+          ? 'testing'
+          : applyTest.allPass
+            ? 'passed'
+            : null
+        : !unapplied
+          ? null
+          : applyTest.state === 'running'
+            ? 'testing'
+            : applyTest.stopped
+              ? 'stopped'
+              : (applyTest.state === 'done' || applyTest.state === 'partial') && applyTest.fail > 0
+                ? 'review'
+                : 'unapplied'
   // 시험 · 반영 중엔 입력 칸 · 목소리 · 이름 · 수정 기록 보기를 막음 — 고치면 새 버전이 생겨 시험하던 글과 달라짐
   const locked = step === 'testing' || step === 'applying'
   const comparing = showCall && callVersion !== null && !locked
@@ -372,6 +383,12 @@ export function usePersonaPage() {
     }
     if (confirming?.kind === 'test') {
       const n = applyTest.toRun
+      if (switching)
+        return {
+          title: `통화에 쓰기 전에 ${nameEul(persona.name)} 시험할까요?`,
+          note: `${applyTest.resume ? `남은 시나리오 ${n}개를` : `시나리오 ${n}개를 모두`} 돌린 뒤, 결과를 보고 통화에 사용할지 정합니다.`,
+          okLabel: '시험 시작',
+        }
       return {
         title: '시험하고 통화에 반영할까요?',
         note: `${applyTest.resume ? `남은 시나리오 ${n}개를` : `시나리오 ${n}개를 모두`} 돌립니다. 모두 통과하면 바로 반영하고, 실패가 있으면 결과를 확인한 뒤 반영할 수 있습니다.`,
@@ -381,6 +398,13 @@ export function usePersonaPage() {
     if (confirming?.kind === 'use') {
       const p = list.find((x) => x.personaSeq === confirming.personaSeq)
       if (!p) return null
+      // 6번 시험 통과 → 바꾸기 확인 (피그마 6번 줄 '통화에 사용 확인')
+      if (switching && step === 'passed' && p.personaSeq === persona.personaSeq)
+        return {
+          title: `${nameEul(p.name)} 통화에 사용할까요?`,
+          note: `다음 통화부터 ${inUse ? `${inUse.name} 대신 ` : ''}${nameI(p.name)} 응대합니다.${liveCalls ? ` 지금 통화 중인 ${liveCalls}건은 바뀌지 않습니다.` : ''}`,
+          okLabel: '사용하기',
+        }
       const until = p.inUse
         ? ' 그 전까지는 이전 버전이 계속 쓰입니다.'
         : inUse
@@ -404,8 +428,13 @@ export function usePersonaPage() {
     return null
   })()
 
+  // 6번 — 시험 전 · 실패 · 중단이면 시험부터 (모두 통과면 바로 바꾸기 확인). 시나리오 시험이 꺼진 환경이면 예전처럼 바로
   const askUse = (seq: number) => {
     confirm.reset() // 지난번 실패 문구가 새 창에 먼저 뜨지 않게
+    if (switching && seq === persona.personaSeq && applyTest.on && step !== 'passed') {
+      applyTest.resetStart()
+      return setConfirming({ kind: 'test' })
+    }
     setConfirming({ kind: 'use', personaSeq: seq })
   }
   // 수정 기록 창의 비교 기준 = 통화에 쓰는 내용 (안 쓰는 상담가는 appliedVersion = 현재 버전)
@@ -414,18 +443,20 @@ export function usePersonaPage() {
   const items = [...list]
     .sort((a, b) => Number(b.inUse) - Number(a.inUse))
     .map((p): PersonaItem => {
+      // 6번 시험 중 · 시험 통과 — [삭제]는 시험 중만, [통화에 사용하기]는 띠로 옮김 (피그마 6번 줄)
+      const mine = p.personaSeq === persona?.personaSeq
       return {
         personaSeq: p.personaSeq,
         name: p.name,
-        selected: p.personaSeq === persona?.personaSeq,
+        selected: mine,
         inUse: p.inUse,
         applying: p.applyingVersion
           ? `${VERSION_BADGE.PENDING.label}${p.applyError ? ' · AI 반영 오류' : ''}`
           : null,
         voice: voiceName(p.voice.voice),
-        deletable: canManage && !p.inUse && !p.applyingVersion,
+        deletable: canManage && !p.inUse && !p.applyingVersion && !(mine && step === 'testing'),
         // 시험 전이어도 켬 — 누르면 확인 창이 [시나리오 시험]으로 유도 (11/13, 11/12의 '말없이 끔'을 바꿈)
-        canUse: canManage && !p.inUse && !p.applyingVersion,
+        canUse: canManage && !p.inUse && !p.applyingVersion && !(mine && step !== null),
       }
     })
 
@@ -477,6 +508,8 @@ export function usePersonaPage() {
       step && (applyingVersion ?? head)
         ? {
             step,
+            // 6번 — 다른 상담가로 바꾸는 띠 문구: '통화에 쓰기 전 시험' · '다음 통화부터 친절형이 응대합니다'
+            switchNote: switching ? `다음 통화부터 ${nameI(persona.name)} 응대합니다` : null,
             time: fmtVersionTime((applyingVersion ?? head)!.savedAt),
             author: (applyingVersion ?? head)!.author,
             canApply: canManage,
@@ -507,6 +540,11 @@ export function usePersonaPage() {
                     fail: applyTest.failed.length,
                     at: applyTest.at ? fmtVersionTime(applyTest.at) : '',
                   }
+                : null,
+            // 6번 시험 통과 — 시나리오 10개 모두 통과 · 시험 시각
+            passed:
+              step === 'passed'
+                ? { total: applyTest.total, at: applyTest.at ? fmtVersionTime(applyTest.at) : '' }
                 : null,
             applyError: step === 'applying' ? (persona?.applyError ?? null) : null,
             error: applyTest.startError ?? applyTest.applyError,

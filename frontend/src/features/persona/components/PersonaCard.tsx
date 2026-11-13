@@ -5,6 +5,7 @@ import { usePromptEditor, type EditTarget } from '@/features/persona/hooks/usePr
 import { Badge, Btn, Icon } from '@/shared/ui'
 import { Confirm } from '@/shared/ui/Modal'
 import { ApplyBand } from './ApplyBand'
+import { PassBand } from './PassBand'
 import { HistoryModal } from './HistoryModal'
 import { PersonaName } from './PersonaName'
 import { PersonaTabs } from './PersonaTabs'
@@ -76,8 +77,8 @@ function Card({ vm, ed, editing }: { vm: Vm; ed: Ed | null; editing: boolean }) 
             {/* 프롬프트를 고치는 중엔 연필 없음 — 이름 저장이 새 버전을 만들어 고치던 글이 사라지므로 */}
             <PersonaName name={c.name} target={ed && !editing ? vm.editTarget : null} />
             {c.inUse && <Badge tone="done">통화에 사용 중</Badge>}
-            {/* 사용 중 상담가의 반영 중은 띠가 알림 */}
-            {c.applying && !c.inUse && <Badge tone="wait">{c.applying}</Badge>}
+            {/* 반영 중은 띠가 알림 (1번 사용 중 상담가 · 6번 다른 상담가로 바꾸기). 띠를 못 그릴 때만 배지 */}
+            {c.applying && !vm.band && <Badge tone="wait">{c.applying}</Badge>}
           </div>
           <div className="flex flex-wrap items-end gap-4 text-[14px] text-ops-sub">
             {ed ? (
@@ -127,7 +128,8 @@ function Card({ vm, ed, editing }: { vm: Vm; ed: Ed | null; editing: boolean }) 
                 삭제
               </Btn>
             )}
-            {vm.testTo && (
+            {/* 6번 시험 중 · 반영 중엔 머리 줄 버튼 없음 — [진행 보기]는 띠에 (피그마 6번 줄) */}
+            {vm.testTo && !(vm.locked && !c.inUse) && (
               <Btn kind="plain" onClick={() => void navigate(vm.testTo!)}>
                 시나리오 시험
               </Btn>
@@ -140,17 +142,26 @@ function Card({ vm, ed, editing }: { vm: Vm; ed: Ed | null; editing: boolean }) 
           </span>
         )}
       </header>
-      {vm.band && (
-        <ApplyBand
-          band={vm.band}
-          showCall={vm.showCall}
-          setShowCall={vm.setShowCall}
-          onApply={vm.applyHead}
-          onProgress={vm.testTo ? () => void navigate(vm.testTo!) : undefined}
-          onStop={vm.askStop}
-          onReview={vm.askReview}
-          busy={editing}
+      {vm.band?.passed ? (
+        <PassBand
+          total={vm.band.passed.total}
+          time={vm.band.passed.at}
+          onOpen={vm.testTo ? () => void navigate(vm.testTo!) : undefined}
+          onUse={vm.band.canApply ? () => vm.askUse(c.personaSeq) : undefined}
         />
+      ) : (
+        vm.band && (
+          <ApplyBand
+            band={vm.band}
+            showCall={vm.showCall}
+            setShowCall={vm.setShowCall}
+            onApply={vm.applyHead}
+            onProgress={vm.testTo ? () => void navigate(vm.testTo!) : undefined}
+            onStop={vm.askStop}
+            onReview={vm.askReview}
+            busy={editing}
+          />
+        )
       )}
       {/* '통화에 쓰는 내용'은 읽기만 — 고치던 글은 편집 훅에 그대로 남아 '고친 내용'으로 돌아오면 이어짐 */}
       {p.callSections ? (
