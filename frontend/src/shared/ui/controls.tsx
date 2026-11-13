@@ -91,7 +91,7 @@ export function Segments<T extends string>({
   label,
 }: {
   value: T
-  items: { value: T; label: string; count?: number | null }[]
+  items: { value: T; label: string; count?: number | null; badge?: ReactNode }[]
   onPick: (v: T) => void
   label: string
 }) {
@@ -109,6 +109,7 @@ export function Segments<T extends string>({
             className={`inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-[13px] font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ops-route ${on ? 'bg-white text-ops-ink shadow-[0_0_0_1px_var(--color-ops-line)]' : 'text-ops-sub hover:text-ops-ink'}`}
           >
             {it.label}
+            {it.badge}
             {/* 건수 자리는 받기 전(null)에도 잡아 둠 — 숫자가 하나씩 오며 탭이 밀려 울렁이던 것 (11/09 사용자)
                 undefined = 건수 없는 탭(기간 등) */}
             {it.count !== undefined && (
