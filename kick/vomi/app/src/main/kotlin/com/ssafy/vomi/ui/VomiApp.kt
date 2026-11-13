@@ -14,6 +14,8 @@ import com.ssafy.vomi.core.designsystem.component.Scaffold
 import com.ssafy.vomi.core.designsystem.component.VomiBackground
 import com.ssafy.vomi.core.navigation.Navigator
 import com.ssafy.vomi.core.navigation.rememberNavigationState
+import com.ssafy.vomi.feature.call.api.navigation.CallNavKey
+import com.ssafy.vomi.feature.call.impl.navigation.callEntry
 import com.ssafy.vomi.feature.home.api.navigation.HomeNavKey
 import com.ssafy.vomi.feature.home.impl.navigation.homeEntry
 
@@ -31,7 +33,10 @@ fun VomiApp() {
                     rememberSaveableStateHolderNavEntryDecorator(),
                     rememberViewModelStoreNavEntryDecorator(),
                 ),
-                entryProvider = entryProvider { homeEntry() },
+                entryProvider = entryProvider {
+                    homeEntry { friendId, friendName -> navigator.navigate(CallNavKey(friendId, friendName)) }
+                    callEntry(onEndCall = navigator::goBack)
+                },
             )
         }
     }

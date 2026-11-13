@@ -12,6 +12,8 @@ android {
     }
 }
 dependencies {
+    implementation(projects.feature.call.api)
+    implementation(projects.feature.call.impl)
     implementation(projects.feature.home.api)
     implementation(projects.feature.home.impl)
     implementation(projects.core.data)

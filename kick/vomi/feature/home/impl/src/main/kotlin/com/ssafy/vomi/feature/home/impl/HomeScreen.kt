@@ -31,7 +31,7 @@ import com.ssafy.vomi.feature.home.impl.model.sampleFriends
 
 @Composable
 internal fun HomeScreen(
-    onFriendClick: (Long) -> Unit,
+    onFriendClick: (Long, String) -> Unit,
     modifier: Modifier = Modifier,
     viewModel: HomeViewModel = hiltViewModel(),
 ) {
@@ -47,7 +47,7 @@ internal fun HomeScreen(
 @Composable
 private fun HomeContent(
     uiState: HomeUiState,
-    onFriendClick: (Long) -> Unit,
+    onFriendClick: (Long, String) -> Unit,
     onRetryClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -73,7 +73,7 @@ private fun HomeContent(
                         contentPadding = PaddingValues(top = 4.dp, bottom = 16.dp),
                     ) {
                         items(items = uiState.friends, key = { it.id }, contentType = { "friend" }) { friend ->
-                            FriendListItem(friend = friend, onClick = { onFriendClick(friend.id) })
+                            FriendListItem(friend = friend, onClick = { onFriendClick(friend.id, friend.name) })
                         }
                     }
                 }
@@ -134,7 +134,7 @@ private fun HomePreview(uiState: HomeUiState) {
             Scaffold(modifier = Modifier.fillMaxWidth()) { padding ->
                 HomeContent(
                     uiState = uiState,
-                    onFriendClick = {},
+                    onFriendClick = { _, _ -> },
                     onRetryClick = {},
                     modifier = Modifier.padding(padding),
                 )
