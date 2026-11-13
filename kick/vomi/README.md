@@ -138,7 +138,8 @@ DTO는 Kick의 실제 JSON 응답 형식을 사용합니다.
 
 호출은 `ViewModel → Repository → Client → Service → 서버` 순서입니다.
 서비스의 상대 경로 `api/accounts/me`에는 선행 슬래시를 넣지 않아 `/kick/`을 유지합니다.
-연결·읽기·쓰기·전체 호출 타임아웃은 현재 공통 30초입니다.
+일반 요청의 연결·읽기·쓰기·전체 호출 타임아웃은 30초입니다.
+SSE와 TTS는 별도의 StreamingNetwork 설정으로 전체 호출·읽기 타임아웃을 해제합니다.
 
 `core:data/auth/SessionAccessTokenProvider`는 Repository와 독립적으로 토큰을 공급합니다.
 Repository는 인증 성공 후 Provider를 갱신하고, 로그아웃 시 지웁니다.
@@ -161,3 +162,49 @@ NetworkClientTest는 네트워크로 나가기 전의 테스트 응답을 사용
 OkHttp Interceptor 체인, 인증 헤더와 로그 마스킹을 검증합니다.
 AuthRepositoryLiveTest는 명시적으로 활성화했을 때 공통 설정으로 실제 서버를 조회하여
 각 계정의 명시적 토큰, 로그인 후 자동 헤더, 로그아웃 후 인증 해제를 확인합니다.
+
+## Kick API 지원 범위
+
+[Android 연동 명세](docs/kick-android-api.md)를 기준으로 다음 HTTP API를 구현했습니다.
+아직 친구·통화 화면에는 연결하지 않았으며, 기존 테스트 로그인 동작은 유지합니다.
+
+| Client | 지원 요청 |
+| --- | --- |
+| AccountClient | POST api/accounts, GET api/accounts/me |
+| FriendClient | GET api/friends, PUT api/friends/{friendId} |
+| VoiceClient | GET api/voice, multipart POST api/voice, streaming POST api/voice/speech/stream |
+| CallClient | POST api/calls, GET api/calls/active, GET api/calls/{id}, PATCH api/calls/{id}, POST api/calls/{id}/join |
+| CallEventsClient | GET api/calls/events → Flow<CallStateResponse> |
+| DeviceClient | PUT / DELETE api/devices/push (둘 다 JSON token 본문) |
+| HealthClient | GET health |
+
+- 회원가입과 health는 Retrofit 요청 태그로 현재 세션 토큰 첨부를 생략합니다.
+  회원가입 응답 토큰을 저장하거나 로그인 상태를 바꾸는 처리는 이후 Repository 연결 시 구현합니다.
+- 통화 생성은 CreateCallRequest의 requestId를 그대로 보냅니다. 같은 발신을 재시도할 때 호출자가 같은 UUID를 유지해야 합니다.
+- 통화 변경 action은 accept / reject / cancel / end로 직렬화합니다.
+  명세에 변경 응답 본문이 정의되지 않아 성공은 Unit으로 처리하며, 상태는 조회 또는 이벤트로 확인합니다.
+- 음성 등록은 동의가 true인 1 byte~10 MiB의 MP3/WAV 파일만 요청합니다.
+  TTS는 입력을 자르거나 수정하지 않고 보내며 서버 명세의 최대 50자 제한을 따릅니다.
+- TTS의 ResponseBody는 WAV 헤더 없는 16 kHz, 16-bit signed little-endian, mono PCM입니다.
+  호출자가 IO dispatcher에서 읽고 사용 완료·취소 시 반드시 닫아야 합니다.
+- 이벤트 Flow는 수집할 때 새 SSE 연결을 열고 수집 취소 시 소켓과 응답 본문을 정리합니다.
+  call:null을 포함한 스냅샷을 전달하며 연결 종료와 HTTP·파싱 실패를 오류로 전달합니다.
+  재연결 정책·활성 통화 재조회·FCM 중복 제거는 이후 Repository에서 결정합니다.
+- 일반 HTTP 오류는 HttpException으로 전달합니다. 서비스별 오류 JSON 형식은 명세에 없어 임의의 공통 오류 DTO를 만들지 않았습니다.
+
+로컬 HTTP 계약 테스트(실제 가입·음성 등록·TTS·FCM 요청 없음):
+
+~~~powershell
+# 터미널 1
+postman simulation run postman/simulations/kick-android.sim.yaml --port 4017 --no-history
+
+# 터미널 2
+$env:KICK_SIMULATION_URL = "http://127.0.0.1:4017/kick/"
+.\gradlew.bat :core:network:testDebugUnitTest
+~~~
+
+RemainingApiContractTest는 실제 Retrofit/OkHttp를 로컬 Postman 서버에 연결해 요청 경로·JSON·multipart·204·SSE·PCM·HTTP 오류를 검증합니다.
+운영 URL과 인증 Interceptor를 거친 뒤 테스트용 Interceptor가 마지막 전송 주소만 바꿉니다.
+KICK_SIMULATION_URL이 없으면 이 계약 테스트만 건너뛰며, SSE 파싱·실제 소켓 취소·파일 사전 검증 테스트는 항상 실행합니다.
+AuthRepositoryLiveTest는 별도 활성화 시 두 테스트 계정으로 계정·친구·음성 상태·활성 통화·SSE를 읽기 전용 검증합니다.
+실제 신규 가입, 음성 업로드/합성, 푸시 등록/삭제와 통화 상태 변경은 이번 검증에서 실행하지 않습니다.
