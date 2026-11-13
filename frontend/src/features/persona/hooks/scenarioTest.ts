@@ -62,6 +62,37 @@ export function testOf(
   return before ? { state: 'stale', shown: before } : { state: 'none', shown: null }
 }
 
+/** 통화에 쓰는 버전을 시험한 적이 없으면(이름만 바꿔 시험 없이 반영한 버전) 내용이 같은 앞 버전의 결과를 그 버전 것으로 옮겨 봄
+ *  — 시험 결과 표 · 상세 · 비교 기준이 모두 같은 결과를 봄 (안 옮기면 이름을 바꾼 뒤 '통화에 쓰는 내용'이 '결과 없음') */
+export function withActiveTests(
+  tests: VersionTest[],
+  versions: { version: number; talk: string }[],
+  active: Key | null,
+): VersionTest[] {
+  const base = baseOf(tests, versions, active)
+  if (!active || !base || base.version === active.version) return tests
+  return tests.map((t) => (t === base ? { ...t, version: active.version } : t))
+}
+
+/** 통화에 쓰는 내용의 시험 결과. 그 버전 것이 없으면 AI가 받는 것(프롬프트 · 목소리)이 같은 바로 앞 버전들의 결과
+ *  versions = 그 상담가의 버전들(순서 무관), talk = 프롬프트 · 목소리를 합친 글. 목록을 받기 전(빈 배열)이면 그 버전 것만 */
+export function baseOf(
+  tests: VersionTest[],
+  versions: { version: number; talk: string }[],
+  active: Key | null,
+): VersionTest | null {
+  if (!active) return null
+  const of = (version: number) => tests.find((t) => same(t, { ...active, version }))
+  const talk = versions.find((v) => v.version === active.version)?.talk
+  for (const v of [...versions].sort((a, b) => b.version - a.version)) {
+    if (v.version > active.version) continue
+    if (v.talk !== talk) break
+    const t = of(v.version)
+    if (t) return t
+  }
+  return of(active.version) ?? null
+}
+
 /** 표 줄 — 시나리오 순서 그대로. 통화에 사용 중(base) · 이 버전(now) · 변화 */
 export function rowsOf(scenarios: Scenario[], base: VersionTest | null, now: VersionTest | null) {
   const cell = (t: VersionTest | null, id: string) =>

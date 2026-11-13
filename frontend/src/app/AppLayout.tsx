@@ -1,12 +1,20 @@
 // 화면 틀 — 왼쪽 글자 메뉴(처리할 건수 같이) + 오른쪽 화면. 화면 위 줄(제목 · 상태)은 화면이 PageHead로 그림
-import { useState } from 'react'
+import { lazy, Suspense, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation, useNavigation } from 'react-router'
 import logo from '@/shared/assets/logo-dva.webp'
 import { Icon, type IconName } from '@/shared/ui'
 import { Confirm } from '@/shared/ui/Modal'
 import { ShellContext } from '@/shared/lib/shell'
 import { useTrackHistory } from '@/shared/lib/keepScroll'
+import { useHasPledge } from '@/features/persona/hooks/pledgeStore'
 import { useShellState } from './useShellState'
+
+// AI 상담가 '모두 통과하면 반영' 약속 지켜보기 — 약속이 있을 때만 불러옴 (시험 창구 코드가 첫 화면 묶음에 들어가지 않게)
+const ApplyAfterTest = lazy(() =>
+  import('@/features/persona/components/ApplyAfterTest').then((m) => ({
+    default: m.ApplyAfterTest,
+  })),
+)
 
 type Item = {
   to: string
@@ -22,6 +30,7 @@ export function AppLayout() {
   const nav = useNavigation()
   useTrackHistory()
   const [askLogout, setAskLogout] = useState(false) // 로그아웃은 한 번 더 물음 (11/12 사용자: 잘못 누르면 바로 나가짐)
+  const hasPledge = useHasPledge() // 시험이 모두 통과하면 반영 — 어느 화면에 있든 (AI 상담가 1번)
   const groups: { title: string; items: Item[] }[] = [
     {
       title: '운영',
@@ -152,6 +161,11 @@ export function AppLayout() {
           </div>
         </main>
       </div>
+      {hasPledge && (
+        <Suspense fallback={null}>
+          <ApplyAfterTest />
+        </Suspense>
+      )}
       {askLogout && (
         <Confirm
           title="로그아웃할까요?"

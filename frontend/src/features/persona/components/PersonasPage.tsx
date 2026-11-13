@@ -1,12 +1,11 @@
 // AI 상담가 (11/13 새 안, 피그마 2368:2525) — 위 탭으로 상담가 고르기 | 카드 = 머리 줄(이름 · 목소리 · 저장 시각 · 버튼) + 프롬프트
 // 11/11: 저장 = 새 버전, [적용] 없음. 버전 기록은 5단계 수정 기록 창으로 옮김
 // 데이터 · 규칙은 usePersonaPage. 카드 = 탭 + 그 자리에서 고치기 (PersonaCard). [시나리오 시험]은 따로 화면 (ScenarioTest)
-import { useLocation, useNavigate } from 'react-router'
+import { useLocation } from 'react-router'
 import { usePersonaPage } from '@/features/persona/hooks/usePersonaPage'
 import { AddPersona } from './AddPersona'
 import { PersonaCard } from './PersonaCard'
 import { PageHead } from '@/shared/ui'
-import { Btn } from '@/shared/ui'
 import { Confirm } from '@/shared/ui/Modal'
 
 // 사이드바의 [AI 상담가]를 다시 눌러도 location.key가 새로 생김 → 화면 상태를 통째로 버리고 처음(상담가 유형 탭)으로.
@@ -15,9 +14,11 @@ export function PersonasPage() {
   return <PersonasView key={useLocation().key} />
 }
 
+// 시안: 위 16 · 옆 24 · 아래 24, 탭 줄과 카드 사이 16
+const FRAME = 'flex min-h-0 flex-1 flex-col gap-4 px-6 pt-4 pb-6'
+
 function PersonasView() {
   const vm = usePersonaPage()
-  const navigate = useNavigate()
   return (
     <>
       <PageHead title="AI 상담가" />
@@ -33,7 +34,7 @@ function PersonasView() {
       )}
       {vm.adding ? (
         // 등록 — 위 탭 아래 '새 상담가' 카드. 목록이 비어 있어도 첫 상담가를 만들 수 있게 맨 앞에서 가름
-        <div className="flex min-h-0 flex-1 flex-col gap-4 px-6 py-4">
+        <div className={FRAME}>
           <AddPersona vm={vm} />
         </div>
       ) : vm.error || vm.isLoading || vm.personas.length === 0 ? (
@@ -41,7 +42,7 @@ function PersonasView() {
           {vm.error ?? (vm.isLoading ? '불러오는 중…' : '상담가가 없습니다.')}
         </p>
       ) : (
-        <div className="flex min-h-0 flex-1 flex-col gap-4 px-6 py-4">
+        <div className={FRAME}>
           <PersonaCard vm={vm} />
         </div>
       )}
@@ -51,30 +52,10 @@ function PersonasView() {
           ok={vm.confirm.okLabel}
           danger={vm.confirm.danger}
           busy={vm.confirmBusy}
-          disabled={vm.confirm.blocked}
-          extra={
-            vm.confirm.testTo && (
-              // 시험 전이면 이 버튼이 주 버튼 + 첫 초점 (끈 확인 버튼엔 초점이 못 감)
-              <Btn
-                kind={vm.confirm.blocked ? 'primary' : 'line'}
-                data-autofocus={vm.confirm.blocked || undefined}
-                onClick={() => void navigate(vm.confirm!.testTo!)}
-              >
-                시나리오 시험
-              </Btn>
-            )
-          }
           error={vm.confirmError}
           onOk={vm.confirmOk}
           onClose={vm.confirmCancel}
         >
-          {/* 통화에 사용 중인 버전과 달라진 수만 (11/12 사용자: 이름을 다 띄우지 않음 — 이름은 뒤의 표에) */}
-          {vm.confirm.changes && vm.confirm.changes.fail + vm.confirm.changes.pass > 0 && (
-            <p className="mb-2 font-bold">
-              <span className="text-ops-stop">새로 실패 {vm.confirm.changes.fail}개</span>,{' '}
-              <span className="text-ops-done">새로 통과 {vm.confirm.changes.pass}개</span>
-            </p>
-          )}
           {vm.confirm.failed && <p>실패: {vm.confirm.failed.join(', ')}</p>}
           {vm.confirm.note}
         </Confirm>

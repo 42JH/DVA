@@ -2,14 +2,14 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { fmtMonthDay, fmtVersionTime } from '@/shared/lib/format'
 import { ymd } from '@/shared/lib/dateRange'
-import { personaQueries } from '@/features/persona/api/personaApi'
+import { personaQueries, type PersonaVersion } from '@/features/persona/api/personaApi'
 import {
   SCENARIO_TEST,
   scenarioTestQueries,
   startTest,
   stopTest,
 } from '@/features/persona/api/scenarioTestApi'
-import { restOf, rowsOf, sideLabel, testOf } from './scenarioTest'
+import { restOf, rowsOf, sideLabel, testOf, withActiveTests } from './scenarioTest'
 
 export { SCENARIO_TEST } // 화면(components)은 api를 직접 부르지 않아 여기서 내보냄
 
@@ -17,13 +17,24 @@ type Me = { personaSeq: number; version: number; isHead: boolean }
 /** 시험할 버전 — 시작할 때 그 버전의 합친 글과 음성을 창구에 보냄 (voiceId null = AI 기본 음성) */
 export type TestTarget = Me & { promptText: string; voiceId: string | null }
 
-/** 시나리오 · 버전별 결과 · 통화에 사용 중인 버전 — 표와 [통화에 사용하기] 관문이 같이 씀 (요청은 한 번, 캐시 공유) */
+/** 버전마다 AI가 받는 것(프롬프트 · 목소리)을 한 글로 — 내용이 같은 버전 찾기(withActiveTests)에 씀 */
+export const talksOf = (versions: PersonaVersion[] | undefined) =>
+  (versions ?? [])
+    .filter((v) => !v.isDraft)
+    .map((v) => ({ version: v.version, talk: JSON.stringify([v.prompt, v.voice]) }))
+
+/** 시나리오 · 버전별 결과 · 통화에 사용 중인 버전 — 시나리오 시험 화면의 표 (띠 · 상세와 캐시 공유) */
 function useTestData() {
   const scenarios = useQuery({ ...scenarioTestQueries.scenarios(), enabled: SCENARIO_TEST })
   const tests = useQuery({ ...scenarioTestQueries.tests(), enabled: SCENARIO_TEST })
   const inUse = useQuery(personaQueries.list()).data?.find((p) => p.inUse)
   const active = inUse ? { personaSeq: inUse.personaSeq, version: inUse.appliedVersion } : null
-  const all = tests.data ?? []
+  // 통화에 쓰는 상담가의 버전들 — 통화에 쓰는 버전을 시험한 적이 없을 때 내용이 같은 앞 버전의 결과를 찾음
+  const activeVersions = useQuery({
+    ...personaQueries.versions(inUse?.personaSeq ?? 0),
+    enabled: SCENARIO_TEST && !!inUse,
+  })
+  const all = withActiveTests(tests.data ?? [], talksOf(activeVersions.data), active)
   const base =
     all.find((t) => t.personaSeq === active?.personaSeq && t.version === active.version) ?? null
   return {
@@ -32,26 +43,8 @@ function useTestData() {
     active,
     read: (me: Me) => {
       const { state, shown } = testOf(all, scenarios.data ?? [], me, active)
-      const rows = rowsOf(scenarios.data ?? [], base, shown)
-      return {
-        state,
-        shown,
-        rows,
-        newFail: rows.filter((r) => r.change === '새로 실패').length,
-        newPass: rows.filter((r) => r.change === '새로 통과').length,
-      }
+      return { state, shown, rows: rowsOf(scenarios.data ?? [], base, shown) }
     },
-  }
-}
-
-/** [통화에 사용하기] 관문 — 그 상담가의 최신 버전이 전체 시험을 끝냈는가, 새로 실패 · 새로 통과는 몇 개인가
- *  시나리오 시험이 꺼진 환경(SCENARIO_TEST false)이면 null (관문 없음, 지금 화면 그대로) */
-export function useTestGate() {
-  const d = useTestData()
-  if (!SCENARIO_TEST) return null
-  return (personaSeq: number, version: number) => {
-    const r = d.read({ personaSeq, version, isHead: true })
-    return { state: d.ready ? r.state : 'none', newFail: r.newFail, newPass: r.newPass }
   }
 }
 
@@ -99,7 +92,7 @@ export function useScenarioTestPage(personaSeq: number, version: number) {
         ? '불러오지 못했습니다. 다시 시도해 주세요.'
         : personas.isPending || versions.isPending
           ? '불러오는 중…'
-          : '없는 버전입니다.',
+          : '시험할 내용을 찾을 수 없습니다.',
   }
 }
 

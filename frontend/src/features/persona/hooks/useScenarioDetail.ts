@@ -12,7 +12,8 @@ import {
   type Check,
   type VersionTest,
 } from '@/features/persona/api/scenarioTestApi'
-import { cellOf, failLine, shownCheck, sideLabel, type Cell } from './scenarioTest'
+import { cellOf, failLine, shownCheck, sideLabel, withActiveTests, type Cell } from './scenarioTest'
+import { talksOf } from './useScenarioTest'
 
 const EMPTY: Record<Cell, string> = {
   pass: '',
@@ -34,12 +35,18 @@ export function useScenarioDetail(personaSeq: number, version: number, scenarioI
   const inUse = personas.data?.find((p) => p.inUse)
   const mine = { personaSeq, version }
   const active = inUse ? { personaSeq: inUse.personaSeq, version: inUse.appliedVersion } : null
+  // 통화에 쓰는 버전을 시험한 적이 없으면 내용이 같은 앞 버전의 결과 (시나리오 시험 표와 같은 기준 — withActiveTests)
+  const activeVersions = useQuery({
+    ...personaQueries.versions(inUse?.personaSeq ?? 0),
+    enabled: !!inUse,
+  })
+  const all = withActiveTests(tests.data ?? [], talksOf(activeVersions.data), active)
   const date = (k: typeof mine) => {
     const v = k.personaSeq === personaSeq && versions.data?.find((x) => x.version === k.version)
     return v ? fmtMonthDay(ymd(new Date(v.savedAt))) : ''
   }
   const side = (label: string, k: typeof mine) => {
-    const t: VersionTest | undefined = tests.data?.find(
+    const t: VersionTest | undefined = all.find(
       (x) => x.personaSeq === k.personaSeq && x.version === k.version,
     )
     const item = t?.items.find((i) => i.scenario === scenarioId)

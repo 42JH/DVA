@@ -32,8 +32,8 @@ export function PersonaTabs({
         }
       />
       {vm.canAdd && (
-        // 등록 중이면 이미 그 화면 — 누르지 않아도 됨
-        <Btn kind="line" className="ml-auto" disabled={adding} onClick={() => go(vm.openAdd)}>
+        // 등록 중이면 이미 그 화면 — 누르지 않아도 됨. 오른쪽 끝은 카드 안 버튼 줄(카드 여백 28)에 맞춤 (시안)
+        <Btn kind="line" className="mr-7 ml-auto" disabled={adding} onClick={() => go(vm.openAdd)}>
           <Icon name="plus" />
           상담가 등록
         </Btn>

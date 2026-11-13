@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict'
 import type { Scenario, TestItem, VersionTest } from '@/features/persona/api/scenarioTestApi'
 import {
+  baseOf,
   changeOf,
   failLine,
   restOf,
@@ -9,6 +10,7 @@ import {
   shownCheck,
   sideLabel,
   testOf,
+  withActiveTests,
   type Cell,
 } from './scenarioTest'
 
@@ -160,4 +162,32 @@ assert.equal(
   '이전 내용',
 )
 assert.equal(sideLabel({ personaSeq: 2, version: 1, isHead: true }, live, '친절형'), '친절형')
+
+// 통화에 쓰는 내용의 비교 기준 — 그 버전을 시험한 적이 없으면 내용(프롬프트 · 목소리)이 같은 앞 버전의 결과
+{
+  const v7 = test(7, 'done', [item('A1', 'done', true)])
+  const v5 = test(5, 'done', [item('A1', 'done', false)])
+  const versions = [
+    { version: 9, talk: 'b' }, // 이름만 바꿔 시험 없이 반영
+    { version: 8, talk: 'b' }, // 이름만 바꿈
+    { version: 7, talk: 'b' }, // 시험함
+    { version: 6, talk: 'a' },
+    { version: 5, talk: 'a' },
+  ]
+  assert.equal(baseOf([v7, v5], versions, { personaSeq: 1, version: 9 }), v7)
+  assert.equal(baseOf([v7, v5], versions, { personaSeq: 1, version: 7 }), v7) // 시험한 버전은 제 것
+  assert.equal(baseOf([v5], versions, { personaSeq: 1, version: 9 }), null) // 내용이 다른 버전(5)까지 내려가지 않음
+  assert.equal(baseOf([v7], [], { personaSeq: 1, version: 7 }), v7) // 버전 목록을 받기 전
+  assert.equal(baseOf([v7], versions, { personaSeq: 2, version: 9 }), null) // 다른 상담가
+  assert.equal(baseOf([v7], versions, null), null)
+  // 그 결과를 통화에 쓰는 버전 것으로 옮겨 봄 — 표 · 상세가 같은 결과를 보게. 제 결과가 있으면 그대로
+  const moved = withActiveTests([v7, v5], versions, { personaSeq: 1, version: 9 })
+  assert.deepEqual(
+    moved.map((t) => t.version),
+    [9, 5],
+  )
+  assert.equal(moved[0].items, v7.items)
+  const own = [v7, v5]
+  assert.equal(withActiveTests(own, versions, { personaSeq: 1, version: 7 }), own)
+}
 console.log('scenarioTest ok')

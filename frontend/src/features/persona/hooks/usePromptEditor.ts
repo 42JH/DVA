@@ -97,10 +97,10 @@ export function usePromptEditor(target: EditTarget, onDone: (savedVersion?: numb
     saveError: !mutation.error
       ? null
       : mutation.error instanceof ConfirmError
-        ? '내용은 저장됐지만 새 버전으로 올리지 못했습니다. [저장]을 다시 눌러 주세요.'
+        ? '저장을 마치지 못했습니다. [저장]을 다시 눌러 주세요.'
         : (unsupportedText(mutation.error) ??
           (mutation.error instanceof ApiError && mutation.error.status === 409
-            ? '그새 다른 관리자가 이 상담가를 저장 · 적용했습니다. 고친 글을 복사해 두고 [취소] 후 최신 버전에서 다시 수정해 주세요.'
+            ? '그새 다른 관리자가 이 상담가를 저장하거나 반영했습니다. 고친 글을 복사해 두고 [취소] 후 최신 내용에서 다시 수정해 주세요.'
             : '저장하지 못했습니다. 잠시 뒤 다시 시도해 주세요.')),
 
     ...guard, // [취소] · 나가기 확인 창

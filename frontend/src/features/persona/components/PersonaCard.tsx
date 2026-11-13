@@ -10,7 +10,7 @@ import { HistoryModal } from './HistoryModal'
 import { PersonaName } from './PersonaName'
 import { PersonaTabs } from './PersonaTabs'
 import { PromptBody } from './PromptBody'
-import { VoiceFields } from './VoiceFields'
+import { VOICE_BOX, VoiceFields } from './VoiceFields'
 
 type Vm = ReturnType<typeof usePersonaPage>
 type Ed = ReturnType<typeof usePromptEditor>
@@ -72,43 +72,41 @@ function Card({ vm, ed, editing }: { vm: Vm; ed: Ed | null; editing: boolean }) 
   return (
     <article className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-ops-line bg-white">
       <header className="flex flex-wrap items-center gap-4 border-b border-ops-line px-7 py-5">
-        <div className="flex min-w-0 flex-col gap-2">
-          <div className="flex flex-wrap items-center gap-2">
+        <div className="flex min-w-0 flex-col gap-1.5">
+          <div className="flex flex-wrap items-center gap-2.5">
             {/* 프롬프트를 고치는 중엔 연필 없음 — 이름 저장이 새 버전을 만들어 고치던 글이 사라지므로 */}
-            {/* 시험 · 반영 중엔 연필을 흐리게 보여 줌 (시안) — 이름 저장도 새 버전이라 막음 */}
+            {/* 시험 · 반영 중엔 연필을 못 누름 — 이름 저장도 새 버전이라 시험하던 글과 달라짐 */}
             <PersonaName
               name={c.name}
               target={ed && !editing ? vm.editTarget : null}
               locked={vm.locked && vm.canAdd}
+              applyAfter={c.inUse && !vm.band}
             />
             {c.inUse && <Badge tone="done">통화에 사용 중</Badge>}
             {/* 반영 중은 띠가 알림 (1번 사용 중 상담가 · 6번 다른 상담가로 바꾸기). 띠를 못 그릴 때만 배지 */}
             {c.applying && !vm.band && <Badge tone="wait">{c.applying}</Badge>}
           </div>
-          <div className="flex flex-wrap items-center gap-4 text-[14px] text-ops-sub">
+          <div className="flex flex-wrap items-center gap-3.5 text-[15px] text-ops-sub">
             {ed ? (
               <VoiceFields vm={ed} />
-            ) : vm.locked ? (
-              // 시험 · 반영 중 — 드롭다운 모양 그대로 흐리게 (피그마 2368:3212)
+            ) : (
+              // 못 고칠 때(시험 · 반영 중 등) — 드롭다운 모양 그대로, 시험 · 반영 중엔 흐리게 (피그마 2368:3212)
               <span
-                aria-disabled
-                className="flex h-7 items-center gap-1.5 rounded-md border border-ops-line bg-ops-paper pr-2 pl-2.5 text-[13px] text-ops-faint"
+                aria-disabled={vm.locked || undefined}
+                className={`${VOICE_BOX} ${vm.locked ? 'opacity-40' : ''}`}
               >
-                목소리 <span className="font-semibold">{c.voice}</span>
+                목소리 <span className="font-semibold text-ops-ink">{p.voice}</span>
                 <Icon name="chevron" className="size-3.5" />
               </span>
-            ) : (
-              <span>목소리 {c.voice}</span>
             )}
-            <span>
-              {p.time} 저장{p.author && ` · ${p.author}`}
-            </span>
+            {/* 저장한 사람은 띠에만 (시안) */}
+            <span>{p.time} 저장</span>
             {/* 고치는 중엔 막음 — 불러오기가 새 버전을 만들어 고치던 글이 사라지므로. 시험 · 반영 중도 (시험하던 글과 달라짐) */}
             <button
               type="button"
               disabled={editing || vm.locked}
               onClick={vm.openHistory}
-              className="underline outline-none hover:text-ops-ink focus-visible:ring-2 focus-visible:ring-ops-route disabled:text-ops-faint disabled:no-underline"
+              className="text-[14px] underline underline-offset-[3px] outline-none hover:text-ops-ink focus-visible:ring-2 focus-visible:ring-ops-route disabled:no-underline disabled:opacity-40"
             >
               수정 기록 보기
             </button>
@@ -133,8 +131,9 @@ function Card({ vm, ed, editing }: { vm: Vm; ed: Ed | null; editing: boolean }) 
                 삭제
               </Btn>
             )}
-            {/* 시험 중 · 반영 중엔 머리 줄 버튼 없음 — [진행 보기]는 띠에 (피그마 1번 · 6번 줄) */}
-            {vm.testTo && !vm.locked && (
+            {/* 시험 중 · 반영 중엔 머리 줄 버튼 없음 — [진행 보기]는 띠에 (피그마 1번 · 6번 줄)
+                사용 중 상담가는 띠가 있으면(반영 전 · 확인 필요 · 시험 중단) 띠의 버튼만 (피그마 1 · 2 · 4번 줄) */}
+            {vm.testTo && !vm.locked && !(c.inUse && vm.band) && (
               <Btn kind="plain" onClick={() => void navigate(vm.testTo!)}>
                 시나리오 시험
               </Btn>
@@ -172,7 +171,7 @@ function Card({ vm, ed, editing }: { vm: Vm; ed: Ed | null; editing: boolean }) 
       {p.callSections ? (
         <PromptBody p={{ ...p, sections: p.callSections }} ed={null} />
       ) : (
-        <PromptBody p={p} ed={ed} />
+        <PromptBody p={p} ed={ed} locked={vm.locked} />
       )}
       {vm.historyOpen && <HistoryModal vm={vm} />}
     </article>
