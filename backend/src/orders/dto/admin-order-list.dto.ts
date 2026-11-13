@@ -27,7 +27,7 @@ export class AdminOrderListQueryDto extends PickType(OrderQueryDto, [
 
   @ApiPropertyOptional({
     description:
-      '발송인·수령인 이름·전화번호·주소의 부분 검색. NFC·대소문자 무시. %·_는 일반 문자.',
+      '표시 주문번호(DV-00140 또는 140) 정확히 일치. 발송인·수령인 이름·전화번호·주소 부분 검색도 지원합니다. NFC·대소문자 무시. %·_는 일반 문자.',
     maxLength: 200,
   })
   @IsOptional()

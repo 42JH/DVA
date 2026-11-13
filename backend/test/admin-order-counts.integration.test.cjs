@@ -154,6 +154,53 @@ test('status counts retain payment groups independently of the selected tab and 
   }
 });
 
+test('order number search matches actual and reserved numbers in the list and counts', async () => {
+  const period = { from: '2097-01-01T00:00:00Z', to: '2097-01-02T00:00:00Z' };
+  const id = (
+    await f.pool.query('INSERT INTO orders(created_at) VALUES($1) RETURNING order_seq', [
+      period.from,
+    ])
+  ).rows[0].order_seq;
+  orderIds.push(id);
+  const draftId = await draft('번호 검색 초안', 'INCOMPLETE', null, period.from);
+  const reserved = (
+    await f.pool.query('SELECT reserved_order_seq FROM order_parcel_drafts WHERE draft_seq=$1', [
+      draftId,
+    ])
+  ).rows[0].reserved_order_seq;
+
+  for (const q of [String(id), `dv-${String(id).padStart(5, '0')}`]) {
+    const actual = await json(await list({ ...period, q }));
+    assert.deepEqual(
+      actual.data.map((row) => [row.orderSeq, row.draftSeq]),
+      [[id, null]],
+    );
+    assert.equal(actual.total_count, 1);
+    assert.deepEqual(actual.statusCounts, { ...empty, all: 1 });
+  }
+
+  const q = `DV-${String(reserved).padStart(5, '0')}`;
+  const query = { ...period, q, statusGroup: 'COLLECTING' };
+  const incomplete = await json(await list(query));
+  assert.deepEqual(
+    incomplete.data.map((row) => [row.orderSeq, row.draftSeq]),
+    [[reserved, draftId]],
+  );
+  assert.equal(incomplete.total_count, 1);
+  assert.deepEqual(incomplete.statusCounts, { ...empty, all: 1, incomplete: 1 });
+  const drafts = await json(
+    await f.get('/api/parcel-drafts?' + new URLSearchParams({ ...period, q })),
+  );
+  assert.deepEqual(
+    drafts.data.map((row) => row.reservedOrderSeq),
+    [reserved],
+  );
+  const wrongGroup = await json(await list({ ...query, statusGroup: 'notPaid' }));
+  assert.equal(wrongGroup.total_count, 0);
+  assert.deepEqual(wrongGroup.statusCounts, incomplete.statusCounts);
+  assert.equal((await json(await list({ ...period, q: 'DV-2147483648' }))).total_count, 0);
+});
+
 test('draft counts and the incomplete list share search, date, current company, deletion and retention filters', async () => {
   const q = randomUUID();
   const company = (

@@ -159,6 +159,29 @@ test('list combines order, exact phone and order status filters and treats SQL s
   );
 });
 
+test('list searches by displayed call number and applies the existing filters', async () => {
+  const row = await call();
+  const q = `#${row.callSessionSeq}`;
+  const query = { callerPhoneNumber: row.callerPhoneNumber };
+  for (const term of [q, String(row.callSessionSeq)]) {
+    assert.deepEqual(await result(await list({ ...query, q: term })), {
+      data: [row],
+      hasNext: false,
+      total_count: 1,
+    });
+  }
+  for (const conditions of [
+    { ...query, q, to: row.startedAt },
+    { ...query, q: '#2147483648' },
+  ])
+    assert.equal((await result(await list(conditions))).total_count, 0);
+
+  await pool.query('UPDATE call_sessions SET deleted_at=now() WHERE call_session_seq=$1', [
+    row.callSessionSeq,
+  ]);
+  assert.equal((await result(await list({ ...query, q }))).total_count, 0);
+});
+
 test('list searches international caller numbers preserved by the AI flow without dropping the country prefix', async () => {
   const phone = callerPhone('+1' + randomInt(2000000000, 10000000000));
   const row = await call({ callerPhoneNumber: phone });
