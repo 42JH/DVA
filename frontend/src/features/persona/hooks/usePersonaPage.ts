@@ -291,14 +291,15 @@ export function usePersonaPage() {
           : ''
       // 저장만으로는 통화에 안 감 → 저장 직후에도 이 창 (11/13 사용자: 저장 = 바로 반영으로 오해)
       const g = gate?.(p.personaSeq, p.head.version)
-      const blocked = !!g && g.state !== 'done'
+      // 11/13 페르소나 전면 수정 동안 시험 없이도 적용 (시험할 때마다 비용). 다시 막으려면 !!g && g.state !== 'done'
+      const blocked = false
       return {
         title: p.inUse ? '새 버전을 통화에 반영할까요?' : `${nameEul(p.name)} 통화에 쓸까요?`,
         note: blocked
           ? '이 버전은 아직 전체 시나리오 시험을 하지 않았습니다. 시험을 마치면 통화에 반영할 수 있습니다.'
           : `진행 중인 통화가 끝나면(AI 확인 후) ${p.name}의 현재 버전으로 응대합니다.${until}`,
         okLabel: p.inUse ? '적용' : '사용하기',
-        changes: g && !blocked ? { fail: g.newFail, pass: g.newPass } : null,
+        changes: g?.state === 'done' ? { fail: g.newFail, pass: g.newPass } : null, // 시험한 버전만 변화 수
         testTo: g ? `/personas/${p.personaSeq}/tests/${p.head.version}` : undefined,
         blocked,
       }
