@@ -34,8 +34,8 @@ app에서 각 기능의 API / impl을 연결합니다. 기능 모듈끼리는 �
 Motif처럼 Repository 인터페이스와 구현은 `core:data/repository`에 둡니다. 의존 방향은 `feature impl → data → network / datastore`이며, 공통 데이터 모델은 `core:model`에 둡니다. `core:domain`은 필요한 UseCase를 추가할 때 사용합니다.
 app은 Hilt 구현 수집을 위해 data를 참조합니다.
 
-친구 목록은 샘플 데이터로 표시하며, Repository, API 서비스,
-DB 테이블, Proto 메시지, Firebase 설정 등 실제 기능은 포함하지 않습니다.
+로그인과 친구 목록은 실제 서버 API에 연결합니다.
+DB 테이블, Proto 메시지, Firebase 설정과 실제 통화 연결은 아직 포함하지 않습니다.
 빈 소스 디렉터리는 Git에 저장되지 않으며, 기능 추가 시 소스 파일과 함께 생성하면 됩니다.
 
 ## 디자인 시스템
@@ -59,9 +59,11 @@ releaseRuntimeClasspath에는 Material 3 컴포넌트 라이브러리가 포함�
 `core:model`의 `Friend`는 ID, 이름, 프로필 이미지 URL을 담는 공통 데이터 모델입니다.
 HomeViewModel이 StateFlow<HomeUiState>를 제공하고, HomeScreen은 lifecycle에 맞춰 상태를 수집합니다.
 HomeUiState는 Loading / Success / Error로 구분하며 빈 목록, 오류 및 큰 글자 미리보기도 제공합니다.
-샘플 친구 8명을 표시하며 프로필 이미지가 없거나 로드에 실패하면 기본 이미지를 사용합니다.
-추후 HomeEntryProvider의 onFriendClick 콜백에 친구 ID를 받아 통화 화면으로 연결할 수 있습니다.
-클릭 콜백은 스크리닝 화면으로 연결되며, 로그인 / 검색 / 친구 추가는 포함하지 않습니다.
+홈 진입 시 FriendRepository가 현재 계정의 인증 토큰으로 GET api/friends를 조회합니다.
+FriendClient의 응답은 core:data/mapper에서 core:model의 Friend로 변환합니다. Repository는 IO dispatcher에서 Flow를 실행하고 HomeViewModel은 asResult()로 상태를 갱신합니다.
+서버 ID는 문자열 그대로 목록 키와 CallNavKey에 전달합니다. 프로필 이미지가 없는 현재 API 응답에는 기본 아바타를 표시합니다.
+요청 실패 시 재시도 버튼으로 다시 조회하며, 서버가 빈 배열을 반환하면 빈 목록 화면을 표시합니다.
+샘플 친구 8명은 Compose Preview에서만 사용합니다. 클릭은 스크리닝 화면 미리보기로 이어지며 검색·친구 추가 화면은 포함하지 않습니다.
 
 ## 스크리닝 화면 (화면·상태 구현 단계)
 
@@ -118,8 +120,8 @@ Motif처럼 Repository는 `Flow<UserSession>`을 반환하고, LoginViewModel은
 친구 목록에는 서버에서 받은 현재 계정 이름을 표시합니다. 친구 목록에서 뒤로 가면
 세션과 토큰을 지우고 계정 선택으로 돌아갑니다. 프로세스를 새로 시작하면 다시 선택합니다.
 
-이번 단계는 계정 선택·인증·세션만 연결합니다. 친구 목록과 통화 화면의 데이터는
-기존 샘플을 유지합니다. 실제 친구 목록·통화 연동 테스트 코드는 별도
+계정 선택·인증·세션과 친구 목록 조회가 연결되어 있습니다. 통화 화면의 데이터와 동작은
+기존 샘플을 유지합니다. 실제 통화 연동 테스트 코드는 별도
 `feature/android-live-call` 브랜치에 보관되어 있습니다.
 
 ```powershell
@@ -166,7 +168,7 @@ AuthRepositoryLiveTest는 명시적으로 활성화했을 때 공통 설정으�
 ## Kick API 지원 범위
 
 [Android 연동 명세](docs/kick-android-api.md)를 기준으로 다음 HTTP API를 구현했습니다.
-아직 친구·통화 화면에는 연결하지 않았으며, 기존 테스트 로그인 동작은 유지합니다.
+친구 목록 조회는 홈 화면에 연결했고, 통화 및 나머지 API의 화면 연동은 이후 단계입니다. 기존 테스트 로그인 동작은 유지합니다.
 
 | Client | 지원 요청 |
 | --- | --- |
@@ -208,3 +210,5 @@ RemainingApiContractTest는 실제 Retrofit/OkHttp를 로컬 Postman 서버에 �
 KICK_SIMULATION_URL이 없으면 이 계약 테스트만 건너뛰며, SSE 파싱·실제 소켓 취소·파일 사전 검증 테스트는 항상 실행합니다.
 AuthRepositoryLiveTest는 별도 활성화 시 두 테스트 계정으로 계정·친구·음성 상태·활성 통화·SSE를 읽기 전용 검증합니다.
 실제 신규 가입, 음성 업로드/합성, 푸시 등록/삭제와 통화 상태 변경은 이번 검증에서 실행하지 않습니다.
+
+친구 목록 연결 검증: FriendRepositoryImplTest는 문자열 ID·이름 매핑, 빈 배열, Flow 수집 시 재조회, 실패·취소 전달을 확인합니다. HomeViewModelTest는 초기 로딩·성공·빈 목록·오류 후 재시도·중복 요청 방지를 확인합니다. AuthRepositoryLiveTest의 친구 조회도 실제 FriendRepository를 거쳐 두 테스트 계정에 상대 계정이 표시되는지 확인합니다.
