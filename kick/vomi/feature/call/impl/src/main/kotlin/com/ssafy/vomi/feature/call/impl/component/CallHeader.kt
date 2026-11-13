@@ -2,14 +2,19 @@ package com.ssafy.vomi.feature.call.impl.component
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.ssafy.vomi.core.designsystem.component.Surface
@@ -25,6 +30,17 @@ internal fun CallHeader(
     onEndClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val timerStyle = VomiTheme.typography.captionR12.copy(fontFeatureSettings = "tnum")
+    val textMeasurer = rememberTextMeasurer()
+    val elapsedTime = "%02d:%02d".format(elapsedSeconds / 60, elapsedSeconds % 60)
+    val timerWidth = with(LocalDensity.current) {
+        textMeasurer.measure(
+            text = elapsedTime,
+            style = timerStyle,
+            maxLines = 1,
+            softWrap = false,
+        ).size.width.toDp()
+    }
     Surface(
         modifier = modifier
             .fillMaxWidth()
@@ -50,6 +66,8 @@ internal fun CallHeader(
                 horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                // Mirror the timer's width to keep the name itself centered in the header.
+                Spacer(modifier = Modifier.width(timerWidth))
                 Text(
                     text = name,
                     style = VomiTheme.typography.titleSB18,
@@ -58,8 +76,10 @@ internal fun CallHeader(
                     modifier = Modifier.weight(1f, fill = false),
                 )
                 Text(
-                    text = "%02d:%02d".format(elapsedSeconds / 60, elapsedSeconds % 60),
-                    style = VomiTheme.typography.captionR12,
+                    text = elapsedTime,
+                    style = timerStyle,
+                    modifier = Modifier.width(timerWidth),
+                    textAlign = TextAlign.Start,
                     color = Color.White.copy(alpha = 0.60f),
                     maxLines = 1,
                     softWrap = false,
