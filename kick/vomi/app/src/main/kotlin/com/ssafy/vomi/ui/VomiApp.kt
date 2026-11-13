@@ -1,7 +1,12 @@
 package com.ssafy.vomi.ui
 
 import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -24,9 +29,17 @@ fun VomiApp() {
     val navigationState = rememberNavigationState(HomeNavKey)
     val navigator = remember(navigationState) { Navigator(navigationState) }
     VomiBackground {
-        Scaffold(modifier = Modifier.fillMaxSize()) { padding ->
+        // The Scaffold handles system bars. The navigation viewport alone handles the IME.
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            contentWindowInsets = WindowInsets.systemBars.union(WindowInsets.displayCutout),
+        ) { padding ->
             NavDisplay(
-                modifier = Modifier.padding(padding).consumeWindowInsets(padding),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .consumeWindowInsets(padding)
+                    .imePadding(),
                 backStack = navigationState.backStack,
                 onBack = { navigator.goBack() },
                 entryDecorators = listOf(
