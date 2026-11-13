@@ -67,13 +67,15 @@ const cut = run(
   'interrupted',
 )
 const [after] = runsToTests([first, cut])
-assert.equal(after.status, 'done')
+assert.equal(after.status, 'interrupted') // 가장 최근 묶음이 다 못 돌고 멈춤 → 띠가 '시험 중단'
 assert.deepEqual(after.items.map((i) => [i.scenario, i.runId, i.status, i.passed]).sort(), [
   ['A1', 'r7', 'done', false],
   ['B1', 'r1', 'error', null],
   ['B3', 'r1', 'done', false],
 ]) // E1은 한 번도 끝난 적이 없어 없음
-assert.deepEqual(runsToTests([first, { ...cut, status: 'stopped' }])[0].items, after.items) // 관리자가 멈춘 묶음도 같음 — 못 끝낸 항목은 '시험 안 함'(남은 것 시험으로 다시 돌림)
+const stopped = runsToTests([first, { ...cut, status: 'stopped' }])[0]
+assert.equal(stopped.status, 'stopped')
+assert.deepEqual(stopped.items, after.items) // 관리자가 멈춘 묶음도 같음 — 못 끝낸 항목은 '시험 안 함'(남은 것 시험으로 다시 돌림)
 
 // 같은 때 시작한 묶음은 번호가 큰 쪽이 최신
 const same = runsToTests([
