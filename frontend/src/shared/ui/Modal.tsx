@@ -109,6 +109,8 @@ export function Confirm({
   closeLabel = '취소',
   danger,
   busy,
+  disabled,
+  extra,
   error,
   onOk,
   onClose,
@@ -119,6 +121,8 @@ export function Confirm({
   closeLabel?: string // 확인 버튼에도 '취소'가 들어가면 '닫기'로 (주문 취소)
   danger?: boolean // 되돌릴 수 없는 일이면 빨간 버튼
   busy?: boolean
+  disabled?: boolean // 확인 버튼만 끔 (busy와 달리 '… 중' 문구 없음)
+  extra?: ReactNode // [취소]와 확인 사이 버튼 (예: [시나리오 시험])
   error?: string | null
   onOk: () => void
   onClose: () => void
@@ -138,9 +142,10 @@ export function Confirm({
           <Btn className="ml-auto" onClick={onClose}>
             {closeLabel}
           </Btn>
+          {extra}
           <Btn
             kind={ok === '삭제' || danger ? 'dangerSolid' : 'primary'}
-            disabled={busy}
+            disabled={busy || disabled}
             onClick={onOk}
             data-autofocus // 열면 확정 버튼에 초점 — Enter = 확인 (OS 확인 창과 같게)
           >
