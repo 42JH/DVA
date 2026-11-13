@@ -5,7 +5,6 @@ import com.ssafy.vomi.core.model.call.CallMessage
 import com.ssafy.vomi.core.model.call.CallSpeaker
 import com.ssafy.vomi.feature.call.impl.model.CallPhase
 import com.ssafy.vomi.feature.call.impl.model.CallUiState
-import com.ssafy.vomi.feature.call.impl.model.QuickReplyTab
 import com.ssafy.vomi.feature.call.impl.model.sampleCallState
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -57,7 +56,6 @@ internal class CallViewModel @Inject constructor() : ViewModel() {
         }
     }
 
-    fun selectQuickReplyTab(tab: QuickReplyTab) { _uiState.update { it.copy(quickReplyTab = tab) } }
     fun showSummary() { _uiState.update { if (it.phase == CallPhase.Active) it.copy(isSummaryVisible = true) else it } }
     fun dismissSummary() { _uiState.update { it.copy(isSummaryVisible = false) } }
 

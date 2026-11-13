@@ -37,7 +37,6 @@ import com.ssafy.vomi.feature.call.impl.component.CallSummarySheet
 import com.ssafy.vomi.feature.call.impl.component.IncomingCallBanner
 import com.ssafy.vomi.feature.call.impl.model.CallPhase
 import com.ssafy.vomi.feature.call.impl.model.CallUiState
-import com.ssafy.vomi.feature.call.impl.model.QuickReplyTab
 import com.ssafy.vomi.feature.call.impl.model.sampleCallState
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -77,7 +76,6 @@ internal fun CallScreen(
         onSummaryClick = viewModel::showSummary,
         onSummaryDismiss = viewModel::dismissSummary,
         onEndClick = viewModel::endCall,
-        onTabClick = viewModel::selectQuickReplyTab,
         onSuggestionClick = viewModel::selectSuggestion,
         onBackchannelClick = viewModel::selectBackchannel,
         onAcceptClick = viewModel::acceptIncoming,
@@ -94,7 +92,6 @@ private fun CallContent(
     onSummaryClick: () -> Unit,
     onSummaryDismiss: () -> Unit,
     onEndClick: () -> Unit,
-    onTabClick: (QuickReplyTab) -> Unit,
     onSuggestionClick: (Long) -> Unit,
     onBackchannelClick: (Long) -> Unit,
     onAcceptClick: () -> Unit,
@@ -158,7 +155,6 @@ private fun CallContent(
                 }
                 CallQuickReplies(
                     state = state,
-                    onTabClick = onTabClick,
                     onSuggestionClick = onSuggestionClick,
                     onBackchannelClick = onBackchannelClick
                 )
@@ -192,11 +188,6 @@ private fun MicrophoneOnPreview() {
     CallPreview(sampleCallState(1L, "싸피 야옹").copy(isMicrophoneEnabled = true))
 }
 
-@Preview(name = "Backchannels", widthDp = 393, heightDp = 800)
-@Composable
-private fun BackchannelsPreview() {
-    CallPreview(sampleCallState(1L, "싸피 야옹").copy(quickReplyTab = QuickReplyTab.Backchannels))
-}
 
 @Preview(name = "Summary", widthDp = 393, heightDp = 800)
 @Composable
@@ -223,7 +214,6 @@ private fun CallPreview(state: CallUiState) {
                     onSummaryClick = {},
                     onSummaryDismiss = {},
                     onEndClick = {},
-                    onTabClick = {},
                     onSuggestionClick = {},
                     onBackchannelClick = {},
                     onAcceptClick = {},

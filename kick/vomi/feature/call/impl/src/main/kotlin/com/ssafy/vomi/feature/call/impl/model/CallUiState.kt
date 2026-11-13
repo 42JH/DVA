@@ -6,7 +6,6 @@ import com.ssafy.vomi.core.model.call.CallSummary
 import com.ssafy.vomi.core.model.call.ReplySuggestion
 
 internal enum class CallPhase { Incoming, Active, Ended }
-internal enum class QuickReplyTab { Suggestions, Backchannels }
 
 internal data class CallUiState(
     val friendId: Long = 0L,
@@ -20,7 +19,6 @@ internal data class CallUiState(
     val backchannels: List<Backchannel> = emptyList(),
     val summary: CallSummary? = null,
     val isSummaryVisible: Boolean = false,
-    val quickReplyTab: QuickReplyTab = QuickReplyTab.Suggestions,
 ) {
     val canType: Boolean get() = phase == CallPhase.Active && !isMicrophoneEnabled
     val canSend: Boolean get() = canType && draft.isNotBlank()
