@@ -1,0 +1,18 @@
+<resources>
+    <string name="call_preview">미리보기</string>
+    <string name="call_end">통화 종료</string>
+    <string name="call_show_summary">통화 요약 보기</string>
+    <string name="call_summary_title">통화 요약</string>
+    <string name="call_summary_empty">아직 요약할 대화가 없어요</string>
+    <string name="call_close">닫기</string>
+    <string name="call_suggestions">추천 답변</string>
+    <string name="call_backchannels">맞장구</string>
+    <string name="call_mic_off_action">마이크 끄기</string>
+    <string name="call_mic_on_action">마이크 켜기</string>
+    <string name="call_input_hint">답변을 입력하세요</string>
+    <string name="call_input_mic_enabled">마이크를 끄면 입력할 수 있어요</string>
+    <string name="call_send">답변 전송</string>
+    <string name="call_incoming">전화가 왔어요</string>
+    <string name="call_accept">전화 받기</string>
+    <string name="call_decline">전화 거절</string>
+</resources>
