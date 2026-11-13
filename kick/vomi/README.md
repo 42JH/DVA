@@ -107,7 +107,7 @@ HomeUiState는 Loading / Success / Error로 구분하며 빈 목록, 오류 및 
 - `core:model`: TestAccount, UserSession, LoginError (토큰은 UI 모델에 포함하지 않음)
 - `core:data/repository`: AuthRepository 계약과 AuthRepositoryImpl 구현
 - `core:data/di/DataModule`: Repository와 Provider 바인딩을 한곳에서 관리
-- `core:network`: 선택한 Bearer 토큰으로 `GET /kick/api/accounts/me` 호출
+- `core:network`: 공통 Retrofit과 AccountClient / AccountService를 통해 `GET /kick/api/accounts/me` 호출
 - `core:data`: 응답 계정 검증, 메모리 세션 및 AccessTokenProvider
 - `app`: 인증 상태에 따라 로그인 / 홈 이동, 디버그 자격 증명 DI
 
@@ -128,3 +128,36 @@ Motif처럼 Repository는 `Flow<UserSession>`을 반환하고, LoginViewModel은
 
 `AuthRepositoryLiveTest`는 `VOMI_RUN_AUTH_LIVE_TESTS=1`과 두 토큰 환경변수가 있을 때만
 실제 서버의 `/api/accounts/me`를 읽기 전용으로 조회합니다. 기본 실행에서는 이 테스트를 건너뜁니다.
+
+## 공통 네트워크 구조
+
+Motif처럼 `core:network/di/NetworkModule`에서 Json, OkHttpClient, Retrofit과 Service를
+싱글턴으로 제공합니다. `NetworkConfig`에 베이스 URL과 타임아웃을 모으며,
+`service/account`에는 AccountService / AccountClient, `model/account`에는 AccountResponse를 둡니다.
+DTO는 Kick의 실제 JSON 응답 형식을 사용합니다.
+
+호출은 `ViewModel → Repository → Client → Service → 서버` 순서입니다.
+서비스의 상대 경로 `api/accounts/me`에는 선행 슬래시를 넣지 않아 `/kick/`을 유지합니다.
+연결·읽기·쓰기·전체 호출 타임아웃은 현재 공통 30초입니다.
+
+`core:data/auth/SessionAccessTokenProvider`는 Repository와 독립적으로 토큰을 공급합니다.
+Repository는 인증 성공 후 Provider를 갱신하고, 로그아웃 시 지웁니다.
+이 분리로 `Repository → Retrofit → Interceptor → Repository` 순환 의존성을 피합니다.
+Provider 바인딩은 기존 `DataModule`에서 함께 관리합니다.
+
+AccessTokenInterceptor는 Kick API의 스킴·호스트·포트·경로에 해당하는 요청에만
+현재 토큰을 추가합니다. 로그인 계정 검증처럼 요청이 명시적으로 Authorization을
+지정했다면 그 값을 유지합니다. 따라서 사용자 1이 저장된 상태에서도 사용자 2의
+토큰을 올바르게 검증할 수 있습니다.
+
+로그는 debug에서 요청·응답의 기본 정보만 출력하고 release에서는 끕니다.
+Authorization 헤더는 마스킹하며 요청·응답 본문은 기본 로그에 출력하지 않습니다.
+
+```powershell
+.\gradlew.bat :core:network:testDebugUnitTest :core:data:testDebugUnitTest :app:assembleDebug :app:lintDebug
+```
+
+NetworkClientTest는 네트워크로 나가기 전의 테스트 응답을 사용해 실제 Retrofit 변환과
+OkHttp Interceptor 체인, 인증 헤더와 로그 마스킹을 검증합니다.
+AuthRepositoryLiveTest는 명시적으로 활성화했을 때 공통 설정으로 실제 서버를 조회하여
+각 계정의 명시적 토큰, 로그인 후 자동 헤더, 로그아웃 후 인증 해제를 확인합니다.
