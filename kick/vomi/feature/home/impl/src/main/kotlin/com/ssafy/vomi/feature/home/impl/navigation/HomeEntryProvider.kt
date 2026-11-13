@@ -5,6 +5,6 @@ import androidx.navigation3.runtime.NavKey
 import com.ssafy.vomi.feature.home.api.navigation.HomeNavKey
 import com.ssafy.vomi.feature.home.impl.HomeScreen
 
-fun EntryProviderScope<NavKey>.homeEntry(onFriendClick: (Long, String) -> Unit = { _, _ -> }) {
+fun EntryProviderScope<NavKey>.homeEntry(onFriendClick: (String, String) -> Unit = { _, _ -> }) {
     entry<HomeNavKey> { HomeScreen(onFriendClick = onFriendClick) }
 }

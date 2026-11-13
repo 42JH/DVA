@@ -59,7 +59,7 @@ import kotlin.math.roundToInt
 
 @Composable
 internal fun CallScreen(
-    friendId: Long,
+    friendId: String,
     friendName: String,
     isIncoming: Boolean,
     onEndCall: () -> Unit,
@@ -267,26 +267,26 @@ private fun CallContent(
 @Preview(name = "Screening - reduced viewport", widthDp = 393, heightDp = 440)
 @Composable
 private fun CallScreenPreview() {
-    CallPreview(sampleCallState(1L, "싸피 야옹").copy(elapsedSeconds = 2))
+    CallPreview(sampleCallState("kick-test-2", "싸피 야옹").copy(elapsedSeconds = 2))
 }
 
 @Preview(name = "Microphone on", widthDp = 393, heightDp = 800)
 @Composable
 private fun MicrophoneOnPreview() {
-    CallPreview(sampleCallState(1L, "싸피 야옹").copy(isMicrophoneEnabled = true))
+    CallPreview(sampleCallState("kick-test-2", "싸피 야옹").copy(isMicrophoneEnabled = true))
 }
 
 
 @Preview(name = "Summary", widthDp = 393, heightDp = 800)
 @Composable
 private fun SummaryPreview() {
-    CallPreview(sampleCallState(1L, "싸피 야옹").copy(isSummaryVisible = true))
+    CallPreview(sampleCallState("kick-test-2", "싸피 야옹").copy(isSummaryVisible = true))
 }
 
 @Preview(name = "Incoming call", widthDp = 393, heightDp = 800)
 @Composable
 private fun IncomingCallPreview() {
-    CallPreview(sampleCallState(1L, "싸피 야옹", isIncoming = true))
+    CallPreview(sampleCallState("kick-test-2", "싸피 야옹", isIncoming = true))
 }
 
 @Composable

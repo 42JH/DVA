@@ -9,7 +9,7 @@ import org.junit.Test
 class ReplyChipTextTest {
     @Test
     fun displayBreakHintsNeverLeakIntoTheDraftOrSentMessage() {
-        val viewModel = CallViewModel().apply { initialize(1L, "친구", false) }
+        val viewModel = CallViewModel().apply { initialize("kick-test-2", "친구", false) }
         val reply = viewModel.uiState.value.suggestions.last()
         val display = reply.text.withHangulWrapOpportunities()
         assertNotEquals(reply.text, display)

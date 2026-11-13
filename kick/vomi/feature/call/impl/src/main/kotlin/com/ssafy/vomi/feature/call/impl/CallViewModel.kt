@@ -18,7 +18,7 @@ internal class CallViewModel @Inject constructor() : ViewModel() {
     val uiState = _uiState.asStateFlow()
     private var initialized = false
 
-    fun initialize(friendId: Long, friendName: String, isIncoming: Boolean) {
+    fun initialize(friendId: String, friendName: String, isIncoming: Boolean) {
         if (initialized) return
         initialized = true
         _uiState.value = sampleCallState(friendId, friendName, isIncoming)

@@ -8,7 +8,7 @@ import com.ssafy.vomi.core.model.call.ReplySuggestion
 internal enum class CallPhase { Incoming, Active, Ended }
 
 internal data class CallUiState(
-    val friendId: Long = 0L,
+    val friendId: String = "",
     val friendName: String = "",
     val phase: CallPhase = CallPhase.Active,
     val elapsedSeconds: Long = 0L,

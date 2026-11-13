@@ -16,7 +16,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ssafy.vomi.core.designsystem.component.Button
@@ -31,7 +30,7 @@ import com.ssafy.vomi.feature.home.impl.model.sampleFriends
 
 @Composable
 internal fun HomeScreen(
-    onFriendClick: (Long, String) -> Unit,
+    onFriendClick: (String, String) -> Unit,
     modifier: Modifier = Modifier,
     viewModel: HomeViewModel = hiltViewModel(),
 ) {
@@ -47,7 +46,7 @@ internal fun HomeScreen(
 @Composable
 private fun HomeContent(
     uiState: HomeUiState,
-    onFriendClick: (Long, String) -> Unit,
+    onFriendClick: (String, String) -> Unit,
     onRetryClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -72,6 +71,7 @@ private fun HomeContent(
                     LoadingWheel()
                 }
             }
+
             is HomeUiState.Success -> {
                 if (uiState.friends.isEmpty()) {
                     HomeMessage(text = stringResource(R.string.home_empty))
@@ -80,15 +80,23 @@ private fun HomeContent(
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(top = 4.dp, bottom = 16.dp),
                     ) {
-                        items(items = uiState.friends, key = { it.id }, contentType = { "friend" }) { friend ->
-                            FriendListItem(friend = friend, onClick = { onFriendClick(friend.id, friend.name) })
+                        items(
+                            items = uiState.friends,
+                            key = { it.id },
+                            contentType = { "friend" }) { friend ->
+                            FriendListItem(
+                                friend = friend,
+                                onClick = { onFriendClick(friend.id, friend.name) })
                         }
                     }
                 }
             }
+
             is HomeUiState.Error -> {
                 Column(
-                    modifier = Modifier.fillMaxSize().padding(28.dp),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(28.dp),
                     verticalArrangement = Arrangement.spacedBy(20.dp, Alignment.CenterVertically),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
@@ -103,7 +111,9 @@ private fun HomeContent(
 @Composable
 private fun HomeMessage(text: String) {
     Box(
-        modifier = Modifier.fillMaxSize().padding(28.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(28.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(text = text, color = VomiTheme.colors.gray400)

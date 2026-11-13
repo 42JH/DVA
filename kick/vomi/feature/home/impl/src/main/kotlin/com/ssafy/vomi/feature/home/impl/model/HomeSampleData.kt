@@ -2,14 +2,14 @@ package com.ssafy.vomi.feature.home.impl.model
 
 import com.ssafy.vomi.core.model.friend.Friend
 
-// Temporary data shared by the ViewModel and previews until the friend API is connected.
+// Preview fixtures only. Runtime friend data comes from FriendRepository.
 internal val sampleFriends = listOf(
-    Friend(id = 1L, name = "김민지"),
-    Friend(id = 2L, name = "박서준"),
-    Friend(id = 3L, name = "이지우"),
-    Friend(id = 4L, name = "최유진"),
-    Friend(id = 5L, name = "정다은"),
-    Friend(id = 6L, name = "한도윤"),
-    Friend(id = 7L, name = "윤수빈"),
-    Friend(id = 8L, name = "오하준"),
+    Friend(id = "preview-1", name = "김민지"),
+    Friend(id = "preview-2", name = "박서준"),
+    Friend(id = "preview-3", name = "이지우"),
+    Friend(id = "preview-4", name = "최유진"),
+    Friend(id = "preview-5", name = "정다은"),
+    Friend(id = "preview-6", name = "한도윤"),
+    Friend(id = "preview-7", name = "윤수빈"),
+    Friend(id = "preview-8", name = "오하준"),
 )

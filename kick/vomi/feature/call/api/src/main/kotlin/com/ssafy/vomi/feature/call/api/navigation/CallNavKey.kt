@@ -5,7 +5,7 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 data class CallNavKey(
-    val friendId: Long,
+    val friendId: String,
     val friendName: String,
     val isIncoming: Boolean = false,
 ) : NavKey

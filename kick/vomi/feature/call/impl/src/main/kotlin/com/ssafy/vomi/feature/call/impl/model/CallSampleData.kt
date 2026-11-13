@@ -7,7 +7,7 @@ import com.ssafy.vomi.core.model.call.CallSummary
 import com.ssafy.vomi.core.model.call.ReplySuggestion
 
 // UI fixtures only. No RTC, STT, on-device model, or audio synthesis is connected yet.
-internal fun sampleCallState(friendId: Long, friendName: String, isIncoming: Boolean = false) =
+internal fun sampleCallState(friendId: String, friendName: String, isIncoming: Boolean = false) =
     CallUiState(
         friendId = friendId,
         friendName = friendName,

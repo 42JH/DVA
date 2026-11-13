@@ -7,7 +7,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CallViewModelTest {
-    private fun newCall(incoming: Boolean = false) = CallViewModel().apply { initialize(1L, "친구", incoming) }
+    private fun newCall(incoming: Boolean = false) = CallViewModel().apply { initialize("kick-test-2", "친구", incoming) }
 
     @Test
     fun microphoneOnBlocksEditingSendingAndSuggestionsWithoutLosingDraft() {
@@ -98,7 +98,7 @@ class CallViewModelTest {
         val vm = newCall()
         vm.updateDraft("유지할 답변")
         vm.toggleMicrophone()
-        vm.initialize(1L, "친구", false)
+        vm.initialize("kick-test-2", "친구", false)
         assertEquals("유지할 답변", vm.uiState.value.draft)
         assertTrue(vm.uiState.value.isMicrophoneEnabled)
     }
