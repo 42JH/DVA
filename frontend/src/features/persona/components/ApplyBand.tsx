@@ -15,6 +15,7 @@ export function ApplyBand({
   onApply,
   onProgress,
   onStop,
+  onReview,
   busy,
 }: {
   band: Band
@@ -23,6 +24,7 @@ export function ApplyBand({
   onApply: () => void
   onProgress?: () => void // [진행 보기] · [지금까지 결과 보기] — 시나리오 시험 화면
   onStop: () => void // [시험 중단] — 확인 창
+  onReview: () => void // [확인하고 반영] — 실패한 시나리오 이름을 보여 주는 확인 창 (4번)
   busy: boolean
 }) {
   // 시험 · 반영 중 — 버튼은 [진행 보기]만(시험 중), 토글 없음 (피그마 2368:3212 · 3388)
@@ -70,10 +72,18 @@ export function ApplyBand({
     )
   }
   const s = band.stopped
+  const r = band.review
   return (
     <>
       <div className="flex flex-wrap items-center gap-3 border-b border-ops-wait/20 bg-ops-wait-soft px-7 py-3">
-        {s ? (
+        {r ? (
+          // 4번 확인 필요 (피그마 2368:5628) — 실패가 있으면 바로 반영하지 않고 담당자가 확인
+          <>
+            <Badge tone="wait">확인 필요</Badge>
+            <span className="text-[15px] font-bold">시나리오 {r.fail}개 실패</span>
+            <span className="text-[13px] text-ops-sub">{r.at} 시험</span>
+          </>
+        ) : s ? (
           <>
             <Badge tone="idle">시험 중단</Badge>
             <span className="text-[15px] font-bold">
@@ -96,15 +106,17 @@ export function ApplyBand({
           </span>
         )}
         <span className={`flex flex-wrap gap-2 ${band.error ? '' : 'ml-auto'}`}>
-          {s && onProgress && <Btn onClick={onProgress}>지금까지 결과 보기</Btn>}
+          {(s || r) && onProgress && (
+            <Btn onClick={onProgress}>{r ? '실패한 시나리오 보기' : '지금까지 결과 보기'}</Btn>
+          )}
           {band.canApply && (
             <Btn
               kind="line"
               disabled={busy}
               title={busy ? '고친 내용을 먼저 저장해 주세요' : undefined}
-              onClick={onApply}
+              onClick={r ? onReview : onApply}
             >
-              {s ? '다시 시험하고 반영' : '통화에 반영'}
+              {r ? '확인하고 반영' : s ? '다시 시험하고 반영' : '통화에 반영'}
             </Btn>
           )}
         </span>

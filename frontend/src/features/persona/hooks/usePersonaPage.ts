@@ -80,6 +80,7 @@ type Confirming =
   | { kind: 'delete'; personaSeq: number }
   | { kind: 'test' } // 띠의 [통화에 반영] — 시험하고 반영 (모두 통과면 저절로 반영)
   | { kind: 'stop' } // 띠의 [시험 중단] (2번)
+  | { kind: 'review' } // 확인 필요 띠의 [확인하고 반영] (4번) — 실패를 보고도 반영
   | null
 
 // 시나리오 시험에 다녀오거나 새로고침해도 보던 상담가 · 버전 그대로 — 기록(location.key)마다 세션 저장소에 기억
@@ -215,7 +216,9 @@ export function usePersonaPage() {
       ? (all.find((v) => v.version === persona.applyingVersion) ?? null)
       : null
   // stopped = 시험을 멈춤(2번) — [통화에 반영] 대신 [다시 시험하고 반영], 입력 칸은 다시 열림
-  const step: 'unapplied' | 'testing' | 'stopped' | 'applying' | null = applyingVersion
+  // review = 시험이 끝났는데 실패가 있음(4번) — 바로 반영하지 않고 담당자가 [확인하고 반영]
+  // 연결 실패가 섞인 일부 시험(partial)도 실패가 있으면 확인 필요 (피그마 3 · 4번: 통과 7 · 실패 2 · 연결 실패 1)
+  const step: 'unapplied' | 'testing' | 'stopped' | 'review' | 'applying' | null = applyingVersion
     ? 'applying'
     : !unapplied
       ? null
@@ -223,7 +226,9 @@ export function usePersonaPage() {
         ? 'testing'
         : applyTest.stopped
           ? 'stopped'
-          : 'unapplied'
+          : (applyTest.state === 'done' || applyTest.state === 'partial') && applyTest.fail > 0
+            ? 'review'
+            : 'unapplied'
   // 시험 · 반영 중엔 입력 칸 · 목소리 · 이름 · 수정 기록 보기를 막음 — 고치면 새 버전이 생겨 시험하던 글과 달라짐
   const locked = step === 'testing' || step === 'applying'
   const comparing = showCall && callVersion !== null && !locked
@@ -237,6 +242,10 @@ export function usePersonaPage() {
       if (c.kind === 'delete') return deletePersona(c.personaSeq)
       if (c.kind === 'test') {
         if (applyTarget) await applyTest.start(applyTarget)
+        return
+      }
+      if (c.kind === 'review') {
+        if (applyTarget) await applyTest.apply(applyTarget) // 반영되면 띠가 반영 중으로
         return
       }
       if (c.kind === 'stop') {
@@ -331,7 +340,17 @@ export function usePersonaPage() {
     danger?: boolean // 확인 버튼을 빨간색으로
     testTo?: string // [시나리오 시험] — 통화에 쓸 버전의 시험 화면 (시나리오 시험이 꺼진 환경이면 없음)
     blocked?: boolean // 전체 시험 전 → 확인 버튼 끔, [시나리오 시험]으로 유도
+    failed?: string[] // 실패한 시나리오 이름 — 확인하고 반영 창 (4번, 피그마 2368:5978)
   } | null => {
+    if (confirming?.kind === 'review') {
+      if (step !== 'review') return null // 그새 반영 · 다시 고침이면 창을 닫음
+      return {
+        title: `실패한 시나리오 ${applyTest.failed.length}개가 있습니다. 통화에 반영할까요?`,
+        note: '반영하면 다음 통화부터 고친 내용으로 응대합니다.',
+        okLabel: '반영',
+        failed: applyTest.failed,
+      }
+    }
     if (confirming?.kind === 'delete') {
       const p = list.find((x) => x.personaSeq === confirming.personaSeq)
       if (!p) return null
@@ -481,6 +500,14 @@ export function usePersonaPage() {
                     at: fmtVersionTime(applyTest.stopped.at),
                   }
                 : null,
+            // 확인 필요 — 시나리오 2개 실패 · 시험 시각 (4번)
+            review:
+              step === 'review'
+                ? {
+                    fail: applyTest.failed.length,
+                    at: applyTest.at ? fmtVersionTime(applyTest.at) : '',
+                  }
+                : null,
             applyError: step === 'applying' ? (persona?.applyError ?? null) : null,
             error: applyTest.startError ?? applyTest.applyError,
           }
@@ -493,6 +520,11 @@ export function usePersonaPage() {
     askStop: () => {
       confirm.reset()
       setConfirming({ kind: 'stop' })
+    },
+    // [확인하고 반영] — 실패한 시나리오 이름을 보여 주고 반영 (4번)
+    askReview: () => {
+      confirm.reset()
+      setConfirming({ kind: 'review' })
     },
     applyHead: () => {
       if (!persona) return
