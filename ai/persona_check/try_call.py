@@ -26,6 +26,7 @@ import json
 import logging
 import os
 import shutil
+import sqlite3
 import sys
 import tempfile
 import time
@@ -76,6 +77,7 @@ VOICE_RMS = 250                      # 받은 소리가 이보다 크면 AI가 �
 SAVED = ROOT / "logs" / "persona_check"
 TTS_DIR = SAVED / "tts"              # 문장별 고객 음성. 한 번 만들어 계속 쓴다 → 통화마다 같은 소리
 CONFIG_ID = "persona-check-config"   # 세션 설정만 가로채는 가짜 통화의 이름
+FAQ_SNAPSHOT = "faq-events.sqlite3"  # 시험 묶음 폴더에 두는 운영 FAQ 저장 파일의 복사본(묶음이 끝나면 지운다)
 LIVE: list = []                      # 지금 통화 중인 CallService(개발용 관제 목록)
 
 
@@ -204,9 +206,78 @@ def faq_connected() -> bool:
     return bool(os.environ.get("QDRANT_URL"))
 
 
-def build(client, mock: MockBackend, workdir: Path):
+def snapshot_faq(source: Path, target: Path) -> bool:
+    """운영 AI의 FAQ 저장 파일(SQLite · WAL)을 읽기만 해서 target으로 복사한다. 시험 묶음마다 한 번.
+    원본은 읽기 전용으로 붙어 있고 여기서도 읽기 전용으로 연다. immutable은 WAL에 남은 최근 변경을 못 볼 수 있어 마지막 수단.
+    실패하면 False → 그 묶음은 FAQ 검색 없이(KB_UNAVAILABLE) 돈다."""
+    if not source.is_file():
+        log.warning("운영 FAQ 저장 파일이 없음: %s", source)
+        return False
+    for flags in ("mode=ro", "mode=ro&immutable=1"):
+        try:
+            src = sqlite3.connect(f"{source.resolve().as_uri()}?{flags}", uri=True)
+            try:
+                dst = sqlite3.connect(target)
+                try:
+                    src.backup(dst)
+                finally:
+                    dst.close()
+            finally:
+                src.close()
+            return True
+        except sqlite3.Error as e:
+            log.warning("운영 FAQ 저장 파일 복사 실패(%s): %s", flags, e)
+            target.unlink(missing_ok=True)
+    return False
+
+
+def managed_rag(db: Path, cfg):
+    """운영 AI와 같은 FAQ 검색(FAQ 관리 화면에 등록된 FAQ의 색인, app.main.build_rag의 관리 색인 경로)을
+    운영 FAQ 저장 파일의 복사본(db)으로 붙인다. 운영 Qdrant에는 쓰지 않는다 — 색인 등록 · 삭제와 기동 때 삭제 정리는
+    운영 AI만 한다(여기서 불리면 오류). 검색(질문 임베딩 · 벡터 조회 · 리랭커)만 운영과 같다."""
+    from langchain_openai import OpenAIEmbeddings
+    from qdrant_client import QdrantClient
+    from app.rag.faq_events import FaqEventStore
+    from app.rag.faq_index import FaqIndex
+    from app.rag.faq_index_state import FaqIndexState
+    from app.rag.faq_runtime import load_bm25_descriptions
+    from app.rag.faq_vectors import QdrantFaqVectors
+    from app.rag.remote import RemoteReranker
+    from app.rag.service import RagService
+
+    class ReadOnlyVectors(QdrantFaqVectors):
+        def stage(self, *_):
+            raise RuntimeError("시험 도구는 운영 FAQ 색인에 쓰지 않는다")
+        delete_faqs = stage
+
+    class SnapshotIndex(FaqIndex):
+        def reconcile_deletions(self):  # 삭제 정리는 운영 AI가 한다
+            pass
+
+    f, rag = cfg.faq_sync, cfg.rag
+    reranker = RemoteReranker(os.getenv("RAG_RERANKER_URL"), os.getenv("RAG_RERANKER_API_KEY"), rag.http_timeout_sec)
+    client = QdrantClient(url=os.environ["QDRANT_URL"], api_key=os.environ["QDRANT_API_KEY"], timeout=rag.http_timeout_sec)
+    try:
+        events = FaqEventStore(db, max_pending=f.max_pending, busy_timeout_sec=f.busy_timeout_sec)
+        state = FaqIndexState(events, collection=f.collection, model=rag.embedding_model, dimensions=rag.dimensions)
+        index = SnapshotIndex(state, ReadOnlyVectors(client, collection=f.collection, dimensions=rag.dimensions),
+                              OpenAIEmbeddings(model=rag.embedding_model, request_timeout=rag.http_timeout_sec, max_retries=0),
+                              validate_chunks=reranker.validate_chunks, embedding_batch_size=f.embedding_batch_size,
+                              bm25_weight=rag.bm25_weight, rrf_c=rag.rrf_c, bm25_descriptions=load_bm25_descriptions())
+    except BaseException:
+        client.close()
+        reranker.close()
+        raise
+    service = RagService(rag, faq_index=index, reranker=reranker)
+    service.client = client  # close()가 닫는다(리랭커는 run_call 끝에서)
+    return service
+
+
+def build(client, mock: MockBackend, workdir: Path, faq: Path | None = None):
     """app/main.py lifespan과 같은 조립(관제 · FAQ 동기화 · 미답변 검토 제외). workdir = 결과 아웃박스를 둘 임시 폴더.
-    FAQ 검색은 app.main.build_rag의 기본 경로(RagService(cfg.rag), 첫 검색 때 연결)와 같다."""
+    FAQ 검색: 운영이 관리 색인을 쓰고(faq_sync.process_enabled) 묶음의 FAQ 복사본(faq)이 있으면 그 복사본으로 같은 검색을
+    (통화마다 workdir에 한 벌 더 복사 — 동시 통화가 한 파일을 잠그지 않게), 아니면 app.main.build_rag의 기본 경로.
+    11/12 서버 첫 시험: 기본 경로가 찾는 매뉴얼 컬렉션이 운영에 없어 G1의 FAQ 검색이 전부 KB_UNAVAILABLE이었다."""
     cfg = load_server_config()
     backend = BackendGateway(mock, cfg.backend.max_concurrency, cfg.backend.read_budget_sec, cfg.backend.write_budget_sec)
     policy, fare_of = load_policy(), partial(parcel_fare, table=cfg.fare.model_dump())
@@ -214,7 +285,15 @@ def build(client, mock: MockBackend, workdir: Path):
     rag = None
     if faq_connected():
         from app.rag.service import RagService
-        rag = RagService(cfg.rag)
+        if faq is not None and faq.is_file() and cfg.faq_sync.process_enabled:
+            try:
+                mine = workdir / FAQ_SNAPSHOT
+                shutil.copyfile(faq, mine)
+                rag = managed_rag(mine, cfg)
+            except Exception as e:  # 운영과 같다: FAQ 검색만 끄고 통화는 한다(search_manual이 KB_UNAVAILABLE)
+                log.warning("FAQ 관리 색인 준비 실패, FAQ 검색 끔: %s %s", type(e).__name__, str(e)[:200])
+        else:
+            rag = RagService(cfg.rag)
     calls = CallService(CallDeps(client=client, backend=backend, policy=policy, cfg=cfg.call,
                                  backend_model=os.environ.get("BACKEND_MODEL", "gpt-6-luna"),
                                  backend_effort=os.environ.get("BACKEND_EFFORT", "low"), address=address, rag=rag,
@@ -325,7 +404,7 @@ async def run_call(scenario_id: str = "A1", persona: dict | None = None, bus=Non
     if persona.get("promptText"):  # 관리자가 이 글을 적용해 둔 백엔드처럼
         mock.use_prompt(persona["promptText"])
         mock.personas["ACTIVE"]["voiceId"] = persona.get("voiceId")
-    calls, address = build(client, mock, workdir)
+    calls, address = build(client, mock, workdir, out_dir.parent / FAQ_SNAPSHOT)
     stub_address = address.db is None and not kakao.has_key()
     if stub_address:
         async def geocode(address_, timeout_sec, transport=None, http=None):
@@ -510,6 +589,8 @@ async def run_call(scenario_id: str = "A1", persona: dict | None = None, bus=Non
     await address.close()
     if calls.d.rag is not None:
         await calls.d.rag.close()
+        if calls.d.rag.faq_index is not None and calls.d.rag.reranker is not None:
+            calls.d.rag.reranker.close()  # 관리 색인 경로에서는 RagService.close가 리랭커를 닫지 않는다
     shutil.rmtree(workdir, ignore_errors=True)
     if calls in LIVE:
         LIVE.remove(calls)

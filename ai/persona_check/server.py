@@ -32,7 +32,7 @@ from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
 from persona_check import judge, try_call
@@ -40,17 +40,23 @@ from persona_check import judge, try_call
 log = logging.getLogger(__name__)
 PORT = int(os.environ.get("PERSONA_CHECK_PORT", "8765"))
 FILES = {"verdict": "verdict.json", "record": "backend.json", "audio": "call.wav", "report": "report.html"}
+# 형식을 정해 보낸다: Python 3.14는 .wav를 audio/vnd.wave로 짐작하고, 백엔드 중계는 audio/wav · audio/x-wav만 받아 녹음이 안 들렸다(11/12 서버 첫 시험)
+MEDIA = {"verdict": "application/json", "record": "application/json", "audio": "audio/wav", "report": "text/html; charset=utf-8"}
 RUN_ID = re.compile(r"\d{4}_\d{6}_[0-9a-f]{6}")
 MAX_PROMPT_CHARS = 20000  # 운영 페르소나 글 상한(config/server.toml persona_max_prompt_chars)과 같게
 
 
 class RunRequest(BaseModel):
-    scenarios: list[str] | None = Field(None, max_length=200)                 # 없으면 전체(core = true면 핵심만)
+    scenarios: list[str] | None = Field(None, min_length=1, max_length=200)   # 없으면 전체(core = true면 핵심만). 빈 목록은 422
     core: bool = False
     promptText: str | None = Field(None, min_length=1, max_length=MAX_PROMPT_CHARS)  # 후보 페르소나 글. 없으면 서버 기본 페르소나
     voiceId: str | None = Field(None, max_length=64)                          # promptText와 함께 줄 때만 쓰인다
     concurrency: int = Field(1, ge=1)
     tag: str | None = Field(None, min_length=1, max_length=64)                # 화면이 붙이는 표시(어느 상담가 버전의 시험인지). 창구는 뜻을 모르고 저장 · 조회만 한다
+
+
+class Busy(Exception):
+    """같은 표시(tag)의 묶음이 아직 돌고 있다. 받으면 같은 통화가 두 번 걸려 요금이 두 번 나간다."""
 
 
 def available(scenario: dict) -> bool:
@@ -70,6 +76,8 @@ class Runs:
         self.gate: asyncio.Semaphore | None = None  # 묶음이 여러 개여도 동시 통화는 max_concurrency까지
 
     def start(self, req: RunRequest) -> dict:
+        if req.tag and any(r.get("tag") == req.tag for r in self.live.values()):
+            raise Busy(f"이 표시의 시험이 이미 돌고 있음: {req.tag}")
         known = {s["id"]: s for s in judge.load_scenarios()}
         ids = req.scenarios or [i for i, s in known.items() if (s.get("core") or not req.core) and available(s)]
         if unknown := [i for i in ids if i not in known]:
@@ -140,12 +148,17 @@ class Runs:
                 run["finished"] += 1
                 self._save(run)
 
+        # 운영 FAQ 저장 파일을 묶음마다 한 번 복사해 이 묶음의 통화가 함께 쓴다(시작 시점의 FAQ로 시험)
+        faq = self.root / run["runId"] / try_call.FAQ_SNAPSHOT
+        if source := os.environ.get("PERSONA_CHECK_FAQ_DB"):
+            await asyncio.to_thread(try_call.snapshot_faq, Path(source), faq)
         try:
             await asyncio.gather(*(one(item) for item in run["items"]))
             run["status"] = "done"
         finally:  # 종료로 취소되면 run.json은 running으로 남고, 다음에 읽을 때 interrupted로 보인다
             self._save(run)
             self.live.pop(run["runId"], None)
+            faq.unlink(missing_ok=True)
 
     async def stop(self) -> None:
         """돌고 있는 통화를 취소하고 끝날 때까지 기다린다(통화마다 세션을 끊고 나온다)."""
@@ -201,6 +214,8 @@ def create_app(runs: Runs, monitor: APIRouter | None = None) -> FastAPI:
             return {"runId": runs.start(req)["runId"]}
         except ValueError as e:
             raise HTTPException(422, str(e)) from None
+        except Busy as e:
+            raise HTTPException(409, str(e)) from None
 
     @api.get("/runs/{run_id}")
     async def status(run_id: str) -> dict:
@@ -209,10 +224,16 @@ def create_app(runs: Runs, monitor: APIRouter | None = None) -> FastAPI:
         return run
 
     @api.get("/runs/{run_id}/{scenario}/{kind}")
-    async def result(run_id: str, scenario: str, kind: str) -> FileResponse:
+    async def result(run_id: str, scenario: str, kind: str) -> Response:
         if (path := runs.file(run_id, scenario, kind)) is None:
             raise HTTPException(404, "없는 결과")
-        return FileResponse(path)
+        log_path = path.with_name("call.json")
+        if kind == "record" and log_path.is_file():
+            # AI 통화 로그(call.json — 운영 AI가 통화마다 남기는 JSON 로그와 같은 모양)를 callLog로 붙인다.
+            # 백엔드 중계는 record까지만 넘겨서, AI 파트가 브라우저로 …/record 주소를 열면 로그까지 보게(11/12). 화면은 이 칸을 안 씀
+            record = json.loads(path.read_text("utf-8"))
+            return JSONResponse(record | {"callLog": json.loads(log_path.read_text("utf-8"))})
+        return FileResponse(path, media_type=MEDIA[kind])
 
     app = FastAPI(title="persona check", lifespan=lifespan)
     app.include_router(api)

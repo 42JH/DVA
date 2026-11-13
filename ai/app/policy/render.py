@@ -83,6 +83,8 @@ def render_delegation(policy: Policy, tools: tuple[tuple[str, str], ...] = ()) -
               "서버 결과가 오면 그때 안내를 이어갑니다. 새 성함·주소 또는 다른 접수 값을 함께 말하면 그 값으로 생성합니다.",
               "- 고객이 상담원 연결이나 통화 종료만 명확하게 요청할 때(서버가 직접 듣고 처리합니다).",
               "- 인사, 맞장구, 대기 요청, 이미 받은 결과로 답할 수 있는 말", "",
+              "- 새 정보 없는 일반 수긍('네', '알겠습니다')이나 추가 도움이 있다는 짧은 답에도 위임하거나 "
+              "독자적으로 다음 질문을 하지 않습니다. 서버가 응답 의미와 진행 중인 처리를 대조해 다음 안내를 보냅니다.", "",
               "Do not guess the result while waiting.",
               "- 접수 동의와 추가 도움에 대한 종료 답변을 받은 뒤에는 서버 안내를 기다리며 채우는 말을 생략합니다. "
               "다른 백엔드 결과를 기다리는 동안 안내가 필요하면 ‘네, 잠시만요.’, ‘확인해 보겠습니다.’, "
@@ -160,7 +162,8 @@ def decision_questions(policy: Policy, stage_id: str, *, pending: bool = False,
                        pick_labels: tuple[str, ...] = (),
                        destination_candidates: CandidateSet | None = None,
                        callback: bool = False, origin: bool = False, sender_change: bool = False,
-                       sender_name_scope: bool = False, cancel_current: bool = False,
+                       sender_name_scope: bool = False, sender_address_save: bool = False,
+                       cancel_current: bool = False,
                        cancel_selected: bool = False, cancel_selected_order: bool = False,
                        cancel_confirmation: bool = False,
                        box_label: str | None = None) -> list[dict]:
@@ -182,8 +185,12 @@ def decision_questions(policy: Policy, stage_id: str, *, pending: bool = False,
         sets.insert(0, "sender_change")
     if sender_name_scope:
         sets.append("sender_name_scope")
+    if sender_address_save:
+        sets.append("sender_address_save")  # 서버가 등록 주소 변경 여부를 물었을 때만
     if box_label:
         sets.insert(0, "box")
+    if sets or pick_labels:
+        sets.append("reply")
     out = []
     for name in dict.fromkeys(sets):
         for q in policy.decision[name].questions:
@@ -194,6 +201,8 @@ def decision_questions(policy: Policy, stage_id: str, *, pending: bool = False,
                 item["instructions"] = (
                     "직전 AI의 취소 확인 질문에 대한 답만 판단한다. '네, 취소해 주세요'는 yes, "
                     "취소하지 말라는 답은 no, 다른 택배나 범위로 바꾸면 change, 그 밖은 not_answer다.")
+            if q.name == "switch" and stage_id in ("inquiry", "lookup", "cancel", "agent"):
+                item["instructions"] += " 직전 AI가 추가 도움이 필요한지 물었고 고객이 추가 도움이 없다고 답하면 end다."
             if q.type == "choice":
                 item["choices"] = [{"value": c} for c in q.choices]
                 if q.name == "switch" and cancel_current:

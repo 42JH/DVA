@@ -18,8 +18,8 @@ from app.address.parse import clean_text, parse, split_gil, unlink_gil
 from app.calls.session import CallSession, Phase
 from app.domain.rules import KST, restore_phone_ending
 from app.domain.address_book import (begin_sender_name_change, origin_confirmation, origin_place, prefill_sender,
-                                     receiver_questions_deferred, request_sender_address_change, save_offer, sender_change_available,
-                                     sender_change_next)
+                                     new_sender_address, receiver_questions_deferred, request_sender_address_change,
+                                     save_offer, sender_change_available, sender_change_next)
 from app.domain.assess import area_label, assess, readback_facts
 from app.domain.candidates import (DESTINATION_CHANGE_FIELDS, DESTINATION_CLARIFICATIONS, apply_destination_change, apply_pick,
                                    clear_order_lookup, destination_changes, offer, reject_candidates)
@@ -111,7 +111,9 @@ class Runtime:
     confirm_t: float = 0.0                            # 관제: 확인 "네" 발화 끝(→ 담기)
     # 서버 질문(후보·확인·출발지·박스·콜백)에 답하는 발화의 Decision 반영 대기. 같은 턴의 Backend 도구 호출이 기다린다
     deciding: asyncio.Event | None = None
-    name_saving: tuple | None = None                  # 동의 즉시 PATCH를 보낸 (이름[, 주소, 상세])(중복 전송 방지)
+    profile_saving: tuple | None = None               # 동의 즉시 PATCH를 보낸 ([이름][, 주소, 상세])(중복 전송 방지)
+    guidance_t: float = 0.0                          # 마지막 서버 발화 요청 시각(늦은 수긍 안내를 버리는 기준)
+    pending_guidance: int = 0                        # 실행 중 업무 처리·대기 중 N2는 일반 수긍보다 우선한다
 
     def cancel(self) -> None:
         for h in (self.endpoint, self.ai_end, self.commit):
@@ -133,6 +135,8 @@ def _decision_input(state: ConversationState, rt: Runtime, utt: Spoken, prev: Sp
             "이번 택배 기록": draft["sender_name"].value if draft and draft["sender_name"].valid else None,
             "등록 이름 변경 여부 미결정": bool(draft and draft.ask_customer_name_save),
         }
+    if "sender_address_save" in names:
+        facts["서버가 기다리는 답"] = "이번 발송 주소를 등록 주소로도 바꿀지"
     if "origin" in names and origin_place(state):
         facts["발송 주소 후보 출처"] = (
             "직전 택배" if state.current and state.current.previous_parcel_origin else "고객 기존 주소")
@@ -258,6 +262,7 @@ class LiveFlow:
                     or (st.origin_offered and st.origin_answer is None and not st.origin_applied)
                     or sender_change_available(st) and not (st.current and st.current.sender_name_for_parcel)
                     or (st.current and st.current.ask_customer_name_save)
+                    or sender_change_next(st) == "ask_address_save"
                     or (st.current and st.current.box_proposal and st.intent == "order")
                     or assess(st, self.policy).stage == "readback")
 
@@ -352,6 +357,7 @@ class LiveFlow:
                                            pick_labels=pick, callback=callback, origin=origin,
                                            destination_candidates=candidates if pick else None,
                                            sender_change=sender_change, sender_name_scope=name_scope,
+                                           sender_address_save=sender_change_next(s.state) == "ask_address_save",
                                            cancel_current=cancel_current, cancel_selected=bool(selected),
                                            cancel_selected_order=bool(selected and selected.get("order_seq")),
                                            cancel_confirmation=bool(pending and pending.kind == "cancel"),
@@ -453,7 +459,7 @@ class LiveFlow:
             destination_reply = (self._apply_destination_reply(s, utt, prev, candidates, answers.get("pick"), switch)
                                  if st.current is candidate_draft else None)
             if destination_reply is not None:
-                for name in ("pick", "confirm", "origin", "sender_change", "sender_name_scope"):
+                for name in ("pick", "confirm", "origin", "sender_change", "sender_name_scope", "sender_address_save"):
                     answers.pop(name, None)
                 followups.append(("destination_change", (utt, candidate_draft, destination_reply)))
             if (box and st.intent == "order" and not st.pending and st.current and st.current.box_proposal is box
@@ -507,7 +513,17 @@ class LiveFlow:
             if scope_resolved:
                 st.current.ask_customer_name_save = False
                 st.current.save_sender_name = scope_choice in ("save", "confirm_save")
-                self._maybe_save_name(s)
+                self._maybe_save_profile(s)
+                if st.pending and st.pending.kind == "parcel":
+                    st.address_offer = save_offer(st) or None
+            address_answer = answers.get("sender_address_save")
+            address_key = new_sender_address(st) if next_sender == "ask_address_save" else None
+            address_resolved = bool(address_key and address_answer and address_answer[1] >= th
+                                    and address_answer[0] in ("yes", "no"))
+            if address_resolved:
+                st.sender_address_consent = (*address_key, address_answer[0] == "yes")
+                s.note("등록 주소 변경", address_answer[0])
+                self._maybe_save_profile(s)
                 if st.pending and st.pending.kind == "parcel":
                     st.address_offer = save_offer(st) or None
             if (og := origin_answer) and og[1] >= th and og[0] in ("yes", "no") \
@@ -523,7 +539,7 @@ class LiveFlow:
                 s.note("출발지", og[0])
                 if st.intent == "order" and not sender_change:
                     followups.append(("origin", utt))
-            if ((scope_resolved or scope_waits_for_name) and st.intent == "order"
+            if ((scope_resolved or scope_waits_for_name or address_resolved) and st.intent == "order"
                     and not sender_change and ("origin", utt) not in followups):
                 followups.append(("sender_name_scope", utt))
             if next_sender or scope_waits_for_name:
@@ -603,6 +619,12 @@ class LiveFlow:
                     s.spawn(self._follow(s, *f), "confirmation_hold")
                 else:
                     await self._follow(s, *f)
+        reply = answers.get("reply")
+        if (not any(followups) and reply and reply[1] >= th and reply[0] in ("acknowledge", "help")
+                and (not switch or switch[0] == "none")
+                and (not task or task[0] == "chit_chat")):
+            s.spawn(self.notify(s, "N2", {"acknowledgement": reply[0]}, again=True, reply_turn=utt),
+                    "acknowledgement")
 
     def _apply_destination_reply(self, s: CallSession, utt: Spoken, prev: Spoken | None,
                                  candidates: CandidateSet | None, answer, switch) -> dict[str, str] | None:
@@ -705,6 +727,14 @@ class LiveFlow:
 
     async def commit(self, s: CallSession, pending_id: str) -> None:
         rt = self.rt(s)
+        rt.pending_guidance += 1
+        try:
+            await self._commit(s, pending_id)
+        finally:
+            rt.pending_guidance -= 1
+
+    async def _commit(self, s: CallSession, pending_id: str) -> None:
+        rt = self.rt(s)
         rt.commit = rt.commit_pid = None
         draft_save = None
         draft_cancel = None
@@ -778,6 +808,14 @@ class LiveFlow:
             await self.notify(s, "N2", {"cancel": out.to_output()})
 
     async def _follow(self, s: CallSession, what: str, value) -> None:
+        rt = self.rt(s)
+        rt.pending_guidance += 1
+        try:
+            await self._follow_inner(s, what, value)
+        finally:
+            rt.pending_guidance -= 1
+
+    async def _follow_inner(self, s: CallSession, what: str, value) -> None:
         st = s.state
         if what == "hold":
             pending_id, utterance_id, delegations = value
@@ -1074,7 +1112,8 @@ class LiveFlow:
         return {"origin": "name_only"} if done or st.origin_answer is not None else {}
 
     def _maybe_save_addresses(self, s: CallSession) -> None:
-        """택배를 담았으면 묻지 않고 고객 정보·주소를 저장한다(백그라운드, 통화 중 — 기본 주소는 종료 후 409).
+        """택배를 담았으면 저장 대상을 저장한다(백그라운드, 통화 중 — 기본 주소는 종료 후 409). 성함·기본 주소는
+        고객이 동의한 것만(동의 즉시 저장이 실패한 경우의 재시도), 받는 곳 주소록은 묻지 않고 추가한다.
         담기 전(되읽기 중)에는 저장하지 않는다(사용자 결정 2026-11-06)."""
         st, results = s.state, getattr(self.svc, "results", None)
         offer = st.address_offer
@@ -1103,6 +1142,14 @@ class LiveFlow:
             dtime.fromisoformat(self.cfg.agent_open) <= k.time() < dtime.fromisoformat(self.cfg.agent_close)
 
     async def _transfer(self, s: CallSession) -> None:
+        rt = self.rt(s)
+        rt.pending_guidance += 1
+        try:
+            await self._transfer_inner(s)
+        finally:
+            rt.pending_guidance -= 1
+
+    async def _transfer_inner(self, s: CallSession) -> None:
         """안내("바로 연결해 드리겠습니다")가 끝나면 통화 전환(SIP REFER, PBX 계약: 고객 동의 후에만). 실패 → 콜백 제안."""
         deadline = time.monotonic() + 10.0
         rt = self.rt(s)
@@ -1143,24 +1190,23 @@ class LiveFlow:
             s.tools.ops["register"] = {"status": "running"}
             s.spawn(results.register(s, self.svc.call_session_seq), "register")
 
-    def _maybe_save_name(self, s: CallSession) -> None:
-        """등록 고객이 등록 이름 변경에 동의하면 택배를 담기 전이라도 바로 PATCH한다(사용자 결정 2026-11-12).
-        발송 주소가 상세까지 확정됐고 기본 주소와 다르면 담을 때와 같이 같은 PATCH에 싣는다.
-        실패하면 담을 때 저장 경로(save_offer)가 다시 시도한다."""
+    def _maybe_save_profile(self, s: CallSession) -> None:
+        """등록 고객이 등록 이름·등록 주소 변경에 동의하면 택배를 담기 전이라도 바로 PATCH한다(사용자 결정 2026-11-12).
+        동의한 항목을 한 PATCH에 싣는다. 실패하면 담을 때 저장 경로(save_offer)가 다시 시도한다."""
         results, draft = getattr(self.svc, "results", None), s.state.current
-        offer = save_offer(s.state)
-        if results is None or not offer.get("name"):
+        offer = {k: True for k in ("name", "sender") if save_offer(s.state).get(k)}
+        if results is None or not offer:
             return
-        offer = {"name": True} | ({"sender": True} if offer.get("sender")
-                                  and draft["sender_address_detail"].valid else {})
-        snap = {"sender_name": draft["sender_name"].value.strip(), "sender_address": draft["sender_address"].value,
+        snap = {"sender_name": (draft["sender_name"].value or "").strip() if "name" in offer else "",
+                "sender_address": draft["sender_address"].value,
                 "sender_address_detail": draft["sender_address_detail"].value or "", "sender_geo": draft.sender_geo}
-        key = (snap["sender_name"], snap["sender_address"], snap["sender_address_detail"])             if "sender" in offer else (snap["sender_name"],)
+        key = ((snap["sender_name"],) if "name" in offer else ()) + (
+            (snap["sender_address"], snap["sender_address_detail"]) if "sender" in offer else ())
         rt = self.rt(s)
-        if key == rt.name_saving:
+        if key == rt.profile_saving:
             return
-        rt.name_saving = key
-        s.spawn(results.save_addresses(s, self.svc.call_session_seq, snap, offer), "name_save")
+        rt.profile_saving = key
+        s.spawn(results.save_addresses(s, self.svc.call_session_seq, snap, offer), "profile_save")
 
     def _maybe_submit(self, s: CallSession, force: bool = False) -> None:
         """더 없음 + 결제 방식을 알면(또는 고객이 끝낼 때) 결과 전송을 백그라운드로 시작한다(결제는 묻지 않는다)."""
@@ -1319,7 +1365,7 @@ class LiveFlow:
         s.note("도구", f"{name} {out.get('code') or out['status']}")
         if name == "record_fields":
             self._maybe_register(s)
-            self._maybe_save_name(s)
+            self._maybe_save_profile(s)
             if out.get("code") == "ITEM_PARCEL_UNCLEAR":
                 async with s.lock:
                     selection = self._edit(s, use_lookup=False) if s.state.unassigned_item_issues else {}
@@ -1395,7 +1441,21 @@ class LiveFlow:
 
     # ------------------------------------------------------------------ 전달(N1'/N2)
     async def notify(self, s: CallSession, level: str, facts: dict, again: bool = False,
-                     *, unless_tool_turn: Spoken | None = None, cancel_confirmation_id: str | None = None) -> None:
+                     *, unless_tool_turn: Spoken | None = None, cancel_confirmation_id: str | None = None,
+                     reply_turn: Spoken | None = None) -> None:
+        rt = self.rt(s)
+        if level == "N2":
+            rt.pending_guidance += 1
+        try:
+            await self._notify(s, level, facts, again, unless_tool_turn=unless_tool_turn,
+                               cancel_confirmation_id=cancel_confirmation_id, reply_turn=reply_turn)
+        finally:
+            if level == "N2":
+                rt.pending_guidance -= 1
+
+    async def _notify(self, s: CallSession, level: str, facts: dict, again: bool = False,
+                      *, unless_tool_turn: Spoken | None = None, cancel_confirmation_id: str | None = None,
+                      reply_turn: Spoken | None = None) -> None:
         """N1' thinking(무음) · N2 commentary(말할 것, AI 발화가 멈춘 뒤·진행 위임 뒤).
         again: 같은 내용이라도 다시 보낸다(마무리 인사 재요청)."""
         rt = self.rt(s)
@@ -1414,6 +1474,26 @@ class LiveFlow:
             t0 = time.monotonic()
             await self._wait_quiet(s, min_quiet_ms=self.cfg.utterance_gap_ms if receipt_pid else 0,
                                    wait_delegations=not parcel_added)
+            if reply_turn:
+                # 대기 상한이 지나도 실행 중 업무·다른 안내·새 고객 발화를 앞질러 말하지 않는다.
+                if (s.phase != Phase.ACTIVE or s.closed or rt.customer_turns[-1:] != [reply_turn]
+                        or rt.cust is not None or rt.pending_guidance > 1 or self._awaiting_answer(s)
+                        or rt.guidance_t >= reply_turn.t_start or s.last_output_t > reply_turn.t_start
+                        or any(d["inflight"] or d["outputs"] or not d["done"].is_set()
+                               for d in rt.delegations.values())):
+                    return
+                if facts["acknowledgement"] == "help":
+                    facts = {"acknowledgement": "clarify"}
+                elif (s.state.intent == "lookup" and s.state.selected_order is None
+                      or s.state.intent == "cancel" and not s.state.cancel_done):
+                    facts = {"acknowledgement": "clarify", "intent": s.state.intent}
+                elif s.state.intent == "order":
+                    summary = state_summary(s.state, self.policy)
+                    facts = {"acknowledgement": "ask_help" if summary["stage"] == "more_parcels" else "continue",
+                             "summary": summary}
+                else:
+                    facts = {"acknowledgement": "ask_help" if s.state.intent else "ask_intent"}
+                content = json.dumps(facts, ensure_ascii=False, sort_keys=True)
             if cancel_confirmation_id and (not s.state.pending or s.state.pending.id != cancel_confirmation_id):
                 return
             if parcel_added and (s.closing_requested_t or s.closed or assess(s.state, self.policy).stage != "more_parcels"):
@@ -1486,6 +1566,8 @@ class LiveFlow:
         if s.sideband is None or s.phase in (Phase.CLOSED, Phase.FAILED, Phase.FINALIZING, Phase.DONE):
             return False
         try:
+            if event.get("type") in ("session.commentary.append", "response.create"):
+                self.rt(s).guidance_t = time.time()
             await s.sideband.send(event | {"event_id": s.next_event_id()})
         except Exception as e:
             log.warning("송신 실패 %s %s %s", s.call_id, event.get("type"), type(e).__name__)

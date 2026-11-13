@@ -36,6 +36,16 @@ def ctx(backend=None, address=None, **kw) -> ToolContext:
                        BackendGateway(backend or MockBackend()), address, now=lambda: NOW, clock=lambda: 100.0, **kw)
 
 
+def answer_address_save(c: ToolContext, save: bool = False) -> dict:
+    """서버가 등록 주소 변경 여부를 물었고 고객이 답함(LiveFlow의 Decision 반영과 같은 상태 변경) → 다음 상태."""
+    from app.domain.address_book import new_sender_address, sender_change_next
+    from app.tools.lookup import resume_destination
+    assert sender_change_next(c.state) == "ask_address_save"
+    c.state.sender_address_consent = (*new_sender_address(c.state), save)
+    resume_destination(c.state)
+    return call(c, "get_state", {})
+
+
 def complete_sender_address(c: ToolContext) -> None:
     c.state.record("sender_address", "서울특별시 강남구 테헤란로 211")
     c.state.record("sender_address_detail", "")
@@ -328,12 +338,15 @@ def test_sender_address_change_finishes_before_receiver_questions(address, has_p
     assert call(c, "get_state", {})["missing"] == ["sender_address_detail"]
 
     out = call(c, "record_fields", {"sender_address_detail": ""})
-    assert out["fields"]["sender_address_detail"] == "valid" and "sender_change_next" not in out
+    assert out["fields"]["sender_address_detail"] == "valid" and out["sender_change_next"] == "ask_address_save"
+    assert out["missing"] == [] and not c.state.candidates  # 등록 주소 변경 답을 받을 때까지 받는 분 질문 보류
+    if receiver_provided and not has_pin:
+        assert "confirm_route" in out["facts"]
+    out = answer_address_save(c)
+    assert "sender_change_next" not in out
     assert out["missing"][0] == ("receiver_phone" if receiver_provided else "receiver_name")
     if has_pin and receiver_provided:
-        assert out["status"] == "needs_choice" and c.state.candidates
-    elif receiver_provided:
-        assert "confirm_route" in out["facts"]
+        assert out["destination_choices"] == list(c.state.candidates.labels)
     else:
         assert not c.state.candidates
 
@@ -378,6 +391,8 @@ def test_ordinary_sender_and_receiver_use_same_short_detail_question(address):
     assert out["missing"][0] == "sender_address_detail"
     assert out["address_detail_question"] == "상세주소를 알려주시겠어요?"
     out = call(c, "record_fields", {"sender_address_detail": ""})
+    assert out["sender_change_next"] == "ask_address_save"
+    out = answer_address_save(c)
     assert out["missing"][0] == "receiver_address_detail"
     assert out["address_detail_question"] == "상세주소를 알려주시겠어요?"
 
@@ -427,7 +442,9 @@ def test_explicit_destination_waits_for_sender_and_is_not_carried_to_another_dra
     assert out["missing"] == ["sender_address_detail"] and st.candidates is None
     assert call(c, "get_state", {"include_values": True}).get("facts", {}).get("candidates") is None
     out = call(c, "record_fields", {"sender_address_detail": ""})
-    assert out["status"] == "needs_choice" and st.candidates.kind == "destination"
+    assert out["sender_change_next"] == "ask_address_save" and st.candidates is None
+    answer_address_save(c, save=True)
+    assert st.candidates.kind == "destination"
     assert st.current.deferred_destination is None
     assert call(c, "get_state", {})["destination_choices"] == list(st.candidates.labels)
 
@@ -448,7 +465,9 @@ def test_ordinary_order_offers_destination_only_after_sender_address(address, to
     assert "candidates" not in call(c, "get_state", {"include_values": True}).get("facts", {})
 
     out = call(c, "record_fields", {"sender_address_detail": ""})
-    assert out["status"] == "needs_choice" and out["destination_choices"] == out["facts"]["labels"]
+    assert out["sender_change_next"] == "ask_address_save" and c.state.candidates is None
+    out = answer_address_save(c)
+    assert out["destination_choices"] == list(c.state.candidates.labels)
     assert apply_pick(c.state, out["destination_choices"][0])
     assert c.state.current["receiver_address_detail"].value == "5층"
 
@@ -546,6 +565,8 @@ def test_no_destination_match_keeps_early_receiver_name(address):
     assert out["facts"]["recorded"] == ["receiver_name"] and c.state.current["receiver_name"].value == "이영희"
 
     out = call(c, "record_fields", {"sender_address_detail": ""})
+    assert out["sender_change_next"] == "ask_address_save"
+    out = answer_address_save(c)
     assert out["missing"][0] == "receiver_address" and "receiver_name" not in out["missing"]
 
 
@@ -677,6 +698,8 @@ def test_full_parcel_opens_readback_with_facts(corrector, address):
     first = call(c, "record_fields", {"sender_name": "김철수", "sender_address": "서울 강남구 테헤란로 211",
                                       "sender_address_detail": "3층"})
     assert "confirm_route" not in first["facts"]  # 받는 곳 주소가 아직 없다
+    assert first["sender_change_next"] == "ask_address_save"
+    answer_address_save(c, save=True)
     out = call(c, "record_fields", {"receiver_name": "이영희", "receiver_phone": "01098765432",
                                     "receiver_address": "서울 강남구 테헤란로 212", "receiver_address_detail": "",
                                     "small_box_count": 1, "item_price": 30000})
@@ -685,7 +708,7 @@ def test_full_parcel_opens_readback_with_facts(corrector, address):
     # 되읽기는 성함·동 이름만(S15P31D109-164). 되읽기가 열리면 confirm_route는 따로 주지 않는다
     assert set(facts) == {"sender_name", "from", "receiver_name", "to"} and facts["receiver_name"] == "이영희"
     assert "confirm_route" not in out["facts"]
-    # 저장 대상은 상태에만 두고 담을 때 묻지 않고 저장한다(2026-11-06)
+    # 저장 대상은 상태에만 둔다. 발송 주소는 고객이 등록 주소 변경에 동의했을 때만, 받는 곳은 묻지 않고 담을 때 저장
     assert "address_save" not in out["facts"] and c.state.address_offer == {"sender": True, "receiver": True}
 
 
@@ -707,6 +730,7 @@ def test_same_values_after_release_reopen_readback_but_not_while_awaiting_fix(co
     c = ctx(address=address)
     call(c, "record_fields", {"sender_name": "김철수", "sender_address": "서울 강남구 테헤란로 211",
                               "sender_address_detail": "3층"})
+    answer_address_save(c)
     call(c, "record_fields", {"receiver_name": "이영희", "receiver_phone": "01098765432",
                               "receiver_address": "서울 강남구 테헤란로 212", "receiver_address_detail": "",
                               "small_box_count": 1, "item_price": 30000})

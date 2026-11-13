@@ -52,7 +52,7 @@ python -m pytest persona_check -q
 | `PERSONA_CHECK_MAX_CONCURRENCY` | 동시에 거는 통화 수(묶음 전체 합) | 1 |
 | `PERSONA_CHECK_HOST`, `PERSONA_CHECK_PORT` | 창구 주소 | `127.0.0.1`, `8765` |
 | `BACKEND_MODEL`, `BACKEND_EFFORT` | 위임 Backend 모델. 운영과 같은 값으로 둔다 | `gpt-6-luna`, `low` |
-| `QDRANT_URL`, `QDRANT_API_KEY`, `RAG_RERANKER_URL`, `RAG_RERANKER_API_KEY` | FAQ 검색 서버. 운영 AI 서버와 같은 값을 넣으면 FAQ 시나리오(G1)가 돈다. `QDRANT_URL`이 없으면 G1은 빠진다 | 없음 |
+| `QDRANT_URL`, `QDRANT_API_KEY`, `RAG_RERANKER_URL`, `RAG_RERANKER_API_KEY` | FAQ 검색 서버. 운영 AI 서버와 같은 값을 넣으면 FAQ 시나리오(G1)가 돈다. `QDRANT_URL`이 없으면 G1은 빠진다. 질문 임베딩은 `OPENAI_API_KEY`를 읽으므로 배포에서는 그 이름으로 시험 전용 키를 넘긴다 | 없음 |
 | `ADDRESS_DB`, `KAKAO_REST_API_KEY` | 주소DB와 카카오 키. 둘 다 없으면 주소 정보를 고정값으로 채운다(아래 한계) | 없음 |
 | `MONITOR_USER`, `MONITOR_PASSWORD` | 주면 운영 관제 화면(`/monitor`)에 시험 통화를 띄운다. 개발 확인용 | 없음 |
 
@@ -62,11 +62,11 @@ python -m pytest persona_check -q
 |---|---|
 | `GET /scenarios` | 시나리오 목록 `[{id, name, group, core, available}]`. `available`이 false면 이 환경에서 돌릴 수 없다(FAQ 검색 서버 미연결). 전체 · 핵심 묶음에서 빠지고, 골라서 요청하면 422 |
 | `GET /scenarios/{id}` | 시나리오 한 개의 내용 `{id, name, group, core, available, caller, lines: [{text, optional}], expected: [{name, value}], checks: [문장]}`. `expected`는 판정 결과표의 코드 검사와 같은 이름과 값이다(화면의 시나리오 보기) |
-| `POST /runs` | `{scenarios?: [ID], core?: bool, promptText?: 후보 페르소나 글, voiceId?, concurrency?, tag?}` → `202 {runId}`. 시나리오를 안 주면 전체, `core`면 핵심 묶음. `tag`는 화면이 붙이는 표시(어느 상담가 버전의 시험인지)로, 창구는 저장과 조회만 한다 |
+| `POST /runs` | `{scenarios?: [ID], core?: bool, promptText?: 후보 페르소나 글, voiceId?, concurrency?, tag?}` → `202 {runId}`. 시나리오를 안 주면 전체, `core`면 핵심 묶음. `tag`는 화면이 붙이는 표시(어느 상담가 버전의 시험인지)로, 창구는 저장과 조회만 한다. `scenarios`가 빈 목록이면 422, 같은 `tag`의 묶음이 아직 돌고 있으면 409(같은 통화가 두 번 걸리지 않게) |
 | `GET /runs` | 묶음 목록(최신순). 항목은 `GET /runs/{runId}`와 같은 모양에 `tag`, `createdAt`이 붙는다. `?tag=`를 주면 그 표시의 묶음만 |
 | `GET /runs/{runId}` | `{status: running/done/interrupted, total, finished, items: [{scenario, name, group, status: queued/running/done/error, passed, summary, error, seconds, liveSeconds}]}` |
 | `GET /runs/{runId}/{scenario}/verdict` | 판정 전체 `{passed, summary, checks: [{name, status: pass/fail/skip, expected, actual, note}]}` |
-| `GET /runs/{runId}/{scenario}/record` | 통화 기록 `{customer: {lines: [[초, AI/고객, 말]], choices}, received: {events, drafts, analyses, orders, …}, said, liveSeconds}`. 화면의 통화 상세에 쓴다 |
+| `GET /runs/{runId}/{scenario}/record` | 통화 기록 `{customer: {lines: [[초, AI/고객, 말]], choices}, received: {events, drafts, analyses, orders, …}, said, liveSeconds, callLog}`. 화면의 통화 상세에 쓴다. `callLog`는 AI 통화 로그(`call.json`, 운영 AI가 통화마다 남기는 JSON 로그와 같은 모양) — 백엔드 중계로 이 주소를 열면 AI 파트가 로그를 바로 본다 |
 | `GET /runs/{runId}/{scenario}/audio` | 통화 녹음(wav, 고객과 AI를 섞은 모노) |
 | `GET /runs/{runId}/{scenario}/report` | 한 장 보기(html) |
 
@@ -119,7 +119,7 @@ python -m pytest persona_check -q
 - AI 서버 배포를 확인한 뒤에 띄우고, 빌드나 기동이 실패해도 AI 서버 배포는 성공으로 둔다.
 - 결과 폴더는 볼륨 `dva-persona-check_persona_check_runs`에 남는다. 릴리스가 바뀌어도 지난 결과가 조회된다.
 - 백엔드는 `http://persona-check:8765`로 부른다(네트워크 `dva-prod_ai_net`). 호스트 포트는 열지 않는다.
-- FAQ 검색 서버 연결(G1)은 아직 넣지 않았다.
+- FAQ 검색(G1): 운영 AI 스택의 Qdrant 내부망 `dva-ai_rag_net`에 붙고, 운영 `.env`의 `QDRANT_API_KEY` · `RAG_RERANKER_URL` · `RAG_RERANKER_API_KEY`를 읽는다. 검색만 하고 색인 · FAQ 동기화는 하지 않는다. 질문 임베딩은 시험 전용 키로 청구된다. 운영 AI는 FAQ 관리 화면에 등록된 FAQ의 색인(관리 색인)으로 검색하므로, 시험 묶음마다 운영 AI의 FAQ 저장 파일(볼륨 `dva-ai_rag_state`, 읽기 전용)을 한 번 복사해 같은 검색을 한다. 운영 Qdrant에는 쓰지 않는다(등록 · 삭제 · 삭제 정리를 막음).
 
 ## 시험 통화에서 본 것 (2026-11-11 ~ 11-12, develop-ai a7e6dfa2 ~ 6e79326e)
 

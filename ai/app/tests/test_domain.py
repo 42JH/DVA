@@ -22,8 +22,12 @@ YES = ConfirmAnswer("yes", {"yes": 0.97, "no": 0.01, "change": 0.01, "not_answer
 
 
 def filled(receiver="이영희", **over) -> ConversationState:
+    # 등록 주소에서 보내는 등록 고객(발송 주소가 등록 주소와 같아 등록 주소 변경 질문이 없다)
     s = ConversationState(customer=Customer(customer_seq=12, name="김철수", caller_phone="01012345678",
-                                            payment_methods=("billing",)), intent="order")
+                                            payment_methods=("billing",), default_address=over.get(
+                                                "sender_address", "서울 강남구 테헤란로 212"),
+                                            default_address_detail=over.get("sender_address_detail", "1201호")),
+                          intent="order")
     s.record("sender_phone", "01012345678", Source.CALLER_ID)
     values = {"sender_name": "김철수", "sender_address": "서울 강남구 테헤란로 212", "sender_address_detail": "1201호",
               "receiver_name": receiver, "receiver_phone": "01098765432", "receiver_address": "부산 해운대구 센텀로 10",
