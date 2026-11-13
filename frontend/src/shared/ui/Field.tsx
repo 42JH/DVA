@@ -26,6 +26,7 @@ export function TextInput({
   inputMode,
   readOnly,
   invalid,
+  autoFocus,
 }: {
   label: string
   labelClassName?: string // 칸 이름을 제목처럼 크게 (TextAreaInput과 같음, 07 상담가 등록 · 수정)
@@ -37,6 +38,7 @@ export function TextInput({
   inputMode?: 'numeric' | 'tel'
   readOnly?: boolean // 바꿀 수 없는 칸 (회색 바탕)
   invalid?: boolean // 글 없이 빨간 테두리만 (오류 글은 묶음 아래에 한 번)
+  autoFocus?: boolean // 누르면 바로 칸이 열리는 곳 (07 상담가 이름 연필)
 }) {
   return (
     <label className="flex min-w-0 flex-col gap-1">
@@ -48,6 +50,7 @@ export function TextInput({
           placeholder={placeholder}
           inputMode={inputMode}
           readOnly={readOnly}
+          autoFocus={autoFocus}
           aria-invalid={!!error || invalid}
           className="min-w-0 flex-1 bg-transparent text-[14px] outline-none placeholder:text-ops-faint"
         />

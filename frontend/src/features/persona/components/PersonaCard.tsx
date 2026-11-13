@@ -4,6 +4,7 @@ import type { usePersonaPage } from '@/features/persona/hooks/usePersonaPage'
 import { usePromptEditor, type EditTarget } from '@/features/persona/hooks/usePromptEditor'
 import { Badge, Btn } from '@/shared/ui'
 import { Confirm } from '@/shared/ui/Modal'
+import { PersonaName } from './PersonaName'
 import { PersonaTabs } from './PersonaTabs'
 import { PromptBody } from './PromptBody'
 import { VoiceFields } from './VoiceFields'
@@ -72,7 +73,8 @@ function Card({ vm, ed, editing }: { vm: Vm; ed: Ed | null; editing: boolean }) 
       <header className="flex flex-wrap items-center gap-4 border-b border-ops-line px-7 py-5">
         <div className="flex min-w-0 flex-col gap-2">
           <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-[22px] font-bold">{c.name}</h2>
+            {/* 프롬프트를 고치는 중엔 연필 없음 — 이름 저장이 새 버전을 만들어 고치던 글이 사라지므로 */}
+            <PersonaName name={c.name} target={ed && !editing ? vm.editTarget : null} />
             {/* 지난 버전을 볼 땐 그 버전의 배지, 아니면 상담가의 배지 */}
             {p.past ? (
               p.badges.map((b) => (
