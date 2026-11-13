@@ -47,7 +47,7 @@ LoadingWheel, BottomSheet 및 GlassSurface를 `core:designsystem`에서 재사�
 
 `VomiBackground`를 화면 컨테이너로 사용하면 검정에서 푸른 회색과 갈색으로 이어지는 통화 배경이 적용됩니다.
 배경은 화면 전체에 그려지고, 자체 `Scaffold`는 safeDrawing 인셋을 콘텐츠에 전달합니다.
-현재 시작 화면에는 공통 배경 위에 친구 목록을 표시합니다. 통화 화면은 아직 구현하지 않았습니다.
+현재 시작 화면에는 공통 배경 위에 친구 목록을 표시합니다. 친구 선택 시 스크리닝 화면 미리보기로 이동합니다.
 `DesignSystemPreview`에서 이식한 기본 컴포넌트를 미리 볼 수 있습니다.
 
 Android Studio Preview에 필요한 ui-tooling은 debugImplementation으로만 연결합니다.
@@ -61,4 +61,31 @@ HomeViewModel이 StateFlow<HomeUiState>를 제공하고, HomeScreen은 lifecycle
 HomeUiState는 Loading / Success / Error로 구분하며 빈 목록, 오류 및 큰 글자 미리보기도 제공합니다.
 샘플 친구 8명을 표시하며 프로필 이미지가 없거나 로드에 실패하면 기본 이미지를 사용합니다.
 추후 HomeEntryProvider의 onFriendClick 콜백에 친구 ID를 받아 통화 화면으로 연결할 수 있습니다.
-현재 클릭 콜백에는 통화 동작을 연결하지 않았으며, 로그인 / 검색 / 친구 추가는 포함하지 않습니다.
+클릭 콜백은 스크리닝 화면으로 연결되며, 로그인 / 검색 / 친구 추가는 포함하지 않습니다.
+
+## 스크리닝 화면 (화면·상태 구현 단계)
+
+- `feature:call:api`의 CallNavKey와 `feature:call:impl`의 CallViewModel / CallUiState로 구성합니다.
+- 친구의 ID와 이름을 전달해 화면을 열며, 종료 또는 뒤로 가기로 친구 목록에 돌아갑니다.
+- 마이크 ON 상태에서는 텍스트 편집·전송·추천 선택을 UI와 ViewModel 모두에서 차단합니다. 기존 초안은 유지합니다.
+- 추천·맞장구 칩은 한 행으로 가로 스크롤되며, 칩 안의 문장은 최대 두 줄로 표시합니다. 모든 칩과 영역의 높이는 두 줄을 기준으로 고정합니다. 선택하면 초안에 반영되고, 사용자가 전송해야 대화에 추가됩니다.
+- 직접 입력하는 답변에는 20글자 제한을 두지 않습니다. 추천 문구는 최대 20글자를 고려한 샘플입니다.
+- 맞장구는 고정 문구이며, 마이크 상태와 관계없이 선택 즉시 대화에 추가합니다.
+- 이름 왼쪽 버튼은 샘플 요약을 보여주는 바텀시트를 엽니다. 요약 화면에서도 미리보기 타이머는 유지됩니다.
+- CallNavKey의 `isIncoming = true`로 수신 UI에 진입할 수 있고, 수락·거절 상태와 Preview를 제공합니다.
+- 실제 RTC / 마이크 캡처 / STT / TTS / 온디바이스 AI / 요약 생성 / FCM·시스템 알림 수신은 미연결 상태입니다.
+  입력과 맞장구는 로컬 화면 상태에만 반영되며 음성 재생·상대방 전송은 하지 않습니다.
+- 실제 오디오·알림을 사용하지 않으므로 이 단계에서는 마이크·알림 권한이나 foreground service를 추가하지 않습니다.
+
+```powershell
+.\gradlew.bat :app:assembleDebug :feature:call:impl:testDebugUnitTest :feature:call:impl:lintDebug
+```
+
+스크리닝 화면은 이름 옆에 작은 통화 시간을 표시합니다. 추천/맞장구 전환은 칩 대신 아이콘과 선택 표시로 구분하고, 문장 칩 목록은 한 행·가로 스크롤로 배치하고, 칩 안의 문장은 최대 두 줄까지 표시합니다. 버튼은 보이는 원을 36dp로 줄이되 터치 영역은 48dp로 유지합니다.
+
+키보드 인셋은 앱 NavDisplay의 imePadding에서만 적용합니다. Scaffold에는 시스템 바·디스플레이 컷아웃 여백만 전달하며, 이미 적용한 여백을 consumeWindowInsets로 소비합니다. Activity는 adjustResize를 사용합니다.
+추천과 맞장구는 두 줄 문장을 수용하는 같은 높이의 한 행 칩 영역을 공유하므로 모드를 전환해도 입력창 위치가 바뀌지 않습니다. reduced viewport Preview는 키보드로 줄어든 화면 높이를 확인하기 위한 예시이며 실제 IME 애니메이션 검증을 대체하지 않습니다.
+참고: https://developer.android.com/develop/ui/compose/system/insets-ui
+
+칩의 한글 문장은 표시할 때만 음절 사이에 줄바꿈 가능 지점(U+200B)을 추가해 남은 가로 폭을 채우며 이어집니다. 원문과 접근성 텍스트에는 적용하지 않으므로 초안·전송·향후 TTS에는 원래 문장을 사용합니다. 이모지·결합 문자·구두점은 분리하지 않습니다.
+참고: https://www.unicode.org/reports/tr14/#LB8
