@@ -63,8 +63,9 @@ python -m pytest persona_check -q
 | `GET /scenarios` | 시나리오 목록 `[{id, name, group, core, available}]`. `available`이 false면 이 환경에서 돌릴 수 없다(FAQ 검색 서버 미연결). 전체 · 핵심 묶음에서 빠지고, 골라서 요청하면 422 |
 | `GET /scenarios/{id}` | 시나리오 한 개의 내용 `{id, name, group, core, available, caller, lines: [{text, optional}], expected: [{name, value}], checks: [문장]}`. `expected`는 판정 결과표의 코드 검사와 같은 이름과 값이다(화면의 시나리오 보기) |
 | `POST /runs` | `{scenarios?: [ID], core?: bool, promptText?: 후보 페르소나 글, voiceId?, concurrency?, tag?}` → `202 {runId}`. 시나리오를 안 주면 전체, `core`면 핵심 묶음. `tag`는 화면이 붙이는 표시(어느 상담가 버전의 시험인지)로, 창구는 저장과 조회만 한다. `scenarios`가 빈 목록이면 422, 같은 `tag`의 묶음이 아직 돌고 있으면 409(같은 통화가 두 번 걸리지 않게) |
+| `POST /runs/{runId}/stop` | 시험 멈춤 → `202 {runId}`. 돌던 통화는 끊고, 아직 안 건 시나리오는 걸지 않는다. 묶음은 `stopped`, 못 끝낸 항목은 `queued`/`running`으로 남는다. 이미 끝난 묶음이어도 202, 없는 묶음은 404. 멈추면 같은 `tag`의 새 시험을 바로 받는다 |
 | `GET /runs` | 묶음 목록(최신순). 항목은 `GET /runs/{runId}`와 같은 모양에 `tag`, `createdAt`이 붙는다. `?tag=`를 주면 그 표시의 묶음만 |
-| `GET /runs/{runId}` | `{status: running/done/interrupted, total, finished, items: [{scenario, name, group, status: queued/running/done/error, passed, summary, error, seconds, liveSeconds}]}` |
+| `GET /runs/{runId}` | `{status: running/done/interrupted/stopped, total, finished, items: [{scenario, name, group, status: queued/running/done/error, passed, summary, error, seconds, liveSeconds}]}` |
 | `GET /runs/{runId}/{scenario}/verdict` | 판정 전체 `{passed, summary, checks: [{name, status: pass/fail/skip, expected, actual, note}]}` |
 | `GET /runs/{runId}/{scenario}/record` | 통화 기록 `{customer: {lines: [[초, AI/고객, 말]], choices}, received: {events, drafts, analyses, orders, …}, said, liveSeconds, callLog}`. 화면의 통화 상세에 쓴다. `callLog`는 AI 통화 로그(`call.json`, 운영 AI가 통화마다 남기는 JSON 로그와 같은 모양) — 백엔드 중계로 이 주소를 열면 AI 파트가 로그를 바로 본다 |
 | `GET /runs/{runId}/{scenario}/audio` | 통화 녹음(wav, 고객과 AI를 섞은 모노) |

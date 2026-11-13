@@ -119,6 +119,32 @@ def test_stop_cancels_running_calls_and_leaves_the_run_interrupted(tmp_path):
     assert runs.get(run_id)["status"] == "interrupted" and not runs.tasks
 
 
+def test_an_admin_stop_hangs_up_skips_the_rest_and_frees_the_version(tmp_path, monkeypatch):
+    monkeypatch.delenv("QDRANT_URL", raising=False)
+    monkeypatch.setenv("PERSONA_CHECK_TOKEN", TOKEN)
+
+    async def go():
+        runs, seen = fake_runs(tmp_path, max_concurrency=1, seconds=30)
+        transport = httpx.ASGITransport(app=server.create_app(runs))
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as http:
+            run_id = (await http.post("/runs", json={"scenarios": ["A1", "B3", "E1"], "tag": "1:7"}, headers=AUTH)).json()["runId"]
+            await asyncio.sleep(0.05)
+            stop = lambda rid: http.post(f"/runs/{rid}/stop", headers=AUTH)
+            assert (await stop(run_id)).json() == {"runId": run_id}
+            assert (await stop(run_id)).status_code == 202                       # 두 번 눌러도 같음
+            assert (await stop("0101_000000_abcdef")).status_code == 404
+            assert (await http.post(f"/runs/{run_id}/stop")).status_code == 401   # 토큰 없이는 못 멈춘다
+            assert (await http.post("/runs", json={"scenarios": ["A1"], "tag": "1:7"}, headers=AUTH)).status_code == 202  # 같은 버전 바로 다시
+            await asyncio.gather(*runs.tasks, return_exceptions=True)
+        return runs, seen, run_id
+
+    runs, seen, run_id = asyncio.run(go())
+    run = runs.get(run_id)
+    assert seen["cancelled"] >= 1 and len(seen["personas"]) == 2                 # 돌던 A1만 끊고 B3 · E1은 걸지 않음(뒤 묶음 A1 1통)
+    assert run["status"] == "stopped" and run["finished"] == 0
+    assert json.loads((tmp_path / run_id / "run.json").read_text("utf-8"))["status"] == "stopped"  # 다시 띄워도 멈춤으로 보임
+
+
 def test_http_needs_the_token_and_serves_status(tmp_path, monkeypatch):
     monkeypatch.delenv("QDRANT_URL", raising=False)
 
