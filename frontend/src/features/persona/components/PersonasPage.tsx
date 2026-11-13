@@ -75,6 +75,7 @@ function PersonasView() {
               <span className="text-ops-done">새로 통과 {vm.confirm.changes.pass}개</span>
             </p>
           )}
+          {vm.confirm.failed && <p>실패: {vm.confirm.failed.join(', ')}</p>}
           {vm.confirm.note}
         </Confirm>
       )}

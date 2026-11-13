@@ -107,6 +107,9 @@ export function useApplyTest(target: ApplyTarget | null, { auto = true }: { auto
       state === 'partial' && (shown?.status === 'stopped' || shown?.status === 'interrupted')
         ? { at: shown.startedAt }
         : null,
+    // 확인 필요 띠 · 확인 창 (4번) — 실패한 시나리오 이름 · 시험 시각
+    failed: rows.filter((r) => r.now === 'fail').map((r) => r.name),
+    at: shown ? (shown.finishedAt ?? shown.startedAt) : null,
     toRun: rest.length || list.length, // 확인 창의 'N개를 돌립니다'
     resume: rest.length > 0,
     start: (t: ApplyTarget) => start.mutateAsync(t),
