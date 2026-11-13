@@ -12,7 +12,7 @@ export function AddPersona({ vm }: { vm: ReturnType<typeof usePersonaPage> }) {
     <>
       {/* 쓰던 게 있으면 탭을 눌러도 먼저 물음 */}
       <PersonaTabs vm={vm} adding go={f.leave} />
-      <PersonaForm vm={f} voiceFields={<VoiceFields vm={f} />} />
+      <PersonaForm vm={f} voiceFields={<VoiceFields vm={f} form />} />
     </>
   )
 }

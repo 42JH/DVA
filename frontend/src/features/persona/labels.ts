@@ -7,8 +7,8 @@ import { PROMPT_KEYS, type PromptFields, type PromptKey } from './api/personaApi
 const PROMPT_LABEL: Record<PromptKey, string> = {
   role: '역할',
   personality: '성격',
-  tone: '톤',
-  speedInstruction: '속도',
+  tone: '발화 톤', // 서버 글은 '발화 스타일' 아래 '톤' — 화면엔 묶음 제목이 없어 '발화'를 붙임 (11/13 새 안)
+  speedInstruction: '발화 속도',
   backchannel: '맞장구',
   interruption: '끼어들기',
 }
