@@ -4,6 +4,13 @@ import com.ssafy.vomi.core.network.BuildConfig
 import com.ssafy.vomi.core.network.NetworkConfig
 import com.ssafy.vomi.core.network.auth.AccessTokenInterceptor
 import com.ssafy.vomi.core.network.service.account.AccountService
+import com.ssafy.vomi.core.network.service.call.CallService
+import com.ssafy.vomi.core.network.service.call.CallEventService
+import com.ssafy.vomi.core.network.service.device.DeviceService
+import com.ssafy.vomi.core.network.service.friend.FriendService
+import com.ssafy.vomi.core.network.service.health.HealthService
+import com.ssafy.vomi.core.network.service.voice.VoiceService
+import com.ssafy.vomi.core.network.service.voice.VoiceSpeechService
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -45,6 +52,39 @@ object NetworkModule {
         .client(client)
         .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
         .build()
+
+    @Provides @Singleton @StreamingNetwork
+    fun provideStreamingOkHttpClient(client: OkHttpClient): OkHttpClient = client.newBuilder()
+        .callTimeout(0, TimeUnit.SECONDS)
+        .readTimeout(0, TimeUnit.SECONDS)
+        .build()
+
+    @Provides @Singleton @StreamingNetwork
+    fun provideStreamingRetrofit(retrofit: Retrofit, @StreamingNetwork client: OkHttpClient): Retrofit =
+        retrofit.newBuilder().client(client).build()
+
+    @Provides @Singleton
+    fun provideFriendService(retrofit: Retrofit): FriendService = retrofit.create(FriendService::class.java)
+
+    @Provides @Singleton
+    fun provideVoiceService(retrofit: Retrofit): VoiceService = retrofit.create(VoiceService::class.java)
+
+    @Provides @Singleton
+    fun provideVoiceSpeechService(@StreamingNetwork retrofit: Retrofit): VoiceSpeechService =
+        retrofit.create(VoiceSpeechService::class.java)
+
+    @Provides @Singleton
+    fun provideCallService(retrofit: Retrofit): CallService = retrofit.create(CallService::class.java)
+
+    @Provides @Singleton
+    fun provideCallEventService(@StreamingNetwork retrofit: Retrofit): CallEventService =
+        retrofit.create(CallEventService::class.java)
+
+    @Provides @Singleton
+    fun provideDeviceService(retrofit: Retrofit): DeviceService = retrofit.create(DeviceService::class.java)
+
+    @Provides @Singleton
+    fun provideHealthService(retrofit: Retrofit): HealthService = retrofit.create(HealthService::class.java)
 
     @Provides @Singleton
     fun provideAccountService(retrofit: Retrofit): AccountService = retrofit.create(AccountService::class.java)
