@@ -4,6 +4,8 @@ plugins {
 }
 android { namespace = "com.ssafy.vomi.feature.home.impl" }
 dependencies {
+    implementation(libs.androidx.hilt.lifecycle.viewmodel.compose)
+    implementation(libs.coil.compose)
     implementation(projects.feature.home.api)
     implementation(projects.core.domain)
 }
