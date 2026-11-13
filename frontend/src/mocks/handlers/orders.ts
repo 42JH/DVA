@@ -168,6 +168,11 @@ const draftById = (id: number) =>
   openDrafts().find((d) => d.draftSeq === id) ??
   [...madeDrafts.values()].find((d) => d.draftSeq === id)
 const meta = () => ({ requestId: crypto.randomUUID() })
+// 백 searchSequence와 같게 — 'DV-00140' · '140' → 140 (정확히 일치)
+const seqOf = (q?: string) => {
+  const d = q?.toUpperCase().startsWith('DV-') ? q.slice(3) : q
+  return d && /^\d+$/.test(d) ? Number(d) : null
+}
 
 const draftHandlers = [
   http.get(`${API_BASE_URL}/parcel-drafts`, ({ request }) => {
@@ -178,6 +183,7 @@ const draftHandlers = [
     const rows = openDrafts().filter(
       (d) =>
         !q ||
+        d.reservedOrderSeq === seqOf(q) ||
         [d.parcel.origin, d.parcel.destination].some((x) =>
           Object.values(x).some((v) => v?.toLowerCase().includes(q)),
         ),
@@ -258,7 +264,7 @@ const draftHandlers = [
 
 export const orderHandlers = [
   ...draftHandlers,
-  // q = 보내는 분 · 받는 분의 이름 · 전화번호 · 주소 부분 검색 · from 포함 · to 미포함 · 접수 최신순
+  // q = 주문번호 정확히 일치 · 보내는 분 · 받는 분의 이름 · 전화번호 · 주소 부분 검색 · from 포함 · to 미포함 · 접수 최신순
   http.get(`${API_BASE_URL}/admin/orders`, ({ request }) => {
     const u = new URL(request.url).searchParams
     const q = u.get('q')?.toLowerCase()
@@ -290,6 +296,7 @@ export const orderHandlers = [
           at >= from &&
           at < to &&
           (!q ||
+            o.orderSeq === seqOf(q) ||
             o.parcels.some((p) =>
               [p.origin, p.destination].some((x) =>
                 Object.values(x).some((v) => v?.toLowerCase().includes(q)),
