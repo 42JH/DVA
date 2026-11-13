@@ -183,7 +183,8 @@ export class ParcelDraftQueryDto extends PickType(OrderQueryDto, [
   legacyOrderSeq?: number;
 
   @ApiPropertyOptional({
-    description: '발송·수령 이름/전화/주소 부분 검색. 전화번호는 하이픈 허용.',
+    description:
+      '관리자는 예약 주문번호(DV-00140 또는 140)로 정확히 일치 검색할 수 있습니다. 발송·수령 이름/전화/주소 부분 검색. 전화번호는 하이픈 허용.',
     maxLength: 200,
   })
   @IsOptional()

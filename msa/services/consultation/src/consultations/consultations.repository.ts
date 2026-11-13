@@ -61,8 +61,12 @@ function callFilters(
   if (foreign && query.q) {
     values.push(query.q);
     const parameter = `$${values.length}`;
+    const digits = query.q.startsWith('#') ? query.q.slice(1) : query.q;
+    const sequence = /^\d+$/.test(digits) ? Number(digits) : 0;
+    values.push(sequence > 0 && sequence <= 2147483647 ? sequence : null);
     conditions.push(
-      `(strpos(lower(normalize(customer.name,NFC)),lower(normalize(${parameter},NFC)))>0 OR strpos(c.caller_phone_number,${parameter})>0)`,
+      `(strpos(lower(normalize(customer.name,NFC)),lower(normalize(${parameter},NFC)))>0
+        OR strpos(c.caller_phone_number,${parameter})>0 OR c.call_session_seq=$${values.length}::int)`,
     );
   }
   return { where: 'WHERE ' + conditions.join(' AND '), values };
