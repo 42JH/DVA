@@ -20,11 +20,18 @@ export type ApplyTarget = {
  *  [통화에 반영] → 그 버전 시험 상태에 따라: 모두 통과 = 바로 반영 / 아니면 시험하고 반영(못 한 것만 — 일부 시험이면 남은 것)
  *  모두 통과하면 저절로 반영 — 약속을 남기고(pledgeStore) 앱 틀이 지켜봄. 실패가 있으면 확인 필요 띠(담당자가 정함) */
 // auto false = 모두 통과해도 저절로 반영하지 않음 (6번 다른 상담가를 통화에 쓰기 — 담당자가 [통화에 사용하기])
-export function useApplyTest(target: ApplyTarget | null, { auto = true }: { auto?: boolean } = {}) {
+// expected = 띠가 뜰 상담가 — 대상(버전 기록)을 알기 전부터 시험 결과를 받기 시작해 버전 기록과 같이 도착하게
+export function useApplyTest(
+  target: ApplyTarget | null,
+  { auto = true, expected = target !== null }: { auto?: boolean; expected?: boolean } = {},
+) {
   const on = SCENARIO_TEST && target !== null
   const qc = useQueryClient()
-  const scenarios = useQuery({ ...scenarioTestQueries.scenarios(), enabled: on })
-  const tests = useQuery({ ...scenarioTestQueries.tests(), enabled: on })
+  const scenarios = useQuery({
+    ...scenarioTestQueries.scenarios(),
+    enabled: SCENARIO_TEST && expected,
+  })
+  const tests = useQuery({ ...scenarioTestQueries.tests(), enabled: SCENARIO_TEST && expected })
   const list = scenarios.data ?? []
   const me = target && { personaSeq: target.personaSeq, version: target.head.version, isHead: true }
   const { state, shown } = me
@@ -66,6 +73,9 @@ export function useApplyTest(target: ApplyTarget | null, { auto = true }: { auto
 
   return {
     on,
+    // 시험 결과를 처음 받는 중 — 이때 띠를 그리면 '반영 전'이 잠깐 보였다가 시험 중 · 확인 필요로 바뀜
+    // 한 번 실패하면 더 기다리지 않음 (다시 시도는 뒤에서 이어지고, 그동안은 시험 전으로 봄)
+    loading: [scenarios, tests].some((q) => q.isLoading && q.failureCount === 0),
     state,
     total: list.length,
     pass,

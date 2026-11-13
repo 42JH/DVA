@@ -1,0 +1,22 @@
+# 4181 = 고치기 전 빌드(b062d685, !701), 4182 = 고친 뒤 빌드. API 지연 80ms
+# 화면을 처음 열 때 /auth/me를 부른 횟수 (다른 API는 받아 적은 응답이 없어 404 — 횟수만 봄)
+http://localhost:4181/ 2
+http://localhost:4181/calls 2
+http://localhost:4181/orders 2
+http://localhost:4181/faqs 2
+http://localhost:4181/unanswered 2
+http://localhost:4181/customers 2
+http://localhost:4181/companies 2
+http://localhost:4181/stats 2
+http://localhost:4181/admins 2
+http://localhost:4181/me 2
+http://localhost:4182/ 1
+http://localhost:4182/calls 1
+http://localhost:4182/orders 1
+http://localhost:4182/faqs 1
+http://localhost:4182/unanswered 1
+http://localhost:4182/customers 1
+http://localhost:4182/companies 1
+http://localhost:4182/stats 1
+http://localhost:4182/admins 1
+http://localhost:4182/me 1

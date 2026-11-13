@@ -21,6 +21,9 @@ export const sessionQueries = {
     queryOptions({
       queryKey: [...sessionQueries.all(), 'me'],
       queryFn: ({ signal }) => fetchMe(signal),
+      // 로그인 가드가 받은 직후 화면 틀이 붙으면서 또 부르지 않게 (화면을 열 때마다 /auth/me 2번 → 1번)
+      // 30초가 지나면 화면을 옮기거나 창으로 돌아올 때 다시 확인
+      staleTime: 30_000,
     }),
 }
 

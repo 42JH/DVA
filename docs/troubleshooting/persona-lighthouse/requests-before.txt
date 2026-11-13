@@ -1,0 +1,97 @@
+# 4181 = 고치기 전 빌드(b062d685, !701), 4182 = 고친 뒤 빌드. API 지연 80ms
+# 맨 아래 4180 = 39 · 40번 수정 전(develop-fe a343f041) — 시험 화면 12번
+
+http://localhost:4181/personas — 요청 12개 · 두 번 부른 것 1개 · 4박자 · 마지막 응답 481ms
+   41ms GET /auth/me
+  153ms GET /ai/options
+  154ms GET /auth/me
+  154ms GET /personas
+  154ms GET /calls/active-count
+  155ms GET /parcel-drafts
+  155ms GET /unanswered-questions
+  155ms GET /calls/active-count/stream
+  281ms GET /personas/1
+  281ms GET /personas/1/versions
+  387ms GET /persona-check/scenarios
+  388ms GET /persona-check/runs
+
+http://localhost:4181/personas/1/tests/6 — 요청 14개 · 두 번 부른 것 4개 · 3박자 · 마지막 응답 395ms
+   33ms GET /auth/me
+  127ms GET /personas
+  127ms GET /personas/1
+  128ms GET /personas/1/versions
+  128ms GET /auth/me
+  128ms GET /calls/active-count
+  128ms GET /parcel-drafts
+  128ms GET /unanswered-questions
+  132ms GET /calls/active-count/stream
+  222ms GET /persona-check/scenarios
+  222ms GET /persona-check/runs
+  222ms GET /personas
+  223ms GET /personas/1
+  223ms GET /personas/1/versions
+
+http://localhost:4181/personas/1/tests/6/A4 — 요청 17개 · 두 번 부른 것 3개 · 4박자 · 마지막 응답 403ms
+   33ms GET /auth/me
+  134ms GET /persona-check/scenarios
+  134ms GET /persona-check/runs
+  134ms GET /personas
+  134ms GET /personas/1
+  135ms GET /personas/1/versions
+  135ms GET /auth/me
+  135ms GET /calls/active-count
+  135ms GET /parcel-drafts
+  135ms GET /unanswered-questions
+  141ms GET /calls/active-count/stream
+  230ms GET /persona-check/runs/seed-1-6/A4/verdict
+  230ms GET /persona-check/runs/seed-1-6/A4/record
+  230ms GET /persona-check/scenarios/A4
+  231ms GET /personas/1
+  231ms GET /personas/1/versions
+  323ms GET /persona-check/runs/seed-1-6/A4/audio
+
+http://localhost:4180/personas — 요청 13개 · 두 번 부른 것 2개 · 4박자 · 마지막 응답 428ms
+   36ms GET /auth/me
+  149ms GET /persona-check/scenarios
+  150ms GET /persona-check/runs
+  150ms GET /personas
+  150ms GET /ai/options
+  150ms GET /auth/me
+  151ms GET /calls/active-count
+  151ms GET /parcel-drafts
+  151ms GET /unanswered-questions
+  181ms GET /calls/active-count/stream
+  245ms GET /personas/1
+  245ms GET /personas/1/versions
+  339ms GET /persona-check/runs
+
+http://localhost:4180/personas/1/tests/6 — 요청 12개 · 두 번 부른 것 2개 · 3박자 · 마지막 응답 306ms
+   31ms GET /auth/me
+  127ms GET /personas
+  127ms GET /personas/1
+  127ms GET /personas/1/versions
+  127ms GET /auth/me
+  128ms GET /calls/active-count
+  128ms GET /parcel-drafts
+  128ms GET /unanswered-questions
+  132ms GET /calls/active-count/stream
+  221ms GET /persona-check/scenarios
+  222ms GET /persona-check/runs
+  222ms GET /personas
+
+http://localhost:4180/personas/1/tests/6/A4 — 요청 15개 · 두 번 부른 것 1개 · 4박자 · 마지막 응답 394ms
+   36ms GET /auth/me
+  133ms GET /persona-check/scenarios
+  133ms GET /persona-check/runs
+  133ms GET /personas
+  133ms GET /personas/1
+  134ms GET /personas/1/versions
+  134ms GET /auth/me
+  134ms GET /calls/active-count
+  134ms GET /parcel-drafts
+  134ms GET /unanswered-questions
+  140ms GET /calls/active-count/stream
+  223ms GET /persona-check/runs/seed-1-6/A4/verdict
+  224ms GET /persona-check/runs/seed-1-6/A4/record
+  224ms GET /persona-check/scenarios/A4
+  318ms GET /persona-check/runs/seed-1-6/A4/audio

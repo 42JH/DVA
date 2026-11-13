@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, usePrefetchQuery, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { fmtMonthDay, fmtVersionTime } from '@/shared/lib/format'
 import { ymd } from '@/shared/lib/dateRange'
@@ -50,6 +50,9 @@ function useTestData() {
 
 /** 시나리오 시험 화면의 위 줄 — 주소의 상담가 · 버전이 무엇인가 (이름 · 저장 시각 · 현재 버전인가) */
 export function useScenarioTestPage(personaSeq: number, version: number) {
+  // 표가 쓰는 시험 자료를 상담가 자료와 같이 받기 시작 — 표(useScenarioTest)는 버전을 안 뒤에 떠서 그때 부르면 한 박자 늦음
+  usePrefetchQuery(scenarioTestQueries.scenarios())
+  usePrefetchQuery(scenarioTestQueries.tests())
   const personas = useQuery(personaQueries.list())
   const versions = useQuery(personaQueries.versions(personaSeq))
   const persona = personas.data?.find((p) => p.personaSeq === personaSeq)

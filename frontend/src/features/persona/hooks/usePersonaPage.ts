@@ -210,8 +210,9 @@ export function usePersonaPage() {
   // 6번 — 통화에 안 쓰는 상담가를 통화에 쓰기: 현재 버전을 먼저 시험. 모두 통과해도 저절로 바꾸지 않음(담당자가 [통화에 사용하기])
   const switching = !!persona && !persona.inUse
   // 띠의 시험 → 반영 (11/13 새 안 1번) — 반영 전인 고친 내용(현재 버전) · 6번은 안 쓰는 상담가의 현재 버전
+  const banded = unapplied || (switching && !persona.applyingVersion) // 띠가 뜰 상담가 — 목록만으로 앎
   const applyTarget =
-    (unapplied || (switching && !persona.applyingVersion)) && head && !head.isDraft
+    banded && head && !head.isDraft
       ? {
           personaSeq: persona.personaSeq,
           head: persona.head,
@@ -219,7 +220,14 @@ export function usePersonaPage() {
           voiceId: head.voice.voice || null,
         }
       : null
-  const applyTest = useApplyTest(applyTarget, { auto: !switching })
+  const applyTest = useApplyTest(applyTarget, { auto: !switching, expected: banded })
+  // 카드를 처음 그릴 때는 시험 결과까지 기다림 — 띠가 뜰 상담가를 먼저 그리면 '반영 전' 띠와 열린 입력 칸이 잠깐 보였다가 시험 중 · 확인 필요로 바뀜
+  // 한 번 그린 뒤 띠가 생길 때(저장 직후)는 기다리지 않음 — 방금 저장한 내용은 시험한 적이 없어 '반영 전'이 맞고, 카드를 가리면 깜빡임
+  const [shownSeq, setShownSeq] = useState<number | null>(null)
+  const promptLoading =
+    persona !== null &&
+    (versions.isPending || (applyTest.loading && shownSeq !== persona.personaSeq))
+  if (persona && !promptLoading && shownSeq !== persona.personaSeq) setShownSeq(persona.personaSeq)
   // 반영 중 = AI가 확인하는 중 — 사용 중 상담가의 새 버전(1번) · 다른 상담가로 바꾸는 중(6번)
   const applyingVersion = persona?.applyingVersion
     ? (all.find((v) => v.version === persona.applyingVersion) ?? head)
@@ -467,7 +475,7 @@ export function usePersonaPage() {
     demo: PERSONA_DEMO, // 시연 모드 — 저장 · 사용하기가 실서버에 안 감
     isLoading: personas.isPending, // 처음 들어올 때만 화면 전체
     // 상담가를 바꿀 때 버전을 받는 동안은 가운데만 — 오른쪽 카드가 다시 그려지면 스크롤이 맨 위로 감 (11/10)
-    promptLoading: persona !== null && versions.isPending,
+    promptLoading,
     error: personas.error || versions.error ? '불러오지 못했습니다. 다시 시도해 주세요.' : null,
 
     prompt:
