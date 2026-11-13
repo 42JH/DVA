@@ -5,6 +5,7 @@ type Vm = ReturnType<typeof usePersonaPage>
 type Band = NonNullable<Vm['band']>
 
 // 띠 (11/13 새 안 1번) — 반영 전(피그마 2368:2847) · 시험 중(3212) · 반영 중(3388) — 저장했지만 아직 통화에 안 쓰이는 버전이 있을 때
+// 2번 — 시험 중 [시험 중단](2368:3753) → 시험 중단(4355): [지금까지 결과 보기] [다시 시험하고 반영]
 // [반영 전] 고친 내용 · 저장 시각 · 수정한 사람 | [통화에 반영]  /  아래 줄 토글: 고친 내용 ↔ 통화에 쓰는 내용
 // busy: 프롬프트를 고치는 중 — 저장 안 한 글은 반영되지 않으니 [통화에 반영]을 끔
 export function ApplyBand({
@@ -13,17 +14,19 @@ export function ApplyBand({
   setShowCall,
   onApply,
   onProgress,
+  onStop,
   busy,
 }: {
   band: Band
   showCall: boolean
   setShowCall: (v: boolean) => void
   onApply: () => void
-  onProgress?: () => void // [진행 보기] — 시나리오 시험 화면
+  onProgress?: () => void // [진행 보기] · [지금까지 결과 보기] — 시나리오 시험 화면
+  onStop: () => void // [시험 중단] — 확인 창
   busy: boolean
 }) {
   // 시험 · 반영 중 — 버튼은 [진행 보기]만(시험 중), 토글 없음 (피그마 2368:3212 · 3388)
-  if (band.step !== 'unapplied') {
+  if (band.step === 'testing' || band.step === 'applying') {
     const p = band.progress
     return (
       <div className="flex flex-wrap items-center gap-3 border-b border-ops-wait/20 bg-ops-wait-soft px-7 py-3">
@@ -53,38 +56,58 @@ export function ApplyBand({
               : ' · AI 확인이 끝나면 통화에 들어갑니다'}
           </span>
         )}
-        {band.step === 'testing' && onProgress && (
-          <Btn className="ml-auto" onClick={onProgress}>
-            진행 보기
-          </Btn>
+        {band.step === 'testing' && (
+          <span className="ml-auto flex flex-wrap gap-2">
+            {onProgress && <Btn onClick={onProgress}>진행 보기</Btn>}
+            {band.canApply && (
+              <Btn kind="danger" onClick={onStop}>
+                시험 중단
+              </Btn>
+            )}
+          </span>
         )}
       </div>
     )
   }
+  const s = band.stopped
   return (
     <>
       <div className="flex flex-wrap items-center gap-3 border-b border-ops-wait/20 bg-ops-wait-soft px-7 py-3">
-        <Badge tone="wait">반영 전</Badge>
-        <span className="text-[15px] font-bold">고친 내용</span>
-        <span className="text-[13px] text-ops-sub">
-          {band.time} 저장{band.author && ` · ${band.author}`}
-        </span>
+        {s ? (
+          <>
+            <Badge tone="idle">시험 중단</Badge>
+            <span className="text-[15px] font-bold">
+              시나리오 {s.ended} / {s.total}에서 멈춤
+            </span>
+            <span className="text-[13px] text-ops-sub">{s.at} 시작</span>
+          </>
+        ) : (
+          <>
+            <Badge tone="wait">반영 전</Badge>
+            <span className="text-[15px] font-bold">고친 내용</span>
+            <span className="text-[13px] text-ops-sub">
+              {band.time} 저장{band.author && ` · ${band.author}`}
+            </span>
+          </>
+        )}
         {band.error && (
           <span role="alert" className="ml-auto text-[12px] text-ops-stop">
             {band.error}
           </span>
         )}
-        {band.canApply && (
-          <Btn
-            kind="line"
-            className={band.error ? '' : 'ml-auto'}
-            disabled={busy}
-            title={busy ? '고친 내용을 먼저 저장해 주세요' : undefined}
-            onClick={onApply}
-          >
-            통화에 반영
-          </Btn>
-        )}
+        <span className={`flex flex-wrap gap-2 ${band.error ? '' : 'ml-auto'}`}>
+          {s && onProgress && <Btn onClick={onProgress}>지금까지 결과 보기</Btn>}
+          {band.canApply && (
+            <Btn
+              kind="line"
+              disabled={busy}
+              title={busy ? '고친 내용을 먼저 저장해 주세요' : undefined}
+              onClick={onApply}
+            >
+              {s ? '다시 시험하고 반영' : '통화에 반영'}
+            </Btn>
+          )}
+        </span>
       </div>
       {band.canCompare && (
         <div className="border-b border-ops-line px-7 py-3">

@@ -15,7 +15,7 @@ export interface TestItem {
 export interface VersionTest {
   personaSeq: number
   version: number
-  status: 'running' | 'done' | 'interrupted'
+  status: 'running' | 'done' | 'interrupted' | 'stopped' // 가장 최근 묶음이 멈췄으면(관리자 · 창구 꺼짐) 그 상태
   startedAt: string // 가장 최근 묶음을 시작한 때
   finishedAt: string | null // 창구가 끝난 때를 주지 않아 지금은 늘 null
   items: TestItem[]
@@ -64,7 +64,7 @@ export function runsToTests(runs: RunDto[]): VersionTest[] {
     return {
       personaSeq: Number(personaSeq),
       version: Number(version),
-      status: list.some((r) => r.status === 'running') ? 'running' : 'done',
+      status: list.some((r) => r.status === 'running') ? 'running' : list[0].status,
       startedAt: list[0].createdAt,
       finishedAt: null,
       items: [...items.values()],

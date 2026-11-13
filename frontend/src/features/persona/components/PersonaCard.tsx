@@ -147,6 +147,7 @@ function Card({ vm, ed, editing }: { vm: Vm; ed: Ed | null; editing: boolean }) 
           setShowCall={vm.setShowCall}
           onApply={vm.applyHead}
           onProgress={vm.testTo ? () => void navigate(vm.testTo!) : undefined}
+          onStop={vm.askStop}
           busy={editing}
         />
       )}

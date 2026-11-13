@@ -16,7 +16,11 @@ import { inlineDiff, type Part } from '@/features/persona/hooks/lineDiff'
 import { useVoiceOptions } from '@/features/persona/hooks/useVoiceOptions'
 import { useTestGate } from '@/features/persona/hooks/useScenarioTest'
 import { useApplyTest } from '@/features/persona/hooks/useApplyTest'
-import { SCENARIO_TEST } from '@/features/persona/api/scenarioTestApi'
+import {
+  SCENARIO_TEST,
+  scenarioTestQueries,
+  stopTest,
+} from '@/features/persona/api/scenarioTestApi'
 import {
   ConfirmError,
   deletePersona,
@@ -75,6 +79,7 @@ type Confirming =
   | { kind: 'reuse'; version: number }
   | { kind: 'delete'; personaSeq: number }
   | { kind: 'test' } // 띠의 [통화에 반영] — 시험하고 반영 (모두 통과면 저절로 반영)
+  | { kind: 'stop' } // 띠의 [시험 중단] (2번)
   | null
 
 // 시나리오 시험에 다녀오거나 새로고침해도 보던 상담가 · 버전 그대로 — 기록(location.key)마다 세션 저장소에 기억
@@ -209,13 +214,16 @@ export function usePersonaPage() {
     persona?.inUse && persona.applyingVersion
       ? (all.find((v) => v.version === persona.applyingVersion) ?? null)
       : null
-  const step: 'unapplied' | 'testing' | 'applying' | null = applyingVersion
+  // stopped = 시험을 멈춤(2번) — [통화에 반영] 대신 [다시 시험하고 반영], 입력 칸은 다시 열림
+  const step: 'unapplied' | 'testing' | 'stopped' | 'applying' | null = applyingVersion
     ? 'applying'
     : !unapplied
       ? null
       : applyTest.state === 'running'
         ? 'testing'
-        : 'unapplied'
+        : applyTest.stopped
+          ? 'stopped'
+          : 'unapplied'
   // 시험 · 반영 중엔 입력 칸 · 목소리 · 이름 · 수정 기록 보기를 막음 — 고치면 새 버전이 생겨 시험하던 글과 달라짐
   const locked = step === 'testing' || step === 'applying'
   const comparing = showCall && callVersion !== null && !locked
@@ -229,6 +237,16 @@ export function usePersonaPage() {
       if (c.kind === 'delete') return deletePersona(c.personaSeq)
       if (c.kind === 'test') {
         if (applyTarget) await applyTest.start(applyTarget)
+        return
+      }
+      if (c.kind === 'stop') {
+        if (!applyTarget) return
+        // 실패해도 목록을 다시 받음(일부 묶음만 멈췄을 수 있음). 멈추면 띠가 시험 중단으로 바뀜 (저절로 반영 약속은 useApplyTest가 지움)
+        try {
+          await stopTest({ personaSeq: applyTarget.personaSeq, version: applyTarget.head.version })
+        } finally {
+          await qc.invalidateQueries({ queryKey: scenarioTestQueries.tests().queryKey })
+        }
         return
       }
       const v = all.find((x) => x.version === c.version)
@@ -321,6 +339,15 @@ export function usePersonaPage() {
         title: `${nameEul(p.name)} 삭제할까요?`,
         note: '삭제하면 상담가 목록에서 사라집니다.',
         okLabel: '삭제',
+        danger: true,
+      }
+    }
+    if (confirming?.kind === 'stop') {
+      if (step !== 'testing') return null // 그새 시험이 끝났으면 창을 닫음
+      return {
+        title: '시험을 중단할까요?',
+        note: '지금까지 돌린 결과는 남습니다. 통화에는 반영되지 않고, 다시 시험해야 반영할 수 있습니다.',
+        okLabel: '중단',
         danger: true,
       }
     }
@@ -445,6 +472,15 @@ export function usePersonaPage() {
                     fail: applyTest.fail,
                   }
                 : null,
+            // 시험 중단 — 시나리오 4 / 10에서 멈춤 · 시작 시각
+            stopped:
+              step === 'stopped' && applyTest.stopped
+                ? {
+                    ended: applyTest.ended,
+                    total: applyTest.total,
+                    at: fmtVersionTime(applyTest.stopped.at),
+                  }
+                : null,
             applyError: step === 'applying' ? (persona?.applyError ?? null) : null,
             error: applyTest.startError ?? applyTest.applyError,
           }
@@ -453,6 +489,11 @@ export function usePersonaPage() {
     showCall: comparing,
     setShowCall,
     // [통화에 반영] — 시나리오 시험이 꺼진 환경 · 이미 모두 통과 = 바로 반영 확인, 아니면 시험하고 반영 확인
+    // [시험 중단] — 확인 창 (2번)
+    askStop: () => {
+      confirm.reset()
+      setConfirming({ kind: 'stop' })
+    },
     applyHead: () => {
       if (!persona) return
       if (!applyTest.on || applyTest.allPass) return askUse(persona.personaSeq)
@@ -485,14 +526,16 @@ export function usePersonaPage() {
     confirmBusy: confirm.isPending,
     confirmError: !confirm.error
       ? null
-      : confirm.error instanceof ConfirmError
-        ? '내용은 저장됐지만 새 버전으로 올리지 못했습니다. 다시 시도해 주세요.'
-        : (unsupportedText(confirm.error) ??
-          (confirm.error instanceof ApiError && confirm.error.status === 409
-            ? confirming?.kind === 'delete'
-              ? '통화에 사용 중이거나 적용 대기 중인 상담가는 삭제할 수 없습니다.'
-              : conflictText
-            : '요청을 보내지 못했습니다. 잠시 뒤 다시 시도해 주세요.')),
+      : confirming?.kind === 'stop'
+        ? '시험을 중단하지 못했습니다. 다시 시도해 주세요.'
+        : confirm.error instanceof ConfirmError
+          ? '내용은 저장됐지만 새 버전으로 올리지 못했습니다. 다시 시도해 주세요.'
+          : (unsupportedText(confirm.error) ??
+            (confirm.error instanceof ApiError && confirm.error.status === 409
+              ? confirming?.kind === 'delete'
+                ? '통화에 사용 중이거나 적용 대기 중인 상담가는 삭제할 수 없습니다.'
+                : conflictText
+              : '요청을 보내지 못했습니다. 잠시 뒤 다시 시도해 주세요.')),
 
     adding,
     canAdd: canManage,

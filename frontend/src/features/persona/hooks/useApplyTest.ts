@@ -102,6 +102,11 @@ export function useApplyTest(target: ApplyTarget | null, { auto = true }: { auto
     error,
     ended: pass + fail + error,
     allPass,
+    // 시험 중단 띠 (2번) — 이 버전의 마지막 묶음이 다 못 돌고 멈춤(관리자 · 창구 꺼짐). 연결 실패만 남은 '일부 시험'은 아님
+    stopped:
+      state === 'partial' && (shown?.status === 'stopped' || shown?.status === 'interrupted')
+        ? { at: shown.startedAt }
+        : null,
     toRun: rest.length || list.length, // 확인 창의 'N개를 돌립니다'
     resume: rest.length > 0,
     start: (t: ApplyTarget) => start.mutateAsync(t),
