@@ -7,6 +7,11 @@ class Navigator(private val state: NavigationState) {
         state.backStack.add(key)
     }
 
+    fun replaceAll(key: NavKey) {
+        state.backStack.clear()
+        state.backStack.add(key)
+    }
+
     fun goBack() {
         if (state.canGoBack) state.backStack.removeLastOrNull()
     }

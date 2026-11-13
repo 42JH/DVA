@@ -7,5 +7,5 @@ dependencies {
     implementation(libs.androidx.hilt.lifecycle.viewmodel.compose)
     implementation(libs.coil.compose)
     implementation(projects.feature.home.api)
-    implementation(projects.core.domain)
+    implementation(projects.core.data)
 }

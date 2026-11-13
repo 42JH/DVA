@@ -58,6 +58,14 @@ private fun HomeContent(
             style = VomiTheme.typography.titleB22,
             modifier = Modifier.padding(20.dp),
         )
+        (uiState as? HomeUiState.Success)?.currentUser?.let { user ->
+            Text(
+                text = stringResource(R.string.home_current_user, user.displayName),
+                style = VomiTheme.typography.captionR12,
+                color = VomiTheme.colors.gray400,
+                modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 12.dp),
+            )
+        }
         when (uiState) {
             HomeUiState.Loading -> {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
