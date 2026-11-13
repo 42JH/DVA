@@ -8,24 +8,39 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ssafy.vomi.core.designsystem.component.Scaffold
+import com.ssafy.vomi.core.designsystem.component.Surface
 import com.ssafy.vomi.core.designsystem.component.Text
 import com.ssafy.vomi.core.designsystem.component.VomiBackground
 import com.ssafy.vomi.core.designsystem.theme.VomiTheme
@@ -40,6 +55,7 @@ import com.ssafy.vomi.feature.call.impl.model.CallUiState
 import com.ssafy.vomi.feature.call.impl.model.sampleCallState
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlin.math.roundToInt
 
 @Composable
 internal fun CallScreen(
@@ -76,7 +92,8 @@ internal fun CallScreen(
         onSummaryClick = viewModel::showSummary,
         onSummaryDismiss = viewModel::dismissSummary,
         onEndClick = viewModel::endCall,
-        onSuggestionClick = viewModel::selectSuggestion,
+        onSuggestionClick = viewModel::sendSuggestion,
+        onSuggestionEdit = viewModel::selectSuggestion,
         onBackchannelClick = viewModel::selectBackchannel,
         onAcceptClick = viewModel::acceptIncoming,
         modifier = modifier,
@@ -93,11 +110,26 @@ private fun CallContent(
     onSummaryDismiss: () -> Unit,
     onEndClick: () -> Unit,
     onSuggestionClick: (Long) -> Unit,
+    onSuggestionEdit: (Long) -> Unit,
     onBackchannelClick: (Long) -> Unit,
     onAcceptClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Box(modifier = modifier.fillMaxSize()) {
+    var inputBounds by remember { mutableStateOf(Rect.Zero) }
+    var contentOrigin by remember { mutableStateOf(Offset.Zero) }
+    var contentWidth by remember { mutableIntStateOf(0) }
+    var ghostSize by remember { mutableStateOf(IntSize.Zero) }
+    var draggedSuggestion by remember { mutableStateOf<DraggedSuggestion?>(null) }
+    var inputFocusRequest by remember { mutableIntStateOf(0) }
+    LaunchedEffect(state.canType, state.isSummaryVisible) {
+        if (!state.canType || state.isSummaryVisible) draggedSuggestion = null
+    }
+    Box(modifier = modifier
+        .fillMaxSize()
+        .onGloballyPositioned {
+            contentOrigin = it.boundsInRoot().topLeft
+            contentWidth = it.size.width
+        }) {
         if (state.phase == CallPhase.Incoming) {
             Column(
                 modifier = Modifier
@@ -156,13 +188,69 @@ private fun CallContent(
                 CallQuickReplies(
                     state = state,
                     onSuggestionClick = onSuggestionClick,
+                    onSuggestionEdit = { id ->
+                        onSuggestionEdit(id)
+                        inputFocusRequest++
+                    },
+                    onSuggestionDragStart = { id, position ->
+                        if (state.canType) {
+                            state.suggestions.find { it.id == id }?.let {
+                                draggedSuggestion = DraggedSuggestion(id, it.text, position)
+                            }
+                        }
+                    },
+                    onSuggestionDragMove = { position ->
+                        draggedSuggestion = draggedSuggestion?.copy(position = position)
+                    },
+                    onSuggestionDragEnd = {
+                        val drag = draggedSuggestion
+                        if (state.canType && drag != null && inputBounds.contains(drag.position)) {
+                            onSuggestionEdit(drag.id)
+                            inputFocusRequest++
+                        }
+                        draggedSuggestion = null
+                    },
+                    onSuggestionDragCancel = { draggedSuggestion = null },
                     onBackchannelClick = onBackchannelClick
                 )
                 CallInput(
                     state = state,
                     onDraftChange = onDraftChange,
                     onMicrophoneClick = onMicrophoneClick,
-                    onSendClick = onSendClick
+                    onSendClick = onSendClick,
+                    onInputBoundsChanged = { inputBounds = it },
+                    isDropTargetActive = draggedSuggestion != null && state.canType,
+                    focusRequest = inputFocusRequest,
+                )
+            }
+        }
+        draggedSuggestion?.let { drag ->
+            val ghostGap = with(LocalDensity.current) { 12.dp.toPx() }
+            Surface(
+                modifier = Modifier
+                    .offset {
+                        IntOffset(
+                            (drag.position.x - contentOrigin.x - ghostSize.width / 2f)
+                                .coerceIn(
+                                    0f,
+                                    (contentWidth - ghostSize.width).coerceAtLeast(0).toFloat()
+                                )
+                                .roundToInt(),
+                            (drag.position.y - contentOrigin.y - ghostSize.height - ghostGap).coerceAtLeast(
+                                0f
+                            ).roundToInt(),
+                        )
+                    }
+                    .widthIn(max = 220.dp)
+                    .onSizeChanged { ghostSize = it },
+                shape = RoundedCornerShape(12.dp),
+                color = Color(0xFF53657B),
+            ) {
+                Text(
+                    text = drag.text,
+                    style = VomiTheme.typography.bodySB14,
+                    maxLines = 2,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                 )
             }
         }
@@ -215,6 +303,7 @@ private fun CallPreview(state: CallUiState) {
                     onSummaryDismiss = {},
                     onEndClick = {},
                     onSuggestionClick = {},
+                    onSuggestionEdit = {},
                     onBackchannelClick = {},
                     onAcceptClick = {},
                     modifier = Modifier
@@ -225,3 +314,5 @@ private fun CallPreview(state: CallUiState) {
         }
     }
 }
+
+private data class DraggedSuggestion(val id: Long, val text: String, val position: Offset)

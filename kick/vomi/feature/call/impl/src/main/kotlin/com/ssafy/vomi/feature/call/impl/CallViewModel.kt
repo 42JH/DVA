@@ -36,6 +36,13 @@ internal class CallViewModel @Inject constructor() : ViewModel() {
         _uiState.update { if (it.canType) it.copy(draft = text) else it }
     }
 
+    fun sendSuggestion(id: Long) {
+        _uiState.update { state ->
+            val suggestion = state.suggestions.find { it.id == id }
+            if (state.canType && suggestion != null) state.appendLocalMessage(suggestion.text) else state
+        }
+    }
+
     fun selectSuggestion(id: Long) {
         _uiState.update { state ->
             val suggestion = state.suggestions.find { it.id == id }

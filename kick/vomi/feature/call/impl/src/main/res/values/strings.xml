@@ -15,4 +15,6 @@
     <string name="call_incoming">전화가 왔어요</string>
     <string name="call_accept">전화 받기</string>
     <string name="call_decline">전화 거절</string>
+    <string name="call_suggestion_edit">입력창에서 수정</string>
+    <string name="call_input_drop_hint">놓아서 수정하기</string>
 </resources>

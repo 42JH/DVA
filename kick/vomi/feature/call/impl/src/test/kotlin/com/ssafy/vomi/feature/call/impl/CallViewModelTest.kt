@@ -95,4 +95,28 @@ class CallViewModelTest {
         assertEquals("유지할 답변", vm.uiState.value.draft)
         assertTrue(vm.uiState.value.isMicrophoneEnabled)
     }
+    @Test
+    fun tappingSuggestionSendsOneOriginalMessageAndKeepsTheExistingDraft() {
+        val vm = newCall()
+        val reply = vm.uiState.value.suggestions.last()
+        vm.updateDraft("따로 작성하던 답변")
+        val count = vm.uiState.value.messages.size
+        vm.sendSuggestion(reply.id)
+        assertEquals(count + 1, vm.uiState.value.messages.size)
+        assertEquals(reply.text, vm.uiState.value.messages.last().text)
+        assertEquals("따로 작성하던 답변", vm.uiState.value.draft)
+    }
+
+    @Test
+    fun immediateSuggestionSendIsBlockedWithMicrophoneOnOrAfterEnding() {
+        val vm = newCall()
+        val messages = vm.uiState.value.messages
+        vm.toggleMicrophone()
+        vm.sendSuggestion(1L)
+        assertEquals(messages, vm.uiState.value.messages)
+        vm.toggleMicrophone()
+        vm.endCall()
+        vm.sendSuggestion(1L)
+        assertEquals(messages, vm.uiState.value.messages)
+    }
 }

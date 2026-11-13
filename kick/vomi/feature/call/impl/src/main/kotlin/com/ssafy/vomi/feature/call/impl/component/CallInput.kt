@@ -1,6 +1,7 @@
 package com.ssafy.vomi.feature.call.impl.component
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -14,8 +15,14 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalFocusManager
@@ -37,9 +44,19 @@ internal fun CallInput(
     onMicrophoneClick: () -> Unit,
     onSendClick: () -> Unit,
     modifier: Modifier = Modifier,
+    onInputBoundsChanged: (Rect) -> Unit = {},
+    isDropTargetActive: Boolean = false,
+    focusRequest: Int = 0,
 ) {
+    val focusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
+    LaunchedEffect(focusRequest) {
+        if (focusRequest > 0 && state.canType) {
+            focusRequester.requestFocus()
+            keyboard?.show()
+        }
+    }
     LaunchedEffect(state.isMicrophoneEnabled) {
         if (state.isMicrophoneEnabled) {
             focusManager.clearFocus()
@@ -64,6 +81,12 @@ internal fun CallInput(
         Row(
             modifier = Modifier
                 .weight(1f)
+                .onGloballyPositioned { onInputBoundsChanged(it.boundsInRoot()) }
+                .border(
+                    width = 1.dp,
+                    color = if (isDropTargetActive) Color(0xFFB9D7FA) else Color.Transparent,
+                    shape = RoundedCornerShape(24.dp),
+                )
                 .background(
                     Color.White.copy(alpha = if (state.canType) 0.24f else 0.10f),
                     RoundedCornerShape(24.dp)
@@ -86,12 +109,19 @@ internal fun CallInput(
                 keyboardActions = KeyboardActions(onSend = { onSendClick() }),
                 modifier = Modifier
                     .weight(1f)
+                    .focusRequester(focusRequester)
                     .padding(vertical = 8.dp),
                 decorationBox = { innerTextField ->
                     Box {
                         if (state.draft.isEmpty()) {
                             Text(
-                                text = stringResource(if (state.isMicrophoneEnabled) R.string.call_input_mic_enabled else R.string.call_input_hint),
+                                text = stringResource(
+                                    when {
+                                        isDropTargetActive -> R.string.call_input_drop_hint
+                                        state.isMicrophoneEnabled -> R.string.call_input_mic_enabled
+                                        else -> R.string.call_input_hint
+                                    },
+                                ),
                                 color = Color.White.copy(alpha = 0.45f),
                                 style = VomiTheme.typography.bodyR14,
                             )

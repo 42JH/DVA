@@ -16,12 +16,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.text
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.LineBreak
@@ -38,14 +41,22 @@ import com.ssafy.vomi.feature.call.impl.model.CallUiState
 internal fun CallQuickReplies(
     state: CallUiState,
     onSuggestionClick: (Long) -> Unit,
+    onSuggestionEdit: (Long) -> Unit,
+    onSuggestionDragStart: (Long, Offset) -> Unit,
+    onSuggestionDragMove: (Offset) -> Unit,
+    onSuggestionDragEnd: () -> Unit,
+    onSuggestionDragCancel: () -> Unit,
     onBackchannelClick: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val editActionLabel = stringResource(R.string.call_suggestion_edit)
     val rowHeight = with(LocalDensity.current) {
         (VomiTheme.typography.bodySB14.lineHeight.toDp() * 2 + 16.dp).coerceAtLeast(48.dp) + 8.dp
     }
     val chipMaxWidth = 192.dp * LocalDensity.current.fontScale.coerceAtLeast(1f)
-    Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Column(
+        modifier = modifier.fillMaxWidth(),
+    ) {
         // The saved replies stay immediately available, including while the microphone is on.
         QuickReplyRow(
             label = stringResource(R.string.call_backchannels),
@@ -72,7 +83,24 @@ internal fun CallQuickReplies(
                     enabled = state.canType,
                     containerColor = Color.White.copy(alpha = 0.14f),
                     contentColor = Color.White,
-                    modifier = Modifier.widthIn(min = 60.dp, max = chipMaxWidth),
+                    modifier = Modifier
+                        .widthIn(min = 60.dp, max = chipMaxWidth)
+                        .suggestionDragSource(
+                            id = reply.id,
+                            enabled = state.canType,
+                            onStart = onSuggestionDragStart,
+                            onMove = onSuggestionDragMove,
+                            onEnd = onSuggestionDragEnd,
+                            onCancel = onSuggestionDragCancel,
+                        )
+                        .semantics {
+                            customActions = if (state.canType) listOf(
+                                CustomAccessibilityAction(editActionLabel) {
+                                    onSuggestionEdit(reply.id)
+                                    true
+                                },
+                            ) else emptyList()
+                        },
                     onClick = { onSuggestionClick(reply.id) },
                 )
             }
@@ -87,7 +115,10 @@ private fun QuickReplyRow(
     content: LazyListScope.() -> Unit,
 ) {
     LazyRow(
-        modifier = Modifier.fillMaxWidth().height(height).semantics { contentDescription = label },
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(height)
+            .semantics { contentDescription = label },
         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -112,7 +143,10 @@ private fun ReplyChip(
         color = containerColor.copy(alpha = if (enabled) containerColor.alpha else 0.06f),
         modifier = modifier,
     ) {
-        Box(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
+        Box(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            contentAlignment = Alignment.Center
+        ) {
             Text(
                 text = displayText,
                 style = VomiTheme.typography.bodySB14.copy(lineBreak = LineBreak.Simple),
