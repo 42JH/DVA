@@ -231,7 +231,7 @@ function Call({ runId, scenario }: { runId: string; scenario: string }) {
                         <td>{c.name}</td>
                         <td className="break-words tabular-nums">{c.expected}</td>
                         <td
-                          className={`break-words tabular-nums ${bad ? 'font-bold text-ops-stop' : ''}`}
+                          className={`break-words whitespace-pre-line tabular-nums ${bad ? 'font-bold text-ops-stop' : ''}`}
                         >
                           {c.actual}
                         </td>

@@ -91,11 +91,36 @@ export function failLine(c: Check, lines: Line[], script: string[]): number | nu
     const i = said ? lines.findIndex(([, , x]) => x.includes(said) || said.includes(x)) : -1
     return i < 0 ? null : i
   }
-  if (c.name === '대본 진행') {
-    const firstUnsaid = Number(/\[(\d+)/.exec(actual)?.[1])
+  if (c.name === SCRIPT_CHECK) {
+    const firstUnsaid = unsaid(actual)[0]
     const last = script[firstUnsaid - 2] // 대본 번호는 1부터
     const i = lines.findIndex(([, who, x]) => who === '고객' && x === last)
     return i < 0 ? lines.length - 1 : i // 못 찾으면 통화의 마지막 말
   }
   return null
+}
+
+/** 판정기가 주는 대본 진행 항목 이름. 판정기 문구는 그대로 두고 화면에서만 바꿈(11/13) — 이미 저장된 결과도 같은 이름으로 보이게 */
+const SCRIPT_CHECK = '대본 진행'
+/** '말하지 못한 발화: [4, 5]' → [4, 5] (대본 번호는 1부터) */
+const unsaid = (actual: unknown): number[] =>
+  (/\[([\d,\s]+)\]/.exec(String(actual ?? ''))?.[1] ?? '').split(',').map(Number).filter(Boolean)
+
+/** 결과표 · 대화 표시에 쓸 문구. 대본 진행만 바꿈: 항목 '고객 대본 완료', 정답 '모든 대사 진행',
+ *  실패면 '진행 못 한 대사: <대사>'(여럿이면 줄바꿈), 대화 줄 표시 '이후 대본 중단' */
+export function shownCheck(c: Check, script: string[]) {
+  if (c.name !== SCRIPT_CHECK)
+    return { name: c.name, expected: c.expected, actual: c.actual, flag: c.name }
+  const missed = c.status === 'fail' ? unsaid(c.actual) : []
+  return {
+    name: '고객 대본 완료',
+    expected: '모든 대사 진행',
+    actual:
+      c.status === 'pass'
+        ? '모든 대사 진행'
+        : missed.length
+          ? `진행 못 한 대사: ${missed.map((n) => script[n - 1] ?? `${n}번 대사`).join('\n')}`
+          : c.actual,
+    flag: '이후 대본 중단',
+  }
 }
