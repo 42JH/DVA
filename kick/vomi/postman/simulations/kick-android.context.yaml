@@ -1,0 +1,62 @@
+purpose:
+  stands_in_for: Kick account, friend, call-control, SSE and PCM HTTP endpoints from the Android handoff.
+  unblocks: Running the Android Retrofit and SSE clients locally without real account tokens or paid synthesis.
+assumptions:
+  - id: android-handoff-shapes
+    status: supported
+    claim: The live Kick endpoints return the DTO and SSE shapes in docs/kick-android-api.md.
+    reason: A live test of the two dedicated accounts confirmed the documented account, friend, voice, call, SSE and join shapes. This does not establish every error case or Android media behavior.
+    verification: On 2026-11-13 both replacement tokens authenticated; both accounts listed each other as friends and voice READY. A call transitioned REQUESTED to ACCEPTED to ENDED, both join credentials were issued, and both SSE snapshots matched the expected state. Both short speech requests returned HTTP 200 audio/pcm, 43096 bytes each, even length and no WAV header. Earlier credentials had returned 401; the replacement resolved authentication.
+    source: docs/kick-android-api.md; feature/android-live-call:core/network/src/main/kotlin/com/ssafy/vomi/core/network/kick/KickApi.kt
+    updated_at: '2026-11-13'
+  - id: android-http-client-local
+    status: supported
+    claim: The Android Retrofit and SSE clients handle the fixture's paths, DTOs, PCM response, authentication failure and HTML server failure in the scenarios exercised.
+    reason: The actual clients executed against the local Postman simulation; no HTTP client was replaced with a stub.
+    verification: Four KickApiContractTest tests passed with zero skips. The simulation recorded 13 requests covering account, friends, voice, duplicate call request, accept, join, speech, end, call lookup, SSE, HTTP 401 and HTML 503. This supports the caller behavior under those fixture responses and not arbitrary provider behavior.
+    source: feature/android-live-call:core/network/src/test/kotlin/com/ssafy/vomi/core/network/kick/KickApiContractTest.kt; postman/mocks/kick/default.js
+    updated_at: '2026-11-13'
+  - id: transport-not-mocked
+    status: unknown
+    claim: Two Android devices can join LiveKit and exchange microphone audio and PCM speech.
+    reason: This simulation does not implement LiveKit, audio hardware, Android permissions or real TTS.
+    verification: Requires two devices and their separate test tokens.
+    source: feature/android-live-call:core/rtc/src/main/kotlin/com/ssafy/vomi/core/rtc/LiveKitRtcGateway.kt
+    updated_at: '2026-11-13'
+  - id: current-client-http-contract
+    status: supported
+    claim: The new Service and Client split sends the handoff request shapes and handles the fixture responses in the scenarios exercised.
+    reason: Nine RemainingApiContractTest tests passed over real local HTTP, without replacing Retrofit or OkHttp. This supports the clients under the local model, rather than independent guarantees about the provider.
+    verification: On 2026-11-13 the local Postman simulation recorded public signup and health without session auth; bodyless friend PUT with encoded ID; multipart voice upload; call creation with reused requestId; active snapshot; all four lowercase actions; join; push PUT and body-carrying DELETE with 204; SSE; PCM; and HTTP 400, 401, 403, 404, 409 and HTML 503. All nine tests ran with zero skips. The same run passed all 42 selected Android JVM tests, debug assembly, and app/network/data lint with zero errors. Signup, voice upload, speech, push and call writes in this run reached only the local simulation.
+    source: docs/kick-android-api.md; core/network/src/test/kotlin/com/ssafy/vomi/core/network/RemainingApiContractTest.kt; postman/mocks/kick/default.js
+    updated_at: '2026-11-13'
+  - id: current-client-live-read-only
+    status: supported
+    claim: The current clients can read account, friend, voice, active-call and SSE snapshots for both dedicated live test accounts.
+    reason: AuthRepositoryLiveTest exercised the common NetworkModule configuration with each real test account token and retained account-specific responses.
+    verification: On 2026-11-13 the opt-in test passed both account selections, automatic authentication, peer friend lookup, known voice status, active accountId, first SSE snapshot, and HTTP 401 after logout. No live account creation, voice upload/synthesis, push mutation or call state change was made in this work. Historical write validation above used the earlier test branch and does not validate the new write clients.
+    source: core/data/src/test/kotlin/com/ssafy/vomi/core/data/repository/AuthRepositoryLiveTest.kt
+    updated_at: '2026-11-13'
+  - id: current-stream-cancellation
+    status: supported
+    claim: Cancelling the current SSE collection closes its HTTP connection without replacing normal cancellation with a socket error in the tested scenario.
+    reason: An actual local socket stayed open after its snapshot, and the test observed peer disconnect after Flow.first cancelled collection.
+    verification: Four CallEventsClientTest tests passed, covering socket closure plus BOM, CRLF, comments, multiline call data, ignored event types, incomplete trailing data and malformed JSON. Cancellation-induced socket read failures are sent to the already-closed channel instead of thrown by a child coroutine. The streaming client has no whole-call or read timeout; consumers must cancel or close streaming bodies and decide reconnection policy.
+    source: core/network/src/main/kotlin/com/ssafy/vomi/core/network/service/call/CallEventsClient.kt; core/network/src/test/kotlin/com/ssafy/vomi/core/network/service/call/CallEventsClientTest.kt
+    updated_at: '2026-11-13'
+  - id: owner-mock-and-unverified-writes
+    status: unknown
+    claim: The new write clients match all real-provider success and error responses for signup, voice upload, speech, push and call mutation.
+    reason: These writes were verified against the handoff-derived local fixture only. No owner-published mock was discovered; this CLI version reports postman status as unsupported, and the prior local fixture was reused without introducing a workspace binding.
+    verification: Local mock requests and outcomes were checked. The actual provider responses for these new write clients remain for a coordinated live integration test; paid speech and registered voice profiles were left unchanged.
+    source: docs/kick-android-api.md; postman/mocks/kick/default.js; core/network/src/test/kotlin/com/ssafy/vomi/core/network/RemainingApiContractTest.kt
+    updated_at: '2026-11-13'
+fingerprints:
+  - id: initial-android-handoff
+    date: '2026-11-13'
+    commit: af3ae6c9
+    cli: '1.76.0'
+  - id: service-client-api-split
+    date: '2026-11-13'
+    commit: f367c5de (dirty worktree; implementation in this task)
+    cli: '1.76.0'

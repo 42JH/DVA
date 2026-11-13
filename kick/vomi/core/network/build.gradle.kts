@@ -17,3 +17,12 @@ dependencies {
     implementation(libs.retrofit.kotlin.serialization)
     implementation(libs.okhttp.logging.interceptor)
 }
+
+android.testOptions.unitTests.all { test ->
+    val simulationUrl = providers.environmentVariable("KICK_SIMULATION_URL").getOrElse("")
+    test.inputs.property("kickSimulationUrl", simulationUrl)
+    if (simulationUrl.isNotBlank()) {
+        test.outputs.upToDateWhen { false }
+        test.outputs.doNotCacheIf("Local HTTP contract simulation") { true }
+    }
+}
