@@ -148,7 +148,17 @@ export const scenarioTestHandlers = [
     for (const id of ids) {
       const i = lanes.indexOf(Math.min(...lanes))
       const first = !runs.some((r) => r.tag === tag && r.slots[id])
-      const out: Out = id === 'B1' && first ? 'error' : NEW_FAILS.includes(id) ? 'fail' : 'pass'
+      // 결과 규칙 (11/13 새 안 줄마다 재현): 빠른 접수형(1번)의 짝수 버전만 실패 2개(B3 · F1) + 첫 회 연결 실패 1개(B1) → 3 · 4번 줄 '확인 필요'.
+      // 홀수 버전과 다른 상담가는 모두 통과 → 1 · 6번 줄. 고쳐서 저장할 때마다 버전이 1씩 올라 번갈아 나옴 (처음 고친 내용 7 = 통과, 한 번 더 저장하면 8 = 실패)
+      const [p, v] = (tag ?? '1:0').split(':').map(Number)
+      const mixed = p === 1 && v % 2 === 0
+      const out: Out = !mixed
+        ? 'pass'
+        : id === 'B1' && first
+          ? 'error'
+          : NEW_FAILS.includes(id)
+            ? 'fail'
+            : 'pass'
       slots[id] = { out, from: lanes[i], to: (lanes[i] += STEP_MS) }
     }
     const runId = `mock-${now}`

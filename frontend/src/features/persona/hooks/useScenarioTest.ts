@@ -9,7 +9,7 @@ import {
   startTest,
   stopTest,
 } from '@/features/persona/api/scenarioTestApi'
-import { restOf, rowsOf, testOf } from './scenarioTest'
+import { restOf, rowsOf, sideLabel, testOf } from './scenarioTest'
 
 export { SCENARIO_TEST } // 화면(components)은 api를 직접 부르지 않아 여기서 내보냄
 
@@ -62,8 +62,19 @@ export function useScenarioTestPage(personaSeq: number, version: number) {
   const persona = personas.data?.find((p) => p.personaSeq === personaSeq)
   const all = versions.data ?? []
   const v = all.find((x) => x.version === version && !x.isDraft)
+  const inUse = personas.data?.find((p) => p.inUse)
+  const active = inUse ? { personaSeq: inUse.personaSeq, version: inUse.appliedVersion } : null
+  // '고친 내용' · '통화에 쓰는 내용' … — 다른 상담가면 이름이 곧 그 말이라 한 번만
+  const label =
+    persona && v ? sideLabel({ personaSeq, version, isHead: v.isHead }, active, persona.name) : ''
   return {
-    sub: persona && v ? `${persona.name} ${fmtVersionTime(v.savedAt)}` : '',
+    sub:
+      persona && v
+        ? [persona.name, label !== persona.name && label, fmtVersionTime(v.savedAt)]
+            .filter(Boolean)
+            .join(' ')
+        : '',
+    label, // 표의 이 버전 칸 머리
     // ‹ — 바로 전이 AI 상담가면 뒤로가기(보던 그대로), 아니면(새로고침 · 주소로 옴) 이 상담가 · 지난 버전이면 그 버전을 넘겨 줌
     back: {
       to: '/personas',
@@ -128,6 +139,7 @@ export function useScenarioTest(me: TestTarget, dateOf: (version: number) => str
   const ended = items.filter((i) => i.status === 'done' || i.status === 'error').length
   const rest = restOf(r.state, r.rows)
   const tested = r.state === 'done' || r.state === 'partial' || r.state === 'stale'
+  const count = (c: string) => r.rows.filter((x) => x.now === c).length
   const ask = (what: NonNullable<typeof asking>) => {
     start.reset() // 지난번 실패 문구가 새 창에 먼저 뜨지 않게
     setAsking(what)
@@ -139,22 +151,19 @@ export function useScenarioTest(me: TestTarget, dateOf: (version: number) => str
     state: r.state,
     progress:
       r.state === 'running' && r.shown
-        ? {
-            text: `${items.length}개 중 ${ended}개 끝남`,
-            started: `${fmtVersionTime(r.shown.startedAt)} 시작`,
-            value: ended,
-            max: items.length,
-          }
+        ? // 11/13 새 안 2번(피그마 2368:3929): 진행 4 / 10 · 막대 · 통과 n · 실패 n (연결 실패는 어느 쪽에도 안 셈)
+          { value: ended, max: items.length, pass: count('pass'), fail: count('fail') }
         : null,
+    // 11/13 새 안: 통과 + 실패 + 연결 실패 = 전체 (새로 실패 · 새로 통과는 표의 변화 칸에서). 멈춘 묶음처럼 못 한 것이 있으면 '시험 안 함'까지 더해 전체를 맞춤
     summary: tested
       ? [
-          { label: '전체', value: r.rows.filter((x) => x.now !== 'none').length, tone: '' },
-          { label: '새로 실패', value: r.newFail, tone: 'text-ops-stop' },
-          { label: '새로 통과', value: r.newPass, tone: 'text-ops-done' },
-          { label: '이 버전 실패', value: r.rows.filter((x) => x.now === 'fail').length, tone: '' },
+          { label: '전체', value: r.rows.length, tone: '' },
+          { label: '통과', value: count('pass'), tone: 'text-ops-done' },
+          { label: '실패', value: count('fail'), tone: 'text-ops-stop' },
+          { label: '연결 실패', value: count('error'), tone: '' },
+          ...(count('none') ? [{ label: '시험 안 함', value: count('none'), tone: '' }] : []),
         ]
       : null,
-    finished: tested && r.shown?.finishedAt ? `${fmtVersionTime(r.shown.finishedAt)} 끝남` : '',
     // 표 머리 날짜 — 통화에 사용 중인 버전이 다른 상담가 것이면 날짜를 모름
     baseDate: d.active?.personaSeq === me.personaSeq ? dateOf(d.active.version) : '',
     nowDate: dateOf(shownVersion),
