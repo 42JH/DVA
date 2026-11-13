@@ -34,7 +34,8 @@ export class CallQueryDto extends PaginationQueryDto {
 
   @ApiPropertyOptional({
     maxLength: 200,
-    description: '현재 연결 고객 이름·발신번호 부분 검색. %·_는 일반 문자.',
+    description:
+      '통화번호(#423 또는 423) 정확히 일치, 현재 연결 고객 이름·발신번호 부분 검색. %·_는 일반 문자.',
   })
   @IsOptional()
   @Transform(({ value }: TransformFnParams): unknown =>

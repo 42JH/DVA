@@ -556,6 +556,25 @@ test('call reference owners and public APIs preserve original joins, filters and
   await compare();
   const list=(query={})=>'/api/calls?'+new URLSearchParams({callerPhoneNumber:'01066000000',...query}).toString();
   const first=await get(list());assert.equal(first.total_count,528);assert.equal(first.data.length,20);
+  const byNumber = async query => {
+    const response = await fetch('http://consultation-app:3004' + list(query), {
+      headers: { Cookie: 'dva_session=' + session },
+    });
+    const body = await response.json();
+    assert.equal(response.status, 200, JSON.stringify(body));
+    return body;
+  };
+  for (const q of [String(callIds[0]), ` #${callIds[0]} `]) {
+    const body = await byNumber({ q });
+    assert.deepEqual(body.data.map(row => row.callSessionSeq), [callIds[0]]);
+    assert.equal(body.total_count, 1);
+    assert.equal(body.hasNext, false);
+  }
+  for (const q of [`#${callIds[528]}`, `#${callIds[529]}`, '#2147483648'])
+    assert.equal((await byNumber({ q })).total_count, 0);
+  const q = `#${callIds[0]}`;
+  assert.equal((await byNumber({ q, callerPhoneNumber: '01066000001' })).total_count, 0);
+  assert.equal((await byNumber({ q, to: '2026-11-01T01:00:00Z' })).total_count, 0);
   for(const query of [{limit:100},{offset:245,limit:20},{offset:495,limit:30},{offset:99999},{orderSeq:orderIds[0]},
     {organizationSeq:organizationIds[0]},{organizationSeq:organizationIds[1]},{organizationSeq:organizationIds[2]},
     {q:' 가나다 '},{q:'가나다'.normalize('NFD')},{q:'%_'},{q:'%'},{q:'_'},{q:'0106600'},
@@ -681,6 +700,9 @@ test('call reference owners and public APIs preserve original joins, filters and
   for(const db of [mono,ops])await db.query("UPDATE ai_persona_versions SET status='INACTIVE' WHERE ai_persona_version_seq=$1",[versionId]);
   const noActive=(await get('/api/dashboard/registration-time')).data;assert.equal(noActive.comparison.current,null);assert.equal(noActive.comparison.previous,null);
   const docs=await Promise.all(['http://monolith-app:3000','http://consultation-app:3004'].map(async base=>(await fetch(base+'/api/docs-json')).json()));
+  // The pinned monolith predates the number search in !672.
+  const callSearch = docs[0].paths['/api/calls'].get.parameters.find(parameter => parameter.name === 'q');
+  callSearch.description = '통화번호(#423 또는 423) 정확히 일치, 현재 연결 고객 이름·발신번호 부분 검색. %·_는 일반 문자.';
   for(const path of ['/api/calls','/api/calls/{id}','/api/unanswered-questions'])assert.deepEqual(docs[1].paths[path],docs[0].paths[path]);
   for(const name of ['CallDto','CallListItemDto','CallListResponseDto','CallDetailDto','CallDetailResponseDto','CallAnalysisDto','CallComplaintDto','RecordingDto','UnansweredQuestionDto','UnansweredQuestionListResponseDto']){
     assert.ok(docs[0].components.schemas[name],name+' missing in source');

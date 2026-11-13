@@ -130,7 +130,10 @@ export class OrdersService {
     this.assertDateRange(query);
     return this.database.transaction(async (client) => {
       await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
-      const page = new ListResponse(await this.repository.adminList(client, query), query.limit);
+      const filteredPage =
+        query.statusGroup === undefined
+          ? undefined
+          : new ListResponse(await this.repository.adminList(client, query), query.limit);
       const statusCounts = await this.repository.adminStatusCounts(client, query);
       const incomplete = await this.drafts.countIncomplete(
         client,
@@ -141,8 +144,12 @@ export class OrdersService {
           organizationSeq: query.organizationSeq,
         }),
       );
+      const all = statusCounts.all + incomplete;
+      const page =
+        filteredPage ??
+        new ListResponse(await this.repository.adminList(client, query, all), query.limit);
       return Object.assign(page, {
-        statusCounts: { ...statusCounts, all: statusCounts.all + incomplete, incomplete },
+        statusCounts: { ...statusCounts, all, incomplete },
       });
     });
   }
