@@ -1,4 +1,5 @@
 import { readPage, PageRows } from '../common/pagination-query';
+import { searchSequence } from '../common/search-sequence';
 import { Injectable } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
 import { CallQueryDto } from './dto/call-query.dto';
@@ -175,7 +176,7 @@ export class ConsultationsRepository {
 
   async findMany(query: CallQueryDto, client?: PoolClient): Promise<PageRows<CallListItemDto>> {
     const conditions: string[] = ['c.deleted_at IS NULL'];
-    const values: Array<string | number | boolean> = [];
+    const values: Array<string | number | boolean | null> = [];
     for (const [value, column, operator] of [
       [query.orderSeq, 'o.order_seq', '='],
       [query.organizationSeq, 'company.organization_seq', '='],
@@ -194,8 +195,11 @@ export class ConsultationsRepository {
     if (query.q) {
       values.push(query.q);
       const parameter = `$${values.length}`;
+      values.push(searchSequence(query.q, '#'));
+      const sequenceParameter = `$${values.length}`;
       conditions.push(`(strpos(lower(normalize(customer.name,NFC)),lower(normalize(${parameter},NFC)))>0
-        OR strpos(c.caller_phone_number,${parameter})>0)`);
+        OR strpos(c.caller_phone_number,${parameter})>0
+        OR c.call_session_seq=${sequenceParameter}::int)`);
     }
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const result = await readPage<CallRow>(
