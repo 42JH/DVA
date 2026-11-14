@@ -24,6 +24,13 @@ const EMPTY: Record<Cell, string> = {
   none: '시험 결과가 없습니다.',
 }
 
+/** 화면 가운데 한 줄 — 못 받음 · 받는 중 · 없는 시나리오 (그릴 것이 있으면 null) */
+const loadNote = (failed: boolean, loading: boolean, missing: boolean) => {
+  if (failed) return '불러오지 못했습니다. 다시 시도해 주세요.'
+  if (loading) return '불러오는 중…'
+  return missing ? '없는 시나리오입니다.' : null
+}
+
 /** 시나리오 한 개의 상세 — 탭 [고친 내용] · [통화에 쓰는 내용] (sideLabel). 어느 통화를 볼지만 정하고, 그 통화의 내용은 useScenarioCall */
 export function useScenarioDetail(personaSeq: number, version: number, scenarioId: string) {
   const scenarios = useQuery(scenarioTestQueries.scenarios())
@@ -85,13 +92,7 @@ export function useScenarioDetail(personaSeq: number, version: number, scenarioI
   return {
     title: scenario?.name ?? '시나리오 시험',
     sub: persona ? `${persona.name} 시나리오 시험` : '',
-    note: failed
-      ? '불러오지 못했습니다. 다시 시도해 주세요.'
-      : !scenarios.data || !tests.data || !personas.data
-        ? '불러오는 중…'
-        : !scenario
-          ? '없는 시나리오입니다.'
-          : null,
+    note: loadNote(failed, !scenarios.data || !tests.data || !personas.data, !scenario),
     tabs: sides.map((s, i) => ({ ...s, on: i === at, pick: () => pick(i) })),
     // 맨 끝 탭 [시나리오] — 이 시나리오가 무엇을 시험하는지 (고객 대본 · 정답 · 행동 확인)
     script: { pick: () => pick(sides.length) },

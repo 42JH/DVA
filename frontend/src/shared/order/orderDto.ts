@@ -1,19 +1,9 @@
 // 주문 상세 API 응답 (Swagger `GET /api/orders/{id}` → OrderDetailDto, 10/31 받음) 과 화면 데이터(OrderDetail) 사이의 변환
 // React를 모르는 순수 함수 (실행해서 확인: orderDto.test.ts). 실제 연결 때 fetchOrder가 api.get 결과를 toOrderDetail로 넘기면 됨
 // 화면은 주문 하나 = 보내는 분 · 받는 분 한 쌍으로 그림 → 상세(parcel) 여러 건이면 첫 상세의 주소, 품목 · 가액은 취소 안 된 상세 합계
-import type { OrderDetail, Party, PaymentMethod, PaymentState } from './orderApi'
+import type { OrderDetail, OrderStatusDto, Party, PaymentMethod, PaymentState } from './orderTypes'
 
-/** 주문 상태 (서버). COLLECTING 수집 중 · notPaid 결제 대기 · PAID 결제 완료 · SUBMITTING 디버 접수 중
- * · SUBMITTING_FAILED 디버 접수 실패(자동 재시도 중, 11/03) · ACCEPTED 디버 접수 완료 · SUBMISSION_FAILED 디버 접수 최종 실패 · CANCELLED 취소 */
-export type OrderStatusDto =
-  | 'COLLECTING'
-  | 'notPaid'
-  | 'PAID'
-  | 'SUBMITTING'
-  | 'SUBMITTING_FAILED'
-  | 'ACCEPTED'
-  | 'SUBMISSION_FAILED'
-  | 'CANCELLED'
+export type { OrderStatusDto } from './orderTypes'
 
 /** 결제 방식 (서버). cat = 예전 지점 방문 결제(조회만) */
 export type PaymentMethodDto = 'cat' | 'billing' | 'credit' | 'groupBilling'

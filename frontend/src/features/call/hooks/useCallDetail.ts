@@ -2,107 +2,20 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { ApiError } from '@/shared/api/client'
 import { fmtClock } from '@/shared/lib/format'
-import { COMPLAINT_LABEL } from '@/features/call/labels'
-import {
-  callQueries,
-  poll,
-  type Complaint,
-  toCallDetail,
-  type Utterance,
-} from '@/shared/call/callApi'
-import { utteranceAt, utteranceForAction, type CallActionKind } from '@/shared/call/callDto'
-import { faqResultText, groupActions } from '@/shared/call/actionText'
-import { isCustomerComplaint, splitComplaints, TARGET_LABEL } from '@/shared/call/complaints'
+import { callQueries, poll, type Complaint, toCallDetail } from '@/shared/call/callApi'
+import { utteranceForAction } from '@/shared/call/callDto'
 import { useRecordingPlayer } from '@/shared/call/useRecordingPlayer'
-
-/** 스크립트 한 줄 (말만 — AI 동작은 오른쪽 처리 내용으로, 10/30). onClick = 이 말부터 듣기 (11/01, 시각을 모르면 없음) */
-interface ScriptLine {
-  key: number // 발화 순번 (= 서버 order)
-  atSec: number | null
-  time: string // '00:31' (위치를 모르면 '')
-  who: 'AI' | '고객'
-  text: string
-  onClick?: () => void
-  complaint?: string // 고객 불만인 고객 말 — 그 문장만 칠하고 아래에 대상 (11/11)
-}
-/** 연속 구간: AI 응대 오류면 주황 줄로 묶음 */
-interface ScriptSegment {
-  complaint: { label: string } | null
-  lines: ScriptLine[]
-}
-
-/** AI 동작 기록 한 줄. onClick = 그 동작을 부른 고객 말로 스크립트를 넘기고 녹취를 그 말부터 재생 (시각을 모르면 없음) */
-interface ActionView {
-  key: number
-  kind: CallActionKind // 아이콘 (조회 · 저장 · 검색 · 전송 · 취소)
-  text: string
-  active: boolean // 지금 짚은 말이 부른 동작 — 하이라이트
-  onClick?: () => void
-}
-
-/** 고객 말의 서버 시각(offsetSeconds)은 음성 인식이 끝난 뒤 찍혀서 실제 말보다 늦음 — 빨리 말하면 그 말을 놓침 (11/01 사용자, 실서버 녹취)
- *  → 듣기 · 강조는 이만큼 앞에서부터. 앞 말의 시각보다 앞으로는 안 감. AI 말은 TTS 시작 시각이라 그대로 정확
- *  ponytail: 눈대중 2초 — AI팀이 발화 시작 시각을 주면(A9) 0으로 */
-const CUSTOMER_LEAD_SEC = 2
-type Timed = Utterance & { labelSec: number | null } // atSec = 듣기 시작 시각, labelSec = 화면에 쓰는 서버 시각
-function withLead(utterances: Utterance[]): Timed[] {
-  return utterances.map((u, i) => {
-    if (u.atSec === null || u.speaker !== 'CUSTOMER') return { ...u, labelSec: u.atSec }
-    const prev = utterances.slice(0, i).findLast((p) => p.atSec !== null)?.atSec ?? 0
-    // 앞 말 시작까지 당기면 두 줄 시각이 같아져 앞 줄이 하이라이트 · ⏮로 못 감(11/05 실서버 'AI 00:51' · '고객 네 00:52') → 앞 말과의 중간까지만
-    const lead = Math.max(u.atSec - CUSTOMER_LEAD_SEC, (prev + u.atSec) / 2)
-    return { ...u, atSec: Math.max(prev, lead), labelSec: u.atSec }
-  })
-}
-
-/** 발화 순번(utteranceOrders)으로 (명세 §5.2: 실제 있는 발화만 강조) — AI 응대 오류는 구간으로 묶고, 고객 불만은 그 고객 말만 표시 */
-function toSegments(utterances: Timed[], all: Complaint[]): ScriptSegment[] {
-  const { customer, errors: complaints } = splitComplaints(all)
-  const segments: ScriptSegment[] = []
-  for (const u of utterances) {
-    const c = complaints.find((x) => x.utteranceOrders.includes(u.order)) ?? null
-    const said =
-      u.speaker === 'CUSTOMER' && customer.find((x) => x.utteranceOrders.includes(u.order))
-    const line: ScriptLine = {
-      key: u.order,
-      atSec: u.atSec,
-      time: u.labelSec === null ? '' : fmtClock(u.labelSec),
-      who: u.speaker === 'AI' ? 'AI' : '고객',
-      text: u.text,
-      ...(said ? { complaint: TARGET_LABEL[said.target] } : {}),
-    }
-    const last = segments[segments.length - 1]
-    const sameGroup =
-      last && (last.complaint === null) === (c === null) && (!c || last.lines[0].key >= 0)
-    if (
-      sameGroup &&
-      (c === null || complaints.find((x) => x.utteranceOrders.includes(last.lines[0].key)) === c)
-    )
-      last.lines.push(line)
-    else segments.push({ complaint: c ? { label: COMPLAINT_LABEL[c.type] } : null, lines: [line] })
-  }
-  return segments
-}
-
-/** 영역이 비었을 때 문구 — 받는 중 · 못 받음 · 받았는데 없음을 구분 (명세: 빈 성공 응답과 요청 실패를 구분) */
-const emptyText = (
-  q: { isPending: boolean; isError: boolean; data?: unknown },
-  loading: string,
-  failed: string,
-  none: string,
-) => (q.isPending ? loading : q.isError && !q.data ? failed : none)
-
-/** 녹취 한 줄 — 빈 배열은 '아직 연결 안 됨'(업로드 중 · 실패 · 무음으로 단정 안 함), NOT_FOUND와 DEPENDENCY_UNAVAILABLE은 따로 (명세) */
-const recordingNote = (rec: ReturnType<typeof toCallDetail>['recording'], failed: boolean) => {
-  if (!rec) return '녹취가 아직 연결되지 않았어요'
-  if (!failed) return null
-  if (rec.error === 'NOT_FOUND') return '녹취 파일을 찾을 수 없어요'
-  if (rec.error === 'DEPENDENCY_UNAVAILABLE')
-    return '녹취 저장소에 연결하지 못했어요 · 다시 받는 중'
-  return rec.url
-    ? '녹취를 재생하지 못했어요 · 다시 받는 중'
-    : '녹취 주소를 받지 못했어요 · 다시 받는 중'
-}
+import {
+  actionViews,
+  emptyText,
+  faqResultTimes,
+  focusOf,
+  marksOf,
+  recordingNote,
+  toSegments,
+  withLead,
+  type Timed,
+} from './callScript'
 
 /** 06 통화 상세 훅 (11/05 새 디자인) — 대본(불만 묶음) · 녹취 재생(이전 · 다음 발화 · 음량) · AI 동작(짚은 말과 같이 하이라이트)
  * 네 조회(기본 · 대화 · 처리 결과 · AI 동작)를 따로 받아 5초마다 다시 — 늦게 온 분석 · 발화 · 녹취가 같은 화면에 붙고, 한 영역이 늦거나 실패해도 나머지는 그대로 (11/02 연동 명세) */
@@ -140,9 +53,7 @@ export function useCallDetail(callId: number, fromFaq?: number) {
   const seekCall = (sec: number) => player.seek(Math.max(0, sec - shift))
   // 지금 짚은 줄: 녹취가 돌면 재생 위치, 아니면 누른 시각 (11/01 사용자: AI 동작을 누르면 왼쪽 그 부분 + 그 부분 음성)
   const at = callNow > 0 ? callNow : cursor
-  const pinEnd = pin && says.find((u) => u.atSec !== null && u.atSec > pin.sec)?.atSec
-  const pinned = pin && at !== null && at >= pin.sec && (pinEnd == null || at < pinEnd)
-  const focusKey = pinned ? pin.key : at === null ? null : (utteranceAt(says, at)?.order ?? null)
+  const focusKey = focusOf(says, at, pin)
   // AI 동작을 누르면 그 동작을 부른 '고객의 말'로 — AI 말이 아니라 (11/01 사용자). 고객 말 처음부터 듣게 그 말의 시각으로 감
   const jumpTo = (sec: number, text: string) => {
     const line = utteranceForAction(says, sec, text)
@@ -168,30 +79,17 @@ export function useCallDetail(callId: number, fromFaq?: number) {
     if (gone && fromFaq) void qc.invalidateQueries({ queryKey: ['faqs', 'detail', fromFaq] })
   }, [gone, fromFaq, qc])
 
-  const error =
-    detail.error instanceof ApiError && detail.error.status === 404
-      ? '통화 원본이 삭제되어 조회할 수 없습니다.' // FAQ 상세 사례 · 다른 화면에서 온 지워진 통화 (11/05 FAQ 사례 연동 문구)
-      : call || !detail.error
-        ? null
-        : '불러오지 못했습니다. 다시 시도해 주세요.'
+  let error: string | null = null
+  if (gone)
+    error = '통화 원본이 삭제되어 조회할 수 없습니다.' // FAQ 상세 사례 · 다른 화면에서 온 지워진 통화 (11/05 FAQ 사례 연동 문구)
+  else if (!call && detail.error) error = '불러오지 못했습니다. 다시 시도해 주세요.'
   // 이미 받은 영역의 재조회가 실패하면 받은 내용은 그대로 두고 한 줄 알림 (다음 갱신에서 다시)
   const notice =
     call && [detail, transcript, resultsQ, actionsQ].some((q) => q.isError && q.data !== undefined)
       ? '다시 받지 못한 부분이 있어요. 마지막으로 받은 내용을 보여 드려요.'
       : null
-  const rec = call?.recording ?? null
-  const recordingText = recordingNote(rec, player.state === 'failed')
+  const recordingText = recordingNote(call?.recording ?? null, player.state === 'failed')
 
-  // FAQ 최종 응대 결과 → 통화 안 시각(초)별 문구 (FAQ_ANSWERED = 근거 있음 · 미답변 = 근거 부족 / 서버 에러, 11/05 AI팀)
-  // AI는 결과를 그 질문을 찾은 FAQ 검색과 같은 시각으로 보냄. 지운 미답변(질문 · 사유 null)은 사유를 몰라 뺌
-  const faqResultAt = new Map(
-    (call?.results ?? []).flatMap((r) =>
-      r.atSec !== null &&
-      (r.kind === 'FAQ_ANSWERED' || (r.kind === 'QUESTION_UNANSWERED' && r.question !== null))
-        ? [[r.atSec, faqResultText(r.kind, r.reason)] as const]
-        : [],
-    ),
-  )
   // 이전 · 다음 발화 (11/05 새 디자인 재생 줄 ⏮ ⏭) — 지금 짚은 말 기준. 짚은 말이 없으면 다음 = 첫 말
   const timed = says.filter((u): u is Timed & { atSec: number } => u.atSec !== null)
   const here = focusKey === null ? -1 : timed.findIndex((u) => u.order === focusKey)
@@ -209,7 +107,6 @@ export function useCallDetail(callId: number, fromFaq?: number) {
     )
   }
   const lengthSec = player.length || call?.durationSec || 0
-  const { customer, errors } = splitComplaints(call?.complaints ?? [])
 
   return {
     isLoading: detail.isPending,
@@ -234,24 +131,7 @@ export function useCallDetail(callId: number, fromFaq?: number) {
       src: player.src,
       handlers: player.handlers,
       text: recordingText, // 녹취가 없거나 못 들을 때 한 줄
-      // 고객 불만(빨강) · AI 응대 오류(주황) 시각 눈금 (11/11). 누르면 그 말로
-      marks: lengthSec
-        ? [...customer, ...errors].flatMap((c, i) => {
-            const sec =
-              c.offsetSeconds ?? says.find((u) => c.utteranceOrders.includes(u.order))?.labelSec
-            if (sec == null) return []
-            const cust = isCustomerComplaint(c)
-            return [
-              {
-                key: i,
-                at: Math.min(1, Math.max(0, (sec - shift) / lengthSec)),
-                tone: cust ? ('stop' as const) : ('wait' as const),
-                title: `${cust ? TARGET_LABEL[c.target] : COMPLAINT_LABEL[c.type]} ${fmtClock(Math.floor(sec))}`,
-                onClick: () => goComplaint(c),
-              },
-            ]
-          })
-        : [],
+      marks: marksOf(call?.complaints ?? [], says, { shift, lengthSec, go: goComplaint }),
     },
     goComplaint,
     audioRef: player.audioRef, // <audio>에 꽂을 ref — player와 따로 넘김 (렌더 중 ref 접근 규칙)
@@ -274,23 +154,10 @@ export function useCallDetail(callId: number, fromFaq?: number) {
     focusKey, // 하이라이트하는 줄 (발화 순번)
     jump, // 그 줄로 스크롤 (AI 동작 · 이전 · 다음을 눌렀을 때만 — 재생 중엔 하이라이트만 따라가고 스크롤은 안 함)
 
-    // AI 동작 기록 — 짚은 말이 부른 동작은 같이 하이라이트 (11/05 사용자: AI 동작 로그에도 그 부분 하이라이트)
-    // 글은 화면 말로 정제(actionText — 실패 코드 · 주문 상태 · '기록: n개 항목'), 연달아 나온 '기록'은 한 줄로 합침 (11/05 사용자)
-    actions: groupActions(call?.actions ?? []).map(({ head, all, text }): ActionView => {
-      const sec = head.atSec
-      const by = (a: (typeof all)[number]) =>
-        a.atSec === null ? null : (utteranceForAction(says, a.atSec, a.text)?.order ?? null)
-      return {
-        key: head.order,
-        kind: head.kind,
-        // FAQ 검색 = AI 요약 그대로(검색 후보를 찾았다는 뜻 — '답을 찾음' 아님) + 최종 결과 '· 근거 있음 / 근거 부족 / 서버 에러' (11/05 AI팀)
-        text:
-          head.kind === 'FAQ_SEARCH' && sec !== null && faqResultAt.has(sec)
-            ? `${text} · ${faqResultAt.get(sec)}`
-            : text,
-        active: focusKey !== null && all.some((a) => by(a) === focusKey),
-        onClick: sec === null ? undefined : () => jumpTo(sec, head.text),
-      }
+    actions: actionViews(call?.actions ?? [], says, {
+      faqResultAt: faqResultTimes(call?.results ?? []),
+      focusKey,
+      jumpTo,
     }),
   }
 }

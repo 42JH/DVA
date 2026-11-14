@@ -4,7 +4,7 @@ import { api, type ApiItem } from '@/shared/api/client'
 import { countsOf, type KindCountsDto } from '@/shared/lib/callKind'
 import { toOrderDetail, type OrderAddressDto, type OrderDetailDto } from './orderDto'
 import { orderNo } from './labels'
-import type { OrderDetail } from './orderApi'
+import type { OrderDetail } from './orderTypes'
 
 export interface ParcelDraftDto {
   draftSeq: number

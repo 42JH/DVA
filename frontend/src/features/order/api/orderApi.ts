@@ -5,7 +5,8 @@ import { queryOptions } from '@tanstack/react-query'
 import { api, ApiError, type ApiItem } from '@/shared/api/client'
 import { buildCreateOrder } from './orderCreate'
 import type { CustomerPatch, OrderPatch } from './orderPatch'
-import type { OrderDetail, Party, PaymentMethod } from '@/shared/order/orderApi'
+import type { OrderInput, PartyInput } from './orderInput'
+import type { PaymentMethod } from '@/shared/order/orderApi'
 import type { OrderGroup } from '@/shared/order/labels'
 
 export type { OrderDetail, Party, PaymentMethod } from '@/shared/order/orderApi'
@@ -16,15 +17,6 @@ export type OrderStatus = OrderStatusDto
 
 /** '주문 상태' 고르기 = 서버 statusGroup (11/11): 결제 완료 = PAID · SUBMITTING · SUBMITTING_FAILED(재시도 중), 접수 완료 = ACCEPTED, 접수 실패 = SUBMISSION_FAILED */
 export type StatusGroup = 'ALL' | OrderGroup
-
-/** 품목 4종 (와이어프레임 03 · 디버 FAQ '박스 크기') — 주문 상세의 items 키와 같은 순서. 그 밖은 '기타 품목' 글로 */
-export const BOX_TYPES = [
-  { key: 'document', label: '서류' },
-  { key: 'small', label: '소박스' },
-  { key: 'medium', label: '중박스' },
-  { key: 'big', label: '대박스' },
-] as const
-export type BoxKey = (typeof BOX_TYPES)[number]['key']
 
 /** OrderListParty — 수집 중이면 칸마다 null일 수 있음 */
 interface ListParty {
@@ -137,25 +129,8 @@ export async function addMonthly(customerSeq: number | null, sender: PartyInput)
 // ---------- 주문 추가 · 수정 ----------
 /** 주문 추가(수기 접수) 본문 */
 /** 주소 검색으로 고른 주소의 나머지 칸 — 서버 주소는 지번 · 동 이름 · 우편번호 · 좌표가 필수 (명세 4.4) */
-export interface PickedAddress {
-  jibunAddress: string
-  dongName: string
-  postalCode: string // 5자리 문자열 (앞 0 보존)
-}
-
-/** 창에서 보내는 사람 — 주소를 새로 골랐으면 picked가 있음 */
-export type PartyInput = Party & { picked?: PickedAddress }
-
-export interface OrderInput {
-  sender: PartyInput
-  receiver: PartyInput
-  items: OrderDetail['items']
-  declaredValue: number | null // 물품 가액 원 (11/01 필수)
-  shippingFee?: number | null // 배송비 — 접수 중단 주문을 수정해 접수할 때만 (추가는 createOrder 인자로)
-  pickupAt: string | null // ISO 8601 (선택)
-  paymentMethod: PaymentMethod | null // null = 미정 그대로 (수정에서 안 고름)
-  request: string | null // 고객 요청 사항 (선택)
-}
+export { BOX_TYPES } from './orderInput'
+export type { BoxKey, OrderInput, PartyInput, PickedAddress } from './orderInput'
 
 /** 주문 추가(수기 접수) — POST /admin/orders (연동 상세명세 4.4). 본문은 buildCreateOrder
  * 멱등키: 한 번의 접수 의도에 UUID 하나, 재시도에도 같은 키 → 같은 키 재요청은 새 주문을 만들지 않고 처음 결과를 돌려줌

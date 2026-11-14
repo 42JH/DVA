@@ -129,6 +129,12 @@ const pinsOpts = (seq: number) => ({
     }),
 })
 
+/** 이번 달 월결제 누적 한 줄 */
+const monthlyText = (billing: { error: unknown; data?: number }) => {
+  if (billing.error) return '불러오지 못했습니다'
+  return billing.data === undefined ? '불러오는 중…' : `${billing.data.toLocaleString('ko-KR')}원`
+}
+
 /** 고객 한 명 + 개인 주소록 */
 export function useCustomer(seq: number) {
   const c = useQuery(customerOpts(seq))
@@ -165,13 +171,7 @@ export function useCustomer(seq: number) {
       withdrawn: c.data.status === 'WITHDRAWN',
     },
     // null = 월결제 안 씀(또는 기업 고객) → 줄을 안 보임
-    monthly: !personalCredit
-      ? null
-      : billing.error
-        ? '불러오지 못했습니다'
-        : billing.data === undefined
-          ? '불러오는 중…'
-          : `${billing.data.toLocaleString('ko-KR')}원`,
+    monthly: personalCredit ? monthlyText(billing) : null,
     error: c.error ? '고객 정보를 불러오지 못했습니다.' : null,
     pins: (pins.data?.data ?? []).map((p) => ({
       key: p.personalPinSeq,

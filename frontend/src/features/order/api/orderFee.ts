@@ -1,5 +1,5 @@
 // 수기 주문 배송비 — 박스는 개수 × 단가, 서류는 몇 장이든 한 번 (11/09 사용자). 그 합 (11/06). 서버에 견적 API가 없어 화면이 계산 (orderFee.test.ts)
-import type { BoxKey } from './orderApi'
+import type { BoxKey } from './orderInput'
 
 // 단가 = AI 전화 접수 요금표와 같게 (ai/app/domain/fare.py, 10/31 결정 · 11/09 사용자: 화면이 AI에 맞춤)
 // 서류 한 번 · 제주 +3,000원은 수기 주문 규칙 (AI에는 아직 없음)

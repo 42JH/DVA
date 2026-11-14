@@ -2,7 +2,7 @@
 // 서버는 보낸 하위 값만 병합(생략 = 유지) → 바뀐 것만 보내야 다른 관리자 · AI가 고친 칸을 덮지 않음. 빈 변경은 서버가 거절 → null
 import type { OrderDetail, Party, PaymentMethod } from '@/shared/order/orderApi'
 import type { PaymentMethodDto } from '@/shared/order/orderDto'
-import type { OrderInput, PartyInput } from './orderApi'
+import type { OrderInput, PartyInput } from './orderInput'
 
 const METHOD: Record<Exclude<PaymentMethod, 'BRANCH_VISIT'>, PaymentMethodDto> = {
   PERSONAL_CARD: 'billing',
