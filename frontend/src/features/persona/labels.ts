@@ -27,7 +27,7 @@ export const PROMPT_SECTIONS = PROMPT_KEYS.map((key) => ({
 /** 빈칸 안내 '톤 · 속도 칸이 비어 있습니다' — 서버가 공백뿐인 칸을 거절해서 저장 전에 막음. 다 채웠으면 null */
 export function emptyPromptNotice(p: PromptFields): string | null {
   const empty = PROMPT_SECTIONS.filter((s) => p[s.key].trim() === '').map((s) => s.title)
-  return empty.length ? `${empty.join(' · ')} 칸이 비어 있습니다` : null
+  return empty.length ? `${empty.join(', ')} 칸이 비어 있습니다` : null
 }
 
 // 버전 표시 (11/11 — 저장 = 새 버전, [적용] 없음): 통화에 쓰는 버전 · AI 확인을 기다리는 버전
@@ -51,6 +51,6 @@ export function unsupportedText(e: unknown): string | null {
     .filter((d) => d.reason === 'unsupported')
     .map((d) => SETTING_LABEL[d.field] ?? d.field)
   return fields.length
-    ? `AI가 아직 지원하지 않는 설정입니다: ${fields.join(' · ')}. 다른 값을 골라 주세요.`
+    ? `AI가 아직 지원하지 않는 설정입니다: ${fields.join(', ')}. 다른 값을 골라 주세요.`
     : null
 }

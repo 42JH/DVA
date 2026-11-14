@@ -145,8 +145,8 @@ export function WaybillPanel({
         >
           {v?.isDraft ? (
             <>
-              <b className="font-semibold">{v?.no}</b> 미완료 주문을 목록에서 지웁니다. 접수된 주문
-              · 결제와는 상관없습니다.
+              <b className="font-semibold">{v?.no}</b> 미완료 주문을 목록에서 지웁니다. 접수된
+              주문이나 결제와는 상관없습니다.
             </>
           ) : (
             <>

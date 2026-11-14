@@ -183,7 +183,7 @@ export function DropOffCard({ c }: { c: CardState<DropOffView> }) {
             head={['상담 단계', '이탈 통화', '이탈률']}
             rows={v.rows}
           />
-          <Foot>이탈률 = 그 단계에서 이탈한 통화 ÷ 판정 완료 통화 · 고객 중도 종료만 집계</Foot>
+          <Foot>이탈률 = 그 단계에서 이탈한 통화 ÷ 판정 완료 통화, 고객 중도 종료만 집계</Foot>
         </>
       )}
     </Card>
@@ -296,7 +296,7 @@ export function WaitCard({ c }: { c: CardState<WaitView> }) {
             rows={v.rows}
           />
           <Foot>
-            고객 발화 종료 → 업무 응답 시작 · 겹친 구간 제외
+            고객 발화 종료부터 업무 응답 시작까지, 겹친 구간 제외
             <br />
             {v.foot}
           </Foot>

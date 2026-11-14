@@ -63,7 +63,7 @@ function Form({
       >
         {f.asking ? (
           <div className="flex flex-wrap items-center gap-2">
-            <p className="flex-1 text-[13px]">보내는 분 이름 · 주소를 고객 정보에도 저장할까요?</p>
+            <p className="flex-1 text-[13px]">보내는 분 이름과 주소를 고객 정보에도 저장할까요?</p>
             <Btn onClick={() => f.answer(false)}>주문만</Btn>
             <Btn kind="primary" onClick={() => f.answer(true)}>
               고객 정보도

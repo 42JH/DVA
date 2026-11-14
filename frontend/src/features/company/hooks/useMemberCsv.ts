@@ -111,7 +111,7 @@ export function useMemberCsv(companyId: number, onDone: () => void) {
     // 비교 기준을 못 받으면 미리 보기가 안 나옴 → 이유를 알림 (창을 다시 열면 다시 받음)
     loadError:
       picked.kind === 'ok' && (all.error ?? deps.error)
-        ? '지금 등록된 사원 · 부서를 불러오지 못해 비교할 수 없습니다. 창을 닫고 다시 열어 주세요.'
+        ? '지금 등록된 사원과 부서를 불러오지 못해 비교할 수 없습니다. 창을 닫고 다시 열어 주세요.'
         : null,
     // 읽은 사원 + 구분 — 등록 전에 표로 보여 줌 (오류가 있으면 안 보임)
     rows:
@@ -131,7 +131,7 @@ export function useMemberCsv(companyId: number, onDone: () => void) {
               `바뀜 ${pv.changed.length}명`,
               `변경 없음 ${pv.same.length}명`,
               ...(pv.leaders.length ? [`담당자 지정 ${pv.leaders.length}명`] : []),
-            ].join(' · '),
+            ].join(', '),
             changes: pv.changed.slice(0, SHOW_CHANGES).map((c) => ({
               key: c.row.employeeNo,
               text: [
@@ -148,7 +148,7 @@ export function useMemberCsv(companyId: number, onDone: () => void) {
                     : `주소 → ${c.row.address.roadAddress}`),
               ]
                 .filter(Boolean)
-                .join(' · '),
+                .join(', '),
             })),
             moreChanges: Math.max(0, pv.changed.length - SHOW_CHANGES),
           }

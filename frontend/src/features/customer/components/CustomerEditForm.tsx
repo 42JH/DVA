@@ -79,8 +79,8 @@ export function CustomerEditForm({
       {vm.confirming && (
         <ConfirmDialog
           title="이 고객을 탈퇴 처리할까요?"
-          target={`${before.name} · ${fmtPhone(before.phoneNumber)}`}
-          warn="다시 이용 중으로 되돌릴 수 없습니다. 주문 · 통화 기록은 그대로 남습니다."
+          target={`${before.name} ${fmtPhone(before.phoneNumber)}`}
+          warn="다시 이용 중으로 되돌릴 수 없습니다. 주문과 통화 기록은 그대로 남습니다."
           okLabel="탈퇴"
           onOk={vm.withdraw}
           onClose={vm.cancelWithdraw}

@@ -78,7 +78,7 @@ function dropOffView(d: StageDropoffs) {
     value: one(d.dropoffRatePercent),
     note:
       `판정 ${num(d.assessedCallCount)}건 중 고객 이탈 ${num(d.dropoffCallCount)}건` +
-      (d.unassessedCallCount ? ` · 미판정 ${num(d.unassessedCallCount)}건 제외` : ''),
+      (d.unassessedCallCount ? `, 미판정 ${num(d.unassessedCallCount)}건 제외` : ''),
     rows: d.stages.map((s, i) => ({
       key: s.stage,
       cells: [STAGE_LABEL[s.stage], `${num(s.callCount)}건`, pctText(s.dropoffRatePercent)],
@@ -95,7 +95,7 @@ function registrationView(d: RegistrationTime) {
     name: `${v.name} v${v.version}`,
     value: v.averageSecondsPerParcel,
     label: sec(v.averageSecondsPerParcel),
-    sub: `${tag} · 접수 ${num(v.registeredParcelCount)}건`,
+    sub: `${tag}, 접수 ${num(v.registeredParcelCount)}건`,
   })
   return {
     value: one(d.averageSecondsPerParcel),
@@ -103,15 +103,15 @@ function registrationView(d: RegistrationTime) {
       `접수 ${num(d.registeredParcelCount)}건` +
       (d.averageSecondsPerParcel === null
         ? ''
-        : ` · 평균 ${fmtDuration(Math.round(d.averageSecondsPerParcel))}`),
+        : `, 평균 ${fmtDuration(Math.round(d.averageSecondsPerParcel))}`),
     bars: [
       ...(current ? [bar(current, '현재 운영')] : []),
       ...(previous ? [bar(previous, '직전 버전')] : []),
     ],
     callout: versionGap(d.comparison.previousMinusCurrentSeconds),
     foot:
-      '접수가 있는 통화의 전체 통화시간 ÷ 접수 배송 건수 · FAQ · 조회 시간 포함' +
-      (d.unmeasuredCallCount ? ` · 접수 건수 미수신 ${num(d.unmeasuredCallCount)}통화 제외` : ''),
+      '접수가 있는 통화의 전체 통화시간 ÷ 접수 배송 건수, FAQ와 조회 시간 포함' +
+      (d.unmeasuredCallCount ? `, 접수 건수 미수신 ${num(d.unmeasuredCallCount)}통화 제외` : ''),
   }
 }
 
@@ -120,7 +120,7 @@ function waitView(d: ResponseWait) {
   const hot = maxIndex(d.processes.map((p) => p.averageLatencyMs ?? 0))
   return {
     value: one(d.waitRatePercent),
-    note: `총 대기 ${hoursMinutes(d.totalWaitMs / 1000)} · 전체 통화 ${hoursMinutes(d.totalCallDurationMs / 1000)}`,
+    note: `총 대기 ${hoursMinutes(d.totalWaitMs / 1000)}, 전체 통화 ${hoursMinutes(d.totalCallDurationMs / 1000)}`,
     rows: d.processes.map((p, i) => ({
       key: p.processType,
       cells: [
@@ -132,8 +132,8 @@ function waitView(d: ResponseWait) {
     })),
     foot:
       `측정 ${num(d.measuredCallCount)}통화 기준` +
-      (d.unmeasuredCallCount ? ` · 미수신 ${num(d.unmeasuredCallCount)}통화 제외` : '') +
-      (d.invalidWaitCallCount ? ` · 시각 확인 필요 ${num(d.invalidWaitCallCount)}통화 제외` : ''),
+      (d.unmeasuredCallCount ? `, 미수신 ${num(d.unmeasuredCallCount)}통화 제외` : '') +
+      (d.invalidWaitCallCount ? `, 시각 확인 필요 ${num(d.invalidWaitCallCount)}통화 제외` : ''),
   }
 }
 

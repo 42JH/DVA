@@ -18,7 +18,7 @@ function Graph({ kind }: { kind: GraphKind }) {
     <>
       <PageHead title={vm.title} back={{ to: '/stats', label: '통계로' }}>
         <span className="text-[13px] text-ops-sub">
-          신규 · 기존 고객을 함께 보거나, 한 유형만 골라 비교하세요.
+          신규와 기존 고객을 함께 보거나, 한 유형만 골라 비교하세요.
         </span>
       </PageHead>
       <div className="flex min-h-0 flex-1 flex-col px-6 py-4">

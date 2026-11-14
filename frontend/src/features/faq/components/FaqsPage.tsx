@@ -184,9 +184,9 @@ function Opened({ f, open, onEdit }: { f: Faq; open: boolean; onEdit: () => void
       </div>
       {examples.length > 0 && (
         <div className="mt-4">
-          <h3 className="mb-1.5 text-[12px] font-semibold text-ops-sub">
+          <h2 className="mb-1.5 text-[12px] font-semibold text-ops-sub">
             이 FAQ로 AI가 답한 최근 고객 질문
-          </h3>
+          </h2>
           <ul className="flex flex-col gap-1">
             {examples.map((e) => (
               <li key={e.key} className="flex items-baseline gap-3 text-[13px]">
