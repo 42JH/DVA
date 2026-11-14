@@ -12,6 +12,8 @@ const token = 'f'.repeat(64);
 const operator = 'a'.repeat(64);
 const systemAdmin = 'b'.repeat(64);
 const runId = '1112_090752_bd17e9';
+const stopPath = `/runs/${runId}/stop`;
+const stopOptions = { method: 'POST', headers: { Origin: origin } };
 const resultPath = `/runs/${runId}/A1`;
 const api = '/api/persona-check';
 const wav = Buffer.from('RIFF-test-wave');
@@ -50,7 +52,7 @@ async function handleUpstream(request, response) {
     let body = '';
     request.setEncoding('utf8');
     for await (const chunk of request) body += chunk;
-    requests.at(-1).body = JSON.parse(body);
+    requests.at(-1).body = url === stopPath ? body : JSON.parse(body);
     if (fault === 'accepted-but-silent') return;
     return json(response, 202, { runId });
   }
@@ -211,6 +213,21 @@ test('starting a trial preserves the request and returns 202 with a run ID', asy
   assert.equal(Object.hasOwn(requests.at(-1).body, 'scenarios'), false);
 });
 
+test('both admin roles can relay a stop with no body and receive 202 on repeat', async () => {
+  const count = requests.length;
+  for (const session of [operator, systemAdmin]) {
+    await expectData(await call(stopPath, { ...stopOptions, session }), { runId }, 202);
+    const request = requests.at(-1);
+    assert.equal(request.url, stopPath);
+    assert.equal(request.method, 'POST');
+    assert.equal(request.body, '');
+    assert.equal(request.headers['content-type'], undefined);
+    assert.equal(request.headers.authorization, `Bearer ${token}`);
+    assert.equal(request.headers.cookie, undefined);
+  }
+  assert.equal(requests.length, count + 2);
+});
+
 test('session, origin, path and launch validation prevent upstream requests', async () => {
   const count = requests.length;
   await expectError(await call('/scenarios', { session: '' }), 401, 'UNAUTHORIZED');
@@ -219,6 +236,14 @@ test('session, origin, path and launch validation prevent upstream requests', as
   await expectError(await post(startInput, 'https://invalid.example'), 403, 'FORBIDDEN');
   await expectError(await call('/scenarios/A1%2Fextra'), 400, 'INVALID_REQUEST');
   await expectError(await call('/runs/invalid'), 400, 'INVALID_REQUEST');
+  await expectError(await call('/runs/invalid/stop', stopOptions), 400, 'INVALID_REQUEST');
+  await expectError(await call(stopPath, { ...stopOptions, session: '' }), 401, 'UNAUTHORIZED');
+  await expectError(
+    await call(stopPath, { ...stopOptions, session: 'c'.repeat(64) }),
+    403,
+    'FORBIDDEN',
+  );
+  await expectError(await call(stopPath, { method: 'POST' }), 403, 'FORBIDDEN');
   await expectError(await call('/runs?tag=1%3A7%26other%3Dvalue'), 400, 'INVALID_REQUEST');
   await expectError(await call(`${resultPath}/report`), 404, 'NOT_FOUND');
   for (const input of [
@@ -255,6 +280,23 @@ test('upstream errors use the public API envelope and are never retried', async 
     }
     fault = 404;
     await expectError(await call(`${resultPath}/audio`), 404, 'NOT_FOUND');
+  } finally {
+    fault = undefined;
+  }
+});
+
+test('stopping maps upstream 404 to NOT_FOUND and other failed responses to 503', async () => {
+  try {
+    const count = requests.length;
+    fault = 404;
+    await expectError(await call(stopPath, stopOptions), 404, 'NOT_FOUND');
+    assert.equal(requests.length, count + 1);
+    for (const upstreamFault of [200, 202, 400, 422, 500, 'disconnect']) {
+      const count = requests.length;
+      fault = upstreamFault;
+      await expectError(await call(stopPath, stopOptions), 503, 'DEPENDENCY_UNAVAILABLE');
+      assert.equal(requests.length, count + 1);
+    }
   } finally {
     fault = undefined;
   }

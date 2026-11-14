@@ -12,21 +12,26 @@ const unavailable = () =>
 export class PersonaCheckClient {
   constructor(private readonly config: ConfigService<Environment, true>) {}
 
-  async json(path: string, input?: StartPersonaCheckRunDto): Promise<unknown> {
+  async json(
+    path: string,
+    method: 'GET' | 'POST' = 'GET',
+    input?: StartPersonaCheckRunDto,
+  ): Promise<unknown> {
     const response = await this.request(path, {
-      method: input ? 'POST' : 'GET',
+      method,
       body: input ? JSON.stringify(input) : undefined,
       headers: input ? { 'Content-Type': 'application/json' } : undefined,
       signal: AbortSignal.timeout(8000),
     });
-    if (response.status !== (input ? 202 : 200)) return this.reject(response);
+    if (response.status !== (method === 'POST' ? 202 : 200))
+      return this.reject(response, method === 'GET' || input !== undefined);
     const mediaType = response.headers.get('content-type')?.split(';', 1)[0];
     if (mediaType !== 'application/json') return this.reject(response);
     try {
       const data: unknown = await response.json();
       if (!data || typeof data !== 'object') throw unavailable();
       if (
-        input &&
+        method === 'POST' &&
         (!('runId' in data) ||
           typeof data.runId !== 'string' ||
           !personaCheckRunId.test(data.runId))
@@ -82,11 +87,11 @@ export class PersonaCheckClient {
     }
   }
 
-  private async reject(response: Response): Promise<never> {
+  private async reject(response: Response, forwardBadRequest = true): Promise<never> {
     await response.body?.cancel().catch(() => undefined);
     if (response.status === 404)
       throw new ApiException(404, 'NOT_FOUND', '요청한 시험 데이터를 찾을 수 없습니다.');
-    if (response.status === 400 || response.status === 422)
+    if (forwardBadRequest && (response.status === 400 || response.status === 422))
       throw new ApiException(400, 'INVALID_REQUEST', '시험 요청 값을 확인해 주세요.');
     throw unavailable();
   }
