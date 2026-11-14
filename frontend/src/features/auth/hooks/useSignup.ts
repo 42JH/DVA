@@ -7,7 +7,7 @@ import { signup } from '@/features/auth/api/signupApi'
 const MIN_PASSWORD = 6 // 10/30 00 디자인 확정 · 명세 API-02
 const LOGIN_ID = /^[A-Za-z0-9]{1,20}$/ // 명세 API-02: 영문 · 숫자 1~20자, 대소문자 구분 (소문자로 바꾸지 않음)
 const FIELD_TEXT: Record<string, string> = {
-  loginId: '아이디는 영문 · 숫자 1~20자로 입력해 주세요.',
+  loginId: '아이디는 영문, 숫자 1~20자로 입력해 주세요.',
   password: `비밀번호는 ${MIN_PASSWORD}자 이상 입력해 주세요.`,
   name: '이름을 입력해 주세요.',
 }

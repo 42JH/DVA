@@ -136,6 +136,7 @@ export const formFilled = (v: OrderFormValues, lim: OrderLimits, adding: boolean
   lim.hasItem &&
   (!adding || lim.shippingFee >= 1) && // 추가: 배송비 필수 (명세 4.4)
   (!adding || (!!v.parties.sender.picked && !!v.parties.receiver.picked)) && // 추가: 주소는 검색으로 고른 것만
+  (!adding || v.payment !== null) && // 추가: 결제 방식을 골라야 — 안 보내면 서버가 개인카드로 접수함 (월결제 추가를 [취소]하면 미정이 됨)
   v.declaredValue !== '' && // 물품 가액 필수 (명세 4.4, 11/01 결정)
   !lim.pickupOut &&
   !lim.priceOut &&
@@ -145,7 +146,7 @@ export const formFilled = (v: OrderFormValues, lim: OrderLimits, adding: boolean
 /** 물품 칸 아래 오류 한 줄 */
 export const itemsErrorOf = (lim: OrderLimits, showFee: boolean) =>
   [
-    lim.boxesOut && `박스는 소 · 중 · 대 합계 ${MAX_BOXES}개까지예요.`,
+    lim.boxesOut && `박스는 소, 중, 대 합계 ${MAX_BOXES}개까지예요.`,
     lim.docsOut && `서류는 ${MAX_DOCUMENTS}개까지예요.`,
     showFee && lim.feeMissing && '배송비를 계산하려면 박스나 서류를 1개 이상 넣어 주세요.',
   ]

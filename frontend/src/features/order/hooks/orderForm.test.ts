@@ -52,6 +52,12 @@ const typed = {
 }
 assert.equal(formFilled(typed, lim(typed), true), false)
 assert.equal(formFilled(typed, lim(typed), false), true) // 수정은 원래 주소 그대로 통과
+// 추가는 결제 방식을 골라야 함(안 보내면 서버가 개인카드로 접수). 수정은 미정 그대로 둘 수 있음
+const unpaid = { ...base, payment: null }
+assert.deepEqual(
+  [formFilled(unpaid, lim(unpaid), true), formFilled(unpaid, lim(unpaid), false)],
+  [false, true],
+)
 const etcOnly = { ...base, counts: NO_ITEMS, etcItem: '화분' }
 assert.deepEqual(
   [lim(etcOnly).hasItem, lim(etcOnly).feeMissing, formFilled(etcOnly, lim(etcOnly), true)],
@@ -70,7 +76,7 @@ const old = { items: { ...many.counts, other: null } } as OrderDetail
 assert.deepEqual([lim(many, old).boxesOut, lim(many, old).docsOut], [false, false])
 assert.equal(
   itemsErrorOf(lim(many), true),
-  '박스는 소 · 중 · 대 합계 10개까지예요. 서류는 100개까지예요.',
+  '박스는 소, 중, 대 합계 10개까지예요. 서류는 100개까지예요.',
 )
 
 // 가액 · 수거: 범위 밖이면 걸리고, 창을 열 때 값 그대로면 통과

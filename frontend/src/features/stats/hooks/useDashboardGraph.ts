@@ -31,7 +31,7 @@ function waitSeries(d: ResponseWait): Series {
   })
   return {
     headline: one(perCall(d.totalWaitMs)),
-    sub: `전체 통화시간의 ${pctText(d.waitRatePercent)} · ${num(d.measuredCallCount)}통화`,
+    sub: `전체 통화시간의 ${pctText(d.waitRatePercent)}, ${num(d.measuredCallCount)}통화`,
     values,
     labels: values.map(two), // 막대 위 초는 두 자리 — 0.04초가 '0.0'으로 보이지 않게 (11/05 사용자)
   }
@@ -58,7 +58,7 @@ const GRAPHS = {
     unit: '초/통화',
     headUnit: '초/통화',
     name: (who: string) => who,
-    foot: '업무별 대기시간 ÷ 고객군 측정 통화 수 · 위 평균은 겹친 구간을 뺀 전체 대기로 계산',
+    foot: '업무별 대기시간 ÷ 고객군 측정 통화 수. 위 평균은 겹친 구간을 뺀 전체 대기로 계산',
     groups: Object.entries(PROCESS_LABEL).map(([key, label]) => ({ key, label })),
     barWidth: 40,
     series: waitSeries,
@@ -68,8 +68,8 @@ const GRAPHS = {
     chart: '상담 단계별 고객 이탈률',
     unit: '%',
     headUnit: '%',
-    name: (who: string) => `${who} · 전체 이탈률`,
-    foot: '단계 이탈률 = 해당 단계 이탈 통화 ÷ 판정 완료 통화 × 100 · 고객 중도 종료만 집계',
+    name: (who: string) => `${who} 전체 이탈률`,
+    foot: '단계 이탈률 = 해당 단계 이탈 통화 ÷ 판정 완료 통화 × 100, 고객 중도 종료만 집계',
     groups: Object.entries(STAGE_LABEL).map(([key, label]) => ({ key, label })),
     barWidth: 36,
     series: dropSeries,

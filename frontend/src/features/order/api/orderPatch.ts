@@ -126,7 +126,7 @@ export function submitMissing(order: OrderDetail, input: OrderInput): string[] {
     ['보내는 분', order.sender, input.sender],
     ['받는 분', order.receiver, input.receiver],
   ] as const) {
-    if (!after.name || !after.phoneNumber) out.push(`${label} 이름 · 전화번호`)
+    if (!after.name || !after.phoneNumber) out.push(`${label} 이름, 전화번호`)
     if (!addressOk(before, after)) out.push(`${label} 주소(다시 검색)`)
   }
   const i = input.items

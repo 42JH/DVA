@@ -12,11 +12,11 @@ export function orderErrorText(e: unknown, action: '접수' | '저장' | '취소
     case 401:
       return '로그인이 끝났어요. 다시 로그인해 주세요.'
     case 403:
-      return `결제 자격이나 권한이 없어 ${action}하지 못했습니다. 월결제 · 그룹결제는 기업 · 부서 자격이 필요해요.`
+      return `결제 자격이나 권한이 없어 ${action}하지 못했습니다. 월결제와 그룹결제는 기업이나 부서 자격이 필요해요.`
     case 404:
       return '주문이나 고객을 찾을 수 없습니다. 목록을 새로고침해 주세요.'
     case 422:
-      return `주소 · 물품 · 금액 조건이 맞지 않아 ${action}하지 못했습니다. 칸을 다시 확인해 주세요.`
+      return `주소, 물품, 금액 조건이 맞지 않아 ${action}하지 못했습니다. 칸을 다시 확인해 주세요.`
     case 503:
       return `디버 접수 설정 문제로 ${action}하지 못했습니다. 백엔드 담당자에게 알려 주세요.`
     default:

@@ -11,10 +11,10 @@ assert.equal(refineAction('실패·재질문: MISSING_RECEIVER_NAME'), '빠진 �
 assert.equal(refineAction('실패·재질문: SOMETHING_NEW'), '다시 물음') // 모르는 코드
 assert.equal(refineAction('실패·재질문: unavailable'), '일시 장애') // 코드 없이 상태만
 assert.equal(refineAction('기록: 2개 항목'), '항목 2개 기록')
-assert.equal(refineAction('통화 결과 전송: COLLECTING'), '주문 전송 · 미완료 주문')
-assert.equal(refineAction('통화 결과 전송: notPaid'), '주문 전송 · 결제 대기')
-assert.equal(refineAction('통화 결과 전송: 응답 없음'), '주문 전송 · 응답 없음')
-assert.equal(refineAction('등록 고객'), '고객 조회 · 등록 고객')
+assert.equal(refineAction('통화 결과 전송: COLLECTING'), '주문 전송: 미완료 주문')
+assert.equal(refineAction('통화 결과 전송: notPaid'), '주문 전송: 결제 대기')
+assert.equal(refineAction('통화 결과 전송: 응답 없음'), '주문 전송: 응답 없음')
+assert.equal(refineAction('등록 고객'), '고객 조회: 등록 고객')
 assert.equal(refineAction('FAQ 근거 있음'), 'FAQ 검색 후보 있음') // 지난 기록 — 답을 찾았다는 뜻 아님
 assert.equal(refineAction('FAQ 검색 후보 3건'), 'FAQ 검색 후보 3건') // 새 요약은 그대로
 assert.equal(faqResultText('FAQ_ANSWERED', null), '근거 있음')
@@ -46,7 +46,7 @@ assert.deepEqual(
     [2, [2, 3, 4], '항목 4개 기록'],
     [5, [5], '받는 곳 후보가 없어 다시 물음'],
     [6, [6], '항목 1개 기록'],
-    [7, [7], '주문 전송 · 미완료 주문'],
+    [7, [7], '주문 전송: 미완료 주문'],
   ],
 )
 

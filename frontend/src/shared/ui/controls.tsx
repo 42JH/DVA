@@ -157,7 +157,6 @@ const PATHS = {
   sheet:
     'M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-6-6ZM14 3v6h6M9 14.5H7.5v4H9M13 14.5h-1.2a.8.8 0 0 0 0 1.6h.4a.8.8 0 0 1 0 1.6h-1.2M14.5 14.5l1 4 1-4',
   download: 'M12 3v12M7 10l5 5 5-5M4 21h16',
-  kebab: 'M12 5h.01M12 12h.01M12 19h.01', // ⋮ 더 보기 (07 상담가 카드 → 버전 기록)
 }
 export type IconName = keyof typeof PATHS
 

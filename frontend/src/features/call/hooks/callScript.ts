@@ -99,11 +99,10 @@ export const recordingNote = (
   if (!rec) return '녹취가 아직 연결되지 않았어요'
   if (!failed) return null
   if (rec.error === 'NOT_FOUND') return '녹취 파일을 찾을 수 없어요'
-  if (rec.error === 'DEPENDENCY_UNAVAILABLE')
-    return '녹취 저장소에 연결하지 못했어요 · 다시 받는 중'
+  if (rec.error === 'DEPENDENCY_UNAVAILABLE') return '녹취 저장소에 연결하지 못했어요. 다시 받는 중'
   return rec.url
-    ? '녹취를 재생하지 못했어요 · 다시 받는 중'
-    : '녹취 주소를 받지 못했어요 · 다시 받는 중'
+    ? '녹취를 재생하지 못했어요. 다시 받는 중'
+    : '녹취 주소를 받지 못했어요. 다시 받는 중'
 }
 
 type CallDetail = ReturnType<typeof toCallDetail>
@@ -180,7 +179,7 @@ export function actionViews(
     return {
       key: head.order,
       kind: head.kind,
-      text: result === undefined ? text : `${text} · ${result}`,
+      text: result === undefined ? text : `${text}, ${result}`,
       active: x.focusKey !== null && all.some((a) => by(a) === x.focusKey),
       onClick: sec === null ? undefined : () => x.jumpTo(sec, head.text),
     }

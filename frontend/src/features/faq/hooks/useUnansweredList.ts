@@ -53,7 +53,7 @@ export function useUnansweredList() {
     call === null
       ? null
       : first
-        ? `${first.customerName}${first.startedAt ? ` · ${fmtListTime(first.startedAt).join(' ')}` : ''} 통화의 질문만`
+        ? `${first.customerName}${first.startedAt ? ` ${fmtListTime(first.startedAt).join(' ')}` : ''} 통화의 질문만`
         : '이 통화의 질문만'
   // 오래된 날부터, 날짜 모름은 맨 뒤 (같은 날은 서버 순서)
   const rows: UnansweredRow[] = hit

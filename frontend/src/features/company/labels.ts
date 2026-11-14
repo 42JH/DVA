@@ -32,7 +32,7 @@ export function errorText(e: unknown, action: '등록' | '저장' | '삭제'): s
     case 0:
       return '서버에 연결하지 못했어요. 인터넷 연결을 확인한 뒤 다시 시도해 주세요.'
     case 400:
-      return `입력한 내용의 형식이 맞지 않아 ${action}하지 못했습니다. 사번 · 이름 · 전화번호를 확인해 주세요.`
+      return `입력한 내용의 형식이 맞지 않아 ${action}하지 못했습니다. 사번, 이름, 전화번호를 확인해 주세요.`
     case 401:
       return '로그인이 끝났어요. 다시 로그인해 주세요.'
     case 403:

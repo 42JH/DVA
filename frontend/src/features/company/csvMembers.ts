@@ -209,7 +209,7 @@ function readMembersRows(rows: string[][], kind: CsvKind = 'members'): CsvResult
       return errors.push(`${line}행 부서 이름은 ${MAX_DEPARTMENT_NAME}자까지입니다.`)
     const [road = '', jibun = '', dong = '', postal = '', detail = ''] = addr
     if (!(road && jibun && dong && postal))
-      return errors.push(`${line}행 주소는 도로명 · 지번 · 동 · 우편번호를 모두 써 주세요.`)
+      return errors.push(`${line}행 주소는 도로명, 지번, 동, 우편번호를 모두 써 주세요.`)
     // 엑셀은 0으로 시작하는 번호(서울 01~09)의 앞 0만 지움 → 4자리면 0 하나가 빠진 것. 그 밖의 길이는 원래 값을 알 수 없어 막음
     const zip = /^\d{4}$/.test(postal) ? `0${postal}` : postal
     if (!/^\d{5}$/.test(zip)) return errors.push(`${line}행 우편번호는 숫자 5자리여야 합니다.`)

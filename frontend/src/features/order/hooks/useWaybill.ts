@@ -21,7 +21,7 @@ import { itemsText, STATUS_LOOK, won } from '@/shared/order/look'
 // SUBMITTING = 서버가 결과 저장에 실패 — 디버엔 접수됐을 수 있어 바로 다시 누르지 않게 (order-submission.service finishSubmission)
 const RETRY_NOTICE: Partial<Record<OrderStatus, { text: string; tone: 'stop' | 'wait' }>> = {
   SUBMISSION_FAILED: {
-    text: '디버에 다시 보냈지만 접수되지 않았어요. 주소 · 물품을 확인하고 다시 시도해 주세요.',
+    text: '디버에 다시 보냈지만 접수되지 않았어요. 주소와 물품을 확인하고 다시 시도해 주세요.',
     tone: 'stop',
   },
   SUBMITTING: {

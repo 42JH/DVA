@@ -80,11 +80,11 @@ export function refineAction(text: string): string {
   m = /^기록:\s*(\d+)개 항목$/.exec(t)
   if (m) return `항목 ${m[1]}개 기록`
   m = /^통화 결과 전송:\s*(.+)$/.exec(t)
-  if (m) return `주문 전송 · ${STATUS_TEXT[m[1]] ?? m[1]}`
+  if (m) return `주문 전송: ${STATUS_TEXT[m[1]] ?? m[1]}`
   if (t === 'FAQ 근거 있음') return 'FAQ 검색 후보 있음' // 지난 기록 — 검색은 후보를 찾았다는 뜻일 뿐, 답했다는 뜻이 아님 (11/05 AI팀)
   if (t === 'FAQ 근거 없음') return 'FAQ에 답이 없음'
-  if (t === '미등록 고객') return '고객 조회 · 등록되지 않은 번호' // 서버 글. 고객이 아니니 '고객'이라 부르지 않음 (11/11 사용자)
-  if (t === '등록 고객' || t === '탈퇴 고객') return `고객 조회 · ${t}`
+  if (t === '미등록 고객') return '고객 조회: 등록되지 않은 번호' // 서버 글. 고객이 아니니 '고객'이라 부르지 않음 (11/11 사용자)
+  if (t === '등록 고객' || t === '탈퇴 고객') return `고객 조회: ${t}`
   return t
 }
 

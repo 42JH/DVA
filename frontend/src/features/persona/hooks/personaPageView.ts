@@ -77,7 +77,7 @@ export function personaItems(
         selected: mine,
         inUse: p.inUse,
         applying: p.applyingVersion
-          ? `${VERSION_BADGE.PENDING.label}${p.applyError ? ' · AI 반영 오류' : ''}`
+          ? `${VERSION_BADGE.PENDING.label}${p.applyError ? ', AI 반영 오류' : ''}`
           : null,
         deletable: free && !(mine && x.step === 'testing'),
         // 시험 전이어도 켬 — 누르면 시험부터 묻는 확인 창 (6번)
