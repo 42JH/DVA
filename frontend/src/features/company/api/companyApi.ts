@@ -4,7 +4,7 @@ import { queryOptions } from '@tanstack/react-query'
 import { api, type ApiItem } from '@/shared/api/client'
 import { fetchAll } from '@/shared/api/paging'
 
-export type ActiveStatus = 'ACTIVE' | 'INACTIVE'
+type ActiveStatus = 'ACTIVE' | 'INACTIVE'
 
 /** OrganizationSummary — 사원 수 · 등록일은 11/01 백엔드 반영 */
 interface Company {

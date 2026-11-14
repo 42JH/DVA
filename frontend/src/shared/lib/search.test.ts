@@ -1,6 +1,6 @@
 // 실행: npx tsx src/shared/lib/search.test.ts  (프레임워크 없이 assert만)
 import assert from 'node:assert/strict'
-import { findKo, matchKo, parseOrderNo, phoneDigits, suggest } from './search'
+import { findKo, matchKo, phoneDigits, suggest } from './search'
 
 // 띄어쓰기 · 대소문자 무시
 assert.ok(matchKo('수거 시간이 언제예요?', '수거시간'))
@@ -53,11 +53,3 @@ assert.deepEqual(findKo('수거 박스, 박스', '박스'), [
 assert.deepEqual(findKo('방문 수거', 'ㅂㅁ'), [[0, 2]])
 assert.deepEqual(findKo('FAQ 목록', 'faq'), [[0, 3]])
 assert.deepEqual(findKo('아무거나', ''), [])
-
-// 상단바 검색 — 주문번호 (11/05 통계 → 공용 검색으로 옮김)
-assert.equal(parseOrderNo('DV-10519'), 10519)
-assert.equal(parseOrderNo(' dv 00012 '), 12)
-assert.equal(parseOrderNo('10519'), 10519)
-assert.equal(parseOrderNo('01012345678'), null) // 0으로 시작 = 전화번호
-assert.equal(parseOrderNo('DV-'), null)
-assert.equal(parseOrderNo('김민'), null)

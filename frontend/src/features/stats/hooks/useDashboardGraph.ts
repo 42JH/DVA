@@ -51,7 +51,7 @@ function dropSeries(d: StageDropoffs): Series {
 }
 
 /** 화면마다 다른 글자 · 계산 */
-export const GRAPHS = {
+const GRAPHS = {
   'response-wait': {
     title: '응답 대기에 쓰인 통화시간',
     chart: '업무별 응답 대기시간',

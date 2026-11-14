@@ -4,8 +4,6 @@ import assert from 'node:assert/strict'
 import {
   fmtDate,
   fmtDateTime,
-  fmtDateTimeDay,
-  fmtDetailTime,
   fmtClock,
   fmtDuration,
   fmtListTime,
@@ -17,7 +15,6 @@ const t = '2026-10-20T14:33:05+09:00' // 화요일
 
 assert.equal(fmtDateTime(t), '10-20 14:33')
 assert.equal(fmtDate(t), '2026-10-20')
-assert.equal(fmtDateTimeDay(t), '10-20 (화) 14:33')
 assert.equal(fmtDuration(220), '3분 40초')
 assert.equal(fmtDuration(52), '0분 52초')
 assert.equal(fmtDuration(3903), '1시간 5분 03초') // 한 시간 넘는 통화 (11/02)
@@ -34,8 +31,6 @@ assert.equal(fmtPhone('07012345678'), '070-1234-5678')
 const now = new Date('2026-10-20T15:00:00+09:00')
 assert.deepEqual(fmtListTime(t, now), ['10-20 14:33'])
 assert.deepEqual(fmtListTime('2025-12-29T13:40:00+09:00', now), ['2025-12-29', '13:40'])
-assert.equal(fmtDetailTime(t, { seconds: true, now }), '10-20 (화) 14:33:05')
-assert.equal(fmtDetailTime('2025-12-29T13:40:00+09:00', { now }), '2025-12-29 (월) 13:40')
 console.log('format.test ok')
 
 // 버전 기록 시각 — 오늘 · 어제 · 올해 · 다른 해, 그리고 1월 1일의 '어제'(작년 12월 31일)

@@ -701,13 +701,6 @@ function generatedScene(id: number): CallDetail | undefined {
 }
 
 // ---------- 명세 모양으로 (DTO) ----------
-const RESULT: Record<Outcome, string> = {
-  SUCCESS: 'REGISTERED',
-  FAILED: 'REGISTRATION_FAILED',
-  HANDOFF: 'HANDOFF',
-  CANCELLED: 'CANCELLED',
-  INQUIRY: 'INQUIRY',
-}
 /** 가짜 불만 장면 → 판정 (11/11 Jira 148): AI 응대 오류 + 고객 불만(대상 · 강도, 근거 = 고객 말). '말이 빠름'은 옛 유형 그대로,
  *  'AI라서 거부'는 대상 없는 옛 판정(화면 '불만'), 9101엔 화면에서 빼는 근거 없는 답변도 하나 */
 type Judge = { type: string; target?: string | null; level?: string | null }
@@ -934,7 +927,6 @@ function analysisOf(r: CallRow) {
     })
   const n = r.callSessionSeq // 통화 번호로 정해지는 가짜 요약 (새로고침해도 같음)
   return {
-    result: RESULT[r.outcome], // 11/04 서버에서 빠짐 — 옛 화면(주문 상세 관련 통화)이 아직 읽어서 남김
     // 통화 요약 (연동 명세 11/04 §3) — 04 줄의 접수 · 조회 · 취소 · FAQ 칩, new
     isNewCustomer: n % 7 === 0,
     // 상담 유형 횟수 = 그 통화 대화에서 실제로 한 일 (줄 칩과 상세가 맞게)

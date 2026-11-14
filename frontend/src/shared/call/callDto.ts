@@ -26,7 +26,7 @@ export type CallActionKind =
   | 'ORDER_CANCELLED'
   | 'ADDRESS_SEARCH'
   | 'ORDER_LOOKUP'
-export type ProcessingKind =
+type ProcessingKind =
   | 'ORDER_CREATED'
   | 'ORDER_CANCELLED'
   | 'QUESTION_UNANSWERED'
@@ -45,7 +45,7 @@ interface CallComplaintDto {
   target?: ComplaintTarget | null
   level?: ComplaintLevel | null
 }
-export interface CallAnalysisDto {
+interface CallAnalysisDto {
   aiPersonaVersionSeq: number | null
   personaName: string | null
   personaVersion: number | null
@@ -74,7 +74,7 @@ interface HandoffDto {
   summaryText: string | null
   requestedAt: string
 }
-export interface CallDto {
+interface CallDto {
   callSessionSeq: number
   customerSeq: number | null
   customerName: string | null
@@ -93,7 +93,7 @@ export interface CallDto {
 export interface CallListItemDto extends CallDto {
   analysis: CallAnalysisDto | null // 아직 안 왔으면 null — 성공 · 불만 없음으로 보지 않기 (§5.1)
 }
-export interface RecordingDto {
+interface RecordingDto {
   recordingSeq: number
   createdAt: string
   url: string | null // 최대 5분 유효, 발급 실패 null
@@ -137,7 +137,6 @@ export interface CallProcessingResultDto extends Omit<CallActionDto, 'action'> {
 }
 
 // ---------- 화면 모양 ----------
-export type { CallKind } // 상담 유형 (접수 · 조회 · 취소 · FAQ 칩) — 주문 상세도 써서 shared/lib/callKind
 interface CallRow {
   callSessionSeq: number
   startedAt: string | null
@@ -288,26 +287,6 @@ export function toCallRow(d: CallListItemDto): CallRow {
     callbackAsked: a?.hasCallbackRequest ?? null,
     handoffAsked: a?.hasHandoffRequest ?? null,
   }
-}
-
-/** 04 화면 거르기 — 서버에 없는 조건이라 고른 날의 통화를 다 받은 뒤 화면에서 (필터 창) */
-export interface CallFilter {
-  newOnly: boolean // 신규 고객만
-  kinds: CallKind[] // 이 중 하나라도 한 통화 (빈 배열 = 전체)
-  minSec: number // 통화 시간 아래 끝 (0 = 제한 없음)
-  maxSec: number | null // 위 끝 (null = 제한 없음)
-}
-/** 신규 · 유형 · 시간은 모르면(null) 그 조건이 있을 때 뺌 — 모르는 값을 '아님'이나 0으로 보지 않음 */
-export function matchCall(r: CallRow, f: CallFilter): boolean {
-  if (f.newOnly && r.isNew !== true) return false
-  if (f.kinds.length && !f.kinds.some((k) => (r.counts?.[k] ?? 0) > 0)) return false
-  if (f.minSec > 0 || f.maxSec !== null)
-    return (
-      r.durationSec !== null &&
-      r.durationSec >= f.minSec &&
-      (f.maxSec === null || r.durationSec <= f.maxSec)
-    )
-  return true
 }
 
 export function toCallDetail(

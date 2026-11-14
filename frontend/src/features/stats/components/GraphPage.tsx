@@ -14,15 +14,13 @@ const SERIES = [
 ] as const satisfies readonly { key: CustomerType; on: string; bar: string; text: string }[]
 
 /** 큰 그래프 상자 (고객군 평균 · 묶음 막대 · 범례) — 통계 그래프 화면이 같이 씀 */
-export function GraphChart({ kind, className = '' }: { kind: GraphKind; className?: string }) {
+export function GraphChart({ kind }: { kind: GraphKind }) {
   const vm = useDashboardGraph(kind)
   const data = SERIES.map((s) => ({ ...s, d: vm[s.key] }))
   const ready = data.every((s) => s.d)
 
   return (
-    <section
-      className={`flex min-h-0 flex-1 flex-col gap-v16 rounded-lg border border-ops-line bg-white px-7 pt-6 pb-5 ${className}`}
-    >
+    <section className="flex min-h-0 flex-1 flex-col gap-v16 rounded-lg border border-ops-line bg-white px-7 pt-6 pb-5">
       <header className="flex shrink-0 items-center justify-between">
         <h2 className="text-[15px] font-bold">{vm.chart}</h2>
         <span className="text-[12px] text-ops-sub">단위: {vm.unit}</span>

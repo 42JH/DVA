@@ -92,6 +92,18 @@ const emptyText = (
   none: string,
 ) => (q.isPending ? loading : q.isError && !q.data ? failed : none)
 
+/** 녹취 한 줄 — 빈 배열은 '아직 연결 안 됨'(업로드 중 · 실패 · 무음으로 단정 안 함), NOT_FOUND와 DEPENDENCY_UNAVAILABLE은 따로 (명세) */
+const recordingNote = (rec: ReturnType<typeof toCallDetail>['recording'], failed: boolean) => {
+  if (!rec) return '녹취가 아직 연결되지 않았어요'
+  if (!failed) return null
+  if (rec.error === 'NOT_FOUND') return '녹취 파일을 찾을 수 없어요'
+  if (rec.error === 'DEPENDENCY_UNAVAILABLE')
+    return '녹취 저장소에 연결하지 못했어요 · 다시 받는 중'
+  return rec.url
+    ? '녹취를 재생하지 못했어요 · 다시 받는 중'
+    : '녹취 주소를 받지 못했어요 · 다시 받는 중'
+}
+
 /** 06 통화 상세 훅 (11/05 새 디자인) — 대본(불만 묶음) · 녹취 재생(이전 · 다음 발화 · 음량) · AI 동작(짚은 말과 같이 하이라이트)
  * 네 조회(기본 · 대화 · 처리 결과 · AI 동작)를 따로 받아 5초마다 다시 — 늦게 온 분석 · 발화 · 녹취가 같은 화면에 붙고, 한 영역이 늦거나 실패해도 나머지는 그대로 (11/02 연동 명세) */
 export function useCallDetail(callId: number, fromFaq?: number) {
@@ -167,19 +179,8 @@ export function useCallDetail(callId: number, fromFaq?: number) {
     call && [detail, transcript, resultsQ, actionsQ].some((q) => q.isError && q.data !== undefined)
       ? '다시 받지 못한 부분이 있어요. 마지막으로 받은 내용을 보여 드려요.'
       : null
-  // 녹취 한 줄 — 빈 배열은 '아직 연결 안 됨'(업로드 중 · 실패 · 무음으로 단정 안 함), NOT_FOUND와 DEPENDENCY_UNAVAILABLE은 따로 (명세)
   const rec = call?.recording ?? null
-  const recordingText = !rec
-    ? '녹취가 아직 연결되지 않았어요'
-    : player.state !== 'failed'
-      ? null
-      : rec.error === 'NOT_FOUND'
-        ? '녹취 파일을 찾을 수 없어요'
-        : rec.error === 'DEPENDENCY_UNAVAILABLE'
-          ? '녹취 저장소에 연결하지 못했어요 · 다시 받는 중'
-          : !rec.url
-            ? '녹취 주소를 받지 못했어요 · 다시 받는 중'
-            : '녹취를 재생하지 못했어요 · 다시 받는 중'
+  const recordingText = recordingNote(rec, player.state === 'failed')
 
   // FAQ 최종 응대 결과 → 통화 안 시각(초)별 문구 (FAQ_ANSWERED = 근거 있음 · 미답변 = 근거 부족 / 서버 에러, 11/05 AI팀)
   // AI는 결과를 그 질문을 찾은 FAQ 검색과 같은 시각으로 보냄. 지운 미답변(질문 · 사유 null)은 사유를 몰라 뺌
@@ -217,13 +218,6 @@ export function useCallDetail(callId: number, fromFaq?: number) {
 
     // 상단바 (11/05 새 디자인): 경로 '통화 > “김민수”님 통화' · 발신번호
     customer: call?.customerName ?? null,
-    // 검색 창 '최근 조회' (shared/lib/recentViews) — 받으면 기록, 404면 기록에서 뺌
-    recent: call
-      ? {
-          label: call.customerName ?? '이름 없음',
-          sub: call.callerNumber ? [fmtPhone(call.callerNumber)] : undefined,
-        }
-      : null,
     notFound: detail.error instanceof ApiError && detail.error.status === 404,
     caller: call?.callerNumber ? fmtPhone(call.callerNumber) : '',
 
@@ -282,12 +276,6 @@ export function useCallDetail(callId: number, fromFaq?: number) {
       '대화를 불러오는 중…',
       '대화를 받지 못했어요. 잠시 뒤 다시 받아요.',
       '발화가 없습니다.',
-    ),
-    actionsEmpty: emptyText(
-      actionsQ,
-      'AI 동작을 불러오는 중…',
-      'AI 동작을 받지 못했어요. 잠시 뒤 다시 받아요.',
-      '기록이 없습니다.',
     ),
     focusKey, // 하이라이트하는 줄 (발화 순번)
     jump, // 그 줄로 스크롤 (AI 동작 · 이전 · 다음을 눌렀을 때만 — 재생 중엔 하이라이트만 따라가고 스크롤은 안 함)

@@ -222,10 +222,5 @@ export function useCompanyDetail(id: number, size = PAGE_SIZE) {
           if (params.d === String(d.departmentSeq)) set({ d: '' })
         },
       }),
-
-    // 검색 창 '최근 조회' 줄에 쓰던 값 — 첫 담당자 이름 · 전화번호
-    leader: managers[0]
-      ? [managers[0].customer.name, fmtPhone(managers[0].customer.phoneNumber)]
-      : undefined,
   }
 }

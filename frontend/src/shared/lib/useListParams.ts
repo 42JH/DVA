@@ -6,10 +6,9 @@ import { useSearchParams } from 'react-router'
  * 왜: 상세로 갔다가 뒤로가기 하면 보던 필터 · 쪽이 그대로여야 하고(‹ 목록으로 버튼을 뺀 대신), 주소를 복사해 공유할 수 있어야 함
  * 사용법:
  *   const DEFAULTS = { q: '', date: 'today', kind: 'all' } as const   // 모듈 상수로 (렌더마다 새 객체면 안 됨)
- *   const { params, page, set, reset, isDefault } = useListParams(DEFAULTS)
+ *   const { params, page, set } = useListParams(DEFAULTS)
  *   set({ kind: 'edit' })   // 필터를 바꾸면 쪽은 1로 돌아감
  *   set({ page: 3 })        // 쪽만 바꿈
- *   isDefault               // 전부 기본값이면 '적용된 필터' 줄을 숨김
  * 규칙: 기본값과 같은 키는 URL에서 지움(주소가 깨끗하게), 쪽 1도 지움. 주소 변경은 replace라 뒤로가기가 글자 하나하나를 거치지 않음
  */
 export function useListParams<T extends Record<string, string>>(defaults: T) {
@@ -52,9 +51,5 @@ export function useListParams<T extends Record<string, string>>(defaults: T) {
     [setSp, defaults, page],
   )
 
-  const reset = useCallback(() => setSp({}, { replace: true }), [setSp])
-  const isDefault =
-    page === 1 && (Object.keys(defaults) as (keyof T)[]).every((k) => params[k] === defaults[k])
-
-  return { params, page, set, reset, isDefault }
+  return { params, page, set }
 }

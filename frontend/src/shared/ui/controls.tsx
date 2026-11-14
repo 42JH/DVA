@@ -178,32 +178,15 @@ export function Icon({ name, className = 'size-4' }: { name: IconName; className
   )
 }
 
-/** 고객 용건 (택배 접수 · 주문 확인 · 접수 취소 · 문의) — 상태가 아니라 회색, 취소만 빨강
- *  max를 주면 그만큼만 보이고 나머지는 '외 N' (목록 칸이 좁을 때). 올리면 한 문장 설명 */
-export function Kinds({
-  kinds,
-  max,
-}: {
-  kinds: { kind: string; label: string; title?: string }[]
-  max?: number
-}) {
-  const shown = max ? kinds.slice(0, max) : kinds
-  const rest = kinds.slice(shown.length)
+/** 고객 용건 (택배 접수 · 주문 확인 · 접수 취소 · 문의) — 상태가 아니라 회색, 취소만 빨강. 올리면 한 문장 설명 */
+export function Kinds({ kinds }: { kinds: { kind: string; label: string; title?: string }[] }) {
   return (
     <>
-      {shown.map((k) => (
+      {kinds.map((k) => (
         <span key={k.kind} title={k.title}>
           <Badge tone={k.kind === 'cancel' ? 'stop' : 'idle'}>{k.label}</Badge>
         </span>
       ))}
-      {rest.length > 0 && (
-        <span
-          title={rest.map((k) => k.title ?? k.label).join(' ')}
-          className="shrink-0 self-center text-[12px] text-ops-sub"
-        >
-          외 {rest.length}
-        </span>
-      )}
     </>
   )
 }

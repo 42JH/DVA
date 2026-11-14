@@ -9,7 +9,7 @@ const STALE_FILE =
 const RELOADED_AT = 'route-error-reloaded-at'
 const reloadedLately = () => Date.now() - Number(sessionStorage.getItem(RELOADED_AT)) < 60_000
 
-/** 루트 라우트 에러 경계 — 화면을 그리다 난 예외를 받아 빈 화면 대신 안내 (컨벤션 7.3). API 오류는 각 화면의 ErrorNotice가 맡음 */
+/** 루트 라우트 에러 경계 — 화면을 그리다 난 예외를 받아 빈 화면 대신 안내 (컨벤션 7.3). API 오류는 각 화면이 그 자리에 문구로 보여 줌 */
 export function RouteError() {
   const error = useRouteError()
   const message = isRouteErrorResponse(error)

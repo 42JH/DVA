@@ -125,7 +125,7 @@ const excelNumberError = (line: number, col: string) =>
   `${line}행 ${col}이 엑셀에서 숫자(지수 표기)로 바뀌었습니다. ${col} 열을 텍스트 형식으로 바꿔 다시 저장해 주세요.`
 
 /** CSV 주소 — 서버 주소의 필수 칸(좌표 빼고) + 상세주소(빈칸 가능) */
-export interface CsvAddress {
+interface CsvAddress {
   roadAddress: string
   jibunAddress: string
   dongName: string
@@ -275,7 +275,7 @@ export function serverRowErrors(
  * 서버는 같은 사번이면 조용히 덮어써서, 무엇이 바뀌는지 [등록] 전에 보여 줌
  * 비교 칸 (11/01 결정): 이름 · 전화 · 담당자 · 부서 · 주소(좌표 빼고) */
 type ChangedField = '사원명' | '전화번호' | '담당자' | '부서' | '주소'
-export interface CsvChange {
+interface CsvChange {
   row: CsvMember
   before: {
     name: string

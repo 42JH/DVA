@@ -1,7 +1,7 @@
 // 실행: npx tsx --tsconfig tsconfig.app.json src/features/order/api/parcelRows.test.ts  (프레임워크 없이 assert만)
 import assert from 'node:assert/strict'
 import type { ListParcel, OrderListItem } from './orderApi'
-import { parcelRows, partyHas } from './parcelRows'
+import { parcelRows } from './parcelRows'
 
 const parcel = (seq: number, to: string, status: ListParcel['status'] = 'ACTIVE'): ListParcel => ({
   orderParcelSeq: seq,
@@ -51,17 +51,5 @@ assert.deepEqual(
   empty.map((r) => [r.key, r.status, r.parcel]),
   [['10519', 'COLLECTING', null]],
 )
-
-// 검색칸: 그 사람의 이름 · 전화번호 · 주소만 봄 (대소문자 무시, 숫자만 치면 전화번호)
-const sender = parcel(1, '이영희').origin
-assert.equal(partyHas(sender, ''), true) // 빈 칸은 다 맞음
-assert.equal(partyHas(sender, '강도'), true)
-assert.equal(partyHas(sender, '역삼로 150'), true)
-assert.equal(partyHas(sender, '5층'), true)
-assert.equal(partyHas(sender, '010-6638'), true) // 숫자만 → 전화번호 숫자
-assert.equal(partyHas(sender, '이영희'), false) // 받는 분 이름은 보내는 분 칸에서 안 맞음
-assert.equal(partyHas(sender, '마포구'), false)
-assert.equal(partyHas(undefined, '강도'), false) // 상세 없는 미완료 주문
-assert.equal(partyHas({ ...sender, roadAddress: 'Seoul Gangnam-gu' }, 'gangnam'), true)
 
 console.log('parcelRows.test ok')

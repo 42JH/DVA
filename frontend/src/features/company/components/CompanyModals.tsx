@@ -124,7 +124,6 @@ export function MemberFormModal({
               value={vm.form.dept}
               onChange={vm.setDept}
               options={vm.deptOptions}
-              compact
             />
           </div>
           <AddressButton value={vm.road} onClick={vm.openSearch} />

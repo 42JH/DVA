@@ -1,5 +1,5 @@
 // 고객 용건 칩 — 서버의 상담 유형 횟수(접수 · 조회 · 취소 · FAQ)를 처음 보는 사람도 읽히는 말로
-// (기업 피드백: '접수 4' · '조회' · 'FAQ'만으로는 무엇인지 모르겠다). 옛 화면은 shared/lib/callKind 그대로
+// (기업 피드백: '접수 4' · '조회' · 'FAQ'만으로는 무엇인지 모르겠다). 횟수 계산은 shared/lib/callKind
 import { KINDS, type CallKind, type KindCounts } from './callKind'
 
 const LOOK: Record<CallKind, { label: (n: number) => string; title: (n: number) => string }> = {
