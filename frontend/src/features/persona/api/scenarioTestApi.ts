@@ -124,7 +124,7 @@ export const startTest = async (input: {
 
 /** 시험 멈춤 — 그 버전에서 돌고 있는 묶음을 모두 멈춤(남은 것 시험을 하면 묶음이 여럿)
  *  창구 POST /runs/{runId}/stop: 돌던 통화는 끊고, 아직 안 건 시나리오는 걸지 않음 → 시험 안 함으로 남아 [남은 N개 시험]으로 이어 돌림
- *  이미 끝난 묶음에 보내도 202(두 번 눌러도 같음). 백엔드 중계에 이 주소가 생겨야 실제로 동작 (가짜 모드는 바로 됨) */
+ *  이미 끝난 묶음에 보내도 202(두 번 눌러도 같음). 백엔드가 같은 주소로 중계 (11/14, 끝난 묶음 202 · 없는 묶음 404) */
 export const stopTest = async (input: { personaSeq: number; version: number }): Promise<void> => {
   const tag = encodeURIComponent(tagOf(input.personaSeq, input.version))
   const runs = await get<RunDto[]>(`/runs?tag=${tag}`)

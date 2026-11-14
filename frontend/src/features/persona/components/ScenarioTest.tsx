@@ -70,6 +70,8 @@ function ScenarioTest({
   const vm = useScenarioTest(me, dateOf)
   const navigate = useNavigate()
   const [stopping, setStopping] = useState(false) // [시험 중단] 확인 창 (11/13 새 안 2번)
+  // 시험이 멈추거나 끝나면 닫힌 것으로 되돌림 — 그대로 두면 다음 시험을 시작하는 순간 이 창이 저절로 다시 뜸(Enter 한 번에 방금 건 시험이 멈춤)
+  if (stopping && !vm.stop) setStopping(false)
   if (vm.note)
     return (
       <Box>
@@ -133,7 +135,13 @@ function ScenarioTest({
         ))}
         <span className="ml-auto flex flex-wrap items-center gap-2">
           {vm.stop && (
-            <Btn kind="danger" onClick={() => setStopping(true)}>
+            <Btn
+              kind="danger"
+              onClick={() => {
+                vm.stop?.reset() // 지난번 실패 문구가 새 창에 먼저 뜨지 않게
+                setStopping(true)
+              }}
+            >
               시험 중단
             </Btn>
           )}

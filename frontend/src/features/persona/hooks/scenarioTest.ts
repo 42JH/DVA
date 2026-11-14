@@ -112,9 +112,10 @@ type Line = [number, 'AI' | '고객', string]
 /** [남은 N개 시험]에 보낼 시나리오 — 연결 실패 + 결과 없음(AI 배포 등으로 중간에 끊긴 묶음).
  *  일부만 시험한 이 버전의 결과일 때만: 시험 전이면 [전체 시험]과 같고, 고치기 전 결과(stale)에는 없음. 끝난 것은 다시 걸지 않음(요금) */
 export function restOf(state: TestState, rows: { id: string; now: Cell }[]): string[] {
-  return state === 'partial'
-    ? rows.filter((x) => x.now === 'error' || x.now === 'none').map((x) => x.id)
-    : []
+  if (state !== 'partial') return []
+  const rest = rows.filter((x) => x.now === 'error' || x.now === 'none').map((x) => x.id)
+  // 끝난 것이 하나도 없으면(시작하자마자 멈춤 · 전부 연결 실패) 남은 것 = 전체 — [전체 시험]과 같은 버튼을 하나 더 두지 않음
+  return rest.length === rows.length ? [] : rest
 }
 
 /** 실패한 판정이 통화의 어느 말에서 났는지 — 대화 줄 번호, 알 수 없으면 null (값만 틀린 코드 검사는 위치가 없음)
