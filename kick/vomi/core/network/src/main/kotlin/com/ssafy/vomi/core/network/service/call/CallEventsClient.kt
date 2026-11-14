@@ -25,9 +25,9 @@ class CallEventsClient @Inject constructor(
     private val eventService: CallEventService,
     private val json: Json,
     @Dispatcher(VomiDispatcher.IO) private val ioDispatcher: CoroutineDispatcher,
-) {
+) : CallEvents {
     /** Each collection opens a fresh snapshot stream. Caller decides when to reconnect or query active call. */
-    fun events(): Flow<CallStateResponse> = callbackFlow {
+    override fun events(): Flow<CallStateResponse> = callbackFlow {
         val call = eventService.getEvents()
         call.enqueue(object : Callback<ResponseBody> {
             override fun onFailure(call: Call<ResponseBody>, t: Throwable) { close(t) }

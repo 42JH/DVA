@@ -4,6 +4,8 @@ import com.ssafy.vomi.core.network.BuildConfig
 import com.ssafy.vomi.core.network.NetworkConfig
 import com.ssafy.vomi.core.network.auth.AccessTokenInterceptor
 import com.ssafy.vomi.core.network.service.account.AccountService
+import com.ssafy.vomi.core.network.service.call.CallEvents
+import com.ssafy.vomi.core.network.service.call.CallEventsClient
 import com.ssafy.vomi.core.network.service.call.CallService
 import com.ssafy.vomi.core.network.service.call.CallEventService
 import com.ssafy.vomi.core.network.service.device.DeviceService
@@ -72,6 +74,9 @@ object NetworkModule {
     @Provides @Singleton
     fun provideVoiceSpeechService(@StreamingNetwork retrofit: Retrofit): VoiceSpeechService =
         retrofit.create(VoiceSpeechService::class.java)
+
+    @Provides @Singleton
+    fun provideCallEvents(client: CallEventsClient): CallEvents = client
 
     @Provides @Singleton
     fun provideCallService(retrofit: Retrofit): CallService = retrofit.create(CallService::class.java)
