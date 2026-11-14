@@ -47,7 +47,7 @@ LoadingWheel, BottomSheet 및 GlassSurface를 `core:designsystem`에서 재사�
 
 `VomiBackground`를 화면 컨테이너로 사용하면 검정에서 푸른 회색과 갈색으로 이어지는 통화 배경이 적용됩니다.
 배경은 화면 전체에 그려지고, 자체 `Scaffold`는 safeDrawing 인셋을 콘텐츠에 전달합니다.
-현재 시작 화면은 공통 배경을 사용하는 테스트 계정 선택 화면입니다. 인증 후 친구 목록으로 이동하며, 친구 선택 시 스크리닝 화면 미리보기로 이동합니다.
+현재 시작 화면은 공통 배경을 사용하는 테스트 계정 선택 화면입니다. 인증 후 친구 목록으로 이동하며, 친구 선택 시 서버에 통화를 요청하고 발신 대기 화면으로 이동합니다.
 `DesignSystemPreview`에서 이식한 기본 컴포넌트를 미리 볼 수 있습니다.
 
 Android Studio Preview에 필요한 ui-tooling은 debugImplementation으로만 연결합니다.
@@ -61,23 +61,18 @@ HomeViewModel이 StateFlow<HomeUiState>를 제공하고, HomeScreen은 lifecycle
 HomeUiState는 Loading / Success / Error로 구분하며 빈 목록, 오류 및 큰 글자 미리보기도 제공합니다.
 홈 진입 시 FriendRepository가 현재 계정의 인증 토큰으로 GET api/friends를 조회합니다.
 FriendClient의 응답은 core:data/mapper에서 core:model의 Friend로 변환합니다. Repository는 IO dispatcher에서 Flow를 실행하고 HomeViewModel은 asResult()로 상태를 갱신합니다.
-서버 ID는 문자열 그대로 목록 키와 CallNavKey에 전달합니다. 프로필 이미지가 없는 현재 API 응답에는 기본 아바타를 표시합니다.
+친구 ID는 문자열 그대로 발신 요청에 전달하고, 통화 화면은 서버에서 발급한 callId로 식별합니다. 프로필 이미지가 없는 현재 API 응답에는 기본 아바타를 표시합니다.
 요청 실패 시 재시도 버튼으로 다시 조회하며, 서버가 빈 배열을 반환하면 빈 목록 화면을 표시합니다.
-샘플 친구 8명은 Compose Preview에서만 사용합니다. 클릭은 스크리닝 화면 미리보기로 이어지며 검색·친구 추가 화면은 포함하지 않습니다.
+샘플 친구 8명은 Compose Preview에서만 사용합니다. 클릭은 실제 발신 요청으로 이어지며 검색·친구 추가 화면은 포함하지 않습니다.
 
-## 스크리닝 화면 (화면·상태 구현 단계)
+## 스크리닝 화면 (발신·수신 신호 연결)
 
-- `feature:call:api`의 CallNavKey와 `feature:call:impl`의 CallViewModel / CallUiState로 구성합니다.
-- 친구의 ID와 이름을 전달해 화면을 열며, 종료 또는 뒤로 가기로 친구 목록에 돌아갑니다.
-- 마이크 ON 상태에서는 텍스트 편집·전송·추천 선택·맞장구를 UI와 ViewModel 모두에서 차단합니다. 기존 초안은 유지합니다.
-- 맞장구는 위쪽, AI 추천은 아래쪽에 각각 한 행으로 동시에 표시하고 독립적으로 가로 스크롤합니다. 추천을 탭하면 대화에 즉시 추가하며, 아래로 끌어 입력창에 놓으면 원문을 초안으로 넣어 수정 후 전송할 수 있습니다. 각 영역은 두 줄 문장을 표시할 높이를 유지합니다.
-- 직접 입력하는 답변에는 20글자 제한을 두지 않습니다. 추천 문구는 최대 20글자를 고려한 샘플입니다.
-- 맞장구는 고정 문구이며, 마이크 OFF 상태에서 선택 즉시 대화에 추가합니다. 마이크 ON 상태에서는 비활성화하며 전송도 차단합니다.
-- 이름 왼쪽 버튼은 샘플 요약을 보여주는 바텀시트를 엽니다. 요약 화면에서도 미리보기 타이머는 유지됩니다.
-- CallNavKey의 `isIncoming = true`로 수신 UI에 진입할 수 있고, 수락·거절 상태와 Preview를 제공합니다.
-- 실제 RTC / 마이크 캡처 / STT / TTS / 온디바이스 AI / 요약 생성 / FCM·시스템 알림 수신은 미연결 상태입니다.
-  입력과 맞장구는 로컬 화면 상태에만 반영되며 음성 재생·상대방 전송은 하지 않습니다.
-- 실제 오디오·알림을 사용하지 않으므로 이 단계에서는 마이크·알림 권한이나 foreground service를 추가하지 않습니다.
+- CallNavKey는 callId만 전달합니다. CallViewModel은 CallRepository의 서버 상태를 관찰하고 친구 목록에서 상대 이름을 찾습니다. 이름 조회가 실패하면 상대 ID를 표시합니다.
+- REQUESTED 상태는 현재 계정이 발신자인지에 따라 발신 대기 / 수신 화면으로 표시합니다. 받기·거절·취소·종료는 서버 요청을 완료한 뒤 조회와 SSE로 상태를 확인합니다.
+- ACCEPTED는 수락 완료 상태이며 LiveKit 연결 완료와 구분합니다. 현재 단계에서는 실제 미디어 연결이 없으므로 마이크·입력·전송은 비활성화하고 타이머를 시작하지 않습니다.
+- 런타임은 sampleCallState를 사용하지 않습니다. 대화·AI 추천·요약은 비워 두며 고정 맞장구만 CallDefaults에서 유지합니다. 기존 샘플 대화는 Preview와 로컬 입력 규칙 테스트에만 사용합니다.
+- 초안 편집·마이크 ON 시 입력 차단·추천 탭/드래그의 기존 규칙은 CallConversation에 분리했습니다. 실제 미디어가 Active 상태가 되면 이 규칙을 사용합니다.
+- 실제 RTC / 마이크 캡처 / STT / TTS / 온디바이스 AI / 요약 생성 / FCM·시스템 알림 수신은 이후 단계입니다. 아직 마이크·알림 권한이나 foreground service를 추가하지 않습니다.
 
 ```powershell
 .\gradlew.bat :app:assembleDebug :feature:call:impl:testDebugUnitTest :feature:call:impl:lintDebug
@@ -120,9 +115,7 @@ Motif처럼 Repository는 `Flow<UserSession>`을 반환하고, LoginViewModel은
 친구 목록에는 서버에서 받은 현재 계정 이름을 표시합니다. 친구 목록에서 뒤로 가면
 세션과 토큰을 지우고 계정 선택으로 돌아갑니다. 프로세스를 새로 시작하면 다시 선택합니다.
 
-계정 선택·인증·세션과 친구 목록 조회가 연결되어 있습니다. 통화 화면의 데이터와 동작은
-기존 샘플을 유지합니다. 실제 통화 연동 테스트 코드는 별도
-`feature/android-live-call` 브랜치에 보관되어 있습니다.
+계정 선택·인증·세션·친구 목록과 통화 신호가 연결되어 있습니다. LiveKit 미디어 연결은 이후 단계입니다. 이전 미디어 통합 실험 코드는 별도 `feature/android-live-call` 브랜치에 보관되어 있습니다.
 
 ```powershell
 .\gradlew.bat :app:assembleDebug :feature:login:impl:testDebugUnitTest :core:data:testDebugUnitTest :app:lintDebug
@@ -168,7 +161,7 @@ AuthRepositoryLiveTest는 명시적으로 활성화했을 때 공통 설정으�
 ## Kick API 지원 범위
 
 [Android 연동 명세](docs/kick-android-api.md)를 기준으로 다음 HTTP API를 구현했습니다.
-친구 목록 조회는 홈 화면에 연결했고, 통화 및 나머지 API의 화면 연동은 이후 단계입니다. 기존 테스트 로그인 동작은 유지합니다.
+친구 목록과 통화 신호 API는 화면에 연결했습니다. LiveKit join·음성·푸시 등 나머지 화면 연동은 이후 단계입니다. 기존 테스트 로그인 동작은 유지합니다.
 
 | Client | 지원 요청 |
 | --- | --- |
@@ -191,7 +184,7 @@ AuthRepositoryLiveTest는 명시적으로 활성화했을 때 공통 설정으�
   호출자가 IO dispatcher에서 읽고 사용 완료·취소 시 반드시 닫아야 합니다.
 - 이벤트 Flow는 수집할 때 새 SSE 연결을 열고 수집 취소 시 소켓과 응답 본문을 정리합니다.
   call:null을 포함한 스냅샷을 전달하며 연결 종료와 HTTP·파싱 실패를 오류로 전달합니다.
-  재연결 정책·활성 통화 재조회·FCM 중복 제거는 이후 Repository에서 결정합니다.
+  CallRepository가 앱 전경 상태에 맞춰 재연결과 활성 통화 재조회를 관리합니다. FCM 중복 제거는 이후 단계입니다.
 - 일반 HTTP 오류는 HttpException으로 전달합니다. 서비스별 오류 JSON 형식은 명세에 없어 임의의 공통 오류 DTO를 만들지 않았습니다.
 
 로컬 HTTP 계약 테스트(실제 가입·음성 등록·TTS·FCM 요청 없음):
@@ -209,6 +202,35 @@ RemainingApiContractTest는 실제 Retrofit/OkHttp를 로컬 Postman 서버에 �
 운영 URL과 인증 Interceptor를 거친 뒤 테스트용 Interceptor가 마지막 전송 주소만 바꿉니다.
 KICK_SIMULATION_URL이 없으면 이 계약 테스트만 건너뛰며, SSE 파싱·실제 소켓 취소·파일 사전 검증 테스트는 항상 실행합니다.
 AuthRepositoryLiveTest는 별도 활성화 시 두 테스트 계정으로 계정·친구·음성 상태·활성 통화·SSE를 읽기 전용 검증합니다.
-실제 신규 가입, 음성 업로드/합성, 푸시 등록/삭제와 통화 상태 변경은 이번 검증에서 실행하지 않습니다.
+기본 테스트는 실제 신규 가입·음성 업로드/합성·푸시 등록/삭제·통화 변경을 실행하지 않습니다. 통화 변경을 포함하는 별도 테스트는 아래의 명시적 opt-in을 사용합니다.
 
 친구 목록 연결 검증: FriendRepositoryImplTest는 문자열 ID·이름 매핑, 빈 배열, Flow 수집 시 재조회, 실패·취소 전달을 확인합니다. HomeViewModelTest는 초기 로딩·성공·빈 목록·오류 후 재시도·중복 요청 방지를 확인합니다. AuthRepositoryLiveTest의 친구 조회도 실제 FriendRepository를 거쳐 두 테스트 계정에 상대 계정이 표시되는지 확인합니다.
+
+## 발신·수신 신호 흐름
+
+CallRepository는 기존 DataModule에서 singleton으로 바인딩하고 core:model의 CallSession / CallStatus / CallSignalingState를 사용합니다.
+SessionViewModel은 앱 lifecycle이 STARTED인 동안만 수신 연결을 활성화합니다. Repository는 인증 계정 변경 시 이전 구독과 상태를 지우고, 화면마다 SSE를 중복으로 열지 않습니다.
+
+1. 친구 선택 → HomeViewModel이 UUID requestId를 생성해 createCall Flow를 asResult로 수집합니다. 요청 중 중복 탭을 막고, 같은 친구의 실패 재시도에는 같은 UUID를 씁니다.
+2. 서버 통화 ID로 단일 통화 화면을 엽니다. SSE REQUESTED 수신자는 받기·거절 UI를 표시합니다. 반복 이벤트는 동일 callId 화면을 중복으로 열지 않습니다.
+3. 수신자는 accept/reject, 발신자는 수락 전 cancel, 수락 후 양쪽은 end를 요청합니다. 요청 중 버튼과 뒤로 가기 중복 조작을 막으며, 실패 시 로컬 성공으로 처리하지 않고 재시도할 수 있습니다.
+4. 요청 성공 후 통화를 다시 조회합니다. ACCEPTED 이후 REQUESTED 응답이나 종료 이후 늦은 HTTP 응답이 와도 상태를 되돌리지 않습니다.
+5. REJECTED/CANCELED/ENDED/EXPIRED 또는 call:null을 받으면 화면을 닫습니다. 앱 복귀·일시적 단절 후에는 활성 통화를 조회하고 SSE를 재구독하며, 재시도 간격은 1~30초입니다. HTTP 401/403은 자동 재시도를 멈춥니다.
+
+로컬 Postman fixture는 두 인증 계정과 지속 SSE를 지원합니다. 모의 서버 계약 테스트마다 x-mock-session을 분리해 다른 테스트의 초기화에 영향을 받지 않게 합니다.
+
+~~~powershell
+# 로컬 모의 서버: 별도 터미널
+postman simulation run postman/simulations/kick-android.sim.yaml --port 4017 --no-history
+
+# 실제 HTTP/SSE를 통한 두 Repository의 로컬 신호 검증
+$env:KICK_SIMULATION_URL = "http://127.0.0.1:4017/kick/"
+.\gradlew.bat :core:data:testDebugUnitTest --tests "*CallSignalingIntegrationTest"
+~~~
+
+VOMI_RUN_CALL_LIVE_TESTS=1과 두 KICK_TEST_ACCOUNT 토큰 환경변수를 별도로 설정하면 실서버 신호 테스트도 실행합니다.
+이 테스트는 기존 활성 통화가 있으면 건너뛰고, 전용 테스트 계정 사이에서 발신·수락·종료 / 거절 / 취소의 세 통화를 생성해 정리합니다. LiveKit join과 음성 합성은 호출하지 않습니다.
+기본 실행에서는 실서버 쓰기 테스트를 건너뜁니다.
+
+두 기기에서는 사용자1·사용자2로 로그인한 뒤 앱을 켠 상태에서 친구를 눌러 확인합니다. 상대 수신 화면 표시, 받기 후 양쪽 수락 완료, 거절·발신 취소·종료 후 양쪽 홈 복귀를 확인합니다.
+이 단계의 성공은 신호 연결까지이며 실제 음성이 들리는지와 FCM 백그라운드 알림은 검증 대상에 포함하지 않습니다.

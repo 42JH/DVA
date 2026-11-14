@@ -46,11 +46,18 @@ assumptions:
     updated_at: '2026-11-13'
   - id: owner-mock-and-unverified-writes
     status: unknown
-    claim: The new write clients match all real-provider success and error responses for signup, voice upload, speech, push and call mutation.
+    claim: The new write clients match all real-provider success and error responses for signup, voice upload, speech and push mutation.
     reason: These writes were verified against the handoff-derived local fixture only. No owner-published mock was discovered; this CLI version reports postman status as unsupported, and the prior local fixture was reused without introducing a workspace binding.
-    verification: Local mock requests and outcomes were checked. The actual provider responses for these new write clients remain for a coordinated live integration test; paid speech and registered voice profiles were left unchanged.
+    verification: Local mock requests and outcomes were checked. The actual provider responses for these new write clients remain for a coordinated live integration test; paid speech and registered voice profiles were left unchanged. Subsequent call mutation evidence is recorded under call-signaling-repositories below.
     source: docs/kick-android-api.md; postman/mocks/kick/default.js; core/network/src/test/kotlin/com/ssafy/vomi/core/network/RemainingApiContractTest.kt
     updated_at: '2026-11-13'
+  - id: call-signaling-repositories
+    status: supported
+    claim: Two current CallRepository instances observe incoming calls and reconcile accept/end, reject and cancel through HTTP and SSE in the tested local and dedicated live environments.
+    reason: The same repository implementation and Retrofit/SSE clients passed the opt-in integration scenarios against the Postman fixture and the real backend. This does not establish device UI, LiveKit media or FCM behavior.
+    verification: On 2026-11-13 UTC both integration tests ran with zero failures or skips. Each environment exercised three calls: A requested B, B accepted and A ended; B rejected a new request; A cancelled another request. Both repositories received the requested/accepted/inactive states. Only dedicated test accounts were used, and their live active-call endpoints were subsequently confirmed null. No LiveKit join, microphone, voice registration, speech synthesis or push-token mutation was called. The fixture supports two bearer identities and optional held SSE; tests use separate mock sessions. CLI 1.76 initially crashed when a streamed proxy response was reset by cancellation; the fixture now ends held streams via a local control route before closing the clients. The final parallel run passed 69 local tests, with the two live tests opted out because each had already passed in separate live runs, and all five selected lint tasks reported zero errors. The final UI build and call tests passed after adding creation-in-flight control guards. No Android device was attached, so device UI interaction remains unverified. A later read-only authentication check had one transient Network failure and passed on isolated rerun; health and both active-call endpoints also returned HTTP 200.
+    source: core/data/src/test/kotlin/com/ssafy/vomi/core/data/repository/CallSignalingIntegrationTest.kt; postman/mocks/kick/default.js; docs/kick-android-api.md
+    updated_at: '2026-11-14'
 fingerprints:
   - id: initial-android-handoff
     date: '2026-11-13'
@@ -59,4 +66,8 @@ fingerprints:
   - id: service-client-api-split
     date: '2026-11-13'
     commit: f367c5de (dirty worktree; implementation in this task)
+    cli: '1.76.0'
+  - id: call-signaling-ui
+    date: '2026-11-14'
+    commit: 37bf3ca9 (dirty worktree; signaling implementation in this task)
     cli: '1.76.0'
