@@ -11,6 +11,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.awaitCancellation
 import androidx.compose.runtime.getValue
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -36,10 +40,29 @@ fun VomiApp(viewModel: SessionViewModel = hiltViewModel()) {
     val navigationState = rememberNavigationState(LoginNavKey)
     val navigator = remember(navigationState) { Navigator(navigationState) }
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
-    LaunchedEffect(currentUser?.id) {
+    val callState by viewModel.callState.collectAsStateWithLifecycle()
+    val lifecycleOwner = LocalLifecycleOwner.current
+    LaunchedEffect(lifecycleOwner, viewModel) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            viewModel.setForeground(true)
+            try { awaitCancellation() } finally { viewModel.setForeground(false) }
+        }
+    }
+    LaunchedEffect(currentUser?.id, callState.accountId, callState.session) {
         val currentKey = navigationState.backStack.lastOrNull()
-        if (currentUser == null && currentKey != LoginNavKey) navigator.replaceAll(LoginNavKey)
-        else if (currentUser != null && currentKey == LoginNavKey) navigator.replaceAll(HomeNavKey)
+        if (currentUser == null) {
+            if (currentKey != LoginNavKey) navigator.replaceAll(LoginNavKey)
+        } else {
+            if (currentKey == LoginNavKey) navigator.replaceAll(HomeNavKey)
+            if (callState.accountId == currentUser?.id) {
+                val call = callState.session?.takeUnless { it.isTerminal }
+                val callKey = navigationState.backStack.lastOrNull() as? CallNavKey
+                if (call != null && callKey?.callId != call.id) {
+                    if (callKey != null) navigator.goBack()
+                    navigator.navigate(CallNavKey(call.id))
+                } else if (call == null && callKey != null) navigator.goBack()
+            }
+        }
     }
     BackHandler(enabled = currentUser != null && navigationState.backStack.lastOrNull() == HomeNavKey) {
         viewModel.logout()
@@ -57,15 +80,15 @@ fun VomiApp(viewModel: SessionViewModel = hiltViewModel()) {
                     .consumeWindowInsets(padding)
                     .imePadding(),
                 backStack = navigationState.backStack,
-                onBack = { navigator.goBack() },
+                onBack = { if (navigationState.backStack.lastOrNull() !is CallNavKey) navigator.goBack() },
                 entryDecorators = listOf(
                     rememberSaveableStateHolderNavEntryDecorator(),
                     rememberViewModelStoreNavEntryDecorator(),
                 ),
                 entryProvider = entryProvider {
                     loginEntry()
-                    homeEntry { friendId, friendName -> navigator.navigate(CallNavKey(friendId, friendName)) }
-                    callEntry(onEndCall = navigator::goBack)
+                    homeEntry()
+                    callEntry()
                 },
             )
         }

@@ -1,5 +1,10 @@
 package com.ssafy.vomi.feature.home.impl
 
+import com.ssafy.vomi.core.data.repository.CallRepository
+import com.ssafy.vomi.core.model.call.CallSession
+import com.ssafy.vomi.core.model.call.CallSignalingState
+import com.ssafy.vomi.core.model.call.CallConnection
+import com.ssafy.vomi.core.model.call.CallStatus
 import com.ssafy.vomi.core.data.repository.AuthRepository
 import com.ssafy.vomi.core.data.repository.FriendRepository
 import com.ssafy.vomi.core.model.auth.TestAccount
@@ -48,10 +53,28 @@ class HomeViewModelTest {
         }
     }
 
+    private class Calls : CallRepository {
+        override val state = MutableStateFlow(CallSignalingState(accountId = "kick-test-1", connection = CallConnection.Connected))
+        val requests = mutableListOf<Pair<String, String>>()
+        var failure: Exception? = null
+        var pending: CompletableDeferred<Unit>? = null
+        var retries = 0
+        override fun setForeground(foreground: Boolean) { }
+        override fun retryConnection() { retries++ }
+        override fun createCall(calleeId: String, requestId: String): Flow<CallSession> = flow {
+            requests += calleeId to requestId
+            pending?.await(); failure?.let { throw it }
+            emit(CallSession(requestId, "kick-test-1", calleeId, CallStatus.REQUESTED))
+        }
+        override fun acceptCall(callId: String): Flow<Unit> = error("Unused")
+        override fun declineOrEndCall(callId: String): Flow<Unit> = error("Unused")
+    }
+    private fun home(auth: Auth, friends: Friends, calls: Calls = Calls()) = HomeViewModel(auth, friends, calls)
+
     @Test fun enteringHomeLoadsFriendsAndKeepsTheSignedInUser() {
         val auth = Auth()
         val friends = Friends().apply { pending = CompletableDeferred() }
-        val vm = HomeViewModel(auth, friends)
+        val vm = home(auth, friends)
         assertEquals(HomeUiState.Loading, vm.uiState.value)
         assertEquals(1, friends.requests)
         friends.pending!!.complete(Unit)
@@ -62,14 +85,14 @@ class HomeViewModelTest {
     }
 
     @Test fun emptyResponseShowsEmptySuccessWithoutSampleFriends() {
-        val vm = HomeViewModel(Auth(), Friends().apply { friends = emptyList() })
+        val vm = home(Auth(), Friends().apply { friends = emptyList() })
         assertTrue((vm.uiState.value as HomeUiState.Success).friends.isEmpty())
     }
 
     @Test fun failureShowsErrorAndRetryGoesThroughLoadingToFreshSuccess() {
         val failure = IOException("offline")
         val friends = Friends().apply { this.failure = failure }
-        val vm = HomeViewModel(Auth(), friends)
+        val vm = home(Auth(), friends)
         assertSame(failure, (vm.uiState.value as HomeUiState.Error).exception)
         friends.failure = null
         friends.pending = CompletableDeferred()
@@ -83,7 +106,7 @@ class HomeViewModelTest {
     @Test fun retriesQueuedBeforeInitialLoadStartsDoNotDuplicateRequests() = runTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         val friends = Friends().apply { pending = CompletableDeferred() }
-        val vm = HomeViewModel(Auth(), friends)
+        val vm = home(Auth(), friends)
         vm.retry()
         vm.retry()
         runCurrent()
@@ -93,5 +116,28 @@ class HomeViewModelTest {
         friends.pending!!.complete(Unit)
         runCurrent()
         assertTrue(vm.uiState.value is HomeUiState.Success)
+    }
+    @Test fun failedOutgoingRequestKeepsUuidOnRetryAndBlocksDuplicateTaps() {
+        val calls = Calls().apply { failure = IOException("lost response") }
+        val vm = home(Auth(), Friends(), calls)
+        vm.callFriend("kick-test-2")
+        assertTrue((vm.uiState.value as HomeUiState.Success).callError)
+        calls.failure = null; calls.pending = CompletableDeferred()
+        vm.callFriend("kick-test-2"); vm.callFriend("kick-test-2")
+        assertEquals("kick-test-2", (vm.uiState.value as HomeUiState.Success).callingFriendId)
+        assertEquals(2, calls.requests.size)
+        assertEquals(calls.requests[0], calls.requests[1])
+        calls.pending!!.complete(Unit)
+        assertNull((vm.uiState.value as HomeUiState.Success).callingFriendId)
+        assertFalse((vm.uiState.value as HomeUiState.Success).callError)
+    }
+
+    @Test fun noOutgoingRequestStartsBeforeTheEventConnectionIsReady() {
+        val calls = Calls().apply { state.value = state.value.copy(connection = CallConnection.Failed) }
+        val vm = home(Auth(), Friends(), calls)
+        vm.callFriend("kick-test-2")
+        assertTrue(calls.requests.isEmpty())
+        vm.retryCallConnection()
+        assertEquals(1, calls.retries)
     }
 }

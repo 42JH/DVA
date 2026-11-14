@@ -29,6 +29,8 @@ internal fun CallHeader(
     onSummaryClick: () -> Unit,
     onEndClick: () -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    summaryEnabled: Boolean = true,
 ) {
     val timerStyle = VomiTheme.typography.captionR12.copy(fontFeatureSettings = "tnum")
     val textMeasurer = rememberTextMeasurer()
@@ -57,6 +59,7 @@ internal fun CallHeader(
             CallRoundButton(
                 icon = R.drawable.ic_call_summary,
                 description = stringResource(R.string.call_show_summary),
+                enabled = summaryEnabled,
                 onClick = onSummaryClick
             )
             Row(
@@ -89,6 +92,7 @@ internal fun CallHeader(
                 icon = R.drawable.ic_call_end,
                 description = stringResource(R.string.call_end),
                 onClick = onEndClick,
+                enabled = enabled,
                 color = Color(0xFFDD3E36)
             )
         }

@@ -23,7 +23,8 @@ internal fun IncomingCallBanner(
     name: String,
     onAccept: () -> Unit,
     onDecline: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true
 ) {
     Surface(
         modifier = modifier.fillMaxWidth(),
@@ -53,12 +54,14 @@ internal fun IncomingCallBanner(
                     icon = R.drawable.ic_call_end,
                     description = stringResource(R.string.call_decline),
                     onClick = onDecline,
+                    enabled = enabled,
                     color = Color(0xFFDD3E36)
                 )
                 CallRoundButton(
                     icon = R.drawable.ic_call_answer,
                     description = stringResource(R.string.call_accept),
                     onClick = onAccept,
+                    enabled = enabled,
                     color = Color(0xFF299B65)
                 )
             }

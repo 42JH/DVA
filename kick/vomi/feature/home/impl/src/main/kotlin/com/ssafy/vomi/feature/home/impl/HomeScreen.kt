@@ -24,20 +24,21 @@ import com.ssafy.vomi.core.designsystem.component.Scaffold
 import com.ssafy.vomi.core.designsystem.component.Text
 import com.ssafy.vomi.core.designsystem.component.VomiBackground
 import com.ssafy.vomi.core.designsystem.theme.VomiTheme
+import com.ssafy.vomi.core.model.call.CallConnection
 import com.ssafy.vomi.feature.home.impl.component.FriendListItem
 import com.ssafy.vomi.feature.home.impl.model.HomeUiState
 import com.ssafy.vomi.feature.home.impl.model.sampleFriends
 
 @Composable
 internal fun HomeScreen(
-    onFriendClick: (String, String) -> Unit,
     modifier: Modifier = Modifier,
     viewModel: HomeViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     HomeContent(
         uiState = uiState,
-        onFriendClick = onFriendClick,
+        onFriendClick = { id, _ -> viewModel.callFriend(id) },
+        onConnectionRetry = viewModel::retryCallConnection,
         onRetryClick = viewModel::retry,
         modifier = modifier,
     )
@@ -49,6 +50,7 @@ private fun HomeContent(
     onFriendClick: (String, String) -> Unit,
     onRetryClick: () -> Unit,
     modifier: Modifier = Modifier,
+    onConnectionRetry: () -> Unit = {},
 ) {
     // The app owns the full-screen background and safe-area insets.
     Column(modifier = modifier.fillMaxSize()) {
@@ -73,6 +75,19 @@ private fun HomeContent(
             }
 
             is HomeUiState.Success -> {
+                if (uiState.callConnection != CallConnection.Connected) {
+                    Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
+                        Text(
+                            text = stringResource(if (uiState.callConnection == CallConnection.Failed) R.string.home_call_connection_failed else R.string.home_call_connecting),
+                            style = VomiTheme.typography.captionR12,
+                        )
+                        if (uiState.callConnection == CallConnection.Failed) {
+                            Button(onClick = onConnectionRetry) { Text(stringResource(R.string.home_retry)) }
+                        }
+                    }
+                }
+                if (uiState.callingFriendId != null) Text(stringResource(R.string.home_call_requesting), modifier = Modifier.padding(horizontal = 20.dp))
+                if (uiState.callError) Text(stringResource(R.string.home_call_error), modifier = Modifier.padding(horizontal = 20.dp))
                 if (uiState.friends.isEmpty()) {
                     HomeMessage(text = stringResource(R.string.home_empty))
                 } else {
@@ -86,6 +101,7 @@ private fun HomeContent(
                             contentType = { "friend" }) { friend ->
                             FriendListItem(
                                 friend = friend,
+                                enabled = uiState.callConnection == CallConnection.Connected && uiState.callingFriendId == null,
                                 onClick = { onFriendClick(friend.id, friend.name) })
                         }
                     }

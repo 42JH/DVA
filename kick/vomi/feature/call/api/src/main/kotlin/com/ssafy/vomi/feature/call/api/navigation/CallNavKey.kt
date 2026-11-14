@@ -4,8 +4,4 @@ import androidx.navigation3.runtime.NavKey
 import kotlinx.serialization.Serializable
 
 @Serializable
-data class CallNavKey(
-    val friendId: String,
-    val friendName: String,
-    val isIncoming: Boolean = false,
-) : NavKey
+data class CallNavKey(val callId: String) : NavKey

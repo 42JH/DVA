@@ -1,5 +1,5 @@
 <resources>
-    <string name="call_preview">미리보기</string>
+
     <string name="call_end">통화 종료</string>
     <string name="call_show_summary">통화 요약 보기</string>
     <string name="call_summary_title">통화 요약</string>
@@ -17,4 +17,10 @@
     <string name="call_decline">전화 거절</string>
     <string name="call_suggestion_edit">입력창에서 수정</string>
     <string name="call_input_drop_hint">놓아서 수정하기</string>
+    <string name="call_outgoing">상대방의 응답을 기다리고 있어요</string>
+    <string name="call_accepted">통화가 수락됐어요. 음성 연결은 준비 중이에요</string>
+    <string name="call_action_pending">요청을 처리하고 있어요</string>
+    <string name="call_action_error">요청을 처리하지 못했어요. 다시 눌러 주세요</string>
+    <string name="call_connection_failed">통화 상태 연결에 실패했어요</string>
+    <string name="call_retry_connection">다시 연결</string>
 </resources>

@@ -39,6 +39,9 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.ssafy.vomi.core.designsystem.component.Button
+import com.ssafy.vomi.core.model.call.CallConnection
+import com.ssafy.vomi.core.designsystem.component.LoadingWheel
 import com.ssafy.vomi.core.designsystem.component.Scaffold
 import com.ssafy.vomi.core.designsystem.component.Surface
 import com.ssafy.vomi.core.designsystem.component.Text
@@ -53,36 +56,16 @@ import com.ssafy.vomi.feature.call.impl.component.IncomingCallBanner
 import com.ssafy.vomi.feature.call.impl.model.CallPhase
 import com.ssafy.vomi.feature.call.impl.model.CallUiState
 import com.ssafy.vomi.feature.call.impl.model.sampleCallState
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlin.math.roundToInt
 
 @Composable
 internal fun CallScreen(
-    friendId: String,
-    friendName: String,
-    isIncoming: Boolean,
-    onEndCall: () -> Unit,
+    callId: String,
     modifier: Modifier = Modifier,
     viewModel: CallViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    LaunchedEffect(friendId, friendName, isIncoming) {
-        viewModel.initialize(
-            friendId,
-            friendName,
-            isIncoming
-        )
-    }
-    LaunchedEffect(state.phase) {
-        if (state.phase == CallPhase.Ended) onEndCall()
-        if (state.phase == CallPhase.Active) {
-            while (isActive) {
-                delay(1_000L)
-                viewModel.tick()
-            }
-        }
-    }
+    LaunchedEffect(callId) { viewModel.initialize(callId) }
     BackHandler(onBack = viewModel::endCall)
     CallContent(
         state = state,
@@ -96,6 +79,7 @@ internal fun CallScreen(
         onSuggestionEdit = viewModel::selectSuggestion,
         onBackchannelClick = viewModel::selectBackchannel,
         onAcceptClick = viewModel::acceptIncoming,
+        onRetryConnection = viewModel::retryConnection,
         modifier = modifier,
     )
 }
@@ -114,6 +98,7 @@ private fun CallContent(
     onBackchannelClick: (Long) -> Unit,
     onAcceptClick: () -> Unit,
     modifier: Modifier = Modifier,
+    onRetryConnection: () -> Unit = {},
 ) {
     var inputBounds by remember { mutableStateOf(Rect.Zero) }
     var contentOrigin by remember { mutableStateOf(Offset.Zero) }
@@ -130,7 +115,9 @@ private fun CallContent(
             contentOrigin = it.boundsInRoot().topLeft
             contentWidth = it.size.width
         }) {
-        if (state.phase == CallPhase.Incoming) {
+        if (state.phase == CallPhase.Connecting) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { LoadingWheel() }
+        } else if (state.phase == CallPhase.Incoming) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -138,16 +125,18 @@ private fun CallContent(
                 verticalArrangement = Arrangement.spacedBy(16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Text(
-                    text = stringResource(R.string.call_preview),
+                if (state.isActionPending) Text(
+                    text = stringResource(R.string.call_action_pending),
                     style = VomiTheme.typography.captionR12,
                     color = VomiTheme.colors.gray400
                 )
                 IncomingCallBanner(
                     name = state.friendName,
                     onAccept = onAcceptClick,
+                    enabled = !state.isActionPending && !state.isCreating,
                     onDecline = onEndClick
                 )
+                if (state.hasActionError) Text(stringResource(R.string.call_action_error))
             }
         } else {
             Column(modifier = Modifier.fillMaxSize()) {
@@ -155,8 +144,19 @@ private fun CallContent(
                     name = state.friendName,
                     elapsedSeconds = state.elapsedSeconds,
                     onSummaryClick = onSummaryClick,
-                    onEndClick = onEndClick
+                    onEndClick = onEndClick,
+                    enabled = !state.isActionPending && !state.isCreating,
+                    summaryEnabled = state.phase == CallPhase.Active,
                 )
+                if (state.phase == CallPhase.Outgoing || state.phase == CallPhase.Accepted) {
+                    Text(
+                        text = stringResource(if (state.phase == CallPhase.Outgoing) R.string.call_outgoing else R.string.call_accepted),
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+                        style = VomiTheme.typography.bodyR16,
+                    )
+                }
+                if (state.isActionPending || state.isCreating) Text(stringResource(R.string.call_action_pending), modifier = Modifier.padding(horizontal = 20.dp))
+                if (state.hasActionError) Text(stringResource(R.string.call_action_error), modifier = Modifier.padding(horizontal = 20.dp))
                 val listState = rememberLazyListState()
                 LaunchedEffect(state.messages.size) {
                     if (state.messages.isNotEmpty()) listState.animateScrollToItem(state.messages.lastIndex)
@@ -252,6 +252,12 @@ private fun CallContent(
                     maxLines = 2,
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                 )
+            }
+        }
+        if (state.connection == CallConnection.Failed && state.phase != CallPhase.Ended) {
+            Column(modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp)) {
+                Text(stringResource(R.string.call_connection_failed))
+                Button(onClick = onRetryConnection) { Text(stringResource(R.string.call_retry_connection)) }
             }
         }
         if (state.isSummaryVisible) CallSummarySheet(

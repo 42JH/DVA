@@ -32,9 +32,11 @@ internal fun FriendListItem(
     friend: Friend,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
 ) {
     ClickableSurface(
         onClick = onClick,
+        enabled = enabled,
         modifier = modifier
             .fillMaxWidth()
             .semantics(mergeDescendants = true) {},
