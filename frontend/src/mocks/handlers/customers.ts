@@ -186,4 +186,15 @@ export const customerHandlers = [
     }))
     return HttpResponse.json(page(rows, new URL(request.url)))
   }),
+  // 이 고객이 실제로 보낸 받는 곳 — 최신순 (백엔드 GET /customers/{id}/addresses). 주문 추가의 받는 분 추천을 '최근에 보낸 순'으로 세움
+  // 이 응답이 없으면 요청이 실제 백엔드로 넘어가 401 → 보내는 분을 고르는 순간 로그인 화면으로 튕김
+  http.get(`${API_BASE_URL}/customers/:id/addresses`, ({ params, request }) => {
+    const c = customers().find((x) => x.customerSeq === Number(params.id))
+    if (!c) return HttpResponse.json({ error: { code: 'NOT_FOUND' } }, { status: 404 })
+    const rows = allOrders()
+      .filter((o) => o.sender.phoneNumber === c.phoneNumber && o.receiver.roadAddress)
+      .sort((a, b) => Date.parse(b.acceptedAt) - Date.parse(a.acceptedAt))
+      .map((o) => ({ createdAt: o.acceptedAt, address: { phoneNumber: o.receiver.phoneNumber } }))
+    return HttpResponse.json(page(rows, new URL(request.url)))
+  }),
 ]
