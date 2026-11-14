@@ -177,11 +177,12 @@ export function useScenarioTest(me: TestTarget, dateOf: (version: number) => str
     retryLabel: rest.length ? `남은 ${rest.length}개 시험` : null,
     runAll: () => ask({ title: `시나리오 ${r.rows.length}개를 시험할까요?` }),
     retry: () => ask({ title: `남은 ${rest.length}개를 시험할까요?`, scenarios: rest }),
-    // 시험 멈춤 — 도는 동안만 있음 (버튼 · 확인 창은 아직 화면에 안 붙임)
+    // 시험 멈춤 — 도는 동안만 있음 ([시험 중단] 버튼 · 확인 창)
     stop:
       r.state === 'running'
         ? {
             run: () => stop.mutate({ personaSeq: me.personaSeq, version: me.version }),
+            reset: stop.reset,
             busy: stop.isPending,
             error: stop.isError ? '멈추지 못했습니다. 다시 시도해 주세요.' : null,
           }

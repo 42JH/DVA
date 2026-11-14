@@ -93,6 +93,8 @@ const rowsAs = (now: Cell[]) => now.map((c, i) => ({ id: ['A1', 'B3', 'E1'][i], 
 assert.deepEqual(restOf('partial', rowsAs(['pass', 'none', 'error'])), ['B3', 'E1'])
 assert.deepEqual(restOf('partial', rowsAs(['fail', 'pass', 'none'])), ['E1'])
 assert.deepEqual(restOf('none', rowsAs(['none', 'none', 'none'])), []) // 시험 전은 [전체 시험]
+assert.deepEqual(restOf('partial', rowsAs(['none', 'none', 'none'])), []) // 시작하자마자 멈춤 — 남은 것이 전체
+assert.deepEqual(restOf('partial', rowsAs(['error', 'none', 'error'])), []) // 끝난 것이 없음 (전부 연결 실패 · 결과 없음)
 assert.deepEqual(restOf('stale', rowsAs(['pass', 'error', 'none'])), []) // 고치기 전 글의 결과
 assert.deepEqual(restOf('done', rowsAs(['pass', 'fail', 'pass'])), [])
 
