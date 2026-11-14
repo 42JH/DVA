@@ -1,5 +1,15 @@
-// 주문 추가 · 수정 폼이 보내는 입력 모양 — orderApi · orderCreate · orderPatch · draftApi가 같이 씀 (타입만)
+// 주문 추가 · 수정 폼이 보내는 입력 모양 · 품목 종류 — orderApi · orderCreate · orderPatch · draftApi · 폼 계산이 같이 씀
+// 요청을 모름: 순수 함수 테스트에서 그대로 부를 수 있게 요청 모듈(orderApi)과 따로 둠
 import type { OrderDetail, Party, PaymentMethod } from '@/shared/order/orderApi'
+
+/** 품목 4종 (와이어프레임 03 · 디버 FAQ '박스 크기') — 주문 상세의 items 키와 같은 순서. 그 밖은 '기타 품목' 글로 */
+export const BOX_TYPES = [
+  { key: 'document', label: '서류' },
+  { key: 'small', label: '소박스' },
+  { key: 'medium', label: '중박스' },
+  { key: 'big', label: '대박스' },
+] as const
+export type BoxKey = (typeof BOX_TYPES)[number]['key']
 
 export interface PickedAddress {
   jibunAddress: string
