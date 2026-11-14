@@ -90,7 +90,6 @@ export function useCustomers() {
       seq: c.customerSeq,
       name: c.name,
       phone: fmtPhone(c.phoneNumber),
-      digits: c.phoneNumber,
       address: c.address?.roadAddress ?? '',
       detail: c.address?.detailAddress ?? '',
       payments: c.availablePaymentMethods.map((m) => PAY_LABEL[m]),
@@ -160,7 +159,6 @@ export function useCustomer(seq: number) {
       digits: c.data.phoneNumber,
       address: c.data.address?.roadAddress ?? '',
       detail: c.data.address?.detailAddress ?? '',
-      postal: c.data.address?.postalCode ?? '',
       company: ctx.data?.company ?? null, // '디버물류 영업팀'
       companySeq: ctx.data?.companySeq ?? null,
       payments: ctx.data?.payments ?? null,

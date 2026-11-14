@@ -1,6 +1,6 @@
 // 실행: npx tsx src/shared/lib/search.test.ts  (프레임워크 없이 assert만)
 import assert from 'node:assert/strict'
-import { findKo, matchKo, phoneDigits, suggest } from './search'
+import { findKo, matchKo, phoneDigits } from './search'
 
 // 띄어쓰기 · 대소문자 무시
 assert.ok(matchKo('수거 시간이 언제예요?', '수거시간'))
@@ -35,12 +35,6 @@ assert.equal(phoneDigits('010-6638'), '0106638')
 assert.equal(phoneDigits(' 2047 '), '2047')
 assert.equal(phoneDigits('3시'), '')
 assert.equal(phoneDigits('제주 2일'), '')
-
-// 추천: 맞는 것만 · 중복 없이 · 똑같은 건 빼고 · 최대 n
-assert.deepEqual(suggest(['강도윤', '강도윤', '강하늘', '박지호'], 'ㄱ'), ['강도윤', '강하늘'])
-assert.deepEqual(suggest(['강도윤', '강하늘'], '강도윤'), [])
-assert.deepEqual(suggest(['a1', 'a2', 'a3'], 'a', 2), ['a1', 'a2'])
-assert.deepEqual(suggest(['강도윤'], '  '), [])
 
 console.log('search.test.ts OK')
 

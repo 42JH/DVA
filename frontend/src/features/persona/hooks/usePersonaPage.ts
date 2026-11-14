@@ -20,7 +20,6 @@ import {
 import {
   ConfirmError,
   deletePersona,
-  PERSONA_DEMO,
   personaQueries,
   PROMPT_KEYS,
   requestApply,
@@ -399,7 +398,6 @@ export function usePersonaPage() {
     })
 
   return {
-    demo: PERSONA_DEMO, // 시연 모드 — 저장 · 사용하기가 실서버에 안 감
     isLoading: personas.isPending, // 처음 들어올 때만 화면 전체
     // 상담가를 바꿀 때 버전을 받는 동안은 가운데만 — 오른쪽 카드가 다시 그려지면 스크롤이 맨 위로 감 (11/10)
     promptLoading,
@@ -451,7 +449,6 @@ export function usePersonaPage() {
             changed: promptSections(picked, base).sections.filter((x) => x.rows),
             // [이 내용 불러오기] — 지금 내용과 같으면 보낼 게 없음
             canLoad: canManage && !reuseSame(picked),
-            same: reuseSame(picked),
           }
         : null,
     loadPicked: () => picked && confirm.mutate({ kind: 'reuse', version: picked.version }),

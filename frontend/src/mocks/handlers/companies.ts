@@ -2,7 +2,7 @@
 // 새로고침하면 처음으로 돌아감. 사원 주소는 고객 정보에 있음 (서버와 같음)
 import { http, HttpResponse } from 'msw'
 import { API_BASE_URL } from '@/shared/api/client'
-import { allOrders } from '@/shared/order/orderApi'
+import { allOrders } from './orderData'
 
 type Status = 'ACTIVE' | 'INACTIVE'
 interface Address {

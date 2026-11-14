@@ -4,7 +4,7 @@
 // appliedAt은 'AI가 적용에 성공한 시각'이라 적용본을 찾는 기준이 아님 (백엔드 11/02 답)
 
 export type Speed = 'SLOW' | 'NORMAL' | 'FAST' // 발화 속도 3단계 칩 (서버는 숫자 · null = 기본)
-export type WaitTime = 'SHORT' | 'NORMAL' | 'LONG' // 고객 말 끝을 기다리는 시간
+type WaitTime = 'SHORT' | 'NORMAL' | 'LONG' // 고객 말 끝을 기다리는 시간
 
 /** 음성 설정 — 버전마다 따로. voice '' = AI 기본 음성(서버 null) */
 export interface VoiceSettings {
@@ -67,28 +67,16 @@ export interface PersonaDto {
 type VersionStatus = 'SAVED' | 'PENDING' | 'ACTIVE' | 'APPLIED' | 'PAST'
 
 export interface PersonaVersion {
-  seq: number // aiPersonaVersionSeq — 적용 요청에 씀
   version: number
   name: string // 버전마다 이름이 있음 — 초안에서 바꾼 이름은 확정 전까지 여기에만
   status: VersionStatus
   isHead: boolean // 서버 HEAD(확정 버전 중 최신)
   isDraft: boolean // 초안 줄 — 번호는 화면이 붙인 HEAD + 1, 서버 버전 기록엔 없음
-  voiceOnly: boolean // 바로 앞 버전과 프롬프트는 같고 음성만 다름 ('음성 설정' 태그)
-  changes: VersionChange // 바로 앞 버전과 무엇이 다른지 (요약 문장은 화면 층에서)
   author: string // 확인할 수 없는 옛 작성자는 ''
   promptText: string // 서버가 합친 글 (초안 줄은 '')
   savedAt: string // 서버 ISO 그대로 — 화면 형식은 fmtVersionTime (버전 기록은 분까지, 11/11)
   prompt: PromptFields
   voice: VoiceSettings
-}
-
-/** 바로 앞 버전 대비 바뀐 것 — 첫 버전은 { first: true } */
-interface VersionChange {
-  first: boolean
-  prompt: boolean
-  voice: [string, string] | null
-  speed: [Speed, Speed] | null
-  waitTime: [WaitTime, WaitTime] | null
 }
 
 export interface Persona {
@@ -100,7 +88,6 @@ export interface Persona {
   appliedVersion: number // 적용본 — 통화 중이면 activeVersion, 아니면 HEAD
   head: { version: number; seq: number } // HEAD — 저장 · 확정의 expectedVersion, 적용 요청
   draftRevision: string | null // 초안이 있으면 그 UUID (저장 · 확정에 보냄)
-  savedVersion: number | null // 저장만 하고 아직 적용 안 한 버전 ('v5 저장됨') — 초안이면 HEAD + 1
   applyingVersion: number | null // 적용 대기 ('v5 적용 대기')
   applyError: string | null // 적용 대기 중 AI 반영 오류 코드 (대기는 유지됨)
 }
@@ -118,7 +105,7 @@ export function toRate(speed: Speed, range: { min: number; max: number } | null)
 }
 
 // DTO에서 여섯 칸만 — 통째로 넘기면 다른 서버 칸까지 prompt에 섞임
-export const toPrompt = ({
+const toPrompt = ({
   role,
   personality,
   tone,
@@ -178,35 +165,20 @@ export function toVersions(
   const draftDto = draft && draftRow(draft, headVersion)
   const sorted = [...list, ...(draftDto ? [draftDto] : [])].sort((a, b) => b.version - a.version)
   const active = list.find((v) => v.status === 'ACTIVE')?.version
-  return sorted.map((v, i) => {
-    const prev = sorted[i + 1] // 바로 앞(낮은) 버전
-    const voice = toVoice(v)
-    const before = prev && toVoice(prev)
-    const changes: VersionChange = {
-      first: !prev,
-      prompt: !!prev && PROMPT_KEYS.some((k) => prev[k] !== v[k]),
-      voice: before && before.voice !== voice.voice ? [before.voice, voice.voice] : null,
-      speed: before && before.speed !== voice.speed ? [before.speed, voice.speed] : null,
-      waitTime:
-        before && before.waitTime !== voice.waitTime ? [before.waitTime, voice.waitTime] : null,
-    }
+  return sorted.map((v) => {
     const isDraft = v === draftDto
     const isHead = !isDraft && v.version === headVersion
     return {
-      seq: v.aiPersonaVersionSeq,
       version: v.version,
       name: v.name,
       status: statusOf(v, { draft: isDraft, head: isHead }, active),
       isHead,
       isDraft,
-      voiceOnly:
-        !changes.first && !changes.prompt && !!(changes.voice || changes.speed || changes.waitTime),
-      changes,
       author: v.createdByAdminUserName ?? '',
       promptText: (v as { promptText?: string }).promptText ?? '',
       savedAt: v.createdAt,
       prompt: toPrompt(v),
-      voice,
+      voice: toVoice(v),
     }
   })
 }
@@ -225,7 +197,6 @@ export function toPersona(p: PersonaDto): Persona {
     appliedVersion: applied.version,
     head: { version: head, seq: p.headVersion.aiPersonaVersionSeq },
     draftRevision: p.draft?.draftRevision ?? null,
-    savedVersion: p.draft ? head + 1 : head !== applied.version && head !== pending ? head : null,
     applyingVersion: pending,
     applyError: p.pendingVersion?.applyErrorCode ?? null,
   }

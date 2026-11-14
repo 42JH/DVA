@@ -13,7 +13,7 @@ assert.equal(kinds(['a'], []), '-a')
 assert.equal(kinds(['a', 'x', 'c'], ['a', 'y', 'c']), ' a|-x|+y| c') // 바뀐 줄 = 빠진 줄 먼저, 더한 줄 뒤
 assert.equal(kinds(['a', 'c'], ['a', 'b', 'c']), ' a|+b| c') // 끼워 넣기
 
-// 디자인 07 버전 비교 예시: v6 → v7 = 빠진 줄 2 · 더한 줄 3, 줄 번호는 양쪽 따로
+// 디자인 07 버전 비교 예시: v6 → v7 = 빠진 줄 2 · 더한 줄 3
 const v6 = [
   '# 역할',
   '복창 항목마다',
@@ -38,16 +38,14 @@ const v7 = [
 const d = lineDiff(v6, v7)
 assert.equal(d.filter((x) => x.kind === 'del').length, 2)
 assert.equal(d.filter((x) => x.kind === 'add').length, 3)
-const last = d[d.length - 1]
-assert.deepEqual([last.from, last.to], [8, 9]) // 마지막 줄: v6 8번 = v7 9번 (한 줄 늘어서)
 assert.deepEqual(
-  d.filter((x) => x.kind !== 'same').map((x) => [x.kind, x.from, x.to]),
+  d.filter((x) => x.kind !== 'same').map((x) => [x.kind, x.text]),
   [
-    ['del', 2, null],
-    ['add', null, 2],
-    ['del', 6, null],
-    ['add', null, 6],
-    ['add', null, 7],
+    ['del', '복창 항목마다'],
+    ['add', '복창 한 번에'],
+    ['del', '확인된 것도 한 번 더'],
+    ['add', '확인된 것은 안 물음'],
+    ['add', '전화번호 끊어 복창'],
   ],
 )
 

@@ -15,17 +15,6 @@ import {
   type PromptFields,
   type VoiceSettings,
 } from './personaMap'
-import {
-  demoApply,
-  demoConfirm,
-  demoCreate,
-  demoPersonas,
-  demoSaveDraft,
-  demoVersions,
-  PERSONA_DEMO,
-} from './personaDemo'
-
-export { PERSONA_DEMO }
 export { PROMPT_KEYS } from './personaMap'
 
 export type { PersonaVersion, PromptFields, PromptKey, VoiceSettings } from './personaMap'
@@ -36,7 +25,6 @@ export const DEFAULT_VOICE: VoiceSettings = { voice: '', speed: 'NORMAL', waitTi
 interface AiOptions {
   voices: { id: string; label: string }[]
   rateRange: { min: number; max: number } | null
-  waitTimes: VoiceSettings['waitTime'][]
 }
 
 // 한 화면이 뜨는 동안 늦게 붙는 부품(띠 · 표)이 방금 받은 것을 또 부르지 않게 — 저장 · 반영 뒤에는 invalidate로 바로 다시 받음
@@ -66,16 +54,11 @@ export const personaQueries = {
 
 /** 페르소나 목록 — 적용본(HEAD) · 초안이 목록에 같이 옴 */
 async function fetchPersonas(signal?: AbortSignal) {
-  if (PERSONA_DEMO) return (await demoPersonas(signal)).map(toPersona) // 시연 모드: 브라우저 안 사본
   return (await fetchAll<PersonaDto>('/personas', {}, signal)).map(toPersona)
 }
 
 /** 버전 기록 + 초안(있으면 맨 위 'v(HEAD+1) 저장됨') — 높은 번호가 위. 버전 기록 API엔 초안이 없어 상세에서 받음 */
 async function fetchVersions(personaSeq: number, signal?: AbortSignal) {
-  if (PERSONA_DEMO) {
-    const d = await demoVersions(personaSeq, signal)
-    return toVersions(d.list, d.persona.headVersion.version, d.persona.draft)
-  }
   const [persona, list] = await Promise.all([
     api.get<ApiItem<PersonaDto>>(`/personas/${personaSeq}`, { signal }),
     fetchAll<PersonaVersionDto>(`/personas/${personaSeq}/versions`, {}, signal),
@@ -94,7 +77,6 @@ async function fetchAiOptions(signal?: AbortSignal): Promise<AiOptions> {
   return {
     voices: data.voices,
     rateRange: r && r.min !== null && r.max !== null ? { min: r.min, max: r.max } : null,
-    waitTimes: data.turnWaitLevels,
   }
 }
 
@@ -122,11 +104,6 @@ export async function saveVersion(
     ...(voice !== undefined && { voiceId: voice || null }),
     ...(speed !== undefined && { speakingRate: toRate(speed, input.rateRange) }),
     ...(waitTime !== undefined && { turnWaitLevel: waitTime }),
-  }
-  if (PERSONA_DEMO) {
-    // 시연 모드: 실서버에 안 보냄
-    await demoSaveDraft(personaSeq, changed)
-    return demoConfirm(personaSeq)
   }
   // 바뀐 칸이 없으면(남아 있던 초안 · 확정만 실패한 뒤 다시 저장) PATCH 없이 그 초안을 확정 — 서버는 빈 PATCH를 400으로 거절
   const revision =
@@ -156,11 +133,9 @@ export const requestApply = (
   personaSeq: number,
   head: { seq: number; version: number },
 ): Promise<void> =>
-  PERSONA_DEMO
-    ? demoApply(personaSeq) // 시연 모드: 실서버 AI에 적용 요청을 안 보냄
-    : api.post(`/personas/${personaSeq}/activate`, {
-        body: { aiPersonaVersionSeq: head.seq, expectedVersion: head.version },
-      })
+  api.post(`/personas/${personaSeq}/activate`, {
+    body: { aiPersonaVersionSeq: head.seq, expectedVersion: head.version },
+  })
 
 /** 페르소나 삭제 (DELETE /personas, body { aiPersonaSeqs }) — 분류 번호 1~100개를 한꺼번에, 하나라도 실패하면 전부 안 지워짐(204 = 전체 성공)
  * 소프트 삭제: 소속 버전 · 초안 포함. ACTIVE 버전이 하나라도 있으면 409, 없거나 이미 지운 분류가 끼면 404. 화면은 한 건씩만 보냄 */
@@ -182,7 +157,6 @@ export async function createPersona(input: {
     speakingRate: toRate(input.voice.speed, input.rateRange),
     turnWaitLevel: input.voice.waitTime,
   }
-  if (PERSONA_DEMO) return demoCreate(input.code, body) // 시연 모드: 실서버에 안 만듦
   const res = await api.post<ApiItem<{ aiPersonaSeq: number }>>('/personas', {
     body: { code: input.code, ...body },
   })

@@ -107,9 +107,7 @@ export function useWaybill(orderSeq: number, parcelSeq: number | null) {
 
   return {
     view,
-    status,
     missing,
-    isLoading: q.isPending,
     error: !q.error
       ? null
       : gone

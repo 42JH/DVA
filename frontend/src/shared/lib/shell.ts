@@ -9,7 +9,6 @@ export interface Shell {
   persona: string | null // 지금 통화에 쓰는 AI 상담가
   liveCalls: number | null // 진행 중 통화 수 (아직 못 받으면 null)
   live: boolean // 진행 통화 수 연결이 살아 있나
-  incomplete: number | null // 미완료 주문(배송 초안) 수
   unanswered: number | null // 미답변 문의 수
 }
 

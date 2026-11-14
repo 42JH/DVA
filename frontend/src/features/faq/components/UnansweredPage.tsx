@@ -25,15 +25,14 @@ export function UnansweredPage() {
   // 목록은 한 번에 받아 두고 화면에서 쪽을 나눔 (검색을 바꾸면 기존 훅이 쪽을 1로)
   const { params, page: rawPage, set } = useListParams(PARAMS)
   const asc = params.d !== 'desc'
-  const all = vm.groups.flatMap((g) => g.rows.map((r) => ({ ...r, day: g.label })))
-  if (!asc) all.reverse()
+  const all = asc ? vm.rows : [...vm.rows].reverse()
   const [size, setSize] = usePageSize()
   const page = Math.min(rawPage, Math.max(1, Math.ceil(all.length / size)))
   const rows = all.slice((page - 1) * size, page * size)
   const box = useRef<HTMLDivElement>(null)
   const scrollable = useScrollable(box, [rows])
   useKeepScroll(box, 'list')
-  const [open, setOpen] = useState<(UnansweredRow & { day: string }) | null>(null)
+  const [open, setOpen] = useState<UnansweredRow | null>(null)
 
   return (
     <>
@@ -158,7 +157,7 @@ function Row({
   onFaq,
   onOpen,
 }: {
-  r: UnansweredRow & { day: string }
+  r: UnansweredRow
   vm: ReturnType<typeof useUnansweredList>
   onFaq: () => void
   onOpen: () => void

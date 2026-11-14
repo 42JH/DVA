@@ -64,14 +64,3 @@ export function matchKo(text: string, query: string): boolean {
 export function phoneDigits(query: string): string {
   return /^[\d\s-]+$/.test(query.trim()) ? query.replace(/\D/g, '') : ''
 }
-
-/** 추천 목록 — texts 중 검색어에 맞는 것, 같은 글 한 번만, 검색어와 똑같은 건 빼고 최대 n개 (순서는 texts 순서) */
-export function suggest(texts: string[], query: string, n = 5): string[] {
-  if (!norm(query)) return []
-  const out: string[] = []
-  for (const t of texts) {
-    if (out.length >= n) break
-    if (t !== query.trim() && !out.includes(t) && matchKo(t, query)) out.push(t)
-  }
-  return out
-}

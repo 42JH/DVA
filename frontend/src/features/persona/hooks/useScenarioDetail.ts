@@ -94,7 +94,7 @@ export function useScenarioDetail(personaSeq: number, version: number, scenarioI
           : null,
     tabs: sides.map((s, i) => ({ ...s, on: i === at, pick: () => pick(i) })),
     // 맨 끝 탭 [시나리오] — 이 시나리오가 무엇을 시험하는지 (고객 대본 · 정답 · 행동 확인)
-    script: { on: at === sides.length, pick: () => pick(sides.length) },
+    script: { pick: () => pick(sides.length) },
     current: sides[at] ?? null, // null = [시나리오] 탭
   }
 }

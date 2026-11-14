@@ -2,14 +2,12 @@
 // React를 모르는 순수 함수 (실행해서 확인: lineDiff.test.ts). 프롬프트는 수십~수백 줄이라 줄 수 곱만큼 표를 만들어도 충분히 빠름
 // 바뀐 묶음 안에서는 빠진 줄을 먼저, 더한 줄을 뒤에 (디자인: − 줄 아래 + 줄)
 
-interface DiffLine {
+export interface Part {
   kind: 'same' | 'del' | 'add'
   text: string
-  from: number | null // 앞 버전 줄 번호 (더한 줄은 없음)
-  to: number | null // 뒤 버전 줄 번호 (빠진 줄은 없음)
 }
 
-export function lineDiff(before: string[], after: string[]): DiffLine[] {
+export function lineDiff(before: string[], after: string[]): Part[] {
   const n = before.length
   const m = after.length
   // lcs[i][j] = before[i..] 와 after[j..] 의 공통 줄 수 (뒤에서부터 채움)
@@ -19,24 +17,20 @@ export function lineDiff(before: string[], after: string[]): DiffLine[] {
       lcs[i][j] =
         before[i] === after[j] ? lcs[i + 1][j + 1] + 1 : Math.max(lcs[i + 1][j], lcs[i][j + 1])
 
-  const out: DiffLine[] = []
+  const out: Part[] = []
   let i = 0
   let j = 0
   while (i < n || j < m) {
     if (i < n && j < m && before[i] === after[j]) {
-      out.push({ kind: 'same', text: before[i], from: ++i, to: ++j })
+      out.push({ kind: 'same', text: before[i++] })
+      j++
     } else if (i < n && (j >= m || lcs[i + 1][j] >= lcs[i][j + 1])) {
-      out.push({ kind: 'del', text: before[i], from: ++i, to: null })
+      out.push({ kind: 'del', text: before[i++] })
     } else {
-      out.push({ kind: 'add', text: after[j], from: null, to: ++j })
+      out.push({ kind: 'add', text: after[j++] })
     }
   }
   return out
-}
-
-export interface Part {
-  kind: 'same' | 'del' | 'add'
-  text: string
 }
 
 /** 같은 줄에 겹쳐 보이는 비교 — 바뀐 줄 묶음(빠진 줄 + 더한 줄)을 한 문단으로 합치고, 그 안은 글자 단위로 다시 맞춤
@@ -78,7 +72,7 @@ export function inlineDiff(before: string[], after: string[]) {
             { kind: 'del', text: midA.join('') },
             { kind: 'add', text: midB.join('') },
           ]
-        : lineDiff(midA, midB).map((w) => ({ kind: w.kind, text: w.text }))
+        : lineDiff(midA, midB)
     const parts: Part[] = []
     for (const w of [
       { kind: 'same' as const, text: a.slice(0, head).join('') },
