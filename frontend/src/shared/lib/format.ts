@@ -55,19 +55,20 @@ export function fmtPhone(digits: string): string {
   return digits
 }
 
+/** '오늘' · '어제' · '11월 9일' · 다른 해 '2025년 11월 9일' */
+function dayLabel(d: Date, now: Date): string {
+  const day = ymd(d)
+  if (day === ymd(now)) return '오늘'
+  if (day === ymd(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1))) return '어제'
+  return d.getFullYear() === now.getFullYear()
+    ? fmtMonthDay(day)
+    : `${d.getFullYear()}년 ${fmtMonthDay(day)}`
+}
+
 /** 버전 기록 시각 (07 AI 상담가 11/11, Notion 버전 기록처럼) — '오늘 오후 3:07' · '어제 오전 9:41' · '11월 9일 오후 3:07' · 다른 해 '2025년 12월 29일 오후 1:40' */
 export function fmtVersionTime(iso: string, now = new Date()): string {
   const d = new Date(iso)
-  const day = ymd(d)
-  const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1)
-  const date =
-    day === ymd(now)
-      ? '오늘'
-      : day === ymd(yesterday)
-        ? '어제'
-        : d.getFullYear() === now.getFullYear()
-          ? fmtMonthDay(day)
-          : `${d.getFullYear()}년 ${fmtMonthDay(day)}`
+  const date = dayLabel(d, now)
   // 오전/오후는 직접 — toLocaleTimeString은 한국어 데이터가 없는 환경(Node 등)에서 'PM'을 줌
   const h = d.getHours()
   return `${date} ${h < 12 ? '오전' : '오후'} ${h % 12 || 12}:${two(d.getMinutes())}`

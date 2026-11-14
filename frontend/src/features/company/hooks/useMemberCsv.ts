@@ -80,15 +80,24 @@ export function useMemberCsv(companyId: number, onDone: () => void) {
 
   const err = reg.error
   const rowErrors = err instanceof ApiError ? serverRowErrors(err.details, toSend) : []
-  const fileErrors =
-    picked.kind === 'bad'
-      ? [...picked.errors, ...(picked.more ? [`외 ${picked.more}건`] : [])]
-      : pv?.errors.length
-        ? [
-            ...pv.errors.slice(0, 3),
-            ...(pv.errors.length > 3 ? [`외 ${pv.errors.length - 3}건`] : []),
-          ]
-        : rowErrors.slice(0, 3)
+  // 파일 칸 아래 — 파일을 못 읽음 · 등록된 사원과 맞지 않음 · 서버가 줄을 거절함 (3줄까지, 넘으면 '외 n건')
+  const fileErrorsOf = () => {
+    if (picked.kind === 'bad')
+      return [...picked.errors, ...(picked.more ? [`외 ${picked.more}건`] : [])]
+    if (!pv?.errors.length) return rowErrors.slice(0, 3)
+    return [
+      ...pv.errors.slice(0, 3),
+      ...(pv.errors.length > 3 ? [`외 ${pv.errors.length - 3}건`] : []),
+    ]
+  }
+  const fileErrors = fileErrorsOf()
+  // 버튼 줄 — 줄 오류는 파일 칸 아래에 보이므로 여기엔 없음. 등록은 됐는데 주소만 실패했으면 안내
+  const failText = () => {
+    if (err) return rowErrors.length ? null : errorText(err, '등록')
+    return reg.data
+      ? `사원은 등록했지만 ${reg.data}명의 주소를 저장하지 못했습니다. [수정]에서 넣어 주세요.`
+      : null
+  }
 
   return {
     file: picked.kind === 'none' ? null : picked.file,
@@ -144,13 +153,7 @@ export function useMemberCsv(companyId: number, onDone: () => void) {
             moreChanges: Math.max(0, pv.changed.length - SHOW_CHANGES),
           }
         : null,
-    errorMessage: !err
-      ? reg.data
-        ? `사원은 등록했지만 ${reg.data}명의 주소를 저장하지 못했습니다. [수정]에서 넣어 주세요.`
-        : null
-      : rowErrors.length
-        ? null // 줄 오류는 파일 칸 아래에
-        : errorText(err, '등록'),
+    errorMessage: failText(),
     // 할 일이 하나도 없으면(전부 변경 없음) [등록] 꺼짐
     canSubmit: !!pv && pv.errors.length === 0 && toSend.length > 0 && !reg.isPending && !reg.data,
     isSubmitting: reg.isPending,

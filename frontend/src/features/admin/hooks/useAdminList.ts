@@ -28,6 +28,16 @@ type Job = {
   id: number
 }
 
+/** 버튼 · 확인 창이 하는 일 — 승인 = 활성화, 거절 = 삭제 (같은 API) */
+const RUN: Record<Job['kind'], (id: number) => Promise<unknown>> = {
+  approve: (id) => setAdminStatus(id, 'ACTIVE'),
+  activate: (id) => setAdminStatus(id, 'ACTIVE'),
+  deactivate: (id) => setAdminStatus(id, 'INACTIVE'),
+  reset: resetAdminPassword,
+  reject: deleteAdmin,
+  delete: deleteAdmin,
+}
+
 interface AdminRow {
   id: number
   name: string
@@ -77,14 +87,7 @@ export function useAdminList(size = PAGE_SIZE) {
   }, [list.data, page, pages, set])
 
   const job = useMutation({
-    mutationFn: ({ kind, id }: Job) =>
-      kind === 'approve' || kind === 'activate'
-        ? setAdminStatus(id, 'ACTIVE')
-        : kind === 'deactivate'
-          ? setAdminStatus(id, 'INACTIVE')
-          : kind === 'reset'
-            ? resetAdminPassword(id)
-            : deleteAdmin(id), // 거절 = 삭제 (같은 API)
+    mutationFn: ({ kind, id }: Job) => RUN[kind](id),
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: adminQueries.all() }) // 목록 + 탭 건수 한 번에
       setConfirming(null)

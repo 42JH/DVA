@@ -13,6 +13,75 @@ const DIM = 'text-[14px] text-ops-faint'
 // 6번 — 다른 상담가로 바꾸기(switchNote): 시험 중 '통화에 쓰기 전 시험' · 반영 중 '통화에 들어가는 중'. 시험 통과 띠는 PassBand
 // 2번 — 시험 중 [시험 중단](2368:3753) → 시험 중단(4355): [지금까지 결과 보기] [다시 시험하고 반영]
 // [반영 전] 고친 내용 · 저장 시각 · 수정한 사람 | [통화에 반영]  /  아래 줄 토글: 고친 내용 ↔ 통화에 쓰는 내용
+// 6번(다른 상담가로 바꾸기)은 반영 대신 사용 · 다시 시험만 (통과해도 저절로 안 바꿈)
+const applyLabel = (band: Band) => {
+  const switching = !!band.switchNote
+  if (band.review) return switching ? '확인하고 사용하기' : '확인하고 반영'
+  if (band.stopped) return switching ? '다시 시험' : '다시 시험하고 반영'
+  return '통화에 반영'
+}
+const waitTitle = (band: Band) => {
+  const switching = !!band.switchNote
+  if (band.step === 'testing') return switching ? '통화에 쓰기 전 시험' : '통화에 반영하기 전 시험'
+  return switching ? '통화에 들어가는 중' : '고친 내용'
+}
+const waitNote = (band: Band) => {
+  if (band.applyError) return 'AI 반영 오류가 있어 AI 확인을 다시 기다리는 중입니다'
+  return band.switchNote
+    ? `AI 확인이 끝나면 ${band.switchNote}`
+    : 'AI 확인이 끝나면 통화에 들어갑니다'
+}
+
+// 시험 · 반영 중 — 버튼은 [진행 보기] [시험 중단]만(시험 중), 토글 없음 (피그마 2368:3212 · 3388)
+function WaitBand({
+  band,
+  onProgress,
+  onStop,
+}: {
+  band: Band
+  onProgress?: () => void
+  onStop: () => void
+}) {
+  const p = band.progress
+  return (
+    <div className={BAND}>
+      <Badge tone="wait">{band.step === 'testing' ? '시험 중' : '반영 중'}</Badge>
+      <span className={TITLE}>{waitTitle(band)}</span>
+      {p ? (
+        <>
+          <span className={DIM}>
+            시나리오 {p.ended} / {p.total}
+          </span>
+          <progress
+            value={p.ended}
+            max={p.total || 1}
+            aria-label="시험 진행"
+            className="h-1.5 w-40 appearance-none overflow-hidden rounded-full bg-ops-idle-soft [&::-moz-progress-bar]:bg-ops-wait [&::-webkit-progress-bar]:bg-ops-idle-soft [&::-webkit-progress-value]:bg-ops-wait"
+          />
+          <span className={DIM}>통과 {p.pass}</span>
+          {/* 0개도 빨강 (시안 — 시나리오 시험 화면의 '실패 0'과 같게) */}
+          <span className="text-[14px] text-ops-stop">실패 {p.fail}</span>
+        </>
+      ) : (
+        <>
+          {!band.switchNote && <span className={DIM}>{band.time} 저장</span>}
+          <span className={DIM}>{waitNote(band)}</span>
+        </>
+      )}
+      {band.step === 'testing' && (
+        <span className="ml-auto flex flex-wrap gap-3">
+          {onProgress && <Btn onClick={onProgress}>진행 보기</Btn>}
+          {band.canApply && (
+            <Btn kind="danger" onClick={onStop}>
+              시험 중단
+            </Btn>
+          )}
+        </span>
+      )}
+    </div>
+  )
+}
+
 // busy: 프롬프트를 고치는 중 — 저장 안 한 글은 반영되지 않으니 [통화에 반영]을 끔
 export function ApplyBand({
   band,
@@ -33,60 +102,8 @@ export function ApplyBand({
   onReview: () => void // [확인하고 반영] — 실패한 시나리오 이름을 보여 주는 확인 창 (4번)
   busy: boolean
 }) {
-  // 시험 · 반영 중 — 버튼은 [진행 보기] [시험 중단]만(시험 중), 토글 없음 (피그마 2368:3212 · 3388)
-  if (band.step === 'testing' || band.step === 'applying') {
-    const p = band.progress
-    const waiting = band.applyError
-      ? 'AI 반영 오류가 있어 AI 확인을 다시 기다리는 중입니다'
-      : band.switchNote
-        ? `AI 확인이 끝나면 ${band.switchNote}`
-        : 'AI 확인이 끝나면 통화에 들어갑니다'
-    return (
-      <div className={BAND}>
-        <Badge tone="wait">{band.step === 'testing' ? '시험 중' : '반영 중'}</Badge>
-        <span className={TITLE}>
-          {band.step === 'testing'
-            ? band.switchNote
-              ? '통화에 쓰기 전 시험'
-              : '통화에 반영하기 전 시험'
-            : band.switchNote
-              ? '통화에 들어가는 중'
-              : '고친 내용'}
-        </span>
-        {p ? (
-          <>
-            <span className={DIM}>
-              시나리오 {p.ended} / {p.total}
-            </span>
-            <progress
-              value={p.ended}
-              max={p.total || 1}
-              aria-label="시험 진행"
-              className="h-1.5 w-40 appearance-none overflow-hidden rounded-full bg-ops-idle-soft [&::-moz-progress-bar]:bg-ops-wait [&::-webkit-progress-bar]:bg-ops-idle-soft [&::-webkit-progress-value]:bg-ops-wait"
-            />
-            <span className={DIM}>통과 {p.pass}</span>
-            {/* 0개도 빨강 (시안 — 시나리오 시험 화면의 '실패 0'과 같게) */}
-            <span className="text-[14px] text-ops-stop">실패 {p.fail}</span>
-          </>
-        ) : (
-          <>
-            {!band.switchNote && <span className={DIM}>{band.time} 저장</span>}
-            <span className={DIM}>{waiting}</span>
-          </>
-        )}
-        {band.step === 'testing' && (
-          <span className="ml-auto flex flex-wrap gap-3">
-            {onProgress && <Btn onClick={onProgress}>진행 보기</Btn>}
-            {band.canApply && (
-              <Btn kind="danger" onClick={onStop}>
-                시험 중단
-              </Btn>
-            )}
-          </span>
-        )}
-      </div>
-    )
-  }
+  if (band.step === 'testing' || band.step === 'applying')
+    return <WaitBand band={band} onProgress={onProgress} onStop={onStop} />
   const s = band.stopped
   const r = band.review
   return (
@@ -132,16 +149,7 @@ export function ApplyBand({
               title={busy ? '고친 내용을 먼저 저장해 주세요' : undefined}
               onClick={r ? onReview : onApply}
             >
-              {/* 6번(다른 상담가로 바꾸기)은 반영 대신 사용 · 다시 시험만 (통과해도 저절로 안 바꿈) */}
-              {r
-                ? band.switchNote
-                  ? '확인하고 사용하기'
-                  : '확인하고 반영'
-                : s
-                  ? band.switchNote
-                    ? '다시 시험'
-                    : '다시 시험하고 반영'
-                  : '통화에 반영'}
+              {applyLabel(band)}
             </Btn>
           )}
         </span>

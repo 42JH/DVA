@@ -8,6 +8,13 @@ const GRID = 'grid grid-cols-[72px_minmax(0,1fr)_40px] gap-x-3'
 
 const clock = (sec?: number | null) => (sec == null ? '' : fmtClock(sec))
 
+// 말 줄 바탕 — 지금 듣는 말 · 찾아온 말(잠깐) · 누를 수 있으면 올렸을 때만
+const lineBg = (on: boolean, marked: boolean, clickable: boolean) => {
+  if (on) return 'bg-ops-route-soft'
+  if (marked) return 'bg-ops-wait-soft'
+  return clickable ? 'hover:bg-ops-paper' : ''
+}
+
 /** 말 한 줄 */
 export function Talk({
   ai,
@@ -28,7 +35,7 @@ export function Talk({
   dataKey?: number
   flag?: string // 고객 불만인 말 — 문장을 빨갛게 칠하고 아래에 이 글 (11/11)
 }) {
-  const cls = `${GRID} w-full rounded-md px-3 py-2 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ops-route ${on ? 'bg-ops-route-soft' : marked ? 'bg-ops-wait-soft' : onClick ? 'hover:bg-ops-paper' : ''}`
+  const cls = `${GRID} w-full rounded-md px-3 py-2 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ops-route ${lineBg(on, marked, !!onClick)}`
   const inner = (
     <>
       <span

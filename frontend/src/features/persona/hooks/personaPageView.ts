@@ -47,7 +47,7 @@ interface PromptView {
 }
 
 // 칸마다 따로 비교 — 한 칸의 줄이 다른 칸 줄과 짝지어지지 않게. before → v (before가 없으면 비교 없음)
-export function promptSections(v: PersonaVersion, before?: PersonaVersion) {
+function promptSections(v: PersonaVersion, before?: PersonaVersion) {
   const sections = PROMPT_SECTIONS.map((s) => {
     let rows: { key: string; parts: Part[] }[] | null = null
     // 안 바뀐 칸은 rows 없이 → 글 그대로

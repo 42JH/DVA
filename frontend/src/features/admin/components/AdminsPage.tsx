@@ -12,6 +12,13 @@ import { Pagination } from '@/shared/ui/Pagination'
 import { usePageSize } from '@/shared/lib/paging'
 import { Confirm } from '@/shared/ui/Modal'
 
+// 관리 칸 버튼 모양 — 활성화는 비활성화와 같은 자리 · 같은 배지 모양
+const ACTION_KIND = {
+  delete: 'dangerBadge',
+  deactivate: 'plainBadge',
+  reset: 'editBadge',
+  activate: 'lineBadge',
+} as const satisfies Record<AdminAction, string>
 const ACTION_LABEL: Record<AdminAction, string> = {
   reset: '비밀번호 초기화',
   deactivate: '비활성화',
@@ -136,15 +143,7 @@ export function AdminsPage() {
                           r.actions.map((a) => (
                             <Btn
                               key={a}
-                              kind={
-                                a === 'delete'
-                                  ? 'dangerBadge'
-                                  : a === 'deactivate'
-                                    ? 'plainBadge'
-                                    : a === 'reset'
-                                      ? 'editBadge'
-                                      : 'lineBadge' // 활성화 — 비활성화와 같은 자리 · 같은 배지 모양
-                              }
+                              kind={ACTION_KIND[a]}
                               disabled={busy}
                               onClick={() =>
                                 a === 'activate' ? vm.activate(r.id) : vm.ask(a, r.id)

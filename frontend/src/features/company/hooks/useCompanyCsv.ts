@@ -62,14 +62,23 @@ export function useCompanyCsv(onDone: () => void) {
   // 서버 오류 경로는 members.N.field (등록 본문의 사원 배열) → 파일의 행
   const rowErrors = err instanceof ApiError ? serverRowErrors(err.details, members) : []
 
+  // 파일 칸 아래 — 파일을 못 읽었으면 그 이유, 서버가 줄을 거절했으면 그 줄 (3줄까지)
+  const fileErrorOf = () => {
+    if (picked.kind === 'bad')
+      return [...picked.errors, ...(picked.more ? [`외 ${picked.more}건`] : [])].join('\n')
+    return rowErrors.length ? rowErrors.slice(0, 3).join('\n') : undefined
+  }
+  // 버튼 줄 — 줄 오류는 파일 칸 아래에 보이므로 여기엔 없음. 등록은 됐는데 주소만 실패했으면 안내
+  const failText = () => {
+    if (err) return rowErrors.length ? null : errorText(err, '등록')
+    return reg.data
+      ? `기업과 사원은 등록했지만 ${reg.data}명의 주소를 저장하지 못했습니다. 기업 상세의 [수정]에서 넣어 주세요.`
+      : null
+  }
+
   return {
     file: picked.kind === 'none' ? null : picked.file,
-    fileError:
-      picked.kind === 'bad'
-        ? [...picked.errors, ...(picked.more ? [`외 ${picked.more}건`] : [])].join('\n')
-        : rowErrors.length
-          ? rowErrors.slice(0, 3).join('\n')
-          : undefined,
+    fileError: fileErrorOf(),
     // '샘플상사, 부서 2곳, 사원 4명을 등록합니다.'
     summary: members.length
       ? [
@@ -84,13 +93,7 @@ export function useCompanyCsv(onDone: () => void) {
       setPicked({ kind: 'none' })
       reg.reset()
     },
-    errorMessage: err
-      ? rowErrors.length
-        ? null // 줄 오류는 파일 칸 아래에
-        : errorText(err, '등록')
-      : reg.data
-        ? `기업과 사원은 등록했지만 ${reg.data}명의 주소를 저장하지 못했습니다. 기업 상세의 [수정]에서 넣어 주세요.`
-        : null,
+    errorMessage: failText(),
     canSubmit: picked.kind === 'ok' && !reg.isPending && !reg.data,
     isSubmitting: reg.isPending,
     submit: () => picked.kind === 'ok' && reg.mutate(),

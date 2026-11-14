@@ -37,6 +37,16 @@ const party = (p: Party) => ({
   detail: p.detailAddress ?? '',
 })
 
+/** 상세를 못 받았을 때 한 줄. gone = 보던 미완료 주문이 목록에서 빠짐 */
+const loadError = (error: unknown, gone: boolean) => {
+  if (!error) return null
+  if (gone)
+    return '이 미완료 주문은 목록에서 빠졌습니다. 24시간이 지났거나, 더 최근 통화로 정리됐거나, 이미 처리됐습니다.'
+  return error instanceof ApiError && error.status === 404
+    ? '주문을 찾을 수 없습니다.'
+    : '불러오지 못했습니다. 다시 시도해 주세요.'
+}
+
 export function useWaybill(orderSeq: number, parcelSeq: number | null) {
   const qc = useQueryClient()
   // 30초 안에 받은 상세(줄에 마우스를 올려 미리 받은 것)는 다시 묻지 않음 — 수정 · 취소는 무효화로 새로 받음
@@ -108,13 +118,7 @@ export function useWaybill(orderSeq: number, parcelSeq: number | null) {
   return {
     view,
     missing,
-    error: !q.error
-      ? null
-      : gone
-        ? '이 미완료 주문은 목록에서 빠졌습니다. 24시간이 지났거나, 더 최근 통화로 정리됐거나, 이미 처리됐습니다.'
-        : q.error instanceof ApiError && q.error.status === 404
-          ? '주문을 찾을 수 없습니다.'
-          : '불러오지 못했습니다. 다시 시도해 주세요.',
+    error: loadError(q.error, gone),
     canEdit:
       !!status && status !== 'CANCELLED' && !['PAID', 'SUBMITTING', 'ACCEPTED'].includes(status),
     canCancel: status === 'COLLECTING' || status === 'notPaid',
