@@ -1,5 +1,6 @@
 // Local fixture from docs/kick-android-api.md. Never uses real credentials, FCM or paid synthesis.
 const http = require('http');
+const heldStreams = new Map();
 http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
   const body = req.body || {};
@@ -21,7 +22,15 @@ http.createServer(async (req, res) => {
     if (!body.displayName || body.displayName.length > 40) return reply(400, { error: 'Invalid name' });
     return reply(201, { id: 'fixture-created', displayName: body.displayName, token: 'fixture-created-token' });
   }
-  if (req.headers.authorization !== 'Bearer fixture-a') return reply(401, { error: 'Unauthorized' });
+  const accountId = req.headers.authorization === 'Bearer fixture-a' ? 'kick-test-1'
+    : req.headers.authorization === 'Bearer fixture-b' ? 'kick-test-2' : null;
+  if (!accountId) return reply(401, { error: 'Unauthorized' });
+  if (req.method === 'POST' && url.pathname === '/__fixture/stop-events') {
+    const key = req.headers['x-fixture-session'] || 'default';
+    for (const stream of heldStreams.get(key) || []) stream.end();
+    heldStreams.delete(key);
+    return reply(204);
+  }
   if (req.method === 'POST' && url.pathname === '/__fixture/reset') {
     await pm.state.set('kick.calls', {});
     await pm.state.set('kick.requests', {});
@@ -31,7 +40,7 @@ http.createServer(async (req, res) => {
     await pm.state.set('kick.push', null);
     return reply(204);
   }
-  if (req.method === 'GET' && url.pathname === '/api/accounts/me') return reply(200, { id: 'kick-test-1', displayName: '테스트 A' });
+  if (req.method === 'GET' && url.pathname === '/api/accounts/me') return reply(200, { id: accountId, displayName: accountId === 'kick-test-1' ? '테스트 A' : '테스트 B' });
   const friends = (await pm.state.get('kick.friends')) || [];
   if (req.method === 'GET' && url.pathname === '/api/friends') return reply(200, friends);
   if (req.method === 'PUT' && url.pathname.startsWith('/api/friends/')) {
@@ -53,17 +62,37 @@ http.createServer(async (req, res) => {
   const calls = (await pm.state.get('kick.calls')) || {};
   const activeId = await pm.state.get('kick.active');
   const active = activeId ? calls[activeId] : null;
-  if (req.method === 'GET' && url.pathname === '/api/calls/active') return reply(200, { accountId: 'kick-test-1', call: active || null });
+  if (req.method === 'GET' && url.pathname === '/api/calls/active') return reply(200, { accountId, call: active || null });
   if (req.method === 'GET' && url.pathname === '/api/calls/events') {
     if (req.headers.accept !== 'text/event-stream') return reply(400, { error: 'Expected SSE Accept' });
-    res.writeHead(200, { 'Content-Type': 'text/event-stream' });
-    return res.end('event: call\ndata: ' + JSON.stringify({ accountId: 'kick-test-1', call: active || null }) + '\n\n');
+    res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });
+    const encode = call => 'event: call\ndata: ' + JSON.stringify({ accountId, call: call || null }) + '\n\n';
+    if (req.headers['x-fixture-hold-sse'] !== 'true') return res.end(encode(active));
+    const streamKey = req.headers['x-fixture-session'] || 'default';
+    if (!heldStreams.has(streamKey)) heldStreams.set(streamKey, new Set());
+    heldStreams.get(streamKey).add(res);
+    res.write(encode(active));
+    let previous = JSON.stringify(active || null);
+    let ticking = false;
+    const timer = setInterval(async () => {
+      if (ticking || res.destroyed) return;
+      ticking = true;
+      try {
+        const callId = await pm.state.get('kick.active');
+        const all = (await pm.state.get('kick.calls')) || {};
+        const call = callId ? all[callId] : null;
+        const value = JSON.stringify(call || null);
+        if (value !== previous) { previous = value; res.write(encode(call)); }
+      } finally { ticking = false; }
+    }, 40);
+    res.on('close', () => { clearInterval(timer); heldStreams.get(streamKey)?.delete(res); });
+    return;
   }
   if (req.method === 'POST' && url.pathname === '/api/calls') {
     if (!body.calleeId || !body.requestId) return reply(400, { error: 'Invalid request' });
     const requests = (await pm.state.get('kick.requests')) || {};
     if (requests[body.requestId]) return reply(201, calls[requests[body.requestId]]);
-    const call = { id: 'fixture-' + body.requestId, callerId: 'kick-test-1', calleeId: body.calleeId, status: 'REQUESTED', requestedAt: '2026-11-13T00:00:00Z' };
+    const call = { id: 'fixture-' + body.requestId, callerId: accountId, calleeId: body.calleeId, status: 'REQUESTED', requestedAt: '2026-11-13T00:00:00Z' };
     calls[call.id] = call;
     requests[body.requestId] = call.id;
     await pm.state.set('kick.calls', calls); await pm.state.set('kick.requests', requests); await pm.state.set('kick.active', call.id);

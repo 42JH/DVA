@@ -20,8 +20,12 @@ dependencies {
 android.testOptions.unitTests.all { test ->
     val runLive = providers.environmentVariable("VOMI_RUN_AUTH_LIVE_TESTS").getOrElse("0")
     test.inputs.property("runAuthLiveTests", runLive)
-    if (runLive == "1") {
+    val runCallLive = providers.environmentVariable("VOMI_RUN_CALL_LIVE_TESTS").getOrElse("0")
+    val simulationUrl = providers.environmentVariable("KICK_SIMULATION_URL").getOrElse("")
+    test.inputs.property("runCallLiveTests", runCallLive)
+    test.inputs.property("kickSimulationUrl", simulationUrl)
+    if (runLive == "1" || runCallLive == "1" || simulationUrl.isNotBlank()) {
         test.outputs.upToDateWhen { false }
-        test.outputs.doNotCacheIf("Read-only live authentication check") { true }
+        test.outputs.doNotCacheIf("Opt-in API integration checks") { true }
     }
 }

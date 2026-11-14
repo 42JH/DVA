@@ -56,6 +56,7 @@ class RemainingApiContractTest {
         val simulationUrl = System.getenv("KICK_SIMULATION_URL").orEmpty()
         assumeTrue("Run the local contract simulation to enable HTTP integration tests", simulationUrl.isNotBlank())
         val destination = simulationUrl.toHttpUrl()
+        val fixtureSessionId = "network-contract-" + UUID.randomUUID().toString()
         val baseHttp = NetworkModule.provideOkHttpClient(AccessTokenInterceptor(tokens), HttpLoggingInterceptor())
         // Auth and Retrofit keep their production URL; only the final transport destination changes for the test.
         http = baseHttp.newBuilder().addInterceptor { chain ->
@@ -65,7 +66,7 @@ class RemainingApiContractTest {
             synchronized(captured) { captured += Captured(request, buffer.readUtf8()) }
             val url = destination.resolve(request.url.encodedPath.removePrefix("/kick/"))!!
                 .newBuilder().encodedQuery(request.url.encodedQuery).build()
-            chain.proceed(request.newBuilder().url(url).build())
+            chain.proceed(request.newBuilder().url(url).header("x-mock-session", fixtureSessionId).build())
         }.build()
         streamingHttp = NetworkModule.provideStreamingOkHttpClient(http)
         val json = NetworkModule.provideJson()
