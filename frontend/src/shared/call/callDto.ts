@@ -138,19 +138,13 @@ export interface CallProcessingResultDto extends Omit<CallActionDto, 'action'> {
 
 // ---------- 화면 모양 ----------
 interface CallRow {
-  callSessionSeq: number
-  startedAt: string | null
-  company: string | null // 소속 기업명 (null = 없음 · 개인 · 서버가 아직 안 줌)
   customerName: string | null
   callerNumber: string // 숫자만. 모르면 ''
   isNew: boolean | null // 신규 고객 (null = 모름)
   counts: Record<CallKind, number | null> | null // null = 분석 전
   hasComplaint: boolean | null // null = 불만 판정 전 (분석 뒤 따로 판정)
   complaints: Complaint[]
-  persona: string | null // 실제로 받은 상담가 이름 (그 버전의 이름 — 분석 전이면 null)
   durationSec: number | null
-  callbackAsked: boolean | null // 콜백 요청 (null = 모름 — 아님으로 보지 않기)
-  handoffAsked: boolean | null // 상담원 연결 요구 (AI 판정, 연결 성공 아님)
 }
 export interface Complaint {
   type: ComplaintType
@@ -226,7 +220,6 @@ export interface Recording {
   error: RecordingDto['playbackError']
 }
 interface CallDetail {
-  callSessionSeq: number
   customerName: string | null
   startedAt: string | null
   durationSec: number | null
@@ -234,7 +227,7 @@ interface CallDetail {
   isNew: boolean | null // 신규 고객 (null = 모름) — 04 줄과 같은 값
   counts: CallRow['counts'] // 상담 유형 횟수 (null = 분석 전) — 04 줄과 같은 값
   persona: { name: string; version: number } | null
-  handoff: { status: HandoffDto['status']; reason: string } | null // 실제 이관 요청 기록
+  handoff: { status: HandoffDto['status'] } | null // 실제 이관 요청 기록
   callbackAsked: boolean | null // 04 줄과 같은 값
   handoffAsked: boolean | null // AI 판정 요구 — handoff(기록)와 다를 수 있음
   hasComplaint: boolean | null
@@ -242,7 +235,6 @@ interface CallDetail {
   utterances: Utterance[]
   actions: AiAction[]
   results: ResultBlock[]
-  aiActionCount: number
   recording: Recording | null // 첫 녹취 (url 있는 것 우선). 빈 배열(아직 연결 안 됨)이면 null
 }
 
@@ -273,19 +265,13 @@ function isNewOf(c: CallDto, isNewCustomer: boolean | null | undefined): boolean
 export function toCallRow(d: CallListItemDto): CallRow {
   const a = d.analysis
   return {
-    callSessionSeq: d.callSessionSeq,
-    startedAt: d.startedAt,
     customerName: d.customerName,
-    company: d.organizationName ?? null,
     callerNumber: digits(d.callerPhoneNumber),
     isNew: isNewOf(d, a?.isNewCustomer),
     counts: countsOf(a),
     hasComplaint: a ? a.hasComplaint : null,
     complaints: toComplaints(a),
-    persona: a?.personaName ?? null,
     durationSec: durationSec(d.startedAt, d.endedAt),
-    callbackAsked: a?.hasCallbackRequest ?? null,
-    handoffAsked: a?.hasHandoffRequest ?? null,
   }
 }
 
@@ -298,7 +284,6 @@ export function toCallDetail(
   const a = d.analysis
   const rec = d.recordings.find((r) => r.url) ?? d.recordings[0]
   return {
-    callSessionSeq: d.call.callSessionSeq,
     customerName: d.call.customerName,
     startedAt: d.call.startedAt,
     durationSec: durationSec(d.call.startedAt, d.call.endedAt),
@@ -309,9 +294,7 @@ export function toCallDetail(
       a?.personaName && a.personaVersion !== null
         ? { name: a.personaName, version: a.personaVersion }
         : null,
-    handoff: d.call.handoff
-      ? { status: d.call.handoff.status, reason: d.call.handoff.reason }
-      : null,
+    handoff: d.call.handoff ? { status: d.call.handoff.status } : null,
     callbackAsked: a?.hasCallbackRequest ?? null,
     handoffAsked: a?.hasHandoffRequest ?? null,
     hasComplaint: a ? a.hasComplaint : null,
@@ -337,7 +320,6 @@ export function toCallDetail(
       unansweredQuestionSeq: x.unansweredQuestionSeq,
       reason: x.unansweredReason ?? null,
     })),
-    aiActionCount: d.aiActionCount,
     recording: rec
       ? {
           recordingSeq: rec.recordingSeq,

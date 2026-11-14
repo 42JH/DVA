@@ -22,16 +22,6 @@ function PersonasView() {
   return (
     <>
       <PageHead title="AI 상담가" />
-      {vm.demo && (
-        // 시연 모드 (11/09) — 고쳐 봐도 실서버 AI 상담가에는 안 감
-        <p
-          role="note"
-          className="shrink-0 border-b border-ops-wait/20 bg-ops-wait-soft px-6 py-2 text-[13px] text-ops-wait"
-        >
-          시연 모드입니다. 여기서 저장 · 통화에 사용한 내용은 실제 AI 상담가에 반영되지 않고,
-          새로고침하면 원래대로 돌아갑니다.
-        </p>
-      )}
       {vm.adding ? (
         // 등록 — 위 탭 아래 '새 상담가' 카드. 목록이 비어 있어도 첫 상담가를 만들 수 있게 맨 앞에서 가름
         <div className={FRAME}>

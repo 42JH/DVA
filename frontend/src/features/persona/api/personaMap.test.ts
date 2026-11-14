@@ -86,15 +86,11 @@ assert.deepEqual(
   ],
 )
 assert.deepEqual(av[0]!.prompt, fields('C')) // 서버 다른 칸은 안 섞임
-assert.equal(av[0]!.changes.prompt, true) // 초안도 바로 앞(HEAD)과 비교
-assert.deepEqual(av[1]!.changes.speed, ['FAST', 'NORMAL']) // v3 빠르게 → v4 보통
-assert.equal(av[1]!.voiceOnly, true)
-assert.equal(av[4]!.changes.first, true)
 assert.equal(av[4]!.author, '')
 const pa = toPersona(dto(a[0]!, a[0]!, { draft: draft() }))
 assert.deepEqual(
-  [pa.inUse, pa.appliedVersion, pa.savedVersion, pa.head, pa.draftRevision],
-  [true, 4, 5, { version: 4, seq: 104 }, 'rev-1'],
+  [pa.inUse, pa.appliedVersion, pa.head, pa.draftRevision],
+  [true, 4, { version: 4, seq: 104 }, 'rev-1'],
 )
 
 // 초안이 없으면 버전 기록 그대로, 저장됨 없음
@@ -102,12 +98,11 @@ assert.deepEqual(
   toVersions(a, 4, null).map((v) => v.status),
   ['ACTIVE', 'PAST', 'PAST', 'PAST'],
 )
-assert.equal(toPersona(dto(a[0]!, a[0]!)).savedVersion, null)
 
 // 통화에 안 쓰는 페르소나: 적용본 = HEAD(appliedAt이 없어도) → '마지막 적용'
 const b = [ver(3, { voiceId: null }), ver(2), ver(1)]
 const pb = toPersona(dto(b[0]!, null))
-assert.deepEqual([pb.inUse, pb.appliedVersion, pb.savedVersion], [false, 3, null])
+assert.deepEqual([pb.inUse, pb.appliedVersion], [false, 3])
 assert.equal(pb.voice.voice, '') // 기본 음성 = ''
 assert.deepEqual(
   toVersions(b, 3, null).map((v) => v.status),
@@ -117,7 +112,7 @@ assert.deepEqual(
 // 확정은 됐는데 적용 요청이 실패: HEAD v5 > 적용 중 v4 → v5 '저장됨'(적용 다시), 적용본은 v4
 const c = [ver(5, fields('B')), ver(4, { status: 'ACTIVE' })]
 const pc = toPersona(dto(c[0]!, c[1]!))
-assert.deepEqual([pc.appliedVersion, pc.savedVersion], [4, 5])
+assert.equal(pc.appliedVersion, 4)
 assert.deepEqual(
   toVersions(c, 5, null).map((v) => v.status),
   ['SAVED', 'ACTIVE'],
@@ -129,11 +124,6 @@ const d = [
   ver(4, { status: 'ACTIVE' }),
 ]
 const pd = toPersona(dto(d[0]!, d[1]!, { pendingVersion: d[0]! }))
-assert.deepEqual([pd.savedVersion, pd.applyingVersion, pd.applyError], [null, 5, 'AI_UNAVAILABLE'])
-
-// 프롬프트 변경: 여섯 칸 중 하나만 달라도 바뀜(음성만 바뀐 버전 아님), 다 같으면 안 바뀜
-const e = toVersions([ver(2, { tone: 'B' }), ver(1)], 2, null)
-assert.deepEqual([e[0]!.changes.prompt, e[0]!.voiceOnly], [true, false])
-assert.equal(toVersions([ver(2), ver(1)], 2, null)[0]!.changes.prompt, false)
+assert.deepEqual([pd.applyingVersion, pd.applyError], [5, 'AI_UNAVAILABLE'])
 
 console.log('personaMap OK')

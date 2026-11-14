@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { ApiError } from '@/shared/api/client'
-import { fmtClock, fmtPhone } from '@/shared/lib/format'
+import { fmtClock } from '@/shared/lib/format'
 import { COMPLAINT_LABEL } from '@/features/call/labels'
 import {
   callQueries,
@@ -216,13 +216,7 @@ export function useCallDetail(callId: number, fromFaq?: number) {
     error,
     notice,
 
-    // 상단바 (11/05 새 디자인): 경로 '통화 > “김민수”님 통화' · 발신번호
-    customer: call?.customerName ?? null,
-    notFound: detail.error instanceof ApiError && detail.error.status === 404,
-    caller: call?.callerNumber ? fmtPhone(call.callerNumber) : '',
-
     // 대본 + 녹취 재생 (아래 재생 줄)
-    persona: call?.persona?.name ?? '', // 재생 줄 왼쪽 '[ 빠른 접수형 ]'
     player: {
       state: player.state,
       playing: player.playing,

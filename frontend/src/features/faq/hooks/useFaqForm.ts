@@ -122,6 +122,5 @@ export function useFaqDelete(faq: Faq, onDeleted: () => void) {
     confirm: () => remove.mutate(),
     pending: remove.isPending,
     error: remove.error?.message ?? null,
-    target: `“${faq.question}”`,
   }
 }

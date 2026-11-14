@@ -2,7 +2,7 @@
 // 가짜 주문의 보내는 분 = 고객(전화번호로 하나), 그 고객이 보낸 받는 분 = 주소록 — '고객' 화면 확인용
 import { http, HttpResponse } from 'msw'
 import { API_BASE_URL } from '@/shared/api/client'
-import { allOrders } from '@/shared/order/orderApi'
+import { allOrders } from './orderData'
 import { membershipByPhone } from './companies'
 
 type Addr = {

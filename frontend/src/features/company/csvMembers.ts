@@ -159,13 +159,6 @@ const fail = (all: string[]): CsvResult => ({
 export const readMembersCsv = (text: string, kind: CsvKind = 'members'): CsvResult =>
   readMembersRows(parseCsv(text), kind)
 
-/** 기업 CSV 사원 → 기업별 묶음 (파일에 나온 순서) */
-function groupByCompany(members: CsvMember[]): { name: string; members: CsvMember[] }[] {
-  const by = new Map<string, CsvMember[]>()
-  for (const m of members) by.set(m.company ?? '', [...(by.get(m.company ?? '') ?? []), m])
-  return [...by].map(([name, ms]) => ({ name, members: ms }))
-}
-
 /** 줄 · 칸(CSV든 엑셀이든) → 사원 목록 또는 오류 */
 function readMembersRows(rows: string[][], kind: CsvKind = 'members'): CsvResult {
   const [rawHead, ...rawBody] = rows.map((r) => r.map((v) => plainCell(v.trim())))
@@ -245,11 +238,9 @@ function readMembersRows(rows: string[][], kind: CsvKind = 'members'): CsvResult
   })
   // 한 파일 = 한 기업 (11/11 사용자) · 담당자 1명 이상
   if (withCompany && errors.length === 0) {
-    const groups = groupByCompany(members)
-    if (groups.length > 1)
-      errors.push(
-        `한 파일에는 한 기업만 넣어 주세요. (지금 ${groups.map((g) => g.name).join(', ')})`,
-      )
+    const companies = [...new Set(members.map((m) => m.company ?? ''))] // 파일에 나온 순서
+    if (companies.length > 1)
+      errors.push(`한 파일에는 한 기업만 넣어 주세요. (지금 ${companies.join(', ')})`)
     else if (!members.some((m) => m.leader)) errors.push('담당자를 1명 이상 Y로 표시해 주세요.')
   }
   return errors.length ? fail(errors) : { ok: true, members }

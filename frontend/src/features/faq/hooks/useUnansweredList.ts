@@ -1,9 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { useNavigate } from 'react-router'
 import { FETCH_ALL_MAX } from '@/shared/api/paging'
 import { ymd } from '@/shared/lib/dateRange'
-import { fmtListTime, fmtMonthDay, fmtPhone, fmtTime } from '@/shared/lib/format'
+import { fmtListTime, fmtPhone, fmtTime } from '@/shared/lib/format'
 import { matchKo, phoneDigits } from '@/shared/lib/search'
 import { useListParams } from '@/shared/lib/useListParams'
 import {
@@ -21,16 +20,13 @@ export type UnansweredRow = UnansweredQuestion & { time: string; phone: string }
 // from = 이동 전 화면 주소 (경로 첫 칸, 11/05 — 검색 · 쪽을 바꿔도 남음)
 const DEFAULTS = { q: '', call: '' }
 
-type Group = { day: string; label: string; rows: UnansweredRow[] }
-
 type Modal = { kind: 'delete' | 'faq'; item: UnansweredQuestion } | null
 
-/** 09 AI 미답변 문의 훅 (Figma 'FAQ 미답변' 11/06) — 처리 안 된 질문만 · 오래된 순(먼저 쌓인 것부터 처리) · 통화 날짜별로 묶음, 쪽 없이 스크롤
+/** 09 AI 미답변 문의 훅 (Figma 'FAQ 미답변' 11/06) — 처리 안 된 질문만 · 오래된 날부터(먼저 쌓인 것부터 처리)
  * 검색 = 질문 · 이름 · 전화번호. 줄마다 [+](FAQ 화면 맨 위 추가 칸 → 저장하면 처리됨) · [휴지통](확인 창). 줄을 누르면 그 통화의 06
  * 같은 질문 묶기 · 한꺼번에 처리 없음 (콜드 스타트, MVP 후) */
 export function useUnansweredList() {
   const qc = useQueryClient()
-  const navigate = useNavigate()
   const { params, set } = useListParams(DEFAULTS)
   const [modal, setModal] = useState<Modal>(null)
   const list = useQuery(unansweredQueries.list())
@@ -59,18 +55,18 @@ export function useUnansweredList() {
       : first
         ? `${first.customerName}${first.startedAt ? ` · ${fmtListTime(first.startedAt).join(' ')}` : ''} 통화의 질문만`
         : '이 통화의 질문만'
-  const groups: Group[] = []
-  for (const u of hit) {
-    const day = u.startedAt ? ymd(new Date(u.startedAt)) : ''
-    let g = groups.find((x) => x.day === day)
-    if (!g) groups.push((g = { day, label: day ? fmtMonthDay(day) : '날짜 모름', rows: [] }))
-    g.rows.push({
-      ...u,
-      time: u.startedAt ? fmtTime(u.startedAt) : '—', // 시각을 못 받은 통화
-      phone: u.callerNumber ? fmtPhone(u.callerNumber) : '—',
-    })
-  }
-  groups.sort((a, b) => (a.day || '~').localeCompare(b.day || '~')) // 오래된 날부터, 날짜 모름은 맨 뒤
+  // 오래된 날부터, 날짜 모름은 맨 뒤 (같은 날은 서버 순서)
+  const rows: UnansweredRow[] = hit
+    .map((u) => ({
+      day: u.startedAt ? ymd(new Date(u.startedAt)) : '~',
+      row: {
+        ...u,
+        time: u.startedAt ? fmtTime(u.startedAt) : '—', // 시각을 못 받은 통화
+        phone: u.callerNumber ? fmtPhone(u.callerNumber) : '—',
+      },
+    }))
+    .sort((a, b) => a.day.localeCompare(b.day))
+    .map((x) => x.row)
 
   const remove = useMutation({
     mutationFn: (id: number) => deleteUnanswered(id),
@@ -85,7 +81,7 @@ export function useUnansweredList() {
     },
     callChip, // 적용된 필터 칩 (06에서 왔을 때만)
     clearCall: () => set({ call: '' }), // ✕ → 전체 미답변으로
-    groups,
+    rows,
     count: hit.length, // 검색 중엔 결과 수
     // 서버가 오래된 것부터 주고 2,000개까지만 받음 → 그 뒤(최신) 질문은 목록에 없음. 넘으면 서버 쪽 넘김으로 바꿔야 함 (11/02)
     listNote: capped
@@ -93,8 +89,6 @@ export function useUnansweredList() {
       : null,
     isLoading: list.isPending,
     listError: list.error?.message ?? null,
-
-    openCall: (u: UnansweredQuestion) => navigate(`/calls/${u.callSessionSeq}`),
 
     modal,
     // [FAQ 등록] = 이 화면에서 바로 창으로 (11/11 — FAQ 화면으로 넘어갔다 오던 것). 질문 칸은 고객이 한 말, 저장하면 이 질문이 처리됨(API-27)
