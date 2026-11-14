@@ -1,12 +1,11 @@
 package com.ssafy.vomi.feature.call.impl.model
 
-import com.ssafy.vomi.core.model.call.Backchannel
 import com.ssafy.vomi.core.model.call.CallMessage
 import com.ssafy.vomi.core.model.call.CallSpeaker
 import com.ssafy.vomi.core.model.call.CallSummary
 import com.ssafy.vomi.core.model.call.ReplySuggestion
 
-// UI fixtures only. No RTC, STT, on-device model, or audio synthesis is connected yet.
+// Preview/test fixtures only. Runtime signaling state comes from CallRepository.
 internal fun sampleCallState(friendId: String, friendName: String, isIncoming: Boolean = false) =
     CallUiState(
         friendId = friendId,
@@ -21,13 +20,7 @@ internal fun sampleCallState(friendId: String, friendName: String, isIncoming: B
             ReplySuggestion(2L, "내일 저녁은 어떠세요?"),
             ReplySuggestion(3L, "일정 확인하고 다시 말씀드릴게요."),
         ),
-        backchannels = listOf(
-            Backchannel(1L, "응응"),
-            Backchannel(2L, "네"),
-            Backchannel(3L, "아하"),
-            Backchannel(4L, "진짜?"),
-            Backchannel(5L, "나도 그렇게 생각해"),
-        ),
+        backchannels = defaultBackchannels,
         summary = if (isIncoming) null else CallSummary(
             overview = "오늘 저녁에 만날 수 있는지 이야기하고 있어요.",
             highlights = listOf(

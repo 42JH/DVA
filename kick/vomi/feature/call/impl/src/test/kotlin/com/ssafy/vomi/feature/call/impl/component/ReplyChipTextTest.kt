@@ -1,6 +1,8 @@
 package com.ssafy.vomi.feature.call.impl.component
 
-import com.ssafy.vomi.feature.call.impl.CallViewModel
+import com.ssafy.vomi.feature.call.impl.CallConversation
+import com.ssafy.vomi.feature.call.impl.model.sampleCallState
+import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
@@ -9,7 +11,7 @@ import org.junit.Test
 class ReplyChipTextTest {
     @Test
     fun displayBreakHintsNeverLeakIntoTheDraftOrSentMessage() {
-        val viewModel = CallViewModel().apply { initialize("kick-test-2", "친구", false) }
+        val viewModel = CallConversation(MutableStateFlow(sampleCallState("kick-test-2", "친구")))
         val reply = viewModel.uiState.value.suggestions.last()
         val display = reply.text.withHangulWrapOpportunities()
         assertNotEquals(reply.text, display)
