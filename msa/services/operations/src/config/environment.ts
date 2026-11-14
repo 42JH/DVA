@@ -12,6 +12,8 @@ export interface Environment {
   DB_PASSWORD: string;
   DB_NAME: string;
   AI_AGENT_URL?: string;
+  PERSONA_CHECK_URL?: string;
+  PERSONA_CHECK_TOKEN?: string;
   AI_PERSONA_TOKEN?: string;
   AI_FAQ_TOKEN?: string;
   CORS_ORIGINS: string[];
@@ -102,6 +104,33 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
     }
   }
   const personaToken = raw.AI_PERSONA_TOKEN;
+  let personaCheckUrl: string | undefined;
+  if (raw.PERSONA_CHECK_URL !== undefined && raw.PERSONA_CHECK_URL !== '') {
+    try {
+      if (typeof raw.PERSONA_CHECK_URL !== 'string')
+        throw new Error('Invalid persona check origin');
+      const url = new URL(raw.PERSONA_CHECK_URL);
+      if (
+        !['http:', 'https:'].includes(url.protocol) ||
+        url.username ||
+        url.password ||
+        url.pathname !== '/' ||
+        url.search ||
+        url.hash
+      )
+        errors.push('PERSONA_CHECK_URL');
+      else personaCheckUrl = url.origin;
+    } catch {
+      errors.push('PERSONA_CHECK_URL');
+    }
+  }
+  const personaCheckToken = raw.PERSONA_CHECK_TOKEN;
+  if (
+    personaCheckToken !== undefined &&
+    personaCheckToken !== '' &&
+    (typeof personaCheckToken !== 'string' || !/^[a-fA-F0-9]{64}$/.test(personaCheckToken))
+  )
+    errors.push('PERSONA_CHECK_TOKEN');
   if (
     personaToken !== undefined &&
     personaToken !== '' &&
@@ -142,6 +171,9 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
     DB_PASSWORD: required('DB_PASSWORD'),
     DB_NAME: required('DB_NAME'),
     AI_AGENT_URL: typeof aiUrl === 'string' ? aiUrl.replace(/\/$/, '') : undefined,
+    PERSONA_CHECK_URL: personaCheckUrl,
+    PERSONA_CHECK_TOKEN:
+      typeof personaCheckToken === 'string' && personaCheckToken ? personaCheckToken : undefined,
     AI_PERSONA_TOKEN: typeof personaToken === 'string' && personaToken ? personaToken : undefined,
     AI_FAQ_TOKEN: typeof faqToken === 'string' && faqToken ? faqToken : undefined,
     CORS_ORIGINS: origins,

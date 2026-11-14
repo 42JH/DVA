@@ -29,6 +29,13 @@ export function configureApplication(app: INestApplication, logger = new Logger(
   app.use('/internal/events', (request: Request, response: Response, next: NextFunction) => {
     eventParser(request, response, next);
   });
+  // A 20,000-character prompt can exceed 100 KiB when JSON-escaped.
+  const parsePersonaCheckRun = json({ limit: '128kb' });
+  app.use('/api/persona-check/runs', (request: Request, response: Response, next: NextFunction) =>
+    request.method === 'POST' && request.path === '/'
+      ? parsePersonaCheckRun(request, response, next)
+      : next(),
+  );
   app.enableCors({
     origin: (
       origin: string | undefined,
