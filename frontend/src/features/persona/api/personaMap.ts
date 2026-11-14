@@ -156,6 +156,19 @@ const draftRow = (d: PersonaDraftDto, headVersion: number): PersonaVersionDto =>
   applyErrorCode: null,
 })
 
+/** 화면 상태 — 초안은 저장됨, 서버 상태가 있으면(통화에 사용 중 · 적용 대기) 그대로, 나머지는 지난 버전 · 적용본 */
+const statusOf = (
+  v: PersonaVersionDto,
+  is: { draft: boolean; head: boolean },
+  active: number | undefined, // 통화에 쓰는 버전 번호
+): PersonaVersion['status'] => {
+  if (is.draft) return 'SAVED'
+  if (v.status !== 'INACTIVE') return v.status
+  if (!is.head) return 'PAST'
+  // 확정됐지만 적용 요청이 안 된 HEAD (확정 뒤 적용 요청이 실패한 경우) → [적용] 다시
+  return active !== undefined && v.version > active ? 'SAVED' : 'APPLIED'
+}
+
 /** 버전 기록 (+ 초안이 있으면 맨 위 한 줄) → 화면 버전 (높은 번호가 위). 서버 순서를 믿지 않고 정렬 */
 export function toVersions(
   list: PersonaVersionDto[],
@@ -183,15 +196,7 @@ export function toVersions(
       seq: v.aiPersonaVersionSeq,
       version: v.version,
       name: v.name,
-      status: isDraft
-        ? 'SAVED'
-        : v.status !== 'INACTIVE'
-          ? v.status
-          : !isHead
-            ? 'PAST'
-            : active !== undefined && v.version > active
-              ? 'SAVED' // 확정됐지만 적용 요청이 안 된 HEAD (확정 뒤 적용 요청이 실패한 경우) → [적용] 다시
-              : 'APPLIED',
+      status: statusOf(v, { draft: isDraft, head: isHead }, active),
       isHead,
       isDraft,
       voiceOnly:
