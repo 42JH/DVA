@@ -142,8 +142,20 @@ def main():
             (ROOT / 'msa/parity/baseline.json').read_text())['inventory']['routes'] if route['service'] == 'operations'}
         expected_roles = {route: roles for route, roles in role_maps['monolith'].items() if route in owned}
         assert len(role_maps['monolith']) == 95 and expected_roles
-        assert role_maps['operations'] == expected_roles, 'Operations role metadata differs from the original'
+        # The pinned monolith predates persona-check. Verify each new public route and role.
+        persona_routes = (
+            'GET /scenarios', 'GET /scenarios/:id', 'GET /runs', 'POST /runs',
+            'POST /runs/:runId/stop', 'GET /runs/:runId', 'GET /runs/:runId/:scenario/verdict',
+            'GET /runs/:runId/:scenario/record', 'GET /runs/:runId/:scenario/audio',
+        )
+        for route in persona_routes:
+            method, path = route.split()
+            expected_roles[f'{method} /api/persona-check{path}'] = ['OPERATOR', 'SYSTEM_ADMIN']
+        assert role_maps['operations'] == expected_roles, 'Operations public role metadata differs'
         report['adminRouteRoles'] = role_maps
+        name = RUN + '-persona-check-contract'
+        create(name, images['operations-checks'], command=('node', '--test', 'test/persona-check.test.cjs'))
+        complete(name)
         name = RUN + '-persona-peer'
         create(name, images['operations-checks'], '--network-alias', 'persona-fixture',
                '-e', 'NODE_ENV=test', '-e', 'AI_PERSONA_TOKEN=' + password,

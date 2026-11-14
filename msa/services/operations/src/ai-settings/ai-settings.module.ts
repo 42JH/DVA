@@ -12,6 +12,8 @@ import { AiSettingsGuard } from './ai-settings-access';
 import { PersonaApplicationService } from './persona-application.service';
 import { PersonaVersionController } from './persona-version.controller';
 import { CallReadReferencesController } from './call-read-references.controller';
+import { PersonaCheckClient } from './persona-check.client';
+import { PersonaCheckController } from './persona-check.controller';
 
 @Module({
   imports: [ApplicationConfigModule, DatabaseModule, AuditModule],
@@ -21,6 +23,7 @@ import { CallReadReferencesController } from './call-read-references.controller'
     AiRuntimeController,
     PersonaVersionController,
     CallReadReferencesController,
+    PersonaCheckController,
   ],
   providers: [
     AiSettingsRepository,
@@ -28,6 +31,7 @@ import { CallReadReferencesController } from './call-read-references.controller'
     AiPersonaClient,
     AiSettingsGuard,
     PersonaApplicationService,
+    PersonaCheckClient,
   ],
 })
 export class AiSettingsModule {}

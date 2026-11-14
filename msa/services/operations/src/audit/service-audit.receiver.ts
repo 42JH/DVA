@@ -475,9 +475,12 @@ export class ServiceAuditReceiver implements OnModuleInit, OnModuleDestroy {
             if (reference.rowCount !== 1) throw invalid();
           }
           await repository.insert(input.audit, input.result, client, input.at);
+          // Resolve the sequence once so the delete can use the primary key index.
           await client.query(
             `WITH prepared AS (
-          DELETE FROM audit_logs WHERE audit_log_seq=currval(pg_get_serial_sequence('audit_logs','audit_log_seq')) RETURNING *
+          DELETE FROM audit_logs
+          WHERE audit_log_seq=(SELECT currval(pg_get_serial_sequence('audit_logs','audit_log_seq')))
+          RETURNING *
         ) INSERT INTO ${table}(event_id,transaction_id,audit) SELECT $1,$2,to_jsonb(prepared) FROM prepared`,
             [event.eventId, input.transactionId],
           );
