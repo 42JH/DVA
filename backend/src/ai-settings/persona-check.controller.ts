@@ -2,14 +2,17 @@ import { Body, Controller, Get, HttpCode, Param, Post, Query, Req, Res } from '@
 import {
   ApiAcceptedResponse,
   ApiCookieAuth,
+  ApiParam,
   ApiProduces,
   ApiResponse,
   ApiTags,
+  getSchemaPath,
 } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { Roles } from '../auth/auth.guard';
+import { RequestMetaDto } from '../common/dto/api-response.dto';
 import { ApiException } from '../common/errors/api.exception';
 import {
   PersonaCheckResultParams,
@@ -56,7 +59,27 @@ export class PersonaCheckController {
   @HttpCode(202)
   @ApiAcceptedResponse({ description: '시험 실행이 접수되었습니다.' })
   start(@Body() input: StartPersonaCheckRunDto) {
-    return this.client.json('/runs', input);
+    return this.client.json('/runs', 'POST', input);
+  }
+
+  @Post('runs/:runId/stop')
+  @HttpCode(202)
+  @ApiParam({ name: 'runId', type: String })
+  @ApiAcceptedResponse({
+    description: '시험 멈춤이 접수되었습니다.',
+    schema: {
+      type: 'object',
+      properties: {
+        data: {
+          type: 'object',
+          properties: { runId: { type: 'string' } },
+        },
+        meta: { $ref: getSchemaPath(RequestMetaDto) },
+      },
+    },
+  })
+  stop(@Param() { runId }: PersonaCheckRunParams) {
+    return this.client.json(`/runs/${runId}/stop`, 'POST');
   }
 
   @Get('runs/:runId')
