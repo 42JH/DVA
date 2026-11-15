@@ -157,6 +157,14 @@ function Script({ scenario }: { scenario: string }) {
   )
 }
 
+/** 판정 칩 — warn(확인 필요)은 실패로 세지 않지만 볼 만한 것: 덧붙인 말 · 받아쓰기 오류 (11/15) */
+const STATUS = {
+  pass: { tone: 'done', label: '통과' },
+  fail: { tone: 'stop', label: '실패' },
+  warn: { tone: 'wait', label: '확인 필요' },
+  skip: { tone: 'idle', label: '채점 안 함' },
+} as const
+
 const Note = ({ children }: { children: string }) => (
   <p className="flex flex-1 items-center justify-center py-16 text-center text-[14px] text-ops-sub">
     {children}
@@ -215,6 +223,7 @@ function Call({ runId, scenario }: { runId: string; scenario: string }) {
               {vm.checks.map((c) => {
                 const skip = c.status === 'skip'
                 const bad = c.status === 'fail'
+                const warn = c.status === 'warn'
                 return (
                   <tr
                     key={c.key}
@@ -223,7 +232,9 @@ function Call({ runId, scenario }: { runId: string; scenario: string }) {
                     {c.behaviour ? (
                       <td colSpan={3}>
                         {c.name}
-                        {bad && <p className="font-bold text-ops-stop">{c.actual}</p>}
+                        {(bad || warn) && (
+                          <p className={`font-bold ${bad ? 'text-ops-stop' : ''}`}>{c.actual}</p>
+                        )}
                       </td>
                     ) : (
                       <>
@@ -238,9 +249,7 @@ function Call({ runId, scenario }: { runId: string; scenario: string }) {
                     )}
                     {/* 판정 사유(채점 안 한 이유 등)는 글로 붙이지 않고 칩에 올리면 보임 (11/12 사용자: 설명 문구 없이) */}
                     <td className="text-center!" title={c.note || undefined}>
-                      <Badge tone={bad ? 'stop' : skip ? 'idle' : 'done'}>
-                        {bad ? '실패' : skip ? '채점 안 함' : '통과'}
-                      </Badge>
+                      <Badge tone={STATUS[c.status].tone}>{STATUS[c.status].label}</Badge>
                       {/* 어느 말에서 실패했는지 — 누르면 대화의 그 말로 가서 거기부터 들음 */}
                       {c.spot && (
                         <button

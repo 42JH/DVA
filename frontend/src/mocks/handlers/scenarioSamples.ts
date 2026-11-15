@@ -217,9 +217,10 @@ export const SAMPLES = {
         },
         {
           name: '받는 분 이름',
-          status: 'pass',
+          status: 'warn',
           expected: '박서준',
-          actual: '박서준',
+          actual: '박소준',
+          note: '받아쓰기 오류로 보임(정답과 글자가 대부분 같음). 결제 때 고객이 최종 확인하므로 확인 필요로 둠',
         },
         {
           name: '받는 분 번호',

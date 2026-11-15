@@ -167,7 +167,8 @@ export function useScenarioCall(runId: string, scenarioId: string) {
   const spots = checks.map((c) => failLine(c, lines, scriptLines))
   const flags = new Map<number, string>()
   spots.forEach((at, i) => {
-    if (at !== null)
+    // 대화 줄 · 재생 막대 표시는 실패만 (확인 필요는 결과표의 시각으로만 감)
+    if (at !== null && checks[i].status === 'fail')
       flags.set(
         at,
         [flags.get(at), shownCheck(checks[i], scriptLines).flag].filter(Boolean).join(', '),
@@ -205,6 +206,7 @@ export function useScenarioCall(runId: string, scenarioId: string) {
       [
         ['통과', count('pass')],
         ['실패', count('fail')],
+        ['확인 필요', count('warn')],
         ['채점 안 함', count('skip')],
       ] as const
     )

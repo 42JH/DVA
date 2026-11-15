@@ -118,17 +118,20 @@ export function restOf(state: TestState, rows: { id: string; now: Cell }[]): str
   return rest.length === rows.length ? [] : rest
 }
 
-/** 실패한 판정이 통화의 어느 말에서 났는지 — 대화 줄 번호, 알 수 없으면 null (값만 틀린 코드 검사는 위치가 없음)
- *  1) 행동 확인 '어김: <AI가 한 말>' → 그 말
+/** 실패 · 확인 필요 판정이 통화의 어느 말에서 났는지 — 대화 줄 번호, 알 수 없으면 null (값만 틀린 코드 검사는 위치가 없음)
+ *  1) 행동 확인 '어김: <AI가 한 말>' · '확인 필요: <AI가 한 말>' → 그 AI 말 (고객의 "네"가 인용 안에 들어 있어도 고객 줄로 가지 않게)
  *  2) 대본 진행 '말하지 못한 발화: [4, 5]' → 고객이 마지막으로 한 대본 문장(3번) = 통화가 더 나아가지 못한 곳
  *  ponytail: 판정기의 문구를 읽는 것이라 문구가 바뀌면 못 찾음(null). 판정기가 실패 시각을 주게 되면 그 시각으로 찾기 */
 export function failLine(c: Check, lines: Line[], script: string[]): number | null {
   // 대화 기록이 아직 안 왔으면(판정이 먼저 도착) 찾을 줄이 없음 — 없는 줄 번호를 돌려주면 화면이 깨짐
-  if (c.status !== 'fail' || lines.length === 0) return null
+  if ((c.status !== 'fail' && c.status !== 'warn') || lines.length === 0) return null
   const actual = typeof c.actual === 'string' ? c.actual : ''
-  if (actual.startsWith('어김:')) {
-    const said = actual.slice(3).trim()
-    const i = said ? lines.findIndex(([, , x]) => x.includes(said) || said.includes(x)) : -1
+  const quoted = /^(어김|확인 필요):/.exec(actual)
+  if (quoted) {
+    const said = actual.slice(quoted[0].length).trim()
+    const i = said
+      ? lines.findIndex(([, who, x]) => who === 'AI' && (x.includes(said) || said.includes(x)))
+      : -1
     return i < 0 ? null : i
   }
   if (c.name === SCRIPT_CHECK) {
