@@ -26,7 +26,12 @@ export function Markdown({ text, className = '' }: { text: string; className?: s
             <td className="border border-line px-3 py-1.5 align-top">{children}</td>
           ),
           ul: ({ children }) => <ul className="list-disc pl-5">{children}</ul>,
-          ol: ({ children }) => <ol className="list-decimal pl-5">{children}</ol>,
+          // start: '3.'부터 쓴 목록이 1부터로 보이지 않게 (11/15 프롬프트 보기 — 쓴 번호와 보이는 번호가 달랐음)
+          ol: ({ children, start }) => (
+            <ol start={start} className="list-decimal pl-5">
+              {children}
+            </ol>
+          ),
           a: ({ href, children }) => (
             <a
               href={href}

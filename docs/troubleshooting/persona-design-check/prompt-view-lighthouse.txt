@@ -1,0 +1,30 @@
+# AI 상담가 화면(/personas) Lighthouse 13.6 — 데스크톱 · 첫 방문(매번 캐시 비움) · 빌드본 + 받아 적은 응답(persona-lighthouse/serve.mjs), 2026-11-15
+# 전 = develop-fe e85e4e63, 후 = 프롬프트 보는 모양. 전 5회 → 후 5회 → 전 5회 → 후 5회 순서로 번갈아 잼
+== 전 (pv-b1)
+personas 1 {"perf":99,"a11y":100,"bp":100,"fcp":409,"lcp":952,"si":409,"tbt":0,"cls":0,"kb":289}
+personas 2 {"perf":100,"a11y":100,"bp":100,"fcp":396,"lcp":815,"si":414,"tbt":0,"cls":0,"kb":505}
+personas 3 {"perf":99,"a11y":100,"bp":100,"fcp":395,"lcp":875,"si":397,"tbt":0,"cls":0,"kb":505}
+personas 4 {"perf":99,"a11y":100,"bp":100,"fcp":440,"lcp":882,"si":445,"tbt":0,"cls":0,"kb":505}
+personas 5 {"perf":100,"a11y":100,"bp":100,"fcp":395,"lcp":791,"si":409,"tbt":0,"cls":0,"kb":505}
+personas 중앙값 {"perf":99,"a11y":100,"bp":100,"fcp":396,"lcp":875,"si":409,"tbt":0,"cls":0,"kb":505}
+== 후 (pv-a1)
+personas 1 {"perf":100,"a11y":100,"bp":100,"fcp":381,"lcp":810,"si":411,"tbt":0,"cls":0,"kb":337}
+personas 2 {"perf":99,"a11y":100,"bp":100,"fcp":392,"lcp":832,"si":403,"tbt":0,"cls":0,"kb":554}
+personas 3 {"perf":99,"a11y":100,"bp":100,"fcp":467,"lcp":876,"si":467,"tbt":0,"cls":0,"kb":553}
+personas 4 {"perf":99,"a11y":100,"bp":100,"fcp":392,"lcp":912,"si":417,"tbt":0,"cls":0,"kb":553}
+personas 5 {"perf":99,"a11y":100,"bp":100,"fcp":467,"lcp":909,"si":467,"tbt":0,"cls":0,"kb":553}
+personas 중앙값 {"perf":99,"a11y":100,"bp":100,"fcp":392,"lcp":876,"si":417,"tbt":0,"cls":0,"kb":553}
+== 전 (pv-b2)
+personas 1 {"perf":99,"a11y":100,"bp":100,"fcp":406,"lcp":943,"si":408,"tbt":0,"cls":0,"kb":289}
+personas 2 {"perf":99,"a11y":100,"bp":100,"fcp":472,"lcp":832,"si":472,"tbt":0,"cls":0,"kb":505}
+personas 3 {"perf":100,"a11y":100,"bp":100,"fcp":433,"lcp":781,"si":440,"tbt":0,"cls":0,"kb":505}
+personas 4 {"perf":99,"a11y":100,"bp":100,"fcp":390,"lcp":830,"si":401,"tbt":0,"cls":0,"kb":505}
+personas 5 {"perf":99,"a11y":100,"bp":100,"fcp":386,"lcp":826,"si":413,"tbt":0,"cls":0,"kb":505}
+personas 중앙값 {"perf":99,"a11y":100,"bp":100,"fcp":406,"lcp":830,"si":413,"tbt":0,"cls":0,"kb":505}
+== 후 (pv-a2)
+personas 1 {"perf":100,"a11y":100,"bp":100,"fcp":377,"lcp":794,"si":405,"tbt":0,"cls":0,"kb":337}
+personas 2 {"perf":99,"a11y":100,"bp":100,"fcp":391,"lcp":871,"si":429,"tbt":0,"cls":0,"kb":554}
+personas 3 {"perf":99,"a11y":100,"bp":100,"fcp":470,"lcp":870,"si":470,"tbt":0,"cls":0,"kb":553}
+personas 4 {"perf":99,"a11y":100,"bp":100,"fcp":393,"lcp":873,"si":394,"tbt":0,"cls":0,"kb":553}
+personas 5 {"perf":99,"a11y":100,"bp":100,"fcp":393,"lcp":873,"si":415,"tbt":0,"cls":0,"kb":553}
+personas 중앙값 {"perf":99,"a11y":100,"bp":100,"fcp":393,"lcp":871,"si":415,"tbt":0,"cls":0,"kb":553}

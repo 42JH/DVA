@@ -128,9 +128,18 @@ const check = (ok, what, extra = '') => {
     const miss = Object.entries(app[state].probes).filter(([, v]) => !v).map(([k]) => k)
     if (miss.length) log('    (측정 못 찾음:', miss.join(', ') + ')')
   }
+  // 프롬프트 칸 (11/15) — 보는 동안은 꾸민 글(누르면 그 칸만 입력 칸). 읽기 전용 · 잠긴 상태에는 누를 칸이 없음
+  const VIEW = 'article section div[tabindex="0"]'
+  const openCount = () => p.locator(`${VIEW}, article textarea`).count()
+  const firstText = async () =>
+    (await p.locator(`${VIEW}, article textarea`).first().evaluate((el) => (el.tagName === 'TEXTAREA' ? el.value : el.innerText))).trim()
+  /** 첫 칸(역할)을 눌러 입력 칸으로 */
+  const openFirst = async () => {
+    if (!(await p.locator('article textarea').count())) await p.locator(VIEW).first().click()
+    return p.locator('article textarea').first()
+  }
   const edit = async (more) => {
-    const ta = p.locator('article textarea').first()
-    await ta.click()
+    const ta = await openFirst()
     await ta.press('Control+End')
     await ta.type(more)
   }
@@ -159,7 +168,7 @@ const check = (ok, what, extra = '') => {
     // 토글
     await p.getByRole('tab', { name: '통화에 쓰는 내용' }).click().catch(async () => click('통화에 쓰는 내용', 'article'))
     await p.waitForTimeout(400)
-    check((await p.locator('article textarea').count()) === 0, '통화에 쓰는 내용은 읽기만(입력 칸 없음)')
+    check((await openCount()) === 0, '통화에 쓰는 내용은 읽기만(누를 칸 없음)')
     await shot('r1-3b-callview')
     // 새로고침해도 보던 쪽(통화에 쓰는 내용) 그대로
     await p.reload()
@@ -168,7 +177,7 @@ const check = (ok, what, extra = '') => {
     check((await p.locator('[aria-label="보는 내용"] [aria-selected="true"]').innerText().catch(() => '')) === '통화에 쓰는 내용', '새로고침해도 토글(통화에 쓰는 내용) 그대로')
     await p.getByRole('tab', { name: '고친 내용' }).click().catch(async () => click('고친 내용', 'article'))
     await p.waitForTimeout(400)
-    check((await p.locator('article textarea').count()) > 0, '고친 내용으로 돌아오면 입력 칸')
+    check((await openCount()) > 0, '고친 내용으로 돌아오면 고칠 수 있는 칸')
     // 확인 창
     await click('통화에 반영', 'article')
     log('  dialog:', await dlg())
@@ -188,7 +197,7 @@ const check = (ok, what, extra = '') => {
     await spec('testing')
     log('  head(testing):', await head())
     log('  buttons(testing):', (await btns('article')).join(', '))
-    check((await p.locator('article textarea').count()) === 0, '시험 중 입력 칸 막힘')
+    check((await openCount()) === 0, '시험 중 입력 칸 막힘')
     check(await p.locator('article header button', { hasText: '수정 기록 보기' }).isDisabled(), '시험 중 수정 기록 보기 막힘')
     check(await p.locator('button[aria-label="이름 바꾸기"]').isDisabled(), '시험 중 이름 연필 막힘')
     check((await p.locator('article header button', { hasText: '시나리오 시험' }).count()) === 0, '시험 중 머리 줄 [시나리오 시험] 없음')
@@ -202,7 +211,7 @@ const check = (ok, what, extra = '') => {
     await spec('applying')
     log('  head(applying):', await head())
     log('  buttons(applying):', (await btns('article')).join(', '))
-    check((await p.locator('article textarea').count()) === 0, '반영 중 입력 칸 막힘')
+    check((await openCount()) === 0, '반영 중 입력 칸 막힘')
     await waitBand(/^$/, 20)
     await p.waitForTimeout(600)
     await shot('r1-1-live')
@@ -317,7 +326,7 @@ const check = (ok, what, extra = '') => {
     log('  band(after load):', await band())
     await shot('r5-3-unapplied')
     check(/반영 전/.test(await band()), '불러온 뒤 반영 전 띠')
-    check((await p.locator('article textarea').first().inputValue()) === '택배 접수와 수거 일정 확인을 돕는 AI 상담원', '불러온 내용이 입력 칸에', await p.locator('article textarea').first().inputValue())
+    check((await firstText()) === '택배 접수와 수거 일정 확인을 돕는 AI 상담원', '불러온 내용이 입력 칸에', await firstText())
     // 새로고침해도 창 · 고른 날짜 그대로 (가짜 상담가 자료는 처음으로 돌아가지만 10월 1일은 처음 자료에도 있음)
     await p.locator('article header button', { hasText: '수정 기록 보기' }).click()
     await p.waitForTimeout(400)
@@ -333,7 +342,7 @@ const check = (ok, what, extra = '') => {
     check((await p.locator('[role=dialog]').count()) === 0, 'Esc로 수정 기록 창 닫힘')
     // 새로고침해도 가짜 상담가 자료가 남음 (세션 저장소) — 불러온 내용이 그대로 반영 전
     log('  (새로고침 뒤) band:', await band())
-    check(/반영 전/.test(await band()) && (await p.locator('article textarea').first().inputValue()) === '택배 접수와 수거 일정 확인을 돕는 AI 상담원', '새로고침해도 저장한 내용 · 반영 전 띠 그대로')
+    check(/반영 전/.test(await band()) && (await firstText()) === '택배 접수와 수거 일정 확인을 돕는 AI 상담원', '새로고침해도 저장한 내용 · 반영 전 띠 그대로')
     // 시험 화면에서 따로 전체 시험(모두 통과) → 띠의 [통화에 반영]은 시험 없이 바로 묻는 창
     const headNo = await p.evaluate(() => JSON.parse(sessionStorage.getItem('mock:personas')).personas.find((x) => x.aiPersonaSeq === 1).head)
     await p.goto(`${BASE}/personas/1/tests/${headNo}`)
@@ -385,7 +394,7 @@ const check = (ok, what, extra = '') => {
     await spec('review')
     log('  head(review):', await head())
     log('  buttons(review):', (await btns('article')).join(', '))
-    check((await p.locator('article textarea').count()) > 0, '확인 필요에서는 입력 칸 열림')
+    check((await openCount()) > 0, '확인 필요에서는 입력 칸 열림')
     await fit('확인 필요 1440x900')
     await click('실패한 시나리오 보기', 'article')
     await p.waitForTimeout(1200)
@@ -428,6 +437,52 @@ const check = (ok, what, extra = '') => {
   })
 
   await section('r1b', async () => {
+    // 보는 모양 ↔ 입력 칸 (11/15, 피그마 2409:2521): 보는 동안은 꾸민 글, 누른 칸만 글자 그대로
+    const views = p.locator(VIEW)
+    const nView = await views.count()
+    check(nView === 6 && (await p.locator('article textarea').count()) === 0, '보는 동안은 입력 칸 없이 꾸민 글 여섯 칸', `보는 칸 ${nView}`)
+    const top0 = await views.first().evaluate((el) => el.getBoundingClientRect().top)
+    const ta0 = await openFirst()
+    check((await p.locator('article textarea').count()) === 1 && (await views.count()) === nView - 1, '누른 칸만 입력 칸')
+    check(await ta0.evaluate((el) => document.activeElement === el && el.selectionStart === el.value.length), '누르면 바로 칠 수 있음 (초점 · 커서는 글 끝)')
+    check(Math.abs((await ta0.evaluate((el) => el.getBoundingClientRect().top)) - top0) < 1, '누를 때 첫 줄 자리가 안 움직임')
+    const was = await ta0.inputValue()
+    await ta0.type(' **굵게**')
+    await p.keyboard.press('Tab')
+    await p.waitForTimeout(200)
+    check((await p.locator('article label:has(textarea) span').first().innerText()) === '성격', 'Tab으로 다음 칸이 입력 칸')
+    await p.locator('article h3').first().click()
+    await p.waitForTimeout(200)
+    check(
+      (await p.locator('article textarea').count()) === 0 &&
+        (await views.first().locator('strong').allInnerTexts()).join() === '굵게' &&
+        !(await views.first().innerText()).includes('*'),
+      '칸 밖을 누르면 다시 보는 모양 — **굵게**는 굵은 글로, 별표는 안 보임',
+    )
+    // 고치던 칸에서 다른 칸을 바로 누름 — 역할이 입력 칸인 동안 보는 칸의 둘째가 발화 톤
+    await openFirst()
+    await views.nth(1).click()
+    await p.waitForTimeout(200)
+    check(
+      (await p.locator('article textarea').count()) === 1 &&
+        (await p.locator('article label:has(textarea) span').first().innerText()) === '발화 톤' &&
+        (await p.locator('article textarea').evaluate((el) => document.activeElement === el)),
+      '고치던 칸에서 다른 칸을 누르면 그 칸만 입력 칸',
+    )
+    // 긴 글을 내려 보다가 눌러도 보던 자리 그대로 (초점을 줄 때 브라우저가 칸 첫 줄로 끌어올리지 않게)
+    await views.first().click()
+    await p.locator('article textarea').fill(Array.from({ length: 60 }, (_, i) => `- ${i + 1}번째 줄`).join('\n'))
+    await p.locator('article h3').first().click()
+    await p.waitForTimeout(200)
+    const box = p.locator('article h3').first().locator('..') // 프롬프트 스크롤 상자
+    await box.evaluate((el) => (el.scrollTop = 400))
+    const bb = await box.boundingBox()
+    await p.mouse.click(bb.x + 120, bb.y + bb.height / 2)
+    await p.waitForTimeout(200)
+    const top1 = await box.evaluate((el) => el.scrollTop)
+    check(top1 === 400 && (await p.locator('article textarea').count()) === 1, '내려 보다가 눌러도 보던 자리 그대로', `scrollTop 400 → ${top1}`)
+    await (await openFirst()).fill(was) // 원래 글로 (아래 점검은 여기서 이어 침)
+    await box.evaluate((el) => (el.scrollTop = 0))
     // 고치는 중 · 나가기 확인
     await edit(' 고침')
     await p.waitForTimeout(300)
@@ -445,7 +500,7 @@ const check = (ok, what, extra = '') => {
     check(/저장하지 않고/.test(await dlg()), '고친 채 다른 탭 = 나가기 확인')
     await click('취소', '[role=dialog]').catch(async () => p.keyboard.press('Escape'))
     await p.waitForTimeout(300)
-    check((await p.locator('article textarea').first().inputValue()).endsWith('고침'), '확인 창을 닫으면 고친 글 그대로')
+    check((await firstText()).endsWith('고침'), '확인 창을 닫으면 고친 글 그대로')
     // 사이드바 이동도 막힘
     await p.locator('nav a', { hasText: '주문' }).first().click()
     await p.waitForTimeout(400)
@@ -457,9 +512,9 @@ const check = (ok, what, extra = '') => {
     log('  cancel dialog:', await dlg())
     await click('나가기', '[role=dialog]')
     await p.waitForTimeout(400)
-    check(!(await p.locator('article textarea').first().inputValue()).endsWith('고침'), '[취소] → [나가기] = 고친 글 버림')
+    check(!(await firstText()).endsWith('고침'), '[취소] → [나가기] = 고친 글 버림')
     // 빈 칸 저장 막힘
-    const ta = p.locator('article textarea').first()
+    const ta = await openFirst()
     const keep = await ta.inputValue()
     await ta.fill('')
     await p.waitForTimeout(300)
@@ -505,7 +560,7 @@ const check = (ok, what, extra = '') => {
     await spec('stopped')
     log('  head(stopped):', await head())
     log('  buttons(stopped):', (await btns('article')).join(', '))
-    check((await p.locator('article textarea').count()) > 0, '시험 중단 뒤 입력 칸 다시 열림')
+    check((await openCount()) > 0, '시험 중단 뒤 입력 칸 다시 열림')
     await click('다시 시험하고 반영', 'article')
     log('  dialog(retest):', await dlg())
     await shot('r2-5-retest-confirm')

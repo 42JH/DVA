@@ -42,7 +42,7 @@ exports.STATES = {
       ['통화에 사용 중 뱃지', '.nm .bd', { t: '통화에 사용 중', in: 'article header' }],
       ['[시나리오 시험]', '.ch > .b', { t: '시나리오 시험', in: 'article header' }],
       ...body,
-      ['프롬프트 글', '.pbox .pc', PB + ' textarea'],
+      ['프롬프트 글', '.pbox .pc', PB + ' section div[tabindex="0"]'], // 보는 동안의 꾸민 글 (11/15 — 누르면 입력 칸)
     ],
     counts: [['머리 줄 단추 수', '.ch > .b', 'article > header > span:last-child button']],
   },
@@ -81,7 +81,7 @@ exports.STATES = {
       ['목소리 칸(막힘)', '.vsel', 'article header .h-7'],
       ['수정 기록 보기(막힘)', '.tl', { t: '수정 기록 보기' }],
       ['프롬프트 상자(막힘)', '.pbox', PB],
-      ['프롬프트 글(막힘)', '.pbox .pc', PB + ' p'],
+      ['프롬프트 글(막힘)', '.pbox .pc', PB + ' section > div'],
     ],
     counts: [['머리 줄 단추 수', '.ch > .b', 'article > header > span:last-child button']],
   },

@@ -66,7 +66,7 @@ export function PersonaForm({
         />
         {voiceFields}
       </div>
-      <PromptBody ed={vm} />
+      <PromptBody ed={vm} plain />
 
       {vm.confirmingDiscard && (
         <Confirm
