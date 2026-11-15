@@ -53,6 +53,14 @@ export function TextInput({
   )
 }
 
+// 처음 그릴 때 초점을 주고 커서를 글 끝에 — 모듈에 둔 같은 함수라 다시 그려도 한 번만 불림
+// preventScroll: 초점을 줄 때 브라우저가 칸 첫 줄로 끌어올림 → 긴 글을 내려 보다 누르면 화면이 튐 (11/15 재 봄: 900 → 0)
+const focusEnd = (el: HTMLTextAreaElement | null) => {
+  if (!el) return
+  el.focus({ preventScroll: true })
+  el.setSelectionRange(el.value.length, el.value.length)
+}
+
 /** 여러 줄 입력 칸 (07 프롬프트 수정). labelClassName = 칸 이름의 모양(제목 줄) */
 export function TextAreaInput({
   label,
@@ -61,6 +69,8 @@ export function TextAreaInput({
   onChange,
   placeholder,
   className = '',
+  autoFocus,
+  onBlur,
 }: {
   label: string
   labelClassName: string
@@ -68,13 +78,17 @@ export function TextAreaInput({
   onChange: (v: string) => void
   placeholder?: string
   className?: string // 높이 등 (예: 글만큼 늘리기 [field-sizing:content])
+  autoFocus?: boolean // 그리자마자 초점, 커서는 글 끝 — 보던 글을 눌러 입력 칸으로 바꿀 때
+  onBlur?: () => void
 }) {
   return (
     <label className="flex min-w-0 flex-col gap-1">
       <span className={labelClassName}>{label}</span>
       <textarea
+        ref={autoFocus ? focusEnd : undefined}
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        onBlur={onBlur}
         placeholder={placeholder}
         spellCheck={false}
         className={`min-h-20 resize-none rounded-md bg-white px-3 py-2 text-[14px] leading-6 ring-1 ring-ops-line outline-none ring-inset placeholder:text-ops-faint focus:ring-ops-route ${className}`}
