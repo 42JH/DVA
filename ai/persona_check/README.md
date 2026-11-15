@@ -66,7 +66,7 @@ python -m pytest persona_check -q
 | `POST /runs/{runId}/stop` | 시험 멈춤 → `202 {runId}`. 돌던 통화는 끊고, 아직 안 건 시나리오는 걸지 않는다. 묶음은 `stopped`, 못 끝낸 항목은 `queued`/`running`으로 남는다. 이미 끝난 묶음이어도 202, 없는 묶음은 404. 멈추면 같은 `tag`의 새 시험을 바로 받는다 |
 | `GET /runs` | 묶음 목록(최신순). 항목은 `GET /runs/{runId}`와 같은 모양에 `tag`, `createdAt`이 붙는다. `?tag=`를 주면 그 표시의 묶음만 |
 | `GET /runs/{runId}` | `{status: running/done/interrupted/stopped, total, finished, items: [{scenario, name, group, status: queued/running/done/error, passed, summary, error, seconds, liveSeconds}]}` |
-| `GET /runs/{runId}/{scenario}/verdict` | 판정 전체 `{passed, summary, checks: [{name, status: pass/fail/skip, expected, actual, note}]}` |
+| `GET /runs/{runId}/{scenario}/verdict` | 판정 전체 `{passed, summary, checks: [{name, status: pass/fail/skip/warn, expected, actual, note}]}` |
 | `GET /runs/{runId}/{scenario}/record` | 통화 기록 `{customer: {lines: [[초, AI/고객, 말]], choices}, received: {events, drafts, analyses, orders, …}, said, liveSeconds, callLog}`. 화면의 통화 상세에 쓴다. `callLog`는 AI 통화 로그(`call.json`, 운영 AI가 통화마다 남기는 JSON 로그와 같은 모양) — 백엔드 중계로 이 주소를 열면 AI 파트가 로그를 바로 본다 |
 | `GET /runs/{runId}/{scenario}/audio` | 통화 녹음(wav, 고객과 AI를 섞은 모노) |
 | `GET /runs/{runId}/{scenario}/report` | 한 장 보기(html) |
@@ -81,14 +81,14 @@ python -m pytest persona_check -q
 
 실제 통화로 돌려 본 것: develop-ai 4484076b(11/12 00:11)에서 E1과 H10은 통과했다. A1은 끝까지 갔고 가액만 틀렸다(아래 관찰 6). B3는 AI가 전화번호를 거절해 멈췄다(관찰 1). F1은 AI가 취소 확인을 되풀이해 취소되지 않았다(관찰 7). 6e79326e(11/12 09:09)에서 A2, A4, B1, H9를 돌렸고 네 통 모두 도중에 멈췄다(관찰 8). A2 ~ H9는 아직 통과한 적이 없어, 시나리오 정의가 맞는지 확인되지 않았다.
 
-판정은 실패가 하나도 없으면 통과다. `skip`은 통과에도 실패에도 세지 않는다.
+판정은 실패가 하나도 없으면 통과다. `skip`(제외)과 `warn`(확인 필요: 지킬 것은 지켰지만 군말 · 덧붙인 말이 있음)은 통과에도 실패에도 세지 않는다.
 
 | 검사 | 방법 |
 |---|---|
 | 대본 진행 | 필수 발화를 고객이 다 말했는가. 통화가 중간에 멈추면 "접수가 없어야 함" 같은 정답이 저절로 맞기 때문에 먼저 본다 |
 | 접수 건수, 저장된 값 | 백엔드가 받은 초안과 통화 분석을 정답과 비교한다. 보내는 분은 정답에 적지 않으면 발신번호와 등록 고객의 이름 · 주소여야 한다 |
 | 조회, 취소 | 조회 실행 횟수, 심어 둔 기존 주문의 상태(취소하기로 한 건만 취소됐는가) |
-| 행동 확인 항목(`checks`) | 통화 이벤트를 보여 주고 모델이 판정한다. "어김"은 통화에 글자 그대로 있는 AI 발화를 인용했을 때만 남긴다. 3판 중 2판 이상 같은 답만 쓰고, 갈리면 제외한다 |
+| 행동 확인 항목(`checks`) | 통화 이벤트를 보여 주고 모델이 판정한다. "어김"과 "확인 필요"는 통화에 글자 그대로 있는 AI 발화를 인용했을 때만 남긴다. 3판 중 2판 이상 같은 답만 쓰고, 갈리면 제외한다 |
 
 판정기의 입력은 시나리오와 "그 통화에서 백엔드가 받은 것"(`backend.json`)뿐이다. 통화 이벤트, 접수 초안, 통화 분석이 백엔드 계약 모양 그대로라, 통화를 어떻게 돌렸는지와 무관하다.
 
