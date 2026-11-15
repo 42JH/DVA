@@ -22,12 +22,13 @@ import json
 import re
 import sys
 import tomllib
+from difflib import SequenceMatcher
 from pathlib import Path
 
 SCENARIOS = Path(__file__).with_name("scenarios.toml")
 BOXES = {"document": "documentCount", "small": "smallBoxCount", "medium": "mediumBoxCount", "big": "bigBoxCount"}
 BOX_NAMES = {"document": "서류", "small": "소형 박스", "medium": "중형 박스", "big": "대형 박스"}
-PASS, FAIL, SKIP = "pass", "fail", "skip"
+PASS, FAIL, SKIP, WARN = "pass", "fail", "skip", "warn"  # warn = 확인 필요(덧붙인 말 · 받아쓰기 오류). 실패로 세지 않는다
 SILENT = "(무응답)"
 AREA = re.compile(r"(\S+?[구군])(?=\s|$)")
 STUB_NOTE = "주소 정보를 고정값으로 채운 환경이라 채점하지 않음"
@@ -37,7 +38,7 @@ VOTES, NEED = 3, 2
 TIMEOUT_SEC = 90.0
 SCHEMA = {"type": "object", "additionalProperties": False, "required": ["items"], "properties": {"items": {"type": "array", "items": {
     "type": "object", "additionalProperties": False, "required": ["no", "verdict", "quote", "why"],
-    "properties": {"no": {"type": "integer"}, "verdict": {"type": "string", "enum": ["kept", "broken", "unclear"]},
+    "properties": {"no": {"type": "integer"}, "verdict": {"type": "string", "enum": ["kept", "minor", "broken", "unclear"]},
                    "quote": {"type": "string"}, "why": {"type": "string"}}}}}}
 
 
@@ -58,19 +59,36 @@ SIDO = {alias: full for full, short in _SIDO.items() for alias in (full, short, 
 SIDO |= {"강원도": "강원특별자치도", "전라북도": "전북특별자치도", "제주도": "제주특별자치도"}
 
 
+def _full(value) -> str:
+    """첫 낱말이 시 · 도면 정식 이름으로 맞추고 띄어쓰기 · 쉼표를 뺀 글."""
+    head, _, rest = str(value or "").strip().partition(" ")
+    return _squash(f"{SIDO.get(head, head)} {rest}")
+
+
 def same_address(a, b) -> bool:
-    """도로명 주소가 같은가. 첫 낱말이 시 · 도면 정식 이름으로 맞춘 뒤 띄어쓰기 · 쉼표 없이 비교한다."""
-    def full(value) -> str:
-        head, _, rest = str(value or "").strip().partition(" ")
-        return _squash(f"{SIDO.get(head, head)} {rest}")
-    return full(a) == full(b)
+    """도로명 주소가 같은가."""
+    return _full(a) == _full(b)
 
 
-def _check(name: str, expected, actual, same=None, skip: str = "") -> dict:
+def misheard(expected, actual) -> bool:
+    """정답과 글자가 대부분 같은 값 = 받아쓰기 오류('이지은' → '이지윤', 번호 한 자리). 아주 다른 값(다른 칸의 값 · 엉뚱한 곳)은 아니다.
+    ponytail: 글자 비슷한 정도(CLOSE) 하나로 가른다. 짧은 값은 한 글자만 달라도 비율이 크게 떨어지니, 놓치는 예가 나오면 값 종류별 기준으로"""
+    return bool(actual) and SequenceMatcher(None, _full(expected), _full(actual)).ratio() >= CLOSE
+
+
+CLOSE = 0.6
+MISHEARD_NOTE = "받아쓰기 오류로 보임(정답과 글자가 대부분 같음). 결제 때 고객이 최종 확인하므로 확인 필요로 둠"
+
+
+def _check(name: str, expected, actual, same=None, skip: str = "", heard: bool = False) -> dict:
+    """heard = 고객이 불러 준 값을 받아 적는 칸. 받아쓰기 오류(misheard)면 실패가 아니라 확인 필요. 값이 없거나 아주 다르면 실패."""
     if skip:
         return {"name": name, "status": SKIP, "expected": expected, "actual": actual, "note": skip}
-    ok = same(expected, actual) if same else expected == actual
-    return {"name": name, "status": PASS if ok else FAIL, "expected": expected, "actual": actual}
+    if same(expected, actual) if same else expected == actual:
+        return {"name": name, "status": PASS, "expected": expected, "actual": actual}
+    if heard and misheard(expected, actual):
+        return {"name": name, "status": WARN, "expected": expected, "actual": actual, "note": MISHEARD_NOTE}
+    return {"name": name, "status": FAIL, "expected": expected, "actual": actual}
 
 
 def area(address) -> str | None:
@@ -91,12 +109,12 @@ def _parcel_checks(want: dict, parcel: dict, caller: str, stub: bool) -> list[di
     box, count = want.get("box"), want.get("count", 1)
     wanted_boxes = f"{BOX_NAMES[box]} {count}개" if box else None  # 정답에 물품을 안 적었으면 보지 않는다
     checks = [
-        _check("보내는 분 이름", want.get("sender_name"), origin.get("name"), text),
-        _check("보내는 분 번호", sender_phone, origin.get("phoneNumber"), phone),
-        _check("받는 분 이름", want.get("receiver_name"), dest.get("name"), text),
-        _check("받는 분 번호", want.get("receiver_phone"), dest.get("phoneNumber"), phone),
+        _check("보내는 분 이름", want.get("sender_name"), origin.get("name"), text, heard=True),
+        _check("보내는 분 번호", sender_phone, origin.get("phoneNumber"), phone, heard=True),
+        _check("받는 분 이름", want.get("receiver_name"), dest.get("name"), text, heard=True),
+        _check("받는 분 번호", want.get("receiver_phone"), dest.get("phoneNumber"), phone, heard=True),
         _check("물품", wanted_boxes, _boxes(parcel)),
-        _check("물품 가액", want.get("item_price"), parcel.get("itemPrice")),
+        _check("물품 가액", want.get("item_price"), parcel.get("itemPrice"), heard=True),
     ]
     for label, key, place in (("보내는 곳", "sender", origin), ("받는 곳", "receiver", dest)):
         address, detail = want.get(f"{key}_address"), want.get(f"{key}_detail")
@@ -104,10 +122,10 @@ def _parcel_checks(want: dict, parcel: dict, caller: str, stub: bool) -> list[di
             # 주소DB가 없는 환경: 주소와 상세주소가 갈리지 않고 들은 말 그대로 저장돼 글자 비교는 못 한다.
             # 그래도 엉뚱한 곳(보내는 곳이 받는 곳 주소로 덮임 등)은 잡아야 해서 구 · 군은 비교한다
             checks.append(_check(f"{label} 지역", area(address), area(place.get("roadAddress"))))
-            checks.append(_check(f"{label} 상세주소", detail, place.get("detailAddress"), text, STUB_NOTE))
+            checks.append(_check(f"{label} 상세주소", detail, place.get("detailAddress"), text, STUB_NOTE, heard=True))
         else:
-            checks.append(_check(f"{label} 주소", address, place.get("roadAddress"), same_address))
-            checks.append(_check(f"{label} 상세주소", detail, place.get("detailAddress"), text))
+            checks.append(_check(f"{label} 주소", address, place.get("roadAddress"), same_address, heard=True))
+            checks.append(_check(f"{label} 상세주소", detail, place.get("detailAddress"), text, heard=True))
     return [c for c in checks if c["expected"] is not None]  # 정답에 적지 않은 항목은 보지 않는다
 
 
@@ -123,9 +141,10 @@ def _progress(scenario: dict, record: dict) -> dict:
 
 
 def _verdict(scenario: dict, checks: list[dict]) -> dict:
-    count = {s: sum(c["status"] == s for c in checks) for s in (PASS, FAIL, SKIP)}
+    count = {s: sum(c["status"] == s for c in checks) for s in (PASS, FAIL, SKIP, WARN)}
     return {"scenario": scenario["id"], "name": scenario.get("name"), "passed": count[FAIL] == 0, "checks": checks,
-            "summary": f"통과 {count[PASS]} · 실패 {count[FAIL]} · 제외 {count[SKIP]}"}
+            "summary": f"통과 {count[PASS]} · 실패 {count[FAIL]} · 제외 {count[SKIP]}"
+                       + (f" · 확인 필요 {count[WARN]}" if count[WARN] else "")}
 
 
 def dialogue(record: dict) -> list[tuple[str, str]]:
@@ -161,8 +180,10 @@ def check_behaviour(raw, items: list[str], talk: list[tuple[str, str]]) -> list[
         why, quote = " ".join(str(item.get("why") or "").split())[:200], " ".join(str(item.get("quote") or "").split())
         if item.get("verdict") == "kept":
             checks.append({"name": name, "status": PASS, "expected": "지킴", "actual": "지킴", "note": why})
-        elif item.get("verdict") == "broken" and len(_squash(quote)) >= 4 and _squash(quote) in said:
-            checks.append({"name": name, "status": FAIL, "expected": "지킴", "actual": f"어김: {quote}", "note": why})
+        elif item.get("verdict") in ("broken", "minor") and len(_squash(quote)) >= 4 and _squash(quote) in said:
+            bad = item["verdict"] == "broken"
+            checks.append({"name": name, "status": FAIL if bad else WARN, "expected": "지킴",
+                           "actual": f"{'어김' if bad else '확인 필요'}: {quote}", "note": why})
         else:
             checks.append({"name": name, "status": SKIP, "expected": "지킴", "actual": "판단 못 함", "note": why or "판정 없음"})
     return checks
@@ -197,7 +218,7 @@ def vote(rounds: list[list[dict]], need: int = NEED) -> list[dict]:
     """판마다 나온 검사 결과에서 need판 이상 같은 답만. 갈린 항목은 제외로 남긴다."""
     out = []
     for answers in zip(*rounds, strict=True):
-        for status in (FAIL, PASS, SKIP):
+        for status in (FAIL, WARN, PASS, SKIP):
             same = [a for a in answers if a["status"] == status]
             if len(same) >= need:
                 out.append(same[0])
@@ -277,7 +298,7 @@ def main(folder: str) -> int:
     verdict = judge(load_scenario(record["scenario"]), record)
     print(f"{verdict['scenario']} {verdict['name']}: {'통과' if verdict['passed'] else '실패'} ({verdict['summary']})")
     for c in verdict["checks"]:
-        mark = {"pass": "OK  ", "fail": "FAIL", "skip": "-   "}[c["status"]]
+        mark = {"pass": "OK  ", "fail": "FAIL", "skip": "-   ", "warn": "WARN"}[c["status"]]
         print(f"  {mark} {c['name']}: 기대 {c['expected']!r} / 실제 {c['actual']!r}")
     return 0 if verdict["passed"] else 1
 

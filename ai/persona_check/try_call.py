@@ -424,13 +424,13 @@ async def run_call(scenario_id: str = "A1", persona: dict | None = None, bus=Non
     calls.on_finalize.append(write_log)
     now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     config, _ = await asyncio.gather(capture(calls, captured, caller, now),
-                                     asyncio.gather(*(voice_of(real, s) for s in says if s != SILENT)))  # 문장 음성 준비
+                                     asyncio.gather(*(voice_of(real, s) for s in {*says, *map(customer.spoken, customer.SHORT.values())} - {SILENT})))  # 대본 · 짧은 답 음성 준비
     if bus is not None:  # 개발용 관제 화면에 이 통화를 실시간으로
         calls.on_change = lambda s: bus.publish({"type": "call", "call": s.snapshot()})
         LIVE.append(calls)
 
     # --- WebRTC로 세션을 만들고 운영 로직을 붙인다 ---
-    state = {"ai_text": "", "ai_voice_at": 0.0, "closed": False, "live_seconds": None}
+    state = {"ai_text": "", "ai_voice_at": 0.0, "ai_text_at": 0.0, "closed": False, "live_seconds": None}
     started = asyncio.Event()
     mic, ai_audio = CustomerTrack(), []  # ai_audio = [(받은 시각, 24kHz 모노)]
     pc = RTCPeerConnection()
@@ -443,7 +443,7 @@ async def run_call(scenario_id: str = "A1", persona: dict | None = None, bus=Non
         kind = ev.get("type")
         if kind == "session.output_transcript.delta":
             state["ai_text"] += ev.get("delta") or ""
-            state["ai_voice_at"] = time.monotonic()
+            state["ai_voice_at"] = state["ai_text_at"] = time.monotonic()
         elif kind == "session.started":
             captured["started"] = message.encode()  # 운영 로직의 sideband에 그대로 넣어 준다(Sideband)
             started.set()
@@ -479,6 +479,7 @@ async def run_call(scenario_id: str = "A1", persona: dict | None = None, bus=Non
     timed: list[tuple[float, str, str]] = []     # (통화 시작부터 초, AI|고객, 말) — 기록
     said: set[int] = set()                       # 말한 대본 번호
     counts: dict[int, int] = {}                  # 번호별 말한 횟수
+    gave_in: set[int] = set()                    # 정정을 거듭하다 "네"로 넘어간 대본 번호(한 번만)
     choices: list[dict] = []                     # 고객이 고른 행동
     t0 = time.monotonic()
 
@@ -488,9 +489,12 @@ async def run_call(scenario_id: str = "A1", persona: dict | None = None, bus=Non
         log.info("%s [%5.1fs] %s %s%s", scenario_id, time.monotonic() - t0, who, tag, text)
 
     def flush_ai() -> str:
+        nonlocal moved
         heard, state["ai_text"] = state["ai_text"].strip(), ""
         if heard:
             note("AI", heard)
+            if not any(who == "고객" for who, _ in lines):  # 통화 중단 시간은 AI 첫 인사부터 센다(인사가 늦은 시간은 빼고)
+                moved = time.monotonic()
         return heard
 
     call = None
@@ -515,9 +519,21 @@ async def run_call(scenario_id: str = "A1", persona: dict | None = None, bus=Non
         silent = False   # 무응답 차례를 쓴 뒤로는 AI가 조용해도 부르지 않는다
         moved, last = time.monotonic(), ""   # 고객이 마지막으로 새 말을 한 시각 · 그 말
         waited = time.monotonic()
+        ahead: tuple[str, asyncio.Task] | None = None  # (AI 말, 그 말에 대한 고르기) — 소리가 다 나오기 전에 미리 고른다
+
+        def choose_ahead(text: str) -> asyncio.Task:
+            return asyncio.create_task(customer.choose(real, script, [*lines, ("AI", text)], set(said), facts))
+
         while True:
             # 고객 차례 = AI가 새로 말했고 그 소리가 끝난 뒤 잠깐. AI가 너무 오래 조용하면 사람처럼 부른다
             while not over():
+                # 자막은 소리보다 먼저 다 온다: 문장이 끝난 자막이 잠깐 멈추면 그 말로 고르기를 시작해 둔다(고르는 몇 초를 소리 재생과 겹친다)
+                text = state["ai_text"].strip()
+                if (text.endswith((".", "?", "!")) and time.monotonic() - state["ai_text_at"] > 0.3
+                        and (ahead is None or ahead[0] != text)):
+                    if ahead is not None:
+                        ahead[1].cancel()
+                    ahead = (text, choose_ahead(text))
                 gap = GAP_DONE if state["ai_text"].strip().endswith((".", "?", "!")) else GAP_MID
                 idle = not mic.queue and time.monotonic() - state["ai_voice_at"] > gap
                 if idle and (state["ai_text"].strip() or time.monotonic() - waited > STUCK_SEC):
@@ -531,8 +547,18 @@ async def run_call(scenario_id: str = "A1", persona: dict | None = None, bus=Non
             waited = time.monotonic()
             nxt = next((i for i in required if i not in said), None)  # 다음에 말해야 하는 문장
             silent_turn = nxt is not None and script[nxt - 1] == SILENT
-            if flush_ai():
-                pick = await customer.choose(real, script, lines, said, facts)
+            if heard := flush_ai():
+                if not any(who == "고객" for who, _ in lines):  # 첫 인사 뒤에는 군말("잠깐만요")이 붙어도 대본 1번
+                    pick = {"action": "say", "index": 1, "text": script[0], "why": "첫 인사 뒤 대본 1번"}
+                elif customer.holding(heard):
+                    pick = {"action": "wait", "text": "", "why": "기다려 달라는 말만 함"}
+                elif ahead is not None and ahead[0] == heard:
+                    pick = await ahead[1]
+                else:
+                    pick = await customer.choose(real, script, lines, said, facts)
+                if ahead is not None:
+                    ahead[1].cancel()  # 이미 끝났으면 아무 일 없음
+                    ahead = None
             elif ending:        # 마무리 인사 뒤 AI가 조용함 → 고객이 끊는다
                 break
             elif silent_turn or silent:   # 무응답 시나리오: AI가 조용해도 계속 가만히
@@ -553,20 +579,32 @@ async def run_call(scenario_id: str = "A1", persona: dict | None = None, bus=Non
                     said.add(nxt)  # 이번 차례의 무응답을 썼다
                     silent = True
                 continue
-            speech = customer.spoken(pick["text"])
+            audio = await voice_of(real, says[index - 1] if pick["action"] == "say" else customer.spoken(pick["text"]))
+            if state["ai_text"].strip() or time.monotonic() - state["ai_voice_at"] < GAP_DONE:
+                # 고르는 사이 AI가 다시 말했다: 끼어들지 않는다. 이번 고르기는 버리고 AI 말을 들은 뒤 다시 고른다
+                choices[-1]["dropped"] = True
+                continue
             if pick["action"] == "say":
                 counts[index] = counts.get(index, 0) + 1
-                if counts[index] > MAX_REPEAT:
+                if counts[index] > MAX_REPEAT and index not in gave_in and lines[-1][1].endswith("?"):
+                    # 정정해도 AI가 같은 값을 되읽음: 끊지 않고 "네"로 넘어가 통화를 끝까지 보낸다. 틀린 값은 판정이 잡는다
+                    # (11/15: 받는 분 '이지은'을 '이지윤'으로 세 번 되읽어 접수 전에 끊김. 이름은 결제 때 고객이 최종 확인)
+                    gave_in.add(index)
+                    pick = {"action": "short", "short": "yes", "text": customer.SHORT["yes"], "why": "정정을 거듭해도 같은 값이라 넘어감"}
+                    choices[-1] = {"at": choices[-1]["at"], **pick}
+                    audio = await voice_of(real, customer.spoken(pick["text"]))
+                    index = None
+                elif counts[index] > MAX_REPEAT:
                     log.warning("%s 대본 %s번을 %s번 말하고도 또 고름 → 통화 중단", scenario_id, index, MAX_REPEAT)
                     break
-                said.add(index)
-                speech = says[index - 1]
+                else:
+                    said.add(index)
             if pick.get("short") != "hello":
                 hellos = 0
                 if pick["text"] != last:  # 같은 말을 되풀이하는 것은 나아간 게 아니다
                     moved, last = time.monotonic(), pick["text"]
             note("고객", pick["text"], f"[{pick['action']}{index or ''}] ")
-            audio = await voice_of(real, speech)
+            choices[-1]["replySec"] = round(time.monotonic() - state["ai_voice_at"], 1)  # AI 소리가 끝나고 고객이 말하기까지
             mic.queue.extend(audio)
             waited = time.monotonic() + len(audio) / (RATE * 2)
     except Exception as e:  # 고객 쪽(LLM · TTS) · 연결 오류: 통화를 접는다. 취소(CancelledError)는 그대로 올라간다

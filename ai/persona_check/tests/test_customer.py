@@ -35,3 +35,8 @@ def test_choose_shows_the_customer_facts_and_what_was_said():
     text = customer.describe(SCRIPT, [("AI", "등록된 주소로 보내실까요?")], {1}, "등록 고객. 등록된 발송 주소: 서울 강남구 테헤란로 212")
     assert text.startswith("[고객 정보]\n등록 고객.") and "1. (말함) 택배 접수하려고요." in text and "AI: 등록된 주소로 보내실까요?" in text
     assert customer.describe(SCRIPT, [], set()).startswith("[대본]") and "(아직 대화 없음)" in customer.describe(SCRIPT, [], set())
+
+
+def test_holding_is_only_a_bare_please_wait():
+    assert all(customer.holding(t) for t in ["잠시만요.", "네, 잠시만요.", "음, 잠깐만요.", "잠시만 기다려 주세요."])
+    assert not any(customer.holding(t) for t in ["잠시만요. 받는 분 성함을 알려 주세요.", "받는 분 연락처를 알려 주세요.", ""])

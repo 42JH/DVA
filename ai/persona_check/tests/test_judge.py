@@ -51,7 +51,8 @@ def test_wrong_value_and_missing_registration_fail():
     next(iter(record["received"]["analyses"].values()))["registeredParcelCount"] = 0
     verdict = judge.judge(NEW, record)
     assert not verdict["passed"]
-    assert [k for k, v in statuses(verdict).items() if v == "fail"] == ["접수된 택배 수", "접수 확인된 초안 수", "받는 분 번호", "물품"]
+    assert [k for k, v in statuses(verdict).items() if v == "fail"] == ["접수된 택배 수", "접수 확인된 초안 수", "물품"]
+    assert statuses(verdict)["받는 분 번호"] == "warn"   # 한 자리 틀림 = 받아쓰기 오류
     assert statuses(verdict)["받는 분 이름"] == "pass"   # 접수가 안 됐어도 마지막 초안의 값은 본다
 
 
@@ -147,6 +148,16 @@ def test_broken_needs_a_verbatim_ai_quote_and_missing_answers_are_left_out():
     assert [c["status"] for c in judge.check_behaviour("글자", ITEMS, talk)] == ["skip"] * 3
 
 
+
+def test_minor_is_a_warning_that_does_not_fail_the_call():
+    talk = judge.dialogue(TALK)
+    got = judge.check_behaviour(answer(("minor", "디바콜입니다."), ("kept", ""), ("minor", "없는 말이에요")), ITEMS, talk)
+    assert [c["status"] for c in got] == ["warn", "pass", "skip"] and got[0]["actual"] == "확인 필요: 디바콜입니다."
+    verdict = judge._verdict({"id": "A1"}, got)
+    assert verdict["passed"] and verdict["summary"].endswith("확인 필요 1")
+    assert [c["status"] for c in judge.vote([got, got, judge.check_behaviour(answer(("kept", "")), ITEMS, talk)])] == ["warn", "pass", "skip"]
+
+
 class FakeClient:
     def __init__(self, replies):
         self.replies, self.sent = list(replies), []
@@ -185,3 +196,17 @@ def test_addresses_match_when_only_the_city_name_is_shortened():
     assert not judge.same_address("서울시 강남구 테헤란로 212", "부산광역시 강남구 테헤란로 212")   # 다른 시 · 도
     assert not judge.same_address("서울 강남구 테헤란로 212", "서울특별시 강남구 테헤란로 213")      # 다른 번지
     assert not judge.same_address("대전 유성구 대학로 99", None)
+
+
+def test_a_misheard_value_is_a_warning_but_a_missing_or_different_value_still_fails():
+    def status(name, want, got):
+        return judge._check(name, want, got, heard=True)["status"]
+    assert status("받는 분 이름", "이지은", "이지윤") == "warn"
+    assert status("받는 분 번호", "01023456789", "01023456780") == "warn"           # 한 자리
+    assert status("받는 곳 상세주소", "102동 1503호", "102동 1530호") == "warn"
+    assert status("물품 가액", 50000, 5000) == "warn"
+    assert status("받는 곳 주소", "부산 해운대구 센텀중앙로 79", "부산광역시 해운대구 센텀중앙로 97") == "warn"
+    assert status("받는 분 이름", "이지은", None) == "fail"                          # 받아 적지 못함
+    assert status("받는 분 번호", "01023456789", "01011112222") == "fail"          # 보내는 분 번호가 들어감
+    assert status("받는 곳 주소", "부산 해운대구 센텀중앙로 79", "서울 강남구 테헤란로 212") == "fail"
+    assert judge._check("물품", "중형 박스 1개", "소형 박스 1개")["status"] == "fail"   # 받아쓰기 칸이 아님
