@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { personaQueries, requestApply } from '@/features/persona/api/personaApi'
 import {
-  SCENARIO_TEST,
   scenarioTestQueries,
   startTest,
+  TEST_BEFORE_APPLY,
 } from '@/features/persona/api/scenarioTestApi'
 import { pledges } from './pledgeStore'
 import { restOf, rowsOf, testOf } from './scenarioTest'
@@ -25,13 +25,14 @@ export function useApplyTest(
   target: ApplyTarget | null,
   { auto = true, expected = target !== null }: { auto?: boolean; expected?: boolean } = {},
 ) {
-  const on = SCENARIO_TEST && target !== null
+  // 반영 전 시험을 꺼 두면(TEST_BEFORE_APPLY) 시나리오 시험이 꺼진 환경과 같은 길 — 띠는 반영 전만, 버튼은 바로 확인 창
+  const on = TEST_BEFORE_APPLY && target !== null
   const qc = useQueryClient()
   const scenarios = useQuery({
     ...scenarioTestQueries.scenarios(),
-    enabled: SCENARIO_TEST && expected,
+    enabled: TEST_BEFORE_APPLY && expected,
   })
-  const tests = useQuery({ ...scenarioTestQueries.tests(), enabled: SCENARIO_TEST && expected })
+  const tests = useQuery({ ...scenarioTestQueries.tests(), enabled: TEST_BEFORE_APPLY && expected })
   const list = scenarios.data ?? []
   const me = target && { personaSeq: target.personaSeq, version: target.head.version, isHead: true }
   const { state, shown } = me
