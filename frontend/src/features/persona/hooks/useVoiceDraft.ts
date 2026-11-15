@@ -10,11 +10,16 @@ export function useVoiceDraft(initial: VoiceSettings) {
 
   return {
     voice,
-    voiceChanged: voice.voice !== initial.voice, // 저장 안 한 내용 확인에 씀
+    // 저장 안 한 내용 확인에 씀. 속도 · 기다림은 화면에서 못 바꾸지만 수정 기록에서 불러오면 달라질 수 있음
+    voiceChanged:
+      voice.voice !== initial.voice ||
+      voice.speed !== initial.speed ||
+      voice.waitTime !== initial.waitTime,
     rateRange: options.rateRange, // 속도를 AI 지원 범위로 맞춰 보낼 때
     optionsPending: options.isPending, // 받기 전엔 저장 · 등록을 꺼 둠
 
     voiceOptions: options.voiceOptions(voice.voice),
     setVoiceName: (x: string) => setVoice((v) => ({ ...v, voice: x })),
+    setVoice, // 수정 기록 [이 내용 불러오기]
   }
 }

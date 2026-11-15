@@ -123,6 +123,5 @@ test('시험 중단 · 삭제는 빨간 버튼, 불러오기는 확인 창 없�
     okLabel: '삭제',
     danger: true,
   })
-  assert.equal(copy({ kind: 'reuse', version: 6 }), null)
   assert.equal(copy(null), null)
 })

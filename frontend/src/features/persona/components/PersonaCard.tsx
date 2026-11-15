@@ -173,7 +173,7 @@ function Card({ vm, ed, editing }: { vm: Vm; ed: Ed | null; editing: boolean }) 
       ) : (
         <PromptBody p={p} ed={ed} locked={vm.locked} />
       )}
-      {vm.historyOpen && <HistoryModal vm={vm} />}
+      {vm.historyOpen && <HistoryModal vm={vm} ed={ed} />}
     </article>
   )
 }
