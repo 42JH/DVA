@@ -34,7 +34,7 @@ export function usePromptEditor(target: EditTarget, onDone: (savedVersion?: numb
   const [name, setName] = useState(target.personaName)
   const [prompt, setPrompt] = useState(target.prompt)
   const voiceDraft = useVoiceDraft(target.voice)
-  const { voice, voiceChanged } = voiceDraft
+  const { voice, voiceChanged, setVoice } = voiceDraft
   const changedKeys = PROMPT_KEYS.filter((k) => prompt[k] !== target.prompt[k])
   const promptChanged = changedKeys.length > 0
   // 빈 칸은 프롬프트를 고칠 때만 막음 — 음성만 바꾼 저장은 프롬프트를 안 보내니 따로 저장되게 (11/11 사용자, 서버는 빈 칸 허용)
@@ -80,6 +80,12 @@ export function usePromptEditor(target: EditTarget, onDone: (savedVersion?: numb
       empty: prompt[s.key].trim() === '',
     })),
     setField: (key: PromptKey, value: string) => setPrompt((p) => ({ ...p, [key]: value })),
+    // 수정 기록 [이 내용 불러오기] — 칸에 채우기만, 기록은 [저장]을 눌러야 남음 (11/15 사용자: 누르자마자 저장한 것처럼 기록에 뜸)
+    load: (v: { name: string; prompt: PromptFields; voice: VoiceSettings }) => {
+      setName(v.name)
+      setPrompt(v.prompt)
+      setVoice(v.voice)
+    },
     emptyNotice, // 저장이 막힌 이유 — 고친 게 있을 때만 화면에 보이면 됨
 
     // 음성 드롭다운

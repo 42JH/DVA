@@ -22,11 +22,9 @@ import {
   stopTest,
 } from '@/features/persona/api/scenarioTestApi'
 import {
-  ConfirmError,
   deletePersona,
   personaQueries,
   requestApply,
-  saveVersion,
   type PersonaVersion,
 } from '@/features/persona/api/personaApi'
 
@@ -38,7 +36,6 @@ const conflictText =
 function confirmErrorText(error: unknown, kind: NonNullable<Confirming>['kind'] | undefined) {
   if (!error) return null
   if (kind === 'stop') return '시험을 중단하지 못했습니다. 다시 시도해 주세요.'
-  if (error instanceof ConfirmError) return '저장을 마치지 못했습니다. 다시 시도해 주세요.'
   const unsupported = unsupportedText(error)
   if (unsupported != null) return unsupported
   if (!(error instanceof ApiError && error.status === 409))
@@ -50,7 +47,7 @@ function confirmErrorText(error: unknown, kind: NonNullable<Confirming>['kind'] 
 
 /** 07 AI 상담가 훅 (11/13 새 안 — 저장 = 새 버전)
  * 카드 = 위 탭에서 고른 상담가의 현재 버전(그 자리에서 고침). 사용 중 상담가의 새 버전이 통화에 안 쓰이면 반영 전 띠
- * 수정 기록 창: 고른 날짜 내용을 통화에 쓰는 내용과 비교 · [이 내용 불러오기](그 내용을 새 버전으로 저장)
+ * 수정 기록 창: 고른 날짜 내용을 통화에 쓰는 내용과 비교 · [이 내용 불러오기](카드 칸에 채움 — 저장은 [저장])
  * 통화 상담가 바꾸기 · 새 버전 반영은 확인 창으로만. 시나리오 시험은 따로 화면 */
 export function usePersonaPage() {
   const {
@@ -94,10 +91,9 @@ export function usePersonaPage() {
   // 목소리 값 → 이름 ('' = 기본 음성, AI 목록에 없으면 값 그대로)
   const voiceLabel = (v: string) => options.voiceOptions(v).find((o) => o.value === v)?.label ?? v
 
-  // 다시 쓰기 = 고른 버전 내용으로 저장 (수정의 시작점과 다른 칸만)
-  const diffFrom = (v: PersonaVersion) => (latest ? reuseDiff(v, latest) : null)
-  // 남은 초안이 없고 내용도 같으면 보낼 게 없음 (서버는 빈 저장을 400으로 거절)
-  const reuseSame = (v: PersonaVersion) => !!diffFrom(v)?.same && !persona?.draftRevision
+  // 불러올 것이 없음 = 고칠 시작점(남은 초안 · 현재 버전)과 내용이 같음
+  const reuseSame = (v: PersonaVersion) =>
+    !!latest && reuseDiff(v, latest).same && !persona?.draftRevision
 
   // 통화와의 관계 — 반영 전 띠 · 통화에 쓰는 버전 · 띠에서 시험하고 반영할 대상
   const { unapplied, callVersion, sameTalk, switching, banded, applyTarget } = callStateOf(
@@ -147,27 +143,10 @@ export function usePersonaPage() {
         }
         return
       }
-      const v = all.find((x) => x.version === c.version)
-      const d = v && diffFrom(v)
-      if (!persona || !d) return
-      await saveVersion(persona.personaSeq, {
-        expectedVersion: persona.head.version,
-        expectedDraftRevision: persona.draftRevision,
-        name: d.name,
-        prompt: d.prompt,
-        voice: d.voice,
-        rateRange: options.rateRange,
-      })
     },
     onSuccess: async (_, c) => {
       await qc.invalidateQueries({ queryKey: personaQueries.all() })
       setConfirming(null)
-      if (c.kind === 'reuse') {
-        // 창을 닫고 새로 생긴 현재 버전(고친 내용)을 보여 줌 → 사용 중 상담가면 반영 전 띠
-        setHistoryOpen(false)
-        setVersion(null)
-        setShowCall(false)
-      }
       if (c.kind === 'delete' && c.personaSeq === persona?.personaSeq) {
         // 지운 상담가를 보고 있었으면 통화에 사용 중인 상담가로 돌아감 (persona 계산이 못 찾으면 inUse로 넘김)
         setPersonaSeq(null)
@@ -178,7 +157,6 @@ export function usePersonaPage() {
     onError: (e, c) => {
       // 시험 시작은 응답을 못 받아도 걸렸을 수 있음 → 창을 닫고 띠에서 알림 (다시 누르면 요금이 두 번)
       if (c.kind === 'test') return setConfirming(null)
-      if (e instanceof ConfirmError) void qc.invalidateQueries({ queryKey: personaQueries.all() })
       // 삭제는 그새 바뀐 경우(404 이미 지움 · 409 그새 적용됨) 최신 목록을 다시 받음. 이미 없으면 창도 닫음
       if (c.kind === 'delete' && e instanceof ApiError && (e.status === 404 || e.status === 409)) {
         void qc.invalidateQueries({ queryKey: personaQueries.all() })
@@ -235,12 +213,17 @@ export function usePersonaPage() {
       picked && base
         ? {
             ...pickedView(picked, base, voiceLabel),
-            // [이 내용 불러오기] — 지금 내용과 같으면 보낼 게 없음
+            // [이 내용 불러오기] = 카드 칸에 채우기만 (저장은 [저장]으로). 지금 내용과 같으면 채울 게 없음
             canLoad: canManage && !reuseSame(picked),
+            content: { name: picked.name, prompt: picked.prompt, voice: picked.voice },
           }
         : null,
-    loadPicked: () => picked && confirm.mutate({ kind: 'reuse', version: picked.version }),
-    loading: confirm.isPending,
+    // 불러온 뒤 — 창을 닫고 고친 내용 쪽을 보여 줌
+    loadedPicked: () => {
+      setHistoryOpen(false)
+      setVersion(null)
+      setShowCall(false)
+    },
     // 띠 — 반영 전 · 시험 중 · 반영 중 (11/13 새 안 1번). 고친 내용 = 반영 중이면 그 버전, 아니면 현재 버전
     band: bandView(step, applyingVersion ?? head, {
       switchTo: switching && persona ? persona.name : null,
@@ -271,7 +254,6 @@ export function usePersonaPage() {
       setConfirming({ kind: 'test' })
     },
     openHistory: () => {
-      confirm.reset() // 지난번 불러오기 실패 문구가 먼저 뜨지 않게
       setVersion(null)
       setHistoryOpen(true)
     },

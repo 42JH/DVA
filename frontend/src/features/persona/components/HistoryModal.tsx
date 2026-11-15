@@ -1,14 +1,21 @@
 import type { ReactNode } from 'react'
 import type { usePersonaPage } from '@/features/persona/hooks/usePersonaPage'
+import type { usePromptEditor } from '@/features/persona/hooks/usePromptEditor'
 import { Badge, Btn } from '@/shared/ui'
 import { Modal } from '@/shared/ui/Modal'
 
 type Vm = ReturnType<typeof usePersonaPage>
 
 // 수정 기록 창 (11/13 새 안 5번, 피그마 2368:6500) — 왼쪽 날짜별 목록, 오른쪽은 고른 날짜 내용 중 통화에 쓰는 내용과 다른 칸만
-// [이 내용 불러오기] = 그 내용으로 새 버전 저장 → 창이 닫히고 (사용 중 상담가면) 반영 전 띠
+// [이 내용 불러오기] = 카드 칸에 그 내용을 채우고 창을 닫음 → [취소][저장]. 기록은 [저장]을 눌러야 남음 (11/15)
 // 크기는 시안: 창 1000 · 몸 540, 목록 300(날짜 16 · 사람 14), 오른쪽 제목 17 · 글 16 / 1.7. 창 머리 · 아래 줄은 공용 창 그대로
-export function HistoryModal({ vm }: { vm: Vm }) {
+export function HistoryModal({
+  vm,
+  ed,
+}: {
+  vm: Vm
+  ed: ReturnType<typeof usePromptEditor> | null
+}) {
   const d = vm.picked
   const count = d ? d.meta.length + d.changed.length : 0
   return (
@@ -18,17 +25,18 @@ export function HistoryModal({ vm }: { vm: Vm }) {
       onClose={vm.closeHistory}
       footer={
         <>
-          {vm.confirmError && (
-            <p role="alert" className="text-[12px] text-ops-stop">
-              {vm.confirmError}
-            </p>
-          )}
           <Btn className="ml-auto" onClick={vm.closeHistory}>
             취소
           </Btn>
-          {d?.canLoad && (
-            <Btn kind="primary" disabled={vm.loading} onClick={vm.loadPicked}>
-              {vm.loading ? '불러오는 중…' : '이 내용 불러오기'}
+          {d?.canLoad && ed && (
+            <Btn
+              kind="primary"
+              onClick={() => {
+                ed.load(d.content)
+                vm.loadedPicked()
+              }}
+            >
+              이 내용 불러오기
             </Btn>
           )}
         </>

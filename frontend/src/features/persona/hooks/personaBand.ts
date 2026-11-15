@@ -6,10 +6,9 @@
  *  passed = 6번 시험 통과 — 띠의 [통화에 사용하기]. null = 띠 없음 */
 export type BandStep = 'unapplied' | 'testing' | 'stopped' | 'review' | 'applying' | 'passed' | null
 
-/** 확인 창을 띄운 까닭 — [통화에 사용하기] · [삭제] · 수정 기록 창 [이 내용 불러오기](reuse — 확인 창 없이 바로) · 띠의 버튼 셋 */
+/** 확인 창을 띄운 까닭 — [통화에 사용하기] · [삭제] · 띠의 버튼 셋 */
 export type Confirming =
   | { kind: 'use'; personaSeq: number }
-  | { kind: 'reuse'; version: number }
   | { kind: 'delete'; personaSeq: number }
   | { kind: 'test' } // 띠의 [통화에 반영] — 시험하고 반영 (모두 통과면 저절로 반영)
   | { kind: 'stop' } // 띠의 [시험 중단] (2번)
@@ -142,6 +141,6 @@ export function confirmCopy(
       }
     }
     default:
-      return null // reuse는 확인 창 없이 바로
+      return null
   }
 }
