@@ -9,7 +9,7 @@ import { ApiException } from '../common/errors/api.exception';
 import { DatabaseService } from '../database/database.service';
 import { CustomersService } from '../customers/customers.service';
 import { CreateOrderDto } from './dto/create-order.dto';
-import { CreatedOrderDto, OrderResultDto } from './dto/order-response.dto';
+import { CreatedOrderDto, OrderResultDto, OrderSummaryDto } from './dto/order-response.dto';
 import { NoOrderResultDto } from './dto/no-order-result.dto';
 import { OrderQueryDto } from './dto/order-query.dto';
 import { ListResponse } from '../common/pagination';
@@ -26,9 +26,15 @@ import { OrderPaymentsRepository } from './order-payments.repository';
 import { DeliveriesService } from '../deliveries/deliveries.service';
 import { ParcelDraftsRepository } from './parcel-drafts.repository';
 import { ParcelDraftQueryDto } from './dto/parcel-draft.dto';
+import { CoalescedReads } from '../common/coalesced-reads';
 
 @Injectable()
 export class OrdersService {
+  private readonly adminReads = new CoalescedReads<
+    Awaited<ReturnType<OrdersService['readAdminList']>>
+  >();
+  private readonly orderReads = new CoalescedReads<ListResponse<OrderSummaryDto>>();
+
   constructor(
     private readonly database: DatabaseService,
     private readonly repository: OrdersRepository,
@@ -128,6 +134,10 @@ export class OrdersService {
 
   async adminList(query: AdminOrderListQueryDto) {
     this.assertDateRange(query);
+    return this.adminReads.read(JSON.stringify(query), () => this.readAdminList(query));
+  }
+
+  private readAdminList(query: AdminOrderListQueryDto) {
     return this.database.transaction(async (client) => {
       await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
       const filteredPage =
@@ -157,6 +167,15 @@ export class OrdersService {
   async list(adminId: number | null, query: OrderQueryDto, callSessionHeader?: string) {
     const callId = this.callId(adminId, callSessionHeader);
     this.assertDateRange(query);
+    if (adminId !== null) {
+      return this.orderReads.read(JSON.stringify([adminId, query]), () =>
+        this.readList(adminId, query, callId),
+      );
+    }
+    return this.readList(adminId, query, callId);
+  }
+
+  private readList(adminId: number | null, query: OrderQueryDto, callId: number | null) {
     return this.database.transaction(async (client) => {
       // 통화의 고객 범위와 주문 목록을 같은 시점의 데이터로 읽는다.
       await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');

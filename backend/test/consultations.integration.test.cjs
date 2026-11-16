@@ -115,6 +115,48 @@ test('call list requires a real administrator session, including AI/header calle
   }
 });
 
+test('unfiltered call pages preserve fallback timestamps, tie order and the total on an empty page', async (t) => {
+  const initial = await result(await list({ limit: 1 }));
+  const startedAt = '2090-01-01T00:00:00.000Z';
+  const endedAt = '2090-01-01T00:01:00.000Z';
+  const started = await call({ startedAt, endedAt });
+  const analysed = await call({ startedAt: null, endedAt: null });
+  const received = await call({ startedAt: null, endedAt: null });
+  const deleted = await call({ startedAt, endedAt });
+  t.after(async () => {
+    await pool.query(
+      'UPDATE call_sessions SET deleted_at=now() WHERE call_session_seq=ANY($1::int[])',
+      [[started.callSessionSeq, analysed.callSessionSeq, received.callSessionSeq]],
+    );
+  });
+  await pool.query('UPDATE call_sessions SET incoming_at=$2 WHERE call_session_seq=$1', [
+    received.callSessionSeq,
+    startedAt,
+  ]);
+  await pool.query('UPDATE call_sessions SET deleted_at=now() WHERE call_session_seq=$1', [
+    deleted.callSessionSeq,
+  ]);
+  await pool.query(
+    `INSERT INTO call_analyses
+      (call_session_seq,ai_started_at,ai_ended_at,has_complaint,complaints,payload_hash)
+      VALUES($1,$2,$3,false,'[]'::jsonb,repeat('1',64))`,
+    [analysed.callSessionSeq, startedAt, endedAt],
+  );
+  const expected = [received.callSessionSeq, analysed.callSessionSeq, started.callSessionSeq];
+  for (const [offset, callSessionSeq] of expected.entries()) {
+    const unfiltered = await result(await list({ limit: 1, offset }));
+    const filtered = await result(await list({ limit: 1, offset, from: startedAt }));
+    assert.deepEqual(unfiltered.data, filtered.data);
+    assert.equal(unfiltered.data[0].callSessionSeq, callSessionSeq);
+    assert.equal(unfiltered.total_count, initial.total_count + expected.length);
+  }
+  assert.deepEqual(await result(await list({ limit: 1, offset: Number.MAX_SAFE_INTEGER })), {
+    data: [],
+    hasNext: false,
+    total_count: initial.total_count + expected.length,
+  });
+});
+
 test('list combines order, exact phone and order status filters and treats SQL search text literally', async () => {
   const orderSeq = (await pool.query('INSERT INTO orders DEFAULT VALUES RETURNING order_seq'))
     .rows[0].order_seq;

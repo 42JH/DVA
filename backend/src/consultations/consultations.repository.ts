@@ -30,9 +30,12 @@ type CallRow = CallDto & {
 };
 
 const CALL_STARTED_AT = 'COALESCE(c.started_at,a.ai_started_at,c.incoming_at)';
+const CALL_LIST_ORDER = '"startedAt" DESC NULLS LAST,"callSessionSeq" DESC';
+const CALL_PAGE_FIELDS = `page.*,(SELECT min(r.created_at) FROM recordings r WHERE r.call_session_seq=page."callSessionSeq") AS "recordedAt"`;
 
 const callSelect = (
   includeRecordedAt = true,
+  callSource = 'call_sessions c',
 ) => `SELECT c.call_session_seq AS "callSessionSeq",c.provider_call_id AS "providerCallId",
  CASE WHEN a.call_session_seq IS NOT NULL THEN 'COMPLETED'
   WHEN c.analysis_failed_at IS NOT NULL THEN 'FAILED'
@@ -49,7 +52,7 @@ const callSelect = (
  a.faq_answer_count AS "faqAnswerCount",a.order_lookup_count AS "orderLookupCount",
  a.cancelled_parcel_count AS "cancelledParcelCount",a.has_handoff_request AS "hasHandoffRequest",
  a.has_callback_request AS "hasCallbackRequest"
- FROM call_sessions c LEFT JOIN orders o ON o.order_seq=c.order_seq AND o.deleted_at IS NULL
+ FROM ${callSource} LEFT JOIN orders o ON o.order_seq=c.order_seq AND o.deleted_at IS NULL
  LEFT JOIN customers customer ON customer.customer_seq=COALESCE(o.customer_seq,c.customer_seq) AND customer.deleted_at IS NULL
  LEFT JOIN memberships membership ON membership.customer_seq=customer.customer_seq AND membership.deleted_at IS NULL
  LEFT JOIN organizations company ON company.organization_seq=membership.organization_seq AND company.deleted_at IS NULL
@@ -201,16 +204,62 @@ export class ConsultationsRepository {
         OR strpos(c.caller_phone_number,${parameter})>0
         OR c.call_session_seq=${sequenceParameter}::int)`);
     }
-    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const database = client ?? this.database.pool;
+    if (conditions.length === 1) {
+      const result = await this.unfilteredPage(database, query);
+      return { ...result, rows: result.rows.map(callResult) };
+    }
     const result = await readPage<CallRow>(
-      client ?? this.database.pool,
-      `${callSelect(false)} ${where}`,
+      database,
+      `${callSelect(false)} WHERE ${conditions.join(' AND ')}`,
       values,
       query,
-      '"startedAt" DESC NULLS LAST,"callSessionSeq" DESC',
-      `page.*,(SELECT min(r.created_at) FROM recordings r WHERE r.call_session_seq=page."callSessionSeq") AS "recordedAt"`,
+      CALL_LIST_ORDER,
+      CALL_PAGE_FIELDS,
     );
     return { ...result, rows: result.rows.map(callResult) };
+  }
+
+  private async unfilteredPage(
+    database: PoolClient | DatabaseService['pool'],
+    query: CallQueryDto,
+  ): Promise<PageRows<CallRow>> {
+    // Use the started_at index where possible, and resolve the fallback before merging page keys.
+    const result = await database.query<CallRow & { __total_count: string }>(
+      `WITH page_keys AS MATERIALIZED (
+        SELECT call_session_seq FROM (
+          (SELECT c.call_session_seq,c.started_at
+           FROM call_sessions c WHERE c.deleted_at IS NULL AND c.started_at IS NOT NULL
+           ORDER BY c.started_at DESC NULLS LAST,c.call_session_seq DESC
+           LIMIT ($1::bigint + $2::bigint))
+          UNION ALL
+          (SELECT c.call_session_seq,COALESCE(a.ai_started_at,c.incoming_at) AS started_at
+           FROM call_sessions c LEFT JOIN call_analyses a USING(call_session_seq)
+           WHERE c.deleted_at IS NULL AND c.started_at IS NULL
+           ORDER BY started_at DESC NULLS LAST,c.call_session_seq DESC
+           LIMIT ($1::bigint + $2::bigint))
+        ) matching_keys ORDER BY started_at DESC NULLS LAST,call_session_seq DESC
+        LIMIT $1 OFFSET $2
+      ), page AS (
+        ${callSelect(false, 'page_keys JOIN call_sessions c USING(call_session_seq)')}
+      ), totals AS (
+        SELECT count(*) AS __total_count FROM call_sessions WHERE deleted_at IS NULL
+      )
+      SELECT ${CALL_PAGE_FIELDS},totals.__total_count FROM totals
+      LEFT JOIN page ON true ORDER BY ${CALL_LIST_ORDER}`,
+      [query.limit + 1, query.offset],
+    );
+    const total_count = Number(result.rows[0]?.__total_count ?? NaN);
+    if (!Number.isSafeInteger(total_count) || total_count < 0)
+      throw new RangeError('Invalid query total count');
+    const rows = result.rows
+      .filter((row) => row.callSessionSeq !== null)
+      .map((row) => {
+        const call: CallRow & { __total_count?: string } = { ...row };
+        delete call.__total_count;
+        return call;
+      });
+    return { rows, total_count };
   }
 
   async findOne(id: number): Promise<CallListItemDto | undefined> {

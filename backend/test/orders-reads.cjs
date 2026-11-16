@@ -14,6 +14,38 @@ module.exports = function registerOrdersReads(suite) {
     address,
     readDetail,
   } = suite;
+  test('concurrent order reads keep customer filters and AI authorization separate', async () => {
+    const first = await readCustomer();
+    const second = await readCustomer();
+    const own = await readOrder(first.customer, []);
+    const other = await readOrder(second.customer, []);
+    const ownQuery = `?customerSeq=${first.customer}`;
+    const otherQuery = `?customerSeq=${second.customer}`;
+    const callId = await call(first.phone);
+    const [admin, duplicate, separate, forbidden, malformed] = await Promise.all([
+      readOrders(ownQuery),
+      readOrders(ownQuery),
+      readOrders(otherQuery),
+      readOrders(otherQuery, aiReadHeaders(callId)),
+      readOrders(ownQuery, { call_session_seq: 'invalid' }),
+    ]);
+    for (const response of [admin, duplicate, separate]) assert.equal(response.status, 200);
+    const body = await admin.json();
+    assert.deepEqual(await duplicate.json(), body);
+    assert.deepEqual(
+      body.data.map((order) => order.orderSeq),
+      [own],
+    );
+    assert.deepEqual(
+      (await separate.json()).data.map((order) => order.orderSeq),
+      [other],
+    );
+    await errorCode(forbidden, 403, 'FORBIDDEN');
+    await errorCode(malformed, 400, 'INVALID_REQUEST');
+    await readOrder(first.customer, []);
+    assert.equal((await (await readOrders(ownQuery)).json()).total_count, 2);
+  });
+
   test('ORD-02 paginates orders once each, including zero-detail drafts and equal creation times', async () => {
     const { customer } = await readCustomer();
     const ids = [];
