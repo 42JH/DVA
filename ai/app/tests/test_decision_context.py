@@ -91,7 +91,7 @@ def test_judge_sends_context_to_decision_api():
         await live.judge(s, spoken(2, "상담원 연결해 주세요", 2), rt.ai[-1])
         sent = client.decisions.create.call_args.kwargs
         assert context(sent["input"])["판단 시점 서버 기록"]["기존 업무"] == "inquiry"
-        assert [q["name"] for q in sent["questions"]] == ["switch", "reply"]
+        assert [q["name"] for q in sent["questions"]] == ["switch"]
         assert sent["model"] == "gpt-6-luna"
         live.apply.assert_awaited_once()
 
