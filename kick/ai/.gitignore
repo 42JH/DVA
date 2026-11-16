@@ -1,0 +1,10 @@
+node_modules/
+dist/
+test-results/
+playwright-report/
+*.litertlm
+*.wav
+.speech-test-profile/
+public/litertlm/
+public/onnx/
+public/models/
