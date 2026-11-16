@@ -24,8 +24,6 @@ export class CallEventsService {
   ) {}
 
   async findActions(id: number, query: PaginationQueryDto) {
-    if (!(await this.repository.callExists(id)))
-      throw new ApiException(404, 'NOT_FOUND', '통화 기록을 찾을 수 없습니다.');
     return new ListResponse(
       await this.repository.findActions(id, query),
       query.limit,
@@ -33,8 +31,6 @@ export class CallEventsService {
   }
 
   async findProcessingResults(id: number, query: PaginationQueryDto) {
-    if (!(await this.repository.callExists(id)))
-      throw new ApiException(404, 'NOT_FOUND', '통화 기록을 찾을 수 없습니다.');
     return new ListResponse(
       await this.repository.findProcessingResults(id, query),
       query.limit,
