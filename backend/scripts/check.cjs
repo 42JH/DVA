@@ -1,9 +1,10 @@
 // Cross-platform Docker verification. Creates only disposable resources with a random name.
 const { spawnSync } = require('node:child_process');
-const { copyFileSync, mkdirSync, mkdtempSync, rmSync } = require('node:fs');
+const { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const { randomBytes } = require('node:crypto');
 const path = require('node:path');
+const { gzipSync } = require('node:zlib');
 const { integrationCommand } = require('./integration-profile.cjs');
 const profile = process.env.BACKEND_TEST_PROFILE ?? 'full';
 const command = integrationCommand(profile);
@@ -22,6 +23,11 @@ const developmentProxy = run + '-development-proxy';
 const httpsProxy = run + '-https';
 const runtimeTests = run + '-runtime-tests';
 const root = path.resolve(__dirname, '..');
+const databaseVerifySqlGzip = gzipSync(
+  readFileSync(path.resolve(root, '../infra/database/verify.sql')),
+).toString('base64');
+const decodeDatabaseVerifySql =
+  'require("node:zlib").gunzipSync(Buffer.from(process.env.DVA_TEST_DATABASE_VERIFY_SQL_GZIP, "base64")).toString("utf8")';
 const temporary = mkdtempSync(path.join(tmpdir(), run + '-'));
 const password = randomBytes(32).toString('hex');
 const webhookToken = randomBytes(32).toString('hex');
@@ -125,14 +131,13 @@ try {
     `AI_BUSINESS_TOKEN=${businessToken}`,
     '-e',
     'SWAGGER_ENABLED=false',
-    // Keep the growing SQL fixture outside the Windows process command line.
-    '--mount',
-    `type=bind,source=${path.resolve(root, '../infra/database/verify.sql')},target=/tmp/dva-verify.sql,readonly`,
+    // Keep the SQL fixture small enough for Windows and independent of the Docker daemon's filesystem.
+    '-e',
+    `DVA_TEST_DATABASE_VERIFY_SQL_GZIP=${databaseVerifySqlGzip}`,
     image,
     'sh',
     '-c',
-    'DVA_TEST_DATABASE_VERIFY_SQL="$(cat /tmp/dva-verify.sql)" && export DVA_TEST_DATABASE_VERIFY_SQL && ' +
-      command,
+    `DVA_TEST_DATABASE_VERIFY_SQL="$(node -p '${decodeDatabaseVerifySql}')" && export DVA_TEST_DATABASE_VERIFY_SQL && ${command}`,
   ]);
   console.log(`Backend integration checks: ${Date.now() - integrationStarted} ms (${profile})`);
   docker(['build', '-t', runtimeImage, root]);
