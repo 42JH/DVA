@@ -22,6 +22,53 @@ import {
   PreviousOrderAddressDto,
 } from './dto/order-address-history.dto';
 
+const ADMIN_ORDER_SORT = '"createdAt" DESC,"orderSeq" DESC';
+const ADMIN_ORDER_DETAILS = `o.order_seq AS "orderSeq",o.status,o.created_at AS "createdAt",
+  o.pickup_requested_at AS "pickupRequestedAt",customer.customer_seq AS "customerSeq",
+  company.name AS "organizationName",NULL::int AS "draftSeq",NULL::jsonb AS "_draftParcel"`;
+const ADMIN_ORDER_JOINS = `LEFT JOIN customers customer ON customer.customer_seq=o.customer_seq AND customer.deleted_at IS NULL
+  LEFT JOIN memberships membership ON membership.customer_seq=customer.customer_seq AND membership.deleted_at IS NULL
+  LEFT JOIN organizations company ON company.organization_seq=membership.organization_seq AND company.deleted_at IS NULL`;
+
+function adminOrderPage(
+  filter: string,
+  draftRows: string | undefined,
+  limit: string,
+  offset: string,
+) {
+  const keys = 'SELECT "orderSeq","createdAt","draftSeq"';
+  const orders = `${keys} FROM order_keys`;
+  const drafts = `${keys} FROM draft_matching`;
+  const branchLimit = `(${limit}::bigint + ${offset}::bigint)`;
+  // Merge the first offset+limit keys of each source before reading the selected details.
+  const slice = draftRows
+    ? `SELECT * FROM (
+        (${orders} ORDER BY ${ADMIN_ORDER_SORT} LIMIT ${branchLimit})
+        UNION ALL
+        (${drafts} ORDER BY ${ADMIN_ORDER_SORT} LIMIT ${branchLimit})
+      ) AS first_keys`
+    : orders;
+  return `WITH order_keys AS NOT MATERIALIZED (
+      SELECT o.order_seq AS "orderSeq",o.created_at AS "createdAt",NULL::int AS "draftSeq"
+      FROM orders o ${filter}
+    ),
+    ${draftRows ? `draft_matching AS NOT MATERIALIZED (${draftRows}),` : ''}
+    matching AS NOT MATERIALIZED (${orders}${draftRows ? ` UNION ALL ${drafts}` : ''}),
+    page_slice AS MATERIALIZED (
+      ${slice} ORDER BY ${ADMIN_ORDER_SORT} LIMIT ${limit} OFFSET ${offset}
+    ),
+    page_details AS (
+      SELECT ${ADMIN_ORDER_DETAILS}
+      FROM page_slice JOIN orders o ON page_slice."draftSeq" IS NULL AND o.order_seq=page_slice."orderSeq"
+      ${ADMIN_ORDER_JOINS}
+      ${draftRows ? 'UNION ALL SELECT draft_matching.* FROM page_slice JOIN draft_matching USING ("draftSeq")' : ''}
+    ),
+    page AS (
+      SELECT page_details.*,row_number() OVER (ORDER BY ${ADMIN_ORDER_SORT}) + ${offset}::bigint AS __page_ordinal
+      FROM page_details
+    )`;
+}
+
 @Injectable()
 export class OrdersRepository {
   constructor(private readonly drafts: ParcelDraftsRepository) {}
@@ -148,11 +195,8 @@ export class OrdersRepository {
   async addressHistory(client: PoolClient, customerId: number, query: OrderAddressHistoryQueryDto) {
     // SQL 식별자는 검증된 두 방향의 상수에서만 선택한다. 검색값은 모두 바인딩한다.
     const side = query.direction === 'ORIGIN' ? 'origin' : 'destination';
-    const page = await readPage<PreviousOrderAddressDto & { __sort_position: number }>(
-      client,
-      `SELECT o.order_seq AS "orderSeq",p.order_parcel_seq AS "orderParcelSeq",o.created_at AS "createdAt",p.parcel_position AS __sort_position,
-        p.${side}_name AS __name,p.${side}_phone_number AS __phone,p.${side}_road_address AS __road,
-        p.${side}_jibun_address AS __jibun,p.${side}_detail_address AS __detail,p.${side}_dong_name AS __dong,p.${side}_postal_code AS __postal
+    const order = '"createdAt" DESC,"orderSeq" DESC,__sort_position,"orderParcelSeq"';
+    const matching = `SELECT o.order_seq AS "orderSeq",p.order_parcel_seq AS "orderParcelSeq",o.created_at AS "createdAt",p.parcel_position AS __sort_position
        FROM orders o JOIN order_parcels p ON p.order_seq=o.order_seq
        WHERE o.customer_seq=$1 AND o.status='ACCEPTED' AND p.status='ACTIVE' AND o.deleted_at IS NULL
          AND ($2::timestamptz IS NULL OR o.created_at >= $2)
@@ -161,10 +205,22 @@ export class OrdersRepository {
            OR NULLIF(btrim(p.${side}_jibun_address),'') IS NOT NULL)
          AND ($4::text IS NULL OR strpos(lower(normalize(concat_ws(' ',
            p.${side}_name,p.${side}_phone_number,p.${side}_road_address,p.${side}_jibun_address,
-           p.${side}_detail_address,p.${side}_dong_name,p.${side}_postal_code),NFC)),lower(normalize($4,NFC)))>0)`,
+           p.${side}_detail_address,p.${side}_dong_name,p.${side}_postal_code),NFC)),lower(normalize($4,NFC)))>0)`;
+    const page = await readPage<PreviousOrderAddressDto & { __sort_position: number }>(
+      client,
+      (limit, offset) => `WITH matching AS NOT MATERIALIZED (${matching}),
+       page_slice AS MATERIALIZED (
+         SELECT * FROM matching ORDER BY ${order} LIMIT ${limit} OFFSET ${offset}
+       ),
+       page AS (
+         SELECT page_slice.*,row_number() OVER (ORDER BY ${order}) + ${offset}::bigint AS __page_ordinal,
+          p.${side}_name AS __name,p.${side}_phone_number AS __phone,p.${side}_road_address AS __road,
+          p.${side}_jibun_address AS __jibun,p.${side}_detail_address AS __detail,p.${side}_dong_name AS __dong,p.${side}_postal_code AS __postal
+         FROM page_slice JOIN order_parcels p ON p.order_parcel_seq=page_slice."orderParcelSeq"
+       )`,
       [customerId, query.from ?? null, query.to ?? null, query.q || null],
       query,
-      '"createdAt" DESC,"orderSeq" DESC,__sort_position,"orderParcelSeq"',
+      order,
       `page.__page_ordinal,page."orderSeq",page."orderParcelSeq",page."createdAt",page.__sort_position,
        jsonb_build_object('name',page.__name,'phoneNumber',page.__phone,'roadAddress',page.__road,
         'jibunAddress',page.__jibun,'detailAddress',page.__detail,'dongName',page.__dong,'postalCode',page.__postal) AS address`,
@@ -199,12 +255,10 @@ export class OrdersRepository {
   private adminFilter(query: AdminOrderListQueryDto) {
     const phoneQuery =
       query.q && /^[0-9+() -]+$/.test(query.q) ? query.q.replace(/[^0-9]/g, '') : null;
+    const organizationSeq = query.organizationSeq ?? null;
     return {
-      sql: `FROM orders o
-       LEFT JOIN customers customer ON customer.customer_seq=o.customer_seq AND customer.deleted_at IS NULL
-       LEFT JOIN memberships membership ON membership.customer_seq=customer.customer_seq AND membership.deleted_at IS NULL
-       LEFT JOIN organizations company ON company.organization_seq=membership.organization_seq AND company.deleted_at IS NULL
-       WHERE o.deleted_at IS NULL AND NOT o.migrated_to_parcel_drafts
+      organizationScoped: organizationSeq !== null,
+      sql: `WHERE o.deleted_at IS NULL AND NOT o.migrated_to_parcel_drafts
         AND NOT EXISTS(SELECT 1 FROM order_parcel_drafts d WHERE d.legacy_order_seq=o.order_seq)
         AND ($1::text IS NULL OR o.order_seq=$7::int OR EXISTS(SELECT 1 FROM order_parcels p WHERE p.order_seq=o.order_seq AND (
          EXISTS(SELECT 1 FROM unnest(ARRAY[p.origin_name,p.origin_phone_number,p.origin_road_address,p.origin_jibun_address,p.origin_detail_address,
@@ -214,14 +268,14 @@ export class OrdersRepository {
         AND ($2::timestamptz IS NULL OR o.created_at >= $2)
         AND ($3::timestamptz IS NULL OR o.created_at < $3)
         AND ($4::text IS NULL OR o.status=$4 OR ($4='PAID' AND o.status IN ('SUBMITTING','SUBMITTING_FAILED')))
-         AND ($6::int IS NULL OR company.organization_seq=$6)`,
+         AND ${organizationSeq === null ? '$6::int IS NULL' : 'company.organization_seq=$6::int'}`,
       values: [
         query.q || null,
         query.from ?? null,
         query.to ?? null,
         query.statusGroup ?? null,
         phoneQuery || null,
-        query.organizationSeq ?? null,
+        organizationSeq,
         searchSequence(query.q, 'DV-'),
       ],
     };
@@ -229,13 +283,14 @@ export class OrdersRepository {
 
   async adminStatusCounts(client: PoolClient, query: AdminOrderListQueryDto) {
     const filter = this.adminFilter({ ...query, statusGroup: undefined });
+    const joins = filter.organizationScoped ? ADMIN_ORDER_JOINS : '';
     return (
       await client.query<{ data: Omit<AdminOrderStatusCountsDto, 'incomplete'> }>(
         `SELECT jsonb_build_object('all',count(*),'notPaid',count(*) FILTER(WHERE o.status='notPaid'),
        'paid',count(*) FILTER(WHERE o.status IN ('PAID','SUBMITTING','SUBMITTING_FAILED')),
        'accepted',count(*) FILTER(WHERE o.status='ACCEPTED'),
        'submissionFailed',count(*) FILTER(WHERE o.status='SUBMISSION_FAILED'),
-       'cancelled',count(*) FILTER(WHERE o.status='CANCELLED')) AS data ${filter.sql}`,
+       'cancelled',count(*) FILTER(WHERE o.status='CANCELLED')) AS data FROM orders o ${joins} ${filter.sql}`,
         filter.values,
       )
     ).rows[0].data;
@@ -243,16 +298,18 @@ export class OrdersRepository {
 
   async adminList(client: Pool | PoolClient, query: AdminOrderListQueryDto, knownTotal?: number) {
     const filter = this.adminFilter(query);
-    const orders = `SELECT o.order_seq AS "orderSeq",o.status,o.created_at AS "createdAt",o.pickup_requested_at AS "pickupRequestedAt",
-       customer.customer_seq AS "customerSeq",company.name AS "organizationName",NULL::int AS "draftSeq",NULL::jsonb AS "_draftParcel" ${filter.sql}`;
+    const orders = `SELECT ${ADMIN_ORDER_DETAILS} FROM orders o ${ADMIN_ORDER_JOINS} ${filter.sql}`;
     const drafts = this.drafts.adminIncompleteRows(query);
     const onlyDrafts = query.statusGroup === 'COLLECTING';
     const combined = query.statusGroup === undefined;
-    const sql = onlyDrafts
-      ? drafts.sql
-      : combined
-        ? `${orders} UNION ALL ${drafts.sql.replace(/\$(\d+)/g, (_, n: string) => `$${Number(n) + filter.values.length}`)}`
-        : orders;
+    const draftRows = combined
+      ? drafts.sql.replace(/\$(\d+)/g, (_, n: string) => `$${Number(n) + filter.values.length}`)
+      : undefined;
+    let sql: string | ((limit: string, offset: string) => string) = orders;
+    if (onlyDrafts) sql = drafts.sql;
+    else if (!filter.organizationScoped)
+      sql = (limit, offset) => adminOrderPage(filter.sql, draftRows, limit, offset);
+    else if (draftRows) sql = `${orders} UNION ALL ${draftRows}`;
     const values = onlyDrafts
       ? drafts.values
       : combined
@@ -263,7 +320,7 @@ export class OrdersRepository {
       sql,
       values,
       query,
-      '"createdAt" DESC,"orderSeq" DESC',
+      ADMIN_ORDER_SORT,
       `page."orderSeq",page.status,page."createdAt",page."pickupRequestedAt",page."customerSeq",page."organizationName",page."draftSeq",page.__page_ordinal,
        CASE WHEN page."draftSeq" IS NOT NULL THEN jsonb_build_array(jsonb_build_object(
          'orderParcelSeq',NULL,'status','ACTIVE',

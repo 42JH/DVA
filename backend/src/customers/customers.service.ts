@@ -6,8 +6,10 @@ import { AuditService } from '../audit/audit.service';
 import { DatabaseService } from '../database/database.service';
 import { ApiException } from '../common/errors/api.exception';
 import { ListResponse } from '../common/pagination';
+import { CoalescedPages } from '../common/coalesced-pages';
 import { CustomersRepository } from './customers.repository';
 import { CallerContextRequestDto } from './dto/caller-context.dto';
+import { CustomerListItemDto } from './dto/customer-response.dto';
 import { ConsultationsService } from '../consultations/consultations.service';
 import { callerPhone } from '../common/caller-phone';
 import { EmployeeCustomerIdentity } from './customers.types';
@@ -28,6 +30,11 @@ function deletionLockConflict(error: unknown): boolean {
 
 @Injectable()
 export class CustomersService {
+  private readonly pages = new CoalescedPages<
+    ListCustomersQueryDto,
+    ListResponse<CustomerListItemDto>
+  >();
+
   constructor(
     private readonly repository: CustomersRepository,
     private readonly database: DatabaseService,
@@ -223,7 +230,11 @@ export class CustomersService {
   }
 
   list(query: ListCustomersQueryDto) {
-    return this.repository.list(query).then((rows) => new ListResponse(rows, query.limit));
+    return this.pages.read(
+      [],
+      query,
+      async (page) => new ListResponse(await this.repository.list(page), page.limit),
+    );
   }
 
   async find(id: number, administrator: boolean) {

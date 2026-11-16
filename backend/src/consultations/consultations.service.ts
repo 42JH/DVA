@@ -1,9 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { ApiException } from '../common/errors/api.exception';
 import { ListResponse } from '../common/pagination';
+import { CoalescedPages } from '../common/coalesced-pages';
 import { ConsultationsRepository } from './consultations.repository';
 import { CallQueryDto } from './dto/call-query.dto';
-import { CallDetailDto } from './dto/call-response.dto';
+import { CallDetailDto, CallListItemDto } from './dto/call-response.dto';
 import { TranscriptQueryDto } from './dto/transcript.dto';
 import { RecordingPlaybackService } from './recording-playback.service';
 import { PoolClient } from 'pg';
@@ -17,6 +18,8 @@ import { DatabaseService } from '../database/database.service';
 
 @Injectable()
 export class ConsultationsService {
+  private readonly pages = new CoalescedPages<CallQueryDto, ListResponse<CallListItemDto>>();
+
   constructor(
     private readonly repository: ConsultationsRepository,
     private readonly playback: RecordingPlaybackService,
@@ -142,7 +145,11 @@ export class ConsultationsService {
       (from !== undefined && to !== undefined && from >= to)
     )
       throw new ApiException(400, 'INVALID_REQUEST', '시작 시각은 종료 시각보다 빨라야 합니다.');
-    return new ListResponse(await this.repository.findMany(query), query.limit);
+    return this.pages.read(
+      [],
+      query,
+      async (page) => new ListResponse(await this.repository.findMany(page), page.limit),
+    );
   }
 
   async findOne(id: number): Promise<CallDetailDto> {

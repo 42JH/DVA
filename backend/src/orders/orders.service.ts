@@ -19,7 +19,10 @@ import { UpdateOrderDto, UpdatedOrderDto } from './dto/update-order.dto';
 import { assertOrderUpdate } from './order-update.validation';
 import { SubmitOrderDto, SubmittedOrderDto } from './dto/submit-order.dto';
 import { callerPhone } from '../common/caller-phone';
-import { OrderAddressHistoryQueryDto } from './dto/order-address-history.dto';
+import {
+  OrderAddressHistoryQueryDto,
+  PreviousOrderAddressDto,
+} from './dto/order-address-history.dto';
 import { CreateManualOrderDto, ManualOrderResultDto } from './dto/manual-order.dto';
 import { ConsultationsService } from '../consultations/consultations.service';
 import { OrderPaymentsRepository } from './order-payments.repository';
@@ -27,13 +30,20 @@ import { DeliveriesService } from '../deliveries/deliveries.service';
 import { ParcelDraftsRepository } from './parcel-drafts.repository';
 import { ParcelDraftQueryDto } from './dto/parcel-draft.dto';
 import { CoalescedReads } from '../common/coalesced-reads';
+import { CoalescedPages } from '../common/coalesced-pages';
 
 @Injectable()
 export class OrdersService {
-  private readonly adminReads = new CoalescedReads<
+  private readonly adminReads = new CoalescedPages<
+    AdminOrderListQueryDto,
     Awaited<ReturnType<OrdersService['readAdminList']>>
   >();
   private readonly orderReads = new CoalescedReads<ListResponse<OrderSummaryDto>>();
+  private readonly orderPages = new CoalescedPages<OrderQueryDto, ListResponse<OrderSummaryDto>>();
+  private readonly addressPages = new CoalescedPages<
+    OrderAddressHistoryQueryDto,
+    ListResponse<PreviousOrderAddressDto>
+  >();
 
   constructor(
     private readonly database: DatabaseService,
@@ -134,7 +144,7 @@ export class OrdersService {
 
   async adminList(query: AdminOrderListQueryDto) {
     this.assertDateRange(query);
-    return this.adminReads.read(JSON.stringify(query), () => this.readAdminList(query));
+    return this.adminReads.read([], query, (page) => this.readAdminList(page));
   }
 
   private readAdminList(query: AdminOrderListQueryDto) {
@@ -168,6 +178,11 @@ export class OrdersService {
     const callId = this.callId(adminId, callSessionHeader);
     this.assertDateRange(query);
     if (adminId !== null) {
+      if (callSessionHeader === undefined) {
+        return this.orderPages.read([adminId], query, (page) =>
+          this.readList(adminId, page, callId),
+        );
+      }
       return this.orderReads.read(JSON.stringify([adminId, query]), () =>
         this.readList(adminId, query, callId),
       );
@@ -201,6 +216,20 @@ export class OrdersService {
   ) {
     const callId = this.callId(adminId, header);
     this.assertDateRange(query);
+    if (adminId !== null && header === undefined) {
+      return this.addressPages.read([adminId, customerId], query, (page) =>
+        this.readAddressHistory(adminId, customerId, page, callId),
+      );
+    }
+    return this.readAddressHistory(adminId, customerId, query, callId);
+  }
+
+  private readAddressHistory(
+    adminId: number | null,
+    customerId: number,
+    query: OrderAddressHistoryQueryDto,
+    callId: number | null,
+  ) {
     return this.database.transaction(async (client) => {
       await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
       const callerCustomer = await this.readCustomer(client, adminId, callId);

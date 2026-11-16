@@ -3,6 +3,8 @@ import { PoolClient } from 'pg';
 import { DatabaseService } from '../database/database.service';
 import { ApiException, ErrorDetail } from '../common/errors/api.exception';
 import { ListResponse } from '../common/pagination';
+import { CoalescedPages } from '../common/coalesced-pages';
+import { MemberViewDto } from './dto/member-response.dto';
 import { AuditService } from '../audit/audit.service';
 import { MembersRepository } from './members.repository';
 import {
@@ -18,6 +20,8 @@ import { SearchMembersQueryDto } from './dto/search-members.dto';
 
 @Injectable()
 export class MembersService {
+  private readonly pages = new CoalescedPages<ListMembersQueryDto, ListResponse<MemberViewDto>>();
+
   constructor(
     private readonly repository: MembersRepository,
     private readonly database: DatabaseService,
@@ -34,8 +38,10 @@ export class MembersService {
   }
 
   async list(companyId: number, query: ListMembersQueryDto) {
-    await this.company(companyId);
-    return new ListResponse(await this.repository.list(companyId, query), query.limit);
+    return this.pages.read([companyId], query, async (page) => {
+      await this.company(companyId);
+      return new ListResponse(await this.repository.list(companyId, page), page.limit);
+    });
   }
 
   async search(query: SearchMembersQueryDto) {
