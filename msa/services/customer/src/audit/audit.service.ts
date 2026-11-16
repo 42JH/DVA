@@ -1,4 +1,4 @@
-import { createRelay, enqueue, sendEvent } from '@dva/events';
+import { createRelay, enqueue, flushAuditSnapshot, sendEvent } from '@dva/events';
 import { HttpException, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
@@ -21,7 +21,7 @@ export class AuditService implements OnModuleInit, OnModuleDestroy {
   >();
   private readonly logger = new Logger(AuditService.name);
   private readonly failures = new WeakMap<object, string>();
-  private readonly relay: () => Promise<boolean>;
+  private readonly relay: ReturnType<typeof createRelay>;
   private timer?: NodeJS.Timeout;
   private running?: Promise<void>;
   private readonly url: string;
@@ -145,19 +145,40 @@ export class AuditService implements OnModuleInit, OnModuleDestroy {
     this.pending.delete(client);
   }
 
-  async reconcile(transactionIds: string[]): Promise<void> {
-    for (const transactionId of transactionIds)
+  async reconcile(transactionIds: string[]): Promise<string[]> {
+    const { rows: undecided } = await this.database.pool.query<{ id: string }>(
+      `SELECT candidate.id FROM unnest($1::text[]) AS candidate(id)
+       WHERE NOT EXISTS (SELECT 1 FROM outbox_events
+         WHERE event_type='AuditCommitted' AND payload->>'transactionId'=candidate.id)
+         AND NOT EXISTS (SELECT 1 FROM outbox_events
+         WHERE destination='operations' AND event_type='AuditAborted'
+           AND payload->>'transactionId'=candidate.id)`,
+      [transactionIds],
+    );
+    const open: string[] = [];
+    for (const { id: transactionId } of undecided)
       await this.database.transaction(async (client) => {
         const { rows } = await client.query<{ locked: boolean }>(
           'SELECT pg_try_advisory_xact_lock(20261106,hashtext($1)) AS locked',
           [transactionId],
         );
-        if (!rows[0].locked) return;
+        if (!rows[0].locked) {
+          open.push(transactionId);
+          return;
+        }
         const committed = await client.query(
           "SELECT 1 FROM outbox_events WHERE event_type='AuditCommitted' AND payload->>'transactionId'=$1 LIMIT 1",
           [transactionId],
         );
-        if (!committed.rowCount)
+        if (
+          !committed.rowCount &&
+          !(
+            await client.query(
+              "SELECT 1 FROM outbox_events WHERE destination='operations' AND event_type='AuditAborted' AND payload->>'transactionId'=$1 LIMIT 1",
+              [transactionId],
+            )
+          ).rowCount
+        )
           await enqueue(client, {
             destination: 'operations',
             eventType: 'AuditAborted',
@@ -165,6 +186,16 @@ export class AuditService implements OnModuleInit, OnModuleDestroy {
             payload: { transactionId },
           });
       });
+    return open;
+  }
+
+  flushSnapshot(ids: string[]): Promise<void> {
+    return flushAuditSnapshot(
+      this.database.pool,
+      this.relay,
+      (pending) => this.reconcile(pending),
+      ids,
+    );
   }
 
   async flush(eventId?: string): Promise<void> {

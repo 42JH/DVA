@@ -72,3 +72,31 @@ test('large corporate audit confirmations fit the HTTP body limit and wait for t
   assert.equal(decisions.at(-1).type,'AuditAborted');
   assert.equal(decisions.at(-1).key,key);
 });
+
+test('audit recovery skips decided keys and rechecks before aborting a possible concurrent commit', async () => {
+  const { AuditService } = require('../dist/audit/audit.service');
+  const { randomUUID } = require('node:crypto');
+  const ids = [randomUUID(), randomUUID(), randomUUID()];
+  const [decided, racing, busy] = ids;
+  const steps = [];
+  const database = { pool: { query: async (sql, values) => {
+    assert.match(sql, /NOT EXISTS/);
+    assert.deepEqual(values, [ids]);
+    steps.push('prefilter');
+    return { rows: [{ id: racing }, { id: busy }] };
+  } }, transaction: work => work({ query: async (sql, [id]) => {
+    assert.notEqual(id, decided);
+    if (sql.includes('pg_try_advisory_xact_lock')) {
+      steps.push(id);
+      return { rows: [{ locked: id !== busy }] };
+    }
+    assert.match(sql, /AuditCommitted/);
+    assert.equal(id, racing);
+    steps.push('concurrent decision');
+    return { rowCount: 1 };
+  } }) };
+  const config = { OPERATIONS_URL: 'http://operations:3005', CUSTOMER_AUTH_TOKEN: 'a'.repeat(48) };
+  const audit = new AuditService(database, { get: key => config[key] });
+  assert.deepEqual(await audit.reconcile(ids), [busy]);
+  assert.deepEqual(steps, ['prefilter', racing, 'concurrent decision', busy]);
+});

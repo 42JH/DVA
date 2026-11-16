@@ -152,6 +152,61 @@ test('a consultation recovery outage does not prevent order recovery and shutdow
   release();await stopping;assert.equal(finished,true);
 });
 
+test('an audit read with one pending transaction does not join a larger snapshot', { timeout: 2000 }, async (t) => {
+  const firstId = randomUUID(), unrelatedId = randomUUID();
+  const pending = [[firstId, unrelatedId], [firstId], [firstId]];
+  const requests = [];
+  const allCheckedAgain = Promise.withResolvers();
+  let rechecks = 0;
+  const receiver = new ServiceAuditReceiver({
+    pool: { query: async (_, ids) => {
+      if (ids && ++rechecks === 3) allCheckedAgain.resolve();
+      return { rows: (ids?.[0] ?? pending.shift()).map(transaction_id => ({ owner:'customer', transaction_id })) };
+    } },
+  }, { get: key => key === 'CUSTOMER_URL' ? 'http://customer:3001' : 'x'.repeat(48) }, {});
+  t.mock.method(globalThis, 'fetch', (_, options) => {
+    const event = JSON.parse(options.body);
+    const delivery = Promise.withResolvers();
+    assert.deepEqual(Object.keys(event.payload), ['transactionIds']);
+    assert.equal(options.headers['X-Dva-Audit-Snapshot'], '1');
+    requests.push({ event, complete: () => delivery.resolve(Response.json({
+      eventId:event.eventId, status:'processed',
+    })) });
+    return delivery.promise;
+  });
+  const larger = receiver.flushPendingSnapshot();
+  const smaller = receiver.flushPendingSnapshot();
+  const same = receiver.flushPendingSnapshot();
+  await allCheckedAgain.promise;
+  await new Promise(setImmediate);
+  assert.deepEqual(requests.map(r => r.event.payload), [
+    {transactionIds:[firstId,unrelatedId]},
+    {transactionIds:[firstId]},
+  ]);
+  requests[1].complete();
+  await Promise.all([smaller,same]);
+  requests[0].complete();
+  await larger;
+});
+
+test('scheduled recovery skips confirmations completed by the producer', async (t) => {
+  const completed = randomUUID();
+  let checked = false;
+  const receiver = new ServiceAuditReceiver({
+    pool: { query: async (sql, captured) => {
+      if (!captured) return { rows: [{ owner: 'customer', transaction_id: completed }] };
+      assert.match(sql, /transaction_id=ANY\(\$1::uuid\[\]\)/);
+      assert.deepEqual(captured, [[completed], [], []]);
+      checked = true;
+      return { rows: [] };
+    } },
+  }, { get: () => undefined }, {});
+  const fetch = t.mock.method(globalThis, 'fetch', () => assert.fail('Unexpected recovery'));
+  await receiver.flushPendingSnapshot();
+  assert.equal(checked, true);
+  assert.equal(fetch.mock.callCount(), 0);
+});
+
 test('card removal audits bind success to card IDs and failures to public owners without private fields', async () => {
   const token = 'card-audit-regression-token-'.padEnd(48, 'x');
   const client = { query: async () => ({ rows: [], rowCount: 1 }), release() {} };
