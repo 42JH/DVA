@@ -168,7 +168,7 @@ def test_server_missing_uses_same_order_as_instructions():
 ])
 def test_decision_questions_per_stage(stage, pending, expected):
     qs = decision_questions(POLICY, stage, pending=pending)
-    assert [q["name"] for q in qs] == expected + ["reply"]
+    assert [q["name"] for q in qs] == expected
     assert all(q["type"] in ("choice", "predicate", "score") for q in qs)  # 자유형 추출 질문 없음(D1)
     assert all(2 <= len(q["choices"]) <= 255 for q in qs if q["type"] == "choice")
 

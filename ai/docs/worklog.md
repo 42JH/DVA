@@ -1340,3 +1340,117 @@
 - 후보를 찾았지만 발송지 처리가 먼저여서 보류한 결과에 DEST_DEFERRED와 found·안내 근거를 넣었다. 후보 값은 보류 중 노출하지 않는다. 최근 이력에 맞는 곳이 없으면 DEST_NONE·found=0과 불러온 이력 범위라는 안내를 주고 이전 후보를 제거한다. Backend 규칙·도구 설명·내부 도구 계약 문서를 함께 갱신했다. BE/PBX API·인증·고객 데이터 저장·Decision은 변경하지 않았다.
 - 검증: 최근순·이력/핀 중복 제거·후보 수 제한·선택 뒤 HISTORY 반영·발송지 보존·이름 조건·반복 목록 요청·개인 핀 및 기업 검색 제외·빈 이력·빈 인수 유지·보류 후 재개·잘못된 타입/기업 동시 요청을 회귀 검사했다. 구현 전 새 recent 인수를 거절하는 실패를 확인했고 구현 후 신규 8건 및 전체 AI pytest 948 passed, 14 warnings(기존 의존성 deprecation). git diff --check 통과.
 - 실제 모델의 recent 인수 선택·실통화·운영 배포는 미검증이다. 조회 범위는 통화 시작 때 불러온 최근 이력(현재 설정 5건)으로 제한된다. sender_change가 오판하면 후보 제시는 여전히 발송지 처리 뒤로 보류되며 이 커밋으로 그 판정까지 해결되지는 않는다. 원격 push·MR·배포는 하지 않았다.
+# 2026-11-14 — 응답 지연·정확도·Live 활용 구조 조사
+
+- 사용자 증상에 따라 현재 app/calls/live.py, policy/render.py, config.py, tools/lookup.py와 기존 조사 기록을 읽었다. 제품 코드·외부 계약 변경 없음.
+- 대화 제어가 Live 위임·발화별 Decision·서버 후속 안내로 분산된다. 전사 delta 뒤 기본 800ms로 발화 끝을 추정하고 Decision은 1.5초 예산, 일부 도구는 Decision 반영을 기다린다. N2는 별도로 발화·위임 종료를 기다린다. 병렬 경로가 있어 이 수치들을 전체 응답 지연으로 단순 합산할 수 없다.
+- Live가 짧은 선택 답 뒤 독자적으로 다음 질문을 하지 않도록 지시하는 반면 Decision 시간 초과는 판단 없이 반환한다. 과거 11월 6일 조사에 서버 안내 누락과 Live 대기가 겹친 침묵이 기록돼 있으나 후속 수정이 있어 현재 발생률의 근거로 쓰지 않는다.
+- 번호·호수 발화 대조는 사후 로그이며, 검색 min_score는 현재 설정에서 비활성이다. 핵심 흐름 테스트는 가짜 모델과 단축 타이머를 사용하므로 실제 모델 정확도·음성 지연의 증명과 구분한다.
+- 실제 OpenAI/PBX·운영 통화 로그 재생·테스트 실행은 하지 않았다. 수치 개선이나 현재 운영 원인 확정은 하지 않는다.
+
+
+## 2026-11-15 — Live 전사 경로와 정확도 위험 조사
+
+- 현재 세션은 gpt-live-1을 사용하고 별도 STT 호출·전사 모델·언어 설정을 지정하지 않는다. sideband가 session.input_transcript.delta를 받아 delta를 그대로 이어 붙인다. 오디오 반사 이벤트는 읽기 루프에서 건너뛴다.
+- 공식 Live 문서와 설치 SDK에서 전사 완료 이벤트가 없으며 조각 도착 간격은 네트워크 지연일 수도 있음을 확인했다. 현재 마지막 전사 수신 뒤 800ms를 업무 발화 경계로 사용하므로 문장 중간 분리·다른 발화 합침 가능성이 있다. 이는 어휘 인식 오류 자체와 구분한다.
+- 누적 전사는 화면·기록뿐 아니라 Decision 입력, 물품 발화 근거, 전화번호 말끝 복원에도 사용된다. 잘못된 전사가 서버 판단으로 전파될 수 있다.
+- 공식 문서: https://developers.openai.com/api/docs/guides/live-conversations (Manage speech and transcripts). Live의 내부 전사 모델은 확인하지 못했다. PBX 원음·OpenAI 수신 음원·전사 조각 대조와 인식률 측정, 실통화 및 테스트 실행은 하지 않았다. 제품 코드·BE/PBX 계약 변경 없음.
+
+## 2026-11-15 — Live 전사·전용 STT·G.711 원인 구분
+
+- 사용자 질문에 따라 공식 Live/전사 문서와 RFC 3551을 확인했다. 확인한 공식 자료에는 Live-1 대 전용 STT의 한국어 이름·주소 정확도 직접 비교 수치가 없어 우열을 단정하지 않는다.
+- record_fields는 Backend가 만든 도구 인수를 주소 보정·이름 기록에 사용한다. 화면 전사와 도구 인수는 구분해야 하며 동일하다고 가정하지 않는다. 이름은 음성 유사성과 정확한 표기 확인을 구분하고, 주소는 존재하는 다른 주소로 잘못 보정되는 경우도 평가해야 한다.
+- G.711의 협대역 입력과 Live 자체 전사/필드 추출 오류를 분리하려면 같은 입력 음원에서 모델별 전사와 도구 인수를 비교한다. 코덱 영향의 인과 비교에는 G.711 변환 전 광대역 원음이 필요하며 디코딩·업샘플링만으로 손실 정보가 복원되지는 않는다.
+- 제품 코드 수정·API 유료 호출·실통화·음원 A/B 평가는 수행하지 않았다. 운영 협상 코덱, 패킷 손실, 수신 음질과 현재 인식률은 미확인이다.
+
+## 2026-11-15 — 별도 STT 전사의 Live Backend 전달 설계
+
+- 공식 Live delegation 문서의 Accept typed input 및 설치 SDK를 확인했다. 현재 Responses delegation을 유지한 채 response.item.create의 user/input_text로 별도 STT 전사를 큐에 넣고 response.create로 Backend 실행·재개를 요청할 수 있다. 기존 Live 전사나 자동 위임 문맥을 교체하는 API는 아니다.
+- 기존 service.py는 Responses 위임을 설정하며 live.py는 같은 item/create 및 response/create를 도구 결과 반환에 이미 사용한다. 단순 전사 추가는 기존 추론·도구 실행을 취소하지 않으므로 전사 확정 이전의 실행 방지, 발화·전사 버전 연결, 구버전 결과 무효화가 별도로 필요하다. 기존 Decision 및 item_utterance에도 같은 기준 전사를 적용해야 일관된다.
+- Backend 입력 문맥을 완전히 통제해야 하면 client delegation이 공식 제공 경로다. 현 Responses 경로에 전사를 추가하는 방법과 구분해 설명한다. 실제 API 실행·STT 연결·코드 변경·테스트는 하지 않았다.
+- 참고: https://developers.openai.com/api/docs/guides/live-delegation#accept-typed-input
+
+## 2026-11-15 — Live 선행 발화와 서버 후속 지시의 중복 구조 조사
+
+- 사용자 질문에 따라 Live/Backend 지시문, Responses 결과 재개, N2 알림과 대기·중복 방지 코드를 확인했다. Live의 자율 발화, 위임 결과 반영, 서버 commentary가 공통 발화 소유권 없이 병존한다. _wait_quiet은 송신을 늦추며, sent_hashes는 서버 알림 내용만 비교한다. reply_turn·unless_tool_turn의 일부 경로 검사는 전체 Live 자율 발화의 의미 중복이나 실제 재생 여부를 보장하지 않는다.
+- 근본 설계는 업무상 다음 질문·결과 안내의 결정 주체와 전달 경로를 하나로 정하는 것이다. 서버가 주도하면 최신 고객 발화·업무 상태에 연결한 안내를 한 경로로 전달하고 오래된 안내를 폐기한다. Live 자율 대화를 유지하면 해당 일반 질문의 서버 재지시를 제거하되 검증 실패·접수·취소 결과 등 필요한 알림은 유지한다.
+- 공식 문서는 Responses/client 양쪽에서 Live가 독립적으로 말할 수 있으며 client acknowledgement 억제도 독립 발화·이미 생성된 오디오를 막지 못한다고 명시한다. 고객이 듣는 발화를 엄격히 통제하려면 앱/미디어 릴레이의 재생 제어가 필요하며 sideband만으로는 제어할 수 없다. 엄격한 서버 주도 요구에는 서버가 정한 응답을 TTS로 재생하는 구성을 검토한다. client delegation 전환 자체는 무음 보장이 아니다.
+- 참고: https://developers.openai.com/api/docs/guides/live-delegation#suppress-automatic-acknowledgments-while-tools-run , https://developers.openai.com/api/docs/guides/voice-server-controls?api=live (Control playback when needed / Check speech before playback).
+- 제품 코드·외부 계약 변경, 테스트·실통화·실제 재생 로그 대조는 하지 않았다. 이번 증상의 개별 통화 원인을 확정하지 않으며 기존 미커밋 worklog 기록은 보존했다.
+
+## 2026-11-15 — STT 구간 확정용 VAD 선택 조사
+
+- 현재 Python 3.14/FastAPI 단일 워커 및 별도 Live-Transcribe 도입 구상에 대해 공식 Silero VAD 저장소·스트리밍 래퍼, WebRTC VAD 헤더, OpenAI 전사 문서를 확인했다. 제품 코드·의존성 변경 없음.
+- 1순위 제안은 Silero VAD ONNX CPU. 음성 확률·시작/종료 임계값·무음 유지시간을 사용하며 8/16kHz 및 32ms 입력 창을 지원한다. 입력이 Live sideband의 24kHz PCM이면 VAD용 리샘플링이 필요하다. 추론 상태는 통화마다 분리하고 모델 파일은 미리 준비한다.
+- VAD는 STT commit용 음성 구간 종료에만 사용하고 Live 음성 응답 트리거로 사용하지 않는다. STT에는 연속 오디오를 전달하며 VAD의 비음성 판정만으로 샘플을 제거하지 않는다. 기존 800ms는 초기 무음 유지값으로만 제안한다.
+- WebRTC VAD는 대안이나 높은 aggressiveness가 음성 누락률을 높임이 공식 헤더에 명시된다. 실통화 정확도 우열·동시 통화 부하·Python 3.14용 런타임 설치 호환성은 검증하지 않았다.
+
+## 2026-11-15 — 단일 워커 제약과 VAD 실행 분리 조사
+
+- registry.py의 통화 색인·중복 수신 방지·동시 통화 상한, session.py의 연결·Task·Timer·Lock, main.py의 프로세스별 서비스 조립을 확인했다. 현재 단일 워커는 FastAPI 요구사항이 아니라 메모리에 통화 소유권을 둔 설계 제약이다.
+- 이벤트 루프에서 동기 연산을 오래 하면 다른 통화의 서버 이벤트 처리·타이머도 지연된다. Live의 SIP 음성 자체는 별도 경로이므로 이를 모든 음성 스트림 중단으로 표현하지 않는다.
+- 단기 방향은 통화 소유권을 유지하고 VAD·리샘플링을 제한된 실행 경로로 분리하는 것. Python CPU 작업의 GIL과 네이티브 런타임 스레딩을 구분한다. 다중 워커 확장은 session_id별 이벤트 라우팅·공유 중복 방지/상한·백그라운드 작업 소유권을 해결한 뒤 진행해야 한다. Redis에 상태만 저장해도 WebSocket·Task가 이동하지 않는다.
+- FastAPI 공식 async/server-workers/deployment-concepts 문서 확인. 제품 코드·워커 수 변경, 부하·장애 복구 테스트는 하지 않았다.
+
+## 2026-11-15 — Client delegation 전환 시 Live 대화 주도 경계 정리
+
+- 사용자 요구를 Live가 도구 불필요 대화를 즉시 주도하고 서버는 필요한 업무 실행·검증만 담당하는 방향으로 명확히 했다. 서버 대화 주도와 client delegation 선택은 별개의 축이며 Responses에서도 같은 역할 분리가 가능하다. client 전환 자체가 지연 증가·감소나 중복 제거를 보장하지 않는다.
+- 현재 render.py는 일반 수긍 뒤 Live의 독자 질문을 금지하고 서버 Decision reply/N2를 기다리게 한다. 이 대화 진행용 경로를 유지한 채 위임 모드만 바꾸면 요구를 충족하지 못한다. Live가 맡는 일반 대화의 서버 질문 재지시는 제거 대상으로 설계하되, 저장·조회·주소 검증·접수·취소·서버 선택 반영 등 업무 상태에 영향을 주는 입력은 실행 경로와 확인 관문을 유지한다.
+- 서버 결과는 검증된 사실·허용 다음 단계·미해결 항목을 전달하고 Live가 표현과 일반 진행을 맡도록 제안했다. 배경 상태 갱신과 즉시 말해야 할 결과를 구분하고 같은 결과에 발화 요청을 중복 생성하지 않는다. 필요한 결과 이전에는 결과를 전제하는 질문으로 진행하지 않는다.
+- 공식 live-prompting/live-delegation 문서 확인: client 위임 이벤트는 메타데이터이므로 앱이 전사·문맥·상태에서 요청을 구성해야 한다. Live가 직접 구조화된 도구명·인수를 보내는 방식으로 가정하지 않는다. 프롬프트와 상태로 대화 규칙을 유도하고 실제 부작용은 코드로 차단하되 자율 발화의 무위반은 보장하지 않는다.
+- 제품 코드·외부 계약 변경, 실통화·모델 호출·지연 측정·테스트는 하지 않았다. https://developers.openai.com/api/docs/guides/live-prompting , https://developers.openai.com/api/docs/guides/live-delegation
+
+## 2026-11-15 — N3 제거 여부와 일반 발화 지시 구분
+
+- 현재 app 코드에는 N3/session.instructions.append 송신 경로가 없고 notify는 N1'(thinking)·N2(commentary)만 지원한다. delegation.md 첫머리는 11월 12일 N3 제거를 명시하지만 본문 일부에는 이전 설명이 남아 있다. test_live_flow.py에도 N3 미송신을 확인하는 검사가 있다(이번에 실행하지 않음).
+- Live 자율 대화와 겹치는 일반 다음 질문의 서버 재지시는 제거 대상으로 설명했다. 검증된 새 결과·실패 안내·필수 재질문 등 필요한 결과 전달까지 없애지는 않으며 같은 결과를 한 경로로 전달한다. N3 제거 자체로 현재 중복이 해결되는 것은 아니다. 제품 코드·기존 설계 문서 수정과 실통화 검증은 하지 않았다.
+
+## 2026-11-15 — 최신 origin/develop-ai의 N2 제거 영향 확인
+
+- git fetch origin develop-ai 후 원격 추적 기준 4709dc5e(2026-11-15 16:28:36 +09:00)를 확인했다. 작업 브랜치·제품 코드는 바꾸지 않았다. 확인한 live.py/service.py/render.py/backend_rules.md는 로컬 HEAD와 원격 기준 간 차이가 없다.
+- 최신 원격도 Responses delegation, N1'(thinking), N2(commentary)를 사용하며 N3 송신은 없다. 일반 수긍 뒤 Live의 독자 질문을 금지하고 Decision reply/N2가 진행시키는 경로도 유지된다. N2의 해시 중복 방지·reply_turn·unless_tool_turn 검사는 일부 충돌을 막지만 전체 자율 발화의 의미 중복을 보장하지 않는다.
+- N2를 대체 전달 경로 없이 없애면 첫 인사·수긍 후 진행, 서버 취소 확인·접수 되읽기 재질문, 접수 저장 성공/실패·취소 결과, 상담원/콜백·전환 실패, 종료 인사 전달이 누락될 수 있다. 도구 결과 경로는 남아도 Decision에서 직접 실행한 업무 결과가 그 경로로 자동 반환되지는 않는다.
+- _notify는 결과 전달 외에 readback 연결, 송신 직전 접수 상태 재검사, 마무리 요청 시각 및 발화 대기 기록도 수행한다. 함수 전체 삭제와 전송만 생략하는 변경을 구분해야 하며, 새 경로가 기존 확인·종료·전환 계약을 보존해야 한다. 일반 대화 재지시는 Live에 이관하고 필수 결과 전달은 유지/통합하는 방향을 제안했다.
+- 정적 분석과 기존 테스트 코드 열람만 수행했다. 테스트 실행·운영 실통화·지연 측정·배포는 하지 않았다.
+
+## 2026-11-15 — N2 분류와 Decision API 역할 구분
+
+- 원격 4709dc5e의 reply 후속 안내, 후보 선택·발송지 변경·박스 확인 후속 처리와 공식 Decisions 문서를 확인했다. N2 유지/이관 여부는 생성한 코드 경로·업무 이벤트·최신 상태로 정할 수 있어 알림 텍스트를 다시 모델로 분류할 필요가 없다.
+- 일반 진행 지시, 배경 상태 갱신, 검증 결과/실패/확인 요구를 구분한다. _queue_order_question은 선택 반영 사실·검증 실패·readback도 함께 전달하므로 이름만 보고 전체 삭제하지 않는다. 혼합 결과는 필요한 사실과 확인 요구를 보존하고 중복되는 진행 지시만 Live에 이관하는 설계를 제안했다.
+- Decision은 확인 동의·후보 선택·업무 전환처럼 문맥에 따른 고객 발화 의미 판단에 사용한다. 허용 상태·확인 대상 일치·작업 결과·결과 버전/중복 전달은 서버 검증 대상이며 Decision의 확률만으로 보장하지 않는다. 자유형 값 추출·도구 인수 생성은 별도 Backend/구조화 출력 영역이다. 새 N2 분류 호출을 매 턴 선행시키지 않는다.
+- 제품 코드 변경·테스트·실제 모델 정확도 평가는 하지 않았다. 참고: https://developers.openai.com/api/docs/guides/decisions
+
+## 2026-11-15 — Live 자율 진행의 트레이드오프와 Decision 의미 판단 구성 평가
+
+- 4709dc5e의 _decision_input/judge/apply, workflow Decision 질문·확인 임계값, test_decision_context 및 S0c 보고서를 확인했다. 현재 입력은 직전 AI+현재 고객 발화, 최대 최근 6개 발화/3000자, 질문별 서버 기록과 시간 겹침 정보다. 서버 기록을 동의 증거로 취급하지 않으며 질문도 상태에 따라 제한하고 not_answer/unclear 등 회피 답을 둔다. 제한된 업무 의도·동의·선택 분류에는 적합한 방향이나 범용 의미 이해·정확도 보장으로 평가하지 않는다.
+- 일반 진행 N2를 Live로 이관하면 서버 대기·반복 질문 감소가 예상되지만 표현/질문 순서의 일관성·사전 통제는 약해진다. 실제 접수·취소의 확인 관문과 결과 검증은 유지한다. 기존 Decision의 다른 질문이 남으면 호출 수·비용은 그대로일 수 있고, 새 값 기록·검증이 잦은 접수는 서버 작업 지연이 계속 남는다. client 전환은 문맥 구성·결과 상관관계·오래된 결과 폐기 등의 운영 책임을 늘린다.
+- 현재 발화 끝은 800ms delta 공백 추정, Decision 예산 1.5초·일반 confidence 하한 0.6, 확인 yes_min 0.7/change_max 0.3이다(설정 기본/정책 값). 낮은 점수·시간 초과에서 판단을 적용하지 않는 것은 안전하지만 업무 응답 누락에 대한 명시적 복구가 필요하다. 전사 오인식·구간 분리·최근 맥락 생략·확률 임계값 보정은 남은 위험이다.
+- S0c(11월 3일)는 6통화/57발화의 과거 재생 기록이며 웜 53건 p50 251ms/p95 284ms다. 당시 입력·질문은 현재보다 좁아 최신 운영 정확도·지연의 근거로 일반화하지 않는다. 현재 context 테스트는 입력 구성·가짜 API 전달을 검증하며 실제 모델의 의미 정확도를 증명하지 않는다. 공식 문서도 라벨 데이터와 오탐/미탐 비용으로 임계값을 정하도록 안내한다.
+- 제품 코드 변경·테스트 실행·유료 모델 호출·실통화 평가는 하지 않았다. 참고: https://developers.openai.com/api/docs/guides/decisions#interpret-the-answers
+
+## 2026-11-16 — 별도 STT/VAD를 서버 업무 발화 경계로 사용하는 설계
+
+- 별도 STT의 확정 전사를 Decision·Backend 공통 입력으로 쓰는 방향을 검토했다. gpt-live-transcribe는 내장 server_vad/semantic_vad를 지원하지 않으며 앱 VAD로 구간 끝을 감지해 commit한 뒤 completed를 받는 공식 흐름이다. 따라서 전사 completed 자체가 독립적으로 의미상 발화 끝을 찾아주는 것으로 설명하지 않는다.
+- 권장 설계는 고객 입력 음원을 Live와 STT로 병렬 전달하고, 앱 VAD의 speech-start에서 확정 대기 취소/입력 버전 변경, 구간 종료에서 STT commit, item_id에 연결한 확정 전사에서 필요한 Decision·Backend 업무 처리를 시작하는 것이다. 일반 Live 응답은 STT 완료를 기다리는 경로에 넣지 않는다. 서로 다른 구간의 completed 도착 순서는 보장되지 않아 구간 ID·입력 순서로 관리한다.
+- 현재 on_input은 Live 전사 delta 도착 공백으로 고객 구간을 만들며 위임 연결·동의 시점·물품 근거에도 해당 구간을 쓴다. STT 경계를 도입할 때 이 참조들을 같은 구간/전사 버전으로 맞추고 Live 세션과 입력 오디오의 시간축을 연결해야 한다. 고객 STT만으로 AI 질문 종료·실제 고객 청취 여부가 확인되지는 않는다.
+- 예상 이점은 텍스트 이벤트 전송 지연과 발화 경계 분리, 확정 전사의 일관된 업무 사용이다. 남는 한계는 실제 중간 쉼에 따른 분할, STT 인식 오류·비용·추가 연결·최종 전사 대기, Live와 STT 해석 차이다. 무음 유지+commit 후 남은 전사 확정+Decision 경로는 별도 측정하며 Live 응답 지연과 구분한다. 기존 Responses 자동 위임이 STT 확정 전에 시작될 수 있어 경계만 교체해서 입력 일관성이 자동 보장되지는 않는다.
+- 제품 코드 변경·테스트·실통화·STT API 실행은 하지 않았다. 공식 문서: https://developers.openai.com/api/docs/guides/realtime-transcription , https://developers.openai.com/api/docs/guides/live-delegation
+
+## 2026-11-16 — 별도 STT 경계안 재검토와 2단계 목표(중복 발화 → STT 우선) 계획 초안
+
+- 위 설계를 공식 문서·현재 코드로 재대조했다. 사실 주장(gpt-live-transcribe의 내장 VAD 미지원, completed 순서 미보장, 도착 시각 기준 800ms 경계)은 확인됐다. 다만 Responses 위임은 서버가 시작을 늦추거나 전사를 교체할 수 없어(live.py 위임 주석, 공식 문서에 수단 없음) "Decision과 Backend가 같은 확정 전사를 사용"은 현재 구조에서 성립하지 않는다. 800ms 경계가 실제 문제의 원인이라는 측정도 없다. "권장"은 과했고 "검토 후보"로 정정한다.
+- sideband 확인 세션과 교차 검토했다. 합의: VAD 단독은 텍스트 확정이 여전히 delta 도착에 의존해 일관된 안이 아니다. 경계 개선은 값 정확도를 바꾸지 않고 서버의 발화 단위 판단(Decision 입력·위임↔발화 연결·확정 지연 취소·도구의 Decision 대기)만 개선한다. 운영 통화 기록에는 조각별 시각이 남지 않아 기존 로그로 오분할 빈도를 셀 수 없다(상대 세션의 코드 확인, 서버 ai_logs 실파일은 미확인). 반사 음성에는 타임스탬프가 없으므로 VAD 결과를 세션 시간축에 올리지 않는다.
+- 사용자가 목표를 확정했다: 1단계 Live-1과 Backend LLM의 중복 발화 해결, 2단계 sideband 음성을 쓴 별도 STT 결과를 Live 전사보다 우선해 정확도 향상.
+- 1단계 초안: N2 송신 경로를 생성 원인으로 분류한다. 일반 수긍 뒤 진행 재지시(Decision reply → acknowledgement N2, reply_turn 분기)와 render.py의 "독자적으로 다음 질문 금지" 지시를 제거 대상으로, 서버가 직접 처리한 결과가 섞인 경로(_queue_order_question·more_help·lookup_picked·박스)와 필수 결과(접수·취소 확인·상담원·종료)는 유지 대상으로 본다. 어떤 N2 종류가 실제 중복을 만드는지는 개별 통화로 확정하지 않았으므로 기존 "전달 N2" 기록과 AI 발화 시각 대조를 먼저 제안했다.
+- 2단계 초안: 별도 STT가 한국어 이름·주소에서 Live 전사보다 정확하다는 근거가 없으므로 그림자 측정(병렬 전사·기록만)부터 시작하고, 그 결과로 Decision 입력 적용과 도구 인수 우선 방식(도구 실행 시 확정 전사 대조 대 client delegation)을 정한다.
+- 제품 코드 변경·테스트·실통화·유료 호출은 하지 않았다. 계획은 사용자 승인 대기다.
+- 트레이드오프 점검(사용자 요청): 1단계에서 수긍 N2를 없애면 서버가 하던 "응답 의미와 진행 중 처리 대조"(reply_turn 관문: 진행 중 위임·대기 중 확인·새 발화·다른 안내 검사)가 사라져, Live가 오래된 summary로 먼저 묻고 늦은 결과가 다시 말하게 하는 다른 형태의 중복이 생길 수 있다. 수긍 경로의 대기는 설정값 기준 발화 끝 800ms+Decision이며 실측 단축 폭은 없다. 2단계 공식 가격은 gpt-live-transcribe $0.017/분, gpt-live-1 $0.05/분으로 통화 분당 약 34% 추가다. 전사 세션은 languages·prompt·keywords 힌트와 delay(지연↔정확도) 설정을 지원하고 confidence는 반환하지 않는다. commit 뒤 확정 지연·동시 세션 한도·한국어 지원 명시는 문서에 없다. STT가 Live보다 틀리는 경우 "우선" 규칙이 회귀를 만들 수 있어 그림자 측정에서 양방향 오류를 세야 한다. 출처: https://developers.openai.com/api/docs/pricing , https://developers.openai.com/api/docs/guides/realtime-transcription
+
+## 2026-11-16 — 일반 수긍 뒤 서버 재지시 제거(중복 발화 1단계)
+
+- 사용자 승인에 따라 origin/develop-ai(4709dc5e) 기준 로컬 브랜치 fix/live-ack-self-progress에서 구현했다. 일반 수긍·추가 도움 답 뒤에 서버가 Decision reply 판정으로 다음 질문을 지시하던 N2(acknowledgement)를 제거하고, 그 진행을 Live 지시문으로 옮겼다. 같은 질문을 Live와 서버가 각각 낼 수 있던 경로 하나를 없애는 변경이다.
+- 변경: live.py에서 수긍 N2 예약과 notify의 reply_turn 분기, 그 관문 전용이던 pending_guidance·guidance_t와 commit/_follow/_transfer/notify의 래퍼를 삭제했다. workflow.toml의 decision.reply 질문과 results.acknowledgement, model.py·render.py의 reply 세트를 삭제했다. render.py의 "독자적으로 다음 질문을 하지 않습니다"를 수긍 뒤 직접 진행 규칙(접수 수집 중 최신 서버 결과의 질문 하나, 그 밖의 업무는 추가 도움 질문, 도움 있음은 용건 확인, 미정 조회·취소 대상은 받는 분 성함, 용건 없음은 업무 질문)으로 바꾸고 위임·서버 직접 처리 결과를 기다리는 중에는 진행하지 않는다는 조건을 넣었다. delegation.md §3.1·§3.2·§4 표와 overview.md를 맞췄다.
+- 유지: 서버가 직접 처리한 결과가 섞인 N2(후보 선택·발송지 변경·추가 택배·조회 선택·박스)와 필수 결과 N2(접수·취소 확인·상담원·콜백·종료), 확인 답·후보 답·접수 동의 뒤 서버를 기다리는 지시, 업무 확정 관문. BE/PBX 계약·인증·데이터 저장은 변경하지 않았다.
+- 검증: test_reply_flow.py(수긍 N2 전용)를 삭제하고 test_ack_self_progress.py를 추가했다(업무별 일반 수긍에 commentary 미송신, 지시문 문구, reply 질문·acknowledgement 키 부재). 질문 목록 기대값 3개 파일을 갱신했다. 구현 직후 기존 기대값 17건 실패를 확인했고 갱신 후 전체 AI pytest 924 passed, 14 warnings(기존 의존성 deprecation). git diff --check 통과.
+- 미검증·위험: 실제 Live 모델이 새 지시문대로 진행하는지, 중복 발화 감소 폭, 수긍 뒤 응답 지연은 실통화로 확인하지 않았다. 서버의 수긍 뒤 대조(진행 중 위임·확인 대기·새 발화·다른 안내)가 없어져 Live가 오래된 상태로 먼저 묻고 늦은 결과가 다시 말하게 할 수 있다. 어떤 N2 종류가 운영 중복의 주원인인지는 통화 기록으로 세지 않았으므로 유지한 경로의 중복은 남을 수 있다. push·MR·배포는 하지 않았다.
+- 자체 검토 후속 수정: 코드에는 남은 참조·미사용 이름이 없었으나 Live 지시문에 논리 오류가 있었다. 접수를 마친 뒤 추가 택배·도움 질문의 답은 Decision more 판정(clarify → followup_help N2)이 이미 안내하는데, 지시문이 도움이 있다는 답 전체에 Live가 직접 용건을 묻게 해 새 중복 경로를 만들었다. 직접 묻는 범위를 조회·문의·취소 뒤로 좁히고, 서버 확인·선택 질문의 답과 접수 뒤 추가 도움 질문의 답은 서버 결과를 기다리도록 명시했다. 조회·취소 대상 질문은 아직 조회하지 않은 경우로 한정했다. 테스트에 해당 문구 검사를 추가했고 전체 AI pytest 924 passed. 남은 한계: 서버 질문이 열린 상태에서 Decision이 판단하지 못한 수긍은 이전과 같이 아무도 진행시키지 않으며, 구분은 지시문에만 의존한다.
