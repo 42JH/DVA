@@ -97,6 +97,6 @@ test('audit recovery skips decided keys and rechecks before aborting a possible 
   } }) };
   const config = { OPERATIONS_URL: 'http://operations:3005', CUSTOMER_AUTH_TOKEN: 'a'.repeat(48) };
   const audit = new AuditService(database, { get: key => config[key] });
-  assert.deepEqual(await audit.reconcile(ids), [busy]);
+  await audit.reconcile(ids);
   assert.deepEqual(steps, ['prefilter', racing, 'concurrent decision', busy]);
 });

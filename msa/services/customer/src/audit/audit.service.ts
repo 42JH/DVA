@@ -145,7 +145,7 @@ export class AuditService implements OnModuleInit, OnModuleDestroy {
     this.pending.delete(client);
   }
 
-  async reconcile(transactionIds: string[]): Promise<string[]> {
+  async reconcile(transactionIds: string[]): Promise<void> {
     const { rows: undecided } = await this.database.pool.query<{ id: string }>(
       `SELECT candidate.id FROM unnest($1::text[]) AS candidate(id)
        WHERE NOT EXISTS (SELECT 1 FROM outbox_events
@@ -155,17 +155,13 @@ export class AuditService implements OnModuleInit, OnModuleDestroy {
            AND payload->>'transactionId'=candidate.id)`,
       [transactionIds],
     );
-    const open: string[] = [];
     for (const { id: transactionId } of undecided)
       await this.database.transaction(async (client) => {
         const { rows } = await client.query<{ locked: boolean }>(
           'SELECT pg_try_advisory_xact_lock(20261106,hashtext($1)) AS locked',
           [transactionId],
         );
-        if (!rows[0].locked) {
-          open.push(transactionId);
-          return;
-        }
+        if (!rows[0].locked) return;
         const committed = await client.query(
           "SELECT 1 FROM outbox_events WHERE event_type='AuditCommitted' AND payload->>'transactionId'=$1 LIMIT 1",
           [transactionId],
@@ -186,7 +182,6 @@ export class AuditService implements OnModuleInit, OnModuleDestroy {
             payload: { transactionId },
           });
       });
-    return open;
   }
 
   flushSnapshot(ids: string[]): Promise<void> {

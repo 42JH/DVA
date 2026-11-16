@@ -19,7 +19,7 @@ export function createRelay(options: {
 export function flushAuditSnapshot(
   pool: { query(sql: string, values: unknown[]): PromiseLike<unknown> },
   relay: (auditTransactions: readonly string[]) => Promise<boolean>,
-  reconcile: (ids: string[]) => Promise<string[]>, ids: string[],
+  reconcile: (ids: string[]) => Promise<void>, ids: string[],
 ): Promise<void>;
 export function sendEvent(
   url: string, token: string, event: Event, signal?: AbortSignal | null,

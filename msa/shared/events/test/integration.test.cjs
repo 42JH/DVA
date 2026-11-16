@@ -113,7 +113,7 @@ test('audit recovery leaves an earlier outbox event from an uncaptured transacti
   const first = await queue(captured, 2, 2);
   const second = await queue(captured, 3, 2);
   const scoped = createRelay({ pool: sender, source: 'order', destinations: { operations: { url, token } } });
-  await flushAuditSnapshot(sender, scoped, async () => [], [captured]);
+  await flushAuditSnapshot(sender, scoped, async () => {}, [captured]);
   assert.deepEqual((await rows(receiver, 'inbox_events')).map(row => row.event_id).sort(), [first, second].sort());
   const asDelivered = new Map((await rows(sender, 'outbox_events')).map(row => [row.event_id, row.delivered_at !== null]));
   assert.equal(asDelivered.get(unrelated), false);

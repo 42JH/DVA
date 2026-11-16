@@ -289,18 +289,14 @@ export class AuditService implements OnModuleInit, OnModuleDestroy {
     this.pending.delete(client);
   }
 
-  async reconcile(transactionIds: string[]): Promise<string[]> {
-    const open: string[] = [];
+  async reconcile(transactionIds: string[]): Promise<void> {
     for (const transactionId of transactionIds)
       await this.database.transaction(async (client) => {
         const { rows } = await client.query<{ locked: boolean }>(
           'SELECT pg_try_advisory_xact_lock(20261106,hashtext($1)) AS locked',
           [transactionId],
         );
-        if (!rows[0].locked) {
-          open.push(transactionId);
-          return;
-        }
+        if (!rows[0].locked) return;
         const committed = await client.query(
           "SELECT 1 FROM outbox_events WHERE event_type IN ('AuditCommitted','FaqConversionCommitted') AND payload->>'transactionId'=$1 LIMIT 1",
           [transactionId],
@@ -321,7 +317,6 @@ export class AuditService implements OnModuleInit, OnModuleDestroy {
             payload: { transactionId },
           });
       });
-    return open;
   }
 
   flushSnapshot(ids: string[]): Promise<void> {

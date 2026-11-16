@@ -195,17 +195,17 @@ function createRelay({ pool, source, destinations, timeoutMs = 5000, eventTypes 
 async function flushAuditSnapshot(pool, relay, reconcile, ids) {
   if (ids.length === 0) return;
   const deadline = Date.now() + 8000;
-  let undecided = ids;
+  // Active producer transactions are still invisible; wait only for durable decisions.
+  await reconcile(ids);
   do {
-    if (undecided.length) undecided = await reconcile(undecided);
     const { rows: [{ pending }] } = await pool.query(
       `SELECT EXISTS (SELECT 1 FROM outbox_events
         WHERE destination='operations' AND delivered_at IS NULL AND payload->>'transactionId'=ANY($1::text[])) AS pending`,
       [ids],
     );
-    if (!pending && !undecided.length) return;
+    if (!pending) return;
     if (Date.now() >= deadline) break;
-    if (pending && await relay(ids)) continue;
+    if (await relay(ids)) continue;
     await new Promise(resolve => setTimeout(resolve, 25));
   } while (Date.now() < deadline);
   throw new Error('Audit confirmation unavailable');
