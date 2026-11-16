@@ -38,6 +38,8 @@ def test_live_is_told_to_continue_and_decision_has_no_reply_question():
     text = render_delegation(P)
     assert "바로 이어갑니다" in text and "독자적으로 다음 질문" not in text
     assert "결과가 올 때까지 다음 질문을 하지 않습니다" in text  # 서버 결과 대기 규칙은 유지
+    # 접수 뒤 추가 도움 답은 서버(more 판정)가 안내하므로 Live가 따로 묻지 않는다.
+    assert "접수를 마친 뒤 더 보내실 택배나 다른 도움이 필요한지 묻는 질문에 답했거나" in text
     for stage in ("intent", "receiver", "more_parcels", "lookup"):
         assert "reply" not in [q["name"] for q in decision_questions(P, stage)]
     assert "acknowledgement" not in P.results
