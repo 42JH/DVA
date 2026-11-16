@@ -2,6 +2,7 @@ import { HttpException, Injectable, Logger, OnModuleInit, OnModuleDestroy } from
 import { ConfigService } from '@nestjs/config';
 import { createReceiver, sendEvent, type Event } from '@dva/events';
 import { randomUUID } from 'node:crypto';
+import { setTimeout as delay } from 'node:timers/promises';
 import type { PoolClient } from 'pg';
 import { DatabaseService } from '../database/database.service';
 import type { Environment } from '../config/environment';
@@ -25,6 +26,14 @@ import {
   commitFaqConversion,
   isFaqConversionPreparation,
 } from '../faqs/faq-conversion';
+
+const auditOwners = ['customer', 'consultation', 'order'] as const;
+type AuditOwner = (typeof auditOwners)[number];
+
+function pendingTransactions(owner: AuditOwner) {
+  return `SELECT transaction_id FROM ${owner}_audit_preparations WHERE NOT aborted
+    ${owner === 'consultation' ? 'UNION SELECT transaction_id FROM consultation_persona_references WHERE NOT committed' : ''}`;
+}
 
 const object = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -429,6 +438,7 @@ function transaction(payload: Record<string, unknown>): string {
 export class ServiceAuditReceiver implements OnModuleInit, OnModuleDestroy {
   private timer?: NodeJS.Timeout;
   private running?: Promise<void>;
+  private readonly readFlushes = new Map<string, Promise<void>>();
   private readonly logger = new Logger(ServiceAuditReceiver.name);
   readonly receive: ReturnType<typeof createReceiver>;
   constructor(
@@ -672,45 +682,83 @@ export class ServiceAuditReceiver implements OnModuleInit, OnModuleDestroy {
   }
   async onModuleDestroy() {
     clearInterval(this.timer);
-    await this.running;
+    await Promise.allSettled([this.running, ...new Set(this.readFlushes.values())]);
   }
 
-  async flushPending(
-    services: readonly ('customer' | 'consultation' | 'order')[] = [
-      'customer',
-      'consultation',
-      'order',
-    ],
-  ): Promise<void> {
+  async flushPendingSnapshot(): Promise<void> {
+    const pending = (captured?: string[][]) =>
+      this.database.pool.query<{ owner: AuditOwner; transaction_id: string }>(
+        auditOwners
+          .map(
+            (owner, index) =>
+              `SELECT DISTINCT '${owner}' AS owner, transaction_id FROM (${pendingTransactions(owner)}) pending${
+                captured ? ` WHERE transaction_id=ANY($${index + 1}::uuid[])` : ''
+              }`,
+          )
+          .join(' UNION ALL ') + ' ORDER BY owner, transaction_id',
+        captured,
+      );
+    const snapshot = (await pending()).rows;
+    if (!snapshot.length) return;
+    const captured = auditOwners.map((owner) =>
+      snapshot.filter((row) => row.owner === owner).map((row) => row.transaction_id),
+    );
+    // Give the producer's own confirmation a chance to finish before scheduling recovery.
+    await delay(25);
+    const { rows } = await pending(captured);
+    for (const owner of auditOwners) {
+      const ids = rows.filter((row) => row.owner === owner).map((row) => row.transaction_id);
+      for (let offset = 0; offset < ids.length; offset += 128) {
+        const batch = ids.slice(offset, offset + 128);
+        // Sharing a larger batch would make this read wait for transactions outside its snapshot.
+        const key = owner + ':' + batch.join(',');
+        let task = this.readFlushes.get(key);
+        if (!task) {
+          task = this.requestFlush(owner, batch, true).finally(() => {
+            this.readFlushes.delete(key);
+          });
+          this.readFlushes.set(key, task);
+        }
+        await task;
+      }
+    }
+  }
+
+  async flushPending(services: readonly AuditOwner[] = auditOwners): Promise<void> {
     for (const service of services) {
-      const table = `${service}_audit_preparations`;
       const { rows } = await this.database.pool.query<{ transaction_id: string }>(
-        `SELECT DISTINCT transaction_id FROM (SELECT transaction_id FROM ${table} WHERE NOT aborted
-         ${service === 'consultation' ? 'UNION SELECT transaction_id FROM consultation_persona_references WHERE NOT committed' : ''}
-         ) pending ORDER BY transaction_id LIMIT 128`,
+        `SELECT DISTINCT transaction_id FROM (${pendingTransactions(service)}) pending
+         ORDER BY transaction_id LIMIT 128`,
       );
-      if (!rows.length) continue;
-      const url = this.config.get(
-        service === 'order'
-          ? 'ORDER_URL'
-          : service === 'customer'
-            ? 'CUSTOMER_URL'
-            : 'CONSULTATION_URL',
-        {
-          infer: true,
-        },
-      );
-      const token = this.config.get(
-        service === 'consultation' ? 'CONSULTATION_AUTH_TOKEN' : 'CUSTOMER_AUTH_TOKEN',
-        { infer: true },
-      );
-      if (!url || !token) throw new Error('Service audit confirmation unavailable');
-      await sendEvent(url + '/internal/audit/flush', token, {
+      if (rows.length)
+        await this.requestFlush(
+          service,
+          rows.map((row) => row.transaction_id),
+        );
+    }
+  }
+
+  private async requestFlush(owner: AuditOwner, transactionIds: string[], snapshot = false) {
+    const url = this.config.get(
+      owner === 'order' ? 'ORDER_URL' : owner === 'customer' ? 'CUSTOMER_URL' : 'CONSULTATION_URL',
+      { infer: true },
+    );
+    const token = this.config.get(
+      owner === 'consultation' ? 'CONSULTATION_AUTH_TOKEN' : 'CUSTOMER_AUTH_TOKEN',
+      { infer: true },
+    );
+    if (!url || !token) throw new Error('Service audit confirmation unavailable');
+    await sendEvent(
+      url + '/internal/audit/flush',
+      token,
+      {
         eventId: randomUUID(),
         source: 'operations',
         eventType: 'AuditFlushRequested',
-        payload: { transactionIds: rows.map((row) => row.transaction_id) },
-      });
-    }
+        payload: { transactionIds },
+      },
+      undefined,
+      snapshot ? { 'X-Dva-Audit-Snapshot': '1' } : undefined,
+    );
   }
 }

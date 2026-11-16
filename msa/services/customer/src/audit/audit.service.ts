@@ -1,4 +1,4 @@
-import { createRelay, enqueue, sendEvent } from '@dva/events';
+import { createRelay, enqueue, flushAuditSnapshot, sendEvent } from '@dva/events';
 import { HttpException, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
@@ -8,6 +8,11 @@ import type { Environment } from '../config/environment';
 import { DatabaseService } from '../database/database.service';
 import type { AuditEvent, AuditResult } from './audit.types';
 
+function auditQueueKey(transactionId: string): number {
+  // Existing outbox events keep key 1, and new decisions for one transaction share a key.
+  return 2 + (Number.parseInt(transactionId.slice(0, 8), 16) % 2147483646);
+}
+
 @Injectable()
 export class AuditService implements OnModuleInit, OnModuleDestroy {
   private readonly pending = new WeakMap<
@@ -16,7 +21,7 @@ export class AuditService implements OnModuleInit, OnModuleDestroy {
   >();
   private readonly logger = new Logger(AuditService.name);
   private readonly failures = new WeakMap<object, string>();
-  private readonly relay: () => Promise<boolean>;
+  private readonly relay: ReturnType<typeof createRelay>;
   private timer?: NodeJS.Timeout;
   private running?: Promise<void>;
   private readonly url: string;
@@ -111,7 +116,7 @@ export class AuditService implements OnModuleInit, OnModuleDestroy {
       eventId = await enqueue(client, {
         destination: 'operations',
         eventType: 'AuditCommitted',
-        aggregateSeq: 1,
+        aggregateSeq: auditQueueKey(pending.transactionId),
         payload: {
           transactionId: pending.transactionId,
           preparedEventIds: pending.eventIds.slice(offset, offset + 1000),
@@ -127,7 +132,7 @@ export class AuditService implements OnModuleInit, OnModuleDestroy {
       await enqueue(client, {
         destination: 'operations',
         eventType: 'AuditAborted',
-        aggregateSeq: 1,
+        aggregateSeq: auditQueueKey(pending.transactionId),
         payload: { transactionId: pending.transactionId },
       });
       await client.query('COMMIT');
@@ -141,7 +146,16 @@ export class AuditService implements OnModuleInit, OnModuleDestroy {
   }
 
   async reconcile(transactionIds: string[]): Promise<void> {
-    for (const transactionId of transactionIds)
+    const { rows: undecided } = await this.database.pool.query<{ id: string }>(
+      `SELECT candidate.id FROM unnest($1::text[]) AS candidate(id)
+       WHERE NOT EXISTS (SELECT 1 FROM outbox_events
+         WHERE event_type='AuditCommitted' AND payload->>'transactionId'=candidate.id)
+         AND NOT EXISTS (SELECT 1 FROM outbox_events
+         WHERE destination='operations' AND event_type='AuditAborted'
+           AND payload->>'transactionId'=candidate.id)`,
+      [transactionIds],
+    );
+    for (const { id: transactionId } of undecided)
       await this.database.transaction(async (client) => {
         const { rows } = await client.query<{ locked: boolean }>(
           'SELECT pg_try_advisory_xact_lock(20261106,hashtext($1)) AS locked',
@@ -152,14 +166,31 @@ export class AuditService implements OnModuleInit, OnModuleDestroy {
           "SELECT 1 FROM outbox_events WHERE event_type='AuditCommitted' AND payload->>'transactionId'=$1 LIMIT 1",
           [transactionId],
         );
-        if (!committed.rowCount)
+        if (
+          !committed.rowCount &&
+          !(
+            await client.query(
+              "SELECT 1 FROM outbox_events WHERE destination='operations' AND event_type='AuditAborted' AND payload->>'transactionId'=$1 LIMIT 1",
+              [transactionId],
+            )
+          ).rowCount
+        )
           await enqueue(client, {
             destination: 'operations',
             eventType: 'AuditAborted',
-            aggregateSeq: 1,
+            aggregateSeq: auditQueueKey(transactionId),
             payload: { transactionId },
           });
       });
+  }
+
+  flushSnapshot(ids: string[]): Promise<void> {
+    return flushAuditSnapshot(
+      this.database.pool,
+      this.relay,
+      (pending) => this.reconcile(pending),
+      ids,
+    );
   }
 
   async flush(eventId?: string): Promise<void> {

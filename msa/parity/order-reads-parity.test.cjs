@@ -1556,7 +1556,7 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
     } finally {await delivery.end();}
     t.diagnostic('approval HTTP pairs: '+requests.length+'; provider idempotency, approval recovery, paid state and shipments');
   });
-  await t.test('parcel draft writes preserve call and customer scope, versions, reservations and committed-call recovery', async () => {
+  await t.test('parcel draft writes preserve call and customer scope, versions, reservations and committed-call recovery', async (draftWrites) => {
     const customer=92101, other=92102, withdrawn=92103, pin=92101, oldDraft=28100;
     const call=18101, unknown=18103, faultCall=18107, requests=[], histories=[new Map(),new Map()];
     const ownSides=[{...sides[0],orders:reference,calls:reference,customers:reference,audit:reference},
@@ -1582,8 +1582,17 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
         'INSERT INTO call_sessions(call_session_seq,provider_call_id,caller_phone_number,incoming_at,registered_at,order_intake_enabled,deleted_at) '+
         "OVERRIDING SYSTEM VALUE VALUES($1,'write-call-'||$1::int::text,$2,$3,$3,$4,$5)",
         [id,phone,incoming,enabled,deleted]);
-      const guard=await side.calls.connect();await guard.query('BEGIN');
-      await guard.query('SELECT 1 FROM call_sessions WHERE call_session_seq=18105 FOR KEY SHARE');retention.push(guard);
+      const guard=await side.calls.connect();
+      draftWrites.after(async()=>{
+        try {
+          // Clean up the expired fixture before later snapshots and trigger DDL.
+          await guard.query('DELETE FROM call_sessions WHERE call_session_seq=18105');
+          await guard.query('COMMIT');
+        } catch(error) { await guard.query('ROLLBACK');throw error; }
+        finally { guard.release(); }
+      });
+      await guard.query('BEGIN');
+      await guard.query('SELECT 1 FROM call_sessions WHERE call_session_seq=18105 FOR KEY SHARE');
       await side.orders.query(
         'INSERT INTO order_parcel_drafts(draft_seq,reserved_order_seq,call_session_seq,customer_seq,caller_phone_number,'+
         'client_parcel_id,creation_payload,parcel_data,status,version,created_at,updated_at,retention_started_at) '+

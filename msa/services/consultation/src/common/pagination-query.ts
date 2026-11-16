@@ -13,6 +13,7 @@ export async function readPage<T extends QueryResultRow>(
   values: unknown[],
   query: PaginationQueryDto,
   orderBy: string,
+  required?: { existsSql: string; missing: () => Error },
 ): Promise<PageRows<T>> {
   const limit = values.length + 1;
   const offset = values.length + 2;
@@ -25,9 +26,11 @@ export async function readPage<T extends QueryResultRow>(
        FROM matching ORDER BY ${orderBy} LIMIT $${limit} OFFSET $${offset}
      )
      SELECT page.*,totals.__total_count FROM (SELECT count(*) AS __total_count FROM matching) totals
-     LEFT JOIN page ON true ORDER BY page.__page_ordinal`,
+     LEFT JOIN page ON true${required ? ` WHERE EXISTS (${required.existsSql})` : ''}
+     ORDER BY page.__page_ordinal`,
     [...values, query.limit + 1, query.offset],
   );
+  if (required && !result.rows.length) throw required.missing();
   const total_count = Number(result.rows[0]?.__total_count ?? NaN);
   if (!Number.isSafeInteger(total_count) || total_count < 0)
     throw new RangeError('Invalid query total count');

@@ -8,6 +8,45 @@ const { validateEnvironment } = require('../dist/config/environment');
 const { OrdersService } = require('../dist/orders/orders.service');
 const token = 'order-read-test-only-'.padEnd(48, 't');
 
+test('admin order counts and customer references overlap in their existing read scopes', {timeout:2000}, async t => {
+  const referencesModule = require('@dva/events/call-read-references.cjs');
+  const referencesStarted = Promise.withResolvers(), countsStarted = Promise.withResolvers();
+  const finish = Promise.withResolvers();
+  const client = { query: async () => ({ rows: [] }) };
+  const eventId = randomUUID();
+  t.mock.method(referencesModule,'requestReferences', async (_kind,_url,_token,ids,source,scope) => {
+    assert.deepEqual(ids,[12]);
+    assert.equal(source,'order');
+    assert.equal(scope,eventId);
+    referencesStarted.resolve();
+    await finish.promise;
+    return [{customer_seq:12,organization_name:'existing organization'}];
+  });
+  const repository = {
+    adminList: async owner => { assert.equal(owner,client); return {rows:[{customerSeq:12}],total_count:1}; },
+    adminStatusCounts: async owner => {
+      assert.equal(owner,client);
+      countsStarted.resolve();
+      await finish.promise;
+      return {all:1,incomplete:0,notPaid:0,paid:0,accepted:0,submissionFailed:0,cancelled:1};
+    },
+  };
+  const config = {CUSTOMER_URL:'http://customer:3001',CONSULTATION_URL:'http://consultation:3004',CUSTOMER_AUTH_TOKEN:token};
+  const orders = new OrdersService({transaction:work=>work(client)},repository,{get:key=>config[key]});
+  const result = orders.executeAdmin({eventId,source:'customer',eventType:'AdminOrdersReadRequested',
+    payload:{query:{limit:10,offset:0},orderAddress:null}});
+  try {
+    await Promise.all([referencesStarted.promise,countsStarted.promise]);
+  } finally {
+    finish.resolve();
+  }
+  const page = await result;
+  assert.equal(page.data[0].customerSeq,12);
+  assert.equal(page.data[0].organizationName,'existing organization');
+  assert.equal(page.total_count,1);
+  assert.equal(page.statusCounts.cancelled,1);
+});
+
 test('retention references use the independent connection while ordinary order reads are occupied',async()=>{
   const {CallReadReferencesController}=require('../dist/orders/call-read-references.controller');
   const seen=[];

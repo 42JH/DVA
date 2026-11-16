@@ -3,6 +3,7 @@ import { Injectable } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import { DatabaseService } from '../database/database.service';
 import { AuditService } from '../audit/audit.service';
+import { ApiException } from '../common/errors/api.exception';
 import { CustomerContextClient } from '../customers/customer-context.client';
 import { OrderReferenceScopeService } from './order-reference-scope.service';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
@@ -22,6 +23,13 @@ export interface EventCall {
   orderSeq: number | null;
 }
 
+const requiredCall = {
+  existsSql: `SELECT 1 FROM call_sessions WHERE call_session_seq=$1 AND deleted_at IS NULL
+    AND (incoming_at IS NULL OR incoming_at>clock_timestamp()-interval '5 years')`,
+  missing: () =>
+    new ApiException(404, 'NOT_FOUND', '통화 기록을 찾을 수 없습니다.'),
+};
+
 @Injectable()
 export class CallEventsRepository {
   constructor(
@@ -30,17 +38,6 @@ export class CallEventsRepository {
     private readonly references: OrderReferenceScopeService,
     private readonly audit: AuditService,
   ) {}
-
-  async callExists(id: number): Promise<boolean> {
-    return (
-      (
-        await this.database.pool.query(
-          "SELECT 1 FROM call_sessions WHERE call_session_seq=$1 AND deleted_at IS NULL AND (incoming_at IS NULL OR incoming_at>clock_timestamp()-interval '5 years')",
-          [id],
-        )
-      ).rowCount === 1
-    );
-  }
 
   async findActions(
     id: number,
@@ -55,6 +52,7 @@ export class CallEventsRepository {
       [id],
       query,
       '"eventOrder","eventId"',
+      requiredCall,
     );
   }
 
@@ -94,6 +92,7 @@ export class CallEventsRepository {
       [id],
       query,
       '"eventOrder","eventId"',
+      requiredCall,
     );
   }
 

@@ -7,7 +7,7 @@ const { createServer } = require('node:http');
 const { fork } = require('node:child_process');
 const { once } = require('node:events');
 const { Pool } = require('pg');
-const { enqueue, createReceiver, createRelay, eventHttpHandler } = require('../index.cjs');
+const { enqueue, createReceiver, createRelay, eventHttpHandler, flushAuditSnapshot } = require('../index.cjs');
 
 assert.equal(process.env.NODE_ENV, 'test');
 assert.equal(process.env.PGHOST, 'events-db');
@@ -101,6 +101,24 @@ test('a filtered relay leaves unrelated durable intents pending and preserves se
   assert.equal(events.get(intent).delivered_at, null); assert.equal(events.get(intent).attempt_count, 0);
   assert.ok(events.get(first).delivered_at); assert.ok(events.get(second).delivered_at);
   assert.deepEqual((await receiver.query('SELECT event_id FROM inbox_events ORDER BY processed_at')).rows.map(row => row.event_id), [first, second]);
+});
+
+test('audit recovery leaves an earlier outbox event from an uncaptured transaction pending', async () => {
+  const captured = randomUUID(), later = randomUUID();
+  const queue = (transactionId, orderSeq, aggregateSeq) => transaction(sender, client => enqueue(client, {
+    destination: 'operations', eventType: 'OrderAccepted', aggregateSeq, payload: { orderSeq, transactionId },
+  }));
+  // The captured transaction can commit after the later-started transaction.
+  const unrelated = await queue(later, 1, 1);
+  const first = await queue(captured, 2, 2);
+  const second = await queue(captured, 3, 2);
+  const scoped = createRelay({ pool: sender, source: 'order', destinations: { operations: { url, token } } });
+  await flushAuditSnapshot(sender, scoped, async () => {}, [captured]);
+  assert.deepEqual((await rows(receiver, 'inbox_events')).map(row => row.event_id).sort(), [first, second].sort());
+  const asDelivered = new Map((await rows(sender, 'outbox_events')).map(row => [row.event_id, row.delivered_at !== null]));
+  assert.equal(asDelivered.get(unrelated), false);
+  assert.equal(await scoped(), true);
+  assert.deepEqual(await counts(), [3, 3]);
 });
 
 test('concurrent duplicate deliveries apply one business change', async () => {
