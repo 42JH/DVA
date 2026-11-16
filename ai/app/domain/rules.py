@@ -17,7 +17,7 @@ _NATIVE_PATTERN = re.compile("|".join(r"\s*".join(word) for word in _NATIVE_DIGI
 _PHONE_ENDING = re.compile(r"(?:입니다|예요|에요|요)$")
 _AMBIGUOUS_PHONE_ENDING = re.compile(r"이(?:요|에요)$")
 _LAST_FOUR = re.compile(r"^(?:끝|마지막|뒤)\s*(?:네|넷|사|4)\s*자리(?:만|는|가)?\s*[:：]?\s*")
-_PHONE_SEPARATORS = re.compile(r"[\s().에\-‐‑–—]+")
+_PHONE_SEPARATORS = re.compile(r"[\s(),.에\-‐‑–—]+")
 
 
 def normalize_phone(raw: str, rule: Phone | None = None) -> str | None:
