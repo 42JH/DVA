@@ -8,6 +8,11 @@ import type { Environment } from '../config/environment';
 import { DatabaseService } from '../database/database.service';
 import type { AuditEvent, AuditResult } from './audit.types';
 
+function auditQueueKey(transactionId: string): number {
+  // Existing outbox events keep key 1, and new decisions for one transaction share a key.
+  return 2 + (Number.parseInt(transactionId.slice(0, 8), 16) % 2147483646);
+}
+
 @Injectable()
 export class AuditService implements OnModuleInit, OnModuleDestroy {
   private readonly pending = new WeakMap<
@@ -111,7 +116,7 @@ export class AuditService implements OnModuleInit, OnModuleDestroy {
       eventId = await enqueue(client, {
         destination: 'operations',
         eventType: 'AuditCommitted',
-        aggregateSeq: 1,
+        aggregateSeq: auditQueueKey(pending.transactionId),
         payload: {
           transactionId: pending.transactionId,
           preparedEventIds: pending.eventIds.slice(offset, offset + 1000),
@@ -127,7 +132,7 @@ export class AuditService implements OnModuleInit, OnModuleDestroy {
       await enqueue(client, {
         destination: 'operations',
         eventType: 'AuditAborted',
-        aggregateSeq: 1,
+        aggregateSeq: auditQueueKey(pending.transactionId),
         payload: { transactionId: pending.transactionId },
       });
       await client.query('COMMIT');
@@ -156,7 +161,7 @@ export class AuditService implements OnModuleInit, OnModuleDestroy {
           await enqueue(client, {
             destination: 'operations',
             eventType: 'AuditAborted',
-            aggregateSeq: 1,
+            aggregateSeq: auditQueueKey(transactionId),
             payload: { transactionId },
           });
       });

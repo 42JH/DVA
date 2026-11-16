@@ -54,7 +54,7 @@ test('large corporate audit confirmations fit the HTTP body limit and wait for t
   });
   const client={query:async(sql,values)=>{
     if(sql.includes('transaction_timestamp()'))return{rows:[{at:new Date()}]};
-    if(sql.startsWith('INSERT INTO outbox_events')){const id=randomUUID();decisions.push({id,payload:values[3]});return{rows:[{event_id:id}]};}
+    if(sql.startsWith('INSERT INTO outbox_events')){const id=randomUUID();decisions.push({id,type:values[1],key:values[2],payload:values[3]});return{rows:[{event_id:id}]};}
     return{rows:[]};
   }};
   const config={OPERATIONS_URL:'http://operations:3005',CUSTOMER_AUTH_TOKEN:'test-only-audit-token-'.padEnd(40,'a')};
@@ -63,6 +63,12 @@ test('large corporate audit confirmations fit the HTTP body limit and wait for t
   const confirm=await audit.beforeCommit(client);
   for(const decision of decisions)assert.ok(Buffer.byteLength(JSON.stringify({eventId:decision.id,source:'customer',eventType:'AuditCommitted',payload:decision.payload}))<100*1024,'confirmation exceeds Nest HTTP limit');
   assert.deepEqual(decisions.flatMap(item=>item.payload.preparedEventIds),prepared);
+  const key=decisions[0].key;
+  assert.ok(key>=2&&key<=2147483647);
+  assert.ok(decisions.every(decision=>decision.key===key));
   let confirmed;audit.flush=async id=>{confirmed=id;};await confirm();
   assert.equal(confirmed,decisions.at(-1).id);
+  await audit.rollback(client);
+  assert.equal(decisions.at(-1).type,'AuditAborted');
+  assert.equal(decisions.at(-1).key,key);
 });
