@@ -1,6 +1,6 @@
 // Cross-platform Docker verification. Creates only disposable resources with a random name.
 const { spawnSync } = require('node:child_process');
-const { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync } = require('node:fs');
+const { copyFileSync, mkdirSync, mkdtempSync, rmSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const { randomBytes } = require('node:crypto');
 const path = require('node:path');
@@ -125,12 +125,14 @@ try {
     `AI_BUSINESS_TOKEN=${businessToken}`,
     '-e',
     'SWAGGER_ENABLED=false',
-    '-e',
-    `DVA_TEST_DATABASE_VERIFY_SQL=${readFileSync(path.join(root, '../infra/database/verify.sql'), 'utf8')}`,
+    // Keep the growing SQL fixture outside the Windows process command line.
+    '--mount',
+    `type=bind,source=${path.resolve(root, '../infra/database/verify.sql')},target=/tmp/dva-verify.sql,readonly`,
     image,
     'sh',
     '-c',
-    command,
+    'DVA_TEST_DATABASE_VERIFY_SQL="$(cat /tmp/dva-verify.sql)" && export DVA_TEST_DATABASE_VERIFY_SQL && ' +
+      command,
   ]);
   console.log(`Backend integration checks: ${Date.now() - integrationStarted} ms (${profile})`);
   docker(['build', '-t', runtimeImage, root]);
