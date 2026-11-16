@@ -15,7 +15,11 @@ import {
   requestOrderCancellation,
   OrderCancellationError,
 } from '@dva/events/order-cancellation.cjs';
-import { requestReferences, requestOrderOrganization } from '@dva/events/call-read-references.cjs';
+import {
+  requestReferences,
+  requestOrderOrganization,
+  type ReferenceRows,
+} from '@dva/events/call-read-references.cjs';
 import { requestDraftCallReferences } from '@dva/events/parcel-drafts.cjs';
 import { readCallbackUrl } from '@dva/events/read-scope.cjs';
 import { requestAdminOrderRead, type AdminOrderReadEvent } from '@dva/events/order-read.cjs';
@@ -633,9 +637,9 @@ export class OrdersService {
       const customerIds = [
         ...new Set(rows.rows.flatMap((row) => (row.customerSeq === null ? [] : [row.customerSeq]))),
       ];
-      const customers = new Map(
-        (customerIds.length
-          ? await requestReferences(
+      const [references, counts] = await Promise.allSettled([
+        customerIds.length
+          ? requestReferences(
               'customer',
               customerUrl('/internal/call-read-references/for-orders'),
               token,
@@ -643,9 +647,12 @@ export class OrdersService {
               'order',
               event.eventId,
             )
-          : []
-        ).map((row) => [row.customer_seq, row]),
-      );
+          : Promise.resolve<ReferenceRows['customer'][]>([]),
+        this.repository.adminStatusCounts(client, query, organization?.customer_seqs ?? null),
+      ]);
+      if (references.status === 'rejected') throw references.reason;
+      if (counts.status === 'rejected') throw counts.reason;
+      const customers = new Map(references.value.map((row) => [row.customer_seq, row]));
       const page = new ListResponse(
         {
           ...rows,
@@ -663,13 +670,12 @@ export class OrdersService {
         },
         query.limit,
       );
-      const counts = await this.repository.adminStatusCounts(
-        client,
-        query,
-        organization?.customer_seqs ?? null,
-      );
       return Object.assign(page, {
-        statusCounts: { ...counts, all: counts.all + draftIds.length, incomplete: draftIds.length },
+        statusCounts: {
+          ...counts.value,
+          all: counts.value.all + draftIds.length,
+          incomplete: draftIds.length,
+        },
       });
     });
   }
