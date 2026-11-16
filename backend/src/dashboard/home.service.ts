@@ -10,9 +10,12 @@ import { UnansweredQuestionsRepository } from '../unanswered-questions/unanswere
 import { UnansweredQuestionQueryDto } from '../unanswered-questions/dto/unanswered-question-query.dto';
 import { DashboardRepository } from './dashboard.repository';
 import { HomeDto } from './dto/home-response.dto';
+import { CoalescedReads } from '../common/coalesced-reads';
 
 @Injectable()
 export class HomeService {
+  private readonly reads = new CoalescedReads<HomeDto>();
+
   constructor(
     private readonly database: DatabaseService,
     private readonly orders: OrdersRepository,
@@ -23,6 +26,10 @@ export class HomeService {
   ) {}
 
   home(): Promise<HomeDto> {
+    return this.reads.read('home', () => this.readHome());
+  }
+
+  private readHome(): Promise<HomeDto> {
     return this.database.transaction(async (client) => {
       await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
       const { observedAt } = (
