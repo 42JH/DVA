@@ -40,8 +40,11 @@ assert.deepEqual(
     phoneOk('sender', '0212345678'),
     phoneOk('receiver', '0212345678'),
     phoneOk('sender', '01012345678'),
+    phoneOk('receiver', '0311234567'),
+    phoneOk('receiver', '0351234567'), // 없는 지역번호 — 서버가 400
+    phoneOk('receiver', '0651234567'),
   ],
-  [false, true, true],
+  [false, true, true, true, false, false],
 )
 
 // 추가: 다 채우면 통과. 주소를 검색으로 안 골랐거나 배송비가 0이면 안 됨
