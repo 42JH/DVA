@@ -19,6 +19,8 @@ data class CallSignalingState(
     val session: CallSession? = null,
     val connection: CallConnection = CallConnection.Stopped,
     val isCreating: Boolean = false,
+    val media: CallMediaState = CallMediaState(),
+    val startedAtElapsedRealtime: Long? = null,
 ) {
     val canStartCall: Boolean get() = connection == CallConnection.Connected && !isCreating && session?.isTerminal != false
 }
