@@ -7,6 +7,7 @@ data class CallMessage(
     val isFinal: Boolean = true,
     val textMessageId: String? = null,
     val delivery: CallMessageDelivery = CallMessageDelivery.Complete,
+    val playback: CallTextPlayback? = null,
 )
 
 enum class CallSpeaker { Local, Remote }
