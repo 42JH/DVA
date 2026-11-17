@@ -48,7 +48,7 @@ body {
 .bubble[hidden] { display: none; }
 
 /* 스크롤은 말풍선이 아니라 목록에: 말풍선에 overflow를 걸면 바깥의 꼬리 점이 잘린다 */
-.bubble ul { margin: 0; padding: 0; list-style: none; min-height: 0; overflow: auto; font-size: 1.15em; }
+.bubble ul { margin: 0; padding: 0; list-style: none; min-height: 0; overflow: auto; font-size: 1.35em; font-weight: 700; }
 .bubble li + li { margin-top: 0.4em; }
 
 /* 생각 꼬리: 큰 점(span)이 말풍선 아래에 반쯤 걸치고 → 작은 점(::before), 캐릭터 머리 쪽으로 */
