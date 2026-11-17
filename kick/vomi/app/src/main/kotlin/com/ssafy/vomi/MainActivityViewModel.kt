@@ -7,6 +7,11 @@ import com.ssafy.vomi.core.common.result.asResult
 import com.ssafy.vomi.core.data.repository.AuthRepository
 import com.ssafy.vomi.core.data.repository.CallRepository
 import com.ssafy.vomi.core.data.repository.UserRepository
+import com.ssafy.vomi.core.data.repository.SpeechRepository
+import com.ssafy.vomi.core.model.call.CallMediaConnection
+import com.ssafy.vomi.core.model.call.CallStatus
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
 import com.ssafy.vomi.core.model.auth.AuthState
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -24,6 +29,7 @@ internal class MainActivityViewModel @Inject constructor(
     private val authRepository: AuthRepository,
     private val userRepository: UserRepository,
     private val callRepository: CallRepository,
+    private val speechRepository: SpeechRepository,
 ) : ViewModel() {
     val authState = authRepository.authState.stateIn(
         viewModelScope,
@@ -36,6 +42,7 @@ internal class MainActivityViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             authState.collectLatest { state ->
+                speechRepository.clearSession()
                 callRepository.clearSession()
                 userRepository.clearCurrentUserProfile()
                 if (state is AuthState.SignedIn) {
@@ -56,6 +63,28 @@ internal class MainActivityViewModel @Inject constructor(
                                     callRepository.observeMedia().asResult().collect { result ->
                                         if (result is Result.Error && (result.exception as? HttpException)?.code() == 401) {
                                             authRepository.logout()
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        launch {
+                            foreground.collectLatest { visible ->
+                                if (visible) {
+                                    callState.map { signaling ->
+                                        signaling.session?.takeIf {
+                                            signaling.accountId == state.userId && it.status == CallStatus.ACCEPTED &&
+                                                signaling.media.callId == it.id && signaling.media.connection == CallMediaConnection.Connected
+                                        }?.let { it.id to it.peerId(state.userId) }
+                                    }.distinctUntilChanged().collectLatest { call ->
+                                        if (call != null) {
+                                            val (callId, peerId) = call
+                                            val microphoneEnabled = callState.map {
+                                                it.accountId == state.userId && it.session?.id == callId &&
+                                                    it.media.callId == callId && it.media.connection == CallMediaConnection.Connected &&
+                                                    it.media.isMicrophoneEnabled
+                                            }
+                                            speechRepository.observeCall(callId, peerId, microphoneEnabled).asResult().collect { }
                                         }
                                     }
                                 }
