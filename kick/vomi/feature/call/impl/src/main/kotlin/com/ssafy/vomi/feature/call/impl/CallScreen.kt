@@ -59,6 +59,7 @@ import com.ssafy.vomi.core.designsystem.component.VomiBackground
 import com.ssafy.vomi.core.designsystem.theme.VomiTheme
 import com.ssafy.vomi.core.model.call.CallSpeaker
 import com.ssafy.vomi.core.model.call.CallMessageDelivery
+import com.ssafy.vomi.feature.call.impl.component.CallMessageText
 import com.ssafy.vomi.feature.call.impl.component.CallTextSendStatus
 import com.ssafy.vomi.feature.call.impl.component.CallCaptionStatus
 import com.ssafy.vomi.feature.call.impl.component.CallHeader
@@ -228,7 +229,7 @@ private fun CallContent(
                 val showReplyStatus = !hasReplyGroup && state.phase == CallPhase.Active
                 var replyHeight by remember(sourceId) { mutableIntStateOf(0) }
                 val itemCount = state.messages.size + if (hasReplyGroup || showReplyStatus) 1 else 0
-                LaunchedEffect(state.messages.lastOrNull()?.id, state.messages.lastOrNull()?.text, itemCount, replyHeight, draggedSuggestion != null) {
+                LaunchedEffect(state.messages.lastOrNull()?.id, state.messages.lastOrNull()?.text, state.messages.lastOrNull()?.playback?.spokenTextEnd, itemCount, replyHeight, draggedSuggestion != null) {
                     if (draggedSuggestion == null && !listState.isScrollInProgress && itemCount > 0) {
                         listState.scrollToItem(itemCount - 1)
                     }
@@ -261,13 +262,7 @@ private fun CallContent(
                                 contentAlignment = if (isLocal) Alignment.CenterEnd else Alignment.CenterStart
                             ) {
                                 Column(horizontalAlignment = if (isLocal) Alignment.End else Alignment.Start) {
-                                    Text(
-                                        text = message.text,
-                                        color = (if (isLocal) Color(0xFFB9D7FA) else Color(0xFFF8F7FA)).copy(alpha = if (message.isFinal) 1f else 0.55f),
-                                        style = VomiTheme.typography.bodyR16,
-                                        textAlign = if (isLocal) TextAlign.End else TextAlign.Start,
-                                        modifier = Modifier.widthIn(max = 520.dp),
-                                    )
+                                    CallMessageText(message, modifier = Modifier.widthIn(max = 520.dp))
                                     if (isLocal && message.textMessageId != null && message.delivery != CallMessageDelivery.Complete) {
                                         Text(stringResource(when (message.delivery) {
                                             CallMessageDelivery.Sending -> R.string.call_text_message_sending

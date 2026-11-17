@@ -1,5 +1,6 @@
 package com.ssafy.vomi.feature.call.impl.model
 
+import com.ssafy.vomi.core.model.call.CallTextPlaybackStatus
 import com.ssafy.vomi.core.model.call.CallTextError
 import com.ssafy.vomi.core.model.call.CallTextRequest
 import com.ssafy.vomi.core.model.ai.ReplyModelState
@@ -47,6 +48,9 @@ internal data class CallUiState(
     val summary: CallSummary? = null,
     val isSummaryVisible: Boolean = false,
 ) {
+    val hasPendingTextPlayback: Boolean get() = messages.any {
+        it.playback?.status == CallTextPlaybackStatus.Queued || it.playback?.status == CallTextPlaybackStatus.Playing
+    }
     val canType: Boolean get() = phase == CallPhase.Active && !isMicrophoneEnabled && !isMicrophonePending && !isActionPending && !isCreating && !isSendingText
     val canSend: Boolean get() = canType && draft.isNotBlank()
     val canToggleMicrophone: Boolean get() = (phase == CallPhase.Active || phase == CallPhase.Accepted) &&

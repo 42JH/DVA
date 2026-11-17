@@ -193,7 +193,7 @@ internal class CallViewModel @Inject constructor(
                 val dialogue = state.replyDialogue()
                 val last = dialogue.lastOrNull()
                 if (state.phase == CallPhase.Active && !state.isActionPending && !state.isSendingText && !state.isReplyModelOperationPending &&
-                    state.messages.none { !it.isFinal } && state.replyModel.availability == ReplyModelAvailability.Available &&
+                    !state.hasPendingTextPlayback && state.messages.none { !it.isFinal } && state.replyModel.availability == ReplyModelAvailability.Available &&
                     last?.speaker == CallSpeaker.Remote && last.isFinal && last.text.isNotBlank()) {
                     dialogue.takeLast(13)
                 } else null
@@ -241,7 +241,7 @@ internal class CallViewModel @Inject constructor(
         val last = dialogue.lastOrNull()
         return recommendationForeground.value && replySessionReady.value && state.phase == CallPhase.Active &&
             !state.isActionPending && !state.isSendingText && !state.isReplyModelOperationPending &&
-            state.messages.none { !it.isFinal } && state.replyModel.availability == ReplyModelAvailability.Available && last?.isFinal == true &&
+            !state.hasPendingTextPlayback && state.messages.none { !it.isFinal } && state.replyModel.availability == ReplyModelAvailability.Available && last?.isFinal == true &&
             last.speaker == CallSpeaker.Remote && dialogue.takeLast(13) == messages
     }
 
