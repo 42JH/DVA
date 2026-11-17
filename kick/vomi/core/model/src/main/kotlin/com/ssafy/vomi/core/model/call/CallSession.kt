@@ -22,3 +22,5 @@ data class CallSignalingState(
 ) {
     val canStartCall: Boolean get() = connection == CallConnection.Connected && !isCreating && session?.isTerminal != false
 }
+
+data class CallSnapshot(val accountId: String, val session: CallSession?)
