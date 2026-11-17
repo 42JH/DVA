@@ -12,6 +12,10 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        maven {
+            url = uri("https://jitpack.io")
+            content { includeGroup("com.github.davidliu") }
+        }
     }
 }
 
@@ -24,6 +28,7 @@ include(":core:model")
 include(":core:domain")
 include(":core:data")
 include(":core:network")
+include(":core:rtc")
 include(":core:database")
 include(":core:datastore")
 include(":core:datastore-proto")

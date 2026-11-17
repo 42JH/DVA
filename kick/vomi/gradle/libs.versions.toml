@@ -19,8 +19,10 @@ datastore = "1.2.1"
 protobufPlugin = "0.10.0"
 protobuf = "4.35.1"
 junit = "4.13.2"
+livekit = "2.30.0"
 
 [libraries]
+livekit-android = { module = "io.livekit:livekit-android", version.ref = "livekit" }
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }
 androidx-hilt-lifecycle-viewmodel-compose = { module = "androidx.hilt:hilt-lifecycle-viewmodel-compose", version.ref = "hiltLifecycleViewModelCompose" }
 coil-compose = { module = "io.coil-kt:coil-compose", version.ref = "coil" }
