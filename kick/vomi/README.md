@@ -35,7 +35,7 @@ Motif처럼 Repository 인터페이스와 구현은 `core:data/repository`에 �
 app은 Hilt 구현 수집을 위해 data를 참조합니다.
 
 로그인과 친구 목록은 실제 서버 API에 연결합니다.
-인증 세션은 Proto DataStore에 저장합니다. DB 테이블, Firebase 설정과 실제 음성 연결은 아직 포함하지 않습니다.
+인증 세션은 Proto DataStore에 저장합니다. 전경 음성 통화는 core:rtc의 LiveKit 구현으로 연결합니다. DB 테이블과 Firebase 설정은 아직 포함하지 않습니다.
 빈 소스 디렉터리는 Git에 저장되지 않으며, 기능 추가 시 소스 파일과 함께 생성하면 됩니다.
 
 ## 디자인 시스템
@@ -69,7 +69,7 @@ FriendClient의 응답은 core:data/mapper에서 core:model의 Friend로 변환�
 
 - CallNavKey는 callId만 전달합니다. CallViewModel은 CallRepository.callState를 관찰하고 친구 목록에서 상대 이름을 찾습니다. 이름 조회가 실패하면 상대 ID를 표시합니다.
 - REQUESTED 상태는 현재 계정이 발신자인지에 따라 발신 대기 / 수신 화면으로 표시합니다. 받기·거절·취소·종료는 서버 요청을 완료한 뒤 조회와 SSE로 상태를 확인합니다.
-- ACCEPTED는 수락 완료 상태이며 LiveKit 연결 완료와 구분합니다. 현재 단계에서는 실제 미디어 연결이 없으므로 마이크·입력·전송은 비활성화하고 타이머를 시작하지 않습니다.
+- ACCEPTED는 서버 수락 상태이며 실제 미디어 연결과 구분합니다. LiveKit 방 연결과 상대 참여가 확인되면 Active가 되고 타이머를 시작합니다. 마이크는 기본 OFF이며 권한 허용 후 SDK의 실제 상태로 제어합니다.
 - 런타임은 sampleCallState를 사용하지 않습니다. 대화·AI 추천·요약은 비워 두며 고정 맞장구만 CallDefaults에서 유지합니다. 기존 샘플 대화는 Preview와 로컬 입력 규칙 테스트에만 사용합니다.
 - 초안 편집·마이크 ON 시 입력 차단·추천 탭/드래그의 기존 규칙은 CallConversation에 분리했습니다. 실제 미디어가 Active 상태가 되면 이 규칙을 사용합니다.
 - 실제 RTC / 마이크 캡처 / STT / TTS / 온디바이스 AI / 요약 생성 / FCM·시스템 알림 수신은 이후 단계입니다. 아직 마이크·알림 권한이나 foreground service를 추가하지 않습니다.
@@ -117,7 +117,7 @@ AuthRepository.login(credential)은 Flow<AuthLoginResult>를 반환하고, Login
 친구 목록에는 서버에서 받은 현재 계정 이름을 표시합니다. 친구 목록에서 뒤로 가면
 저장된 세션과 토큰을 지우고 계정 선택으로 돌아갑니다. 앱을 다시 실행하면 저장된 세션을 복원하며, 로그아웃·앱 데이터 삭제 후에는 다시 선택합니다.
 
-계정 선택·인증·세션·친구 목록과 통화 신호가 연결되어 있습니다. LiveKit 미디어 연결은 이후 단계입니다. 이전 미디어 통합 실험 코드는 별도 `feature/android-live-call` 브랜치에 보관되어 있습니다.
+계정 선택·인증·세션·친구 목록과 통화 신호가 연결되어 있습니다. 현재 LiveKit 구현은 전경 통화 범위이며 실제 두 기기 송수신은 아직 검증하지 않았습니다. 이전 미디어 통합 실험 코드는 별도 `feature/android-live-call` 브랜치에 보관되어 있습니다.
 
 ```powershell
 .\gradlew.bat :app:assembleDebug :feature:login:impl:testDebugUnitTest :core:data:testDebugUnitTest :app:lintDebug
@@ -163,7 +163,7 @@ AuthRepositoryLiveTest는 명시적으로 활성화했을 때 공통 설정으�
 ## Kick API 지원 범위
 
 [Android 연동 명세](docs/kick-android-api.md)를 기준으로 다음 HTTP API를 구현했습니다.
-친구 목록과 통화 신호 API는 화면에 연결했습니다. LiveKit join·음성·푸시 등 나머지 화면 연동은 이후 단계입니다. 기존 테스트 로그인 동작은 유지합니다.
+친구 목록과 통화 신호 API는 화면에 연결했습니다. LiveKit join과 전경 음성 연결·마이크 제어를 연결했습니다. 음성 프로필·합성·푸시 등 나머지 화면 연동은 이후 단계입니다. 기존 테스트 로그인 동작은 유지합니다.
 
 | Client | 지원 요청 |
 | --- | --- |
@@ -250,3 +250,14 @@ VOMI_RUN_CALL_LIVE_TESTS=1과 두 KICK_TEST_ACCOUNT 토큰 환경변수를 별�
 로그인 네트워크 예외는 재포장하지 않고 그대로 전달합니다. LoginViewModel이 asResult()의 Error에서 인증 실패·네트워크 오류·서버 오류를 구분하며, 토큰 누락·계정 불일치는 Mock 구현의 검증 오류로 전달합니다.
 
 이 인증 구조 변경에서는 테스트와 실서버 요청을 실행하지 않았습니다. 앱 컴파일 확인과 변경 코드·참조 검토만 수행했습니다. 기존 테스트 코드는 새 인터페이스에 맞춰 갱신했으며 실행 결과를 주장하지 않습니다.
+
+## LiveKit 전경 음성 통화
+
+- core:rtc는 RtcClient 인터페이스와 LiveKitRtcClient 구현만 노출하고, SDK Room과 트랙 타입은 내부에 둡니다. LiveKit Android 2.30.0을 사용하며 JitPack은 audioswitch 의존성 그룹으로 제한합니다.
+- CallRepository.observeMedia()는 앱에서 수집할 때만 동작합니다. 수락된 callId가 바뀌면 기존 연결을 정리하고 POST api/calls/{id}/join의 URL·토큰으로 방에 입장합니다. 토큰은 UI 모델·로그·저장소에 넣지 않습니다.
+- 서버 신호 connection과 CallMediaState는 별개입니다. SSE 자동 재연결은 기존 음성 방을 다시 만들지 않으며, SDK의 재연결 이벤트는 미디어 상태에 반영합니다. 수동 재시도는 참여 정보를 다시 받아 연결합니다.
+- 마이크 권한은 UI에서 요청합니다. 기본 마이크 OFF 상태로 상대 음성을 수신하며, 마이크 ON을 선택하고 권한을 허용하면 음성을 송출합니다. SDK 변경과 공유 상태 확인 후 전환 완료를 표시하며 요청 중 중복 조작을 잠급니다.
+- 전사·개인화 TTS·AI 추천·요약은 이번 범위에 없습니다. 마이크 OFF에서 초안 작성은 가능하지만 실제 음성 전송이 연결되기 전에는 전송과 맞장구 실행을 비활성화합니다. Preview의 로컬 입력 예시는 별도 fixture입니다.
+- 통화 종료 요청은 로컬 Room을 먼저 닫고 서버 종료를 요청합니다. 원격 종료·로그아웃·관찰 취소도 Room과 오디오 자원을 해제합니다. 서버 종료 실패는 화면에 표시하고 재시도할 수 있습니다.
+- 이번 구현은 전경 통화입니다. 백그라운드 진입 시 미디어를 정리하고 전경 복귀 시 수락된 통화에 다시 연결하며 마이크는 OFF로 시작합니다. 화면 회전은 동일 ViewModel과 연결을 유지합니다. 백그라운드 통화 유지·수신 알림·FCM·Foreground Service는 이후 단계입니다.
+- 실제 연결 확인 시 두 앱을 모두 전경에 두고 사용자1·사용자2로 로그인한 뒤 발신 → 수락 → 연결 확인 → 각 기기에서 마이크 ON 및 권한 허용 → 상대 음성 수신 → 마이크 OFF → 종료 순서로 확인합니다. 이번 작업에서 이 기기 확인·서버 요청·테스트는 실행하지 않았고 앱 빌드와 정적 검토만 수행했습니다.

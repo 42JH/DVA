@@ -65,6 +65,14 @@ assumptions:
     verification: Added a persistent token-pair/string-user-ID schema, AuthState initialization and restoration, a separate UserRepository, and shared CallSessionStore. CallRepository owns shared callState and an internal CallSessionStore, automatically merging API/SSE results and handling transient retries and recovery through cold Flows, without AuthRepository or ApplicationScope dependencies. MainActivityViewModel coordinates authentication and foreground collection through observeCalls().asResult(), with no direct Store dependency; MainActivity forwards lifecycle state and creates VomiAppState for navigation/UI from supplied authentication and call state. AuthRepository.login now delegates to an AuthDataSource interface, with MockAuthDataSource supplied by AuthModule; the public credential contract has no TestAccount parameter and raw login network errors reach asResult in LoginViewModel. Existing test sources were adapted but not executed. Debug app assembly passed; no server or device requests were made for this refactor.
     source: core/datastore/src/main/kotlin/com/ssafy/vomi/core/datastore/auth/AuthSessionDataSource.kt; core/data/src/main/kotlin/com/ssafy/vomi/core/data/repository/AuthRepositoryImpl.kt; app/src/main/kotlin/com/ssafy/vomi/MainActivityViewModel.kt; app/src/main/kotlin/com/ssafy/vomi/ui/VomiAppState.kt
     updated_at: '2026-11-14'
+  - id: foreground-livekit-audio
+    status: unknown
+    claim: Accepted calls can join the same LiveKit room and exchange audio with SDK-backed microphone controls while the app is foregrounded.
+    reason: The user requested no test execution. No server joins, device microphone access or two-device audio checks were performed.
+    verification: Added an isolated core:rtc client, repository-owned join/media state, foreground collection, runtime microphone permission UI, actual microphone confirmation and room cleanup. Debug app compilation is the available verification; runtime success is not established.
+    source: core/rtc/src/main/kotlin/com/ssafy/vomi/core/rtc/LiveKitRtcClient.kt; core/data/src/main/kotlin/com/ssafy/vomi/core/data/repository/CallRepositoryImpl.kt; feature/call/impl/src/main/kotlin/com/ssafy/vomi/feature/call/impl/CallScreen.kt
+    updated_at: '2026-11-17'
+
 fingerprints:
   - id: initial-android-handoff
     date: '2026-11-13'
