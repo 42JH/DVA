@@ -31,5 +31,3 @@ assert.equal(versionGap(230 - 182.9), '현재 버전이 직전 버전보다 접�
 assert.equal(versionGap(-30), '현재 버전이 직전 버전보다 접수 1건당 30.0초 길었어요.')
 assert.equal(versionGap(0.04), '현재 버전과 직전 버전의 접수 1건당 시간이 같았어요.')
 assert.equal(versionGap(null), null)
-
-console.log('format.test.ts OK')

@@ -42,7 +42,7 @@ export const nameI = (name: string) => `${name}${hasBatchim(name) ? '이' : '가
 
 type Who = { name: string; inUse: boolean }
 
-export interface ConfirmCopy {
+interface ConfirmCopy {
   title: string
   note: string
   okLabel: string

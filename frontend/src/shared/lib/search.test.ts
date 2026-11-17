@@ -36,8 +36,6 @@ assert.equal(phoneDigits(' 2047 '), '2047')
 assert.equal(phoneDigits('3시'), '')
 assert.equal(phoneDigits('제주 2일'), '')
 
-console.log('search.test.ts OK')
-
 // 하이라이트 자리 — 원래 글(띄어쓰기 포함) 기준 [시작, 끝), 띄어쓰기 · 초성 규칙은 matchKo와 같음 (09 FAQ 검색, 11/04)
 assert.deepEqual(findKo('박스 크기는 어떻게', '박스크기'), [[0, 5]])
 assert.deepEqual(findKo('수거 박스, 박스', '박스'), [

@@ -9,7 +9,7 @@ import { pledges } from './pledgeStore'
 import { restOf, rowsOf, testOf } from './scenarioTest'
 
 /** 통화에 반영할 버전 — 사용 중 상담가의 고친 내용(현재 버전) */
-export type ApplyTarget = {
+type ApplyTarget = {
   personaSeq: number
   head: { seq: number; version: number }
   promptText: string

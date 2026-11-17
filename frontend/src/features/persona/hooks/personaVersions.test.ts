@@ -120,5 +120,3 @@ assert.equal(
   '초안 이름',
 )
 assert.equal(editTargetOf(null, v4), null)
-
-console.log('personaVersions.test ok')

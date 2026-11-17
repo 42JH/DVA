@@ -224,5 +224,3 @@ assert.equal(utteranceForAction(talk, 6, '보내는 분 이름 = 강도윤')?.or
 assert.equal(utteranceForAction(talk, 77, '수거 희망 일시 = 11.02 (월) 09:00')?.order, 7) // 값이 말에 없음 → "네." 건너뜀
 assert.equal(utteranceForAction(talk, 78, '디버 접수 완료')?.order, 7) // '=' 없음 → 짧은 대답 건너뜀
 assert.equal(utteranceForAction(talk, 3, '디버 접수 완료')?.order, 1) // 고객 말이 아직 없음 → 그 시각의 말
-
-console.log('callDto.test.ts OK')

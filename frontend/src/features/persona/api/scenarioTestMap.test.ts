@@ -121,4 +121,3 @@ assert.ok(sent.scenarios.every((id: string) => /^[A-Z]{1,3}[0-9]{1,3}$/.test(id)
 assert.ok(Number.isInteger(sent.concurrency) && sent.concurrency >= 1)
 const bare = JSON.parse(JSON.stringify(runBody(input)))
 assert.deepEqual(Object.keys(bare).sort(), ['concurrency', 'promptText', 'tag']) // 기본 음성 · 전체 실행이면 두 칸은 아예 안 감
-console.log('scenarioTestMap ok')

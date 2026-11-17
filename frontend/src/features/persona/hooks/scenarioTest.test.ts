@@ -207,4 +207,3 @@ assert.equal(sideLabel({ personaSeq: 2, version: 1, isHead: true }, live, 'ì¹œì 
   const own = [v7, v5]
   assert.equal(withActiveTests(own, versions, { personaSeq: 1, version: 7 }), own)
 }
-console.log('scenarioTest ok')

@@ -136,5 +136,3 @@ const fieldErr = (field: string) => ({ status: 422, code: 'VALIDATION', details:
 assert.equal(submitErrorOf(fieldErr('sender.name'), '접수'), null)
 assert.equal(typeof submitErrorOf(fieldErr('parcels.0.weight'), '접수'), 'string')
 assert.equal(typeof submitErrorOf(new TypeError('끊김'), '접수'), 'string')
-
-console.log('orderForm.test ok')

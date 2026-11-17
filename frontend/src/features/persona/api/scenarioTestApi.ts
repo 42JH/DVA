@@ -32,7 +32,7 @@ export interface Scenario {
 }
 
 /** 시나리오 내용 (보기 전용 — 시나리오는 AI 파트가 시험 창구의 파일로 관리, 화면에서 고치지 않음) */
-export interface ScenarioScript extends Scenario {
+interface ScenarioScript extends Scenario {
   caller: string // 전화한 사람 ('등록 고객 김민수' · '신규 고객')
   lines: { text: string; optional: boolean }[] // 고객 대본. optional = 상황에 따라 안 할 수 있는 말
   expected: { name: string; value: unknown }[] // 정답 — 판정 결과표의 코드 검사와 같은 이름 · 값(숫자 · 묶음일 수 있음)
@@ -47,13 +47,13 @@ export interface Check {
   actual: unknown
   note?: string
 }
-export interface Verdict {
+interface Verdict {
   passed: boolean
   checks: Check[]
 }
 
 /** 통화 기록 — [통화 안 초, 말한 쪽, 말] */
-export interface TestRecord {
+interface TestRecord {
   customer: { lines: [number, 'AI' | '고객', string][] }
   liveSeconds: number
   audioUrl: string | null // 녹음 주소 — 창구의 …/audio (쿠키로 인증되는 같은 주소라 재생기에 바로 넣음)

@@ -31,7 +31,7 @@ interface ScriptSegment {
 }
 
 /** AI 동작 기록 한 줄. onClick = 그 동작을 부른 고객 말로 스크립트를 넘기고 녹취를 그 말부터 재생 (시각을 모르면 없음) */
-export interface ActionView {
+interface ActionView {
   key: number
   kind: CallActionKind // 아이콘 (조회 · 저장 · 검색 · 전송 · 취소)
   text: string

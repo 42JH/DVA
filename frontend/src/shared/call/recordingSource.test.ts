@@ -18,4 +18,3 @@ assert.equal(pickSource(a, null, false), null) // 녹취 없음
 assert.equal(pickSource(a, rec(1, null), true), a) // 새 URL 발급 실패 → 쓰던 것 유지
 assert.equal(pickSource(null, rec(1, null), false), null) // 처음부터 발급 실패
 assert.equal(pickSource(a, rec(1, 'u1'), true), a) // 같은 URL이 다시 옴 → 그대로 (같은 걸 또 꽂아 오류를 되풀이하지 않음)
-console.log('recordingSource.test ok')

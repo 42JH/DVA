@@ -20,5 +20,3 @@ assert.deepEqual(parseCsv('﻿이름,번호\r\n강도윤,010\r\n\r\n'), [
   ['강도윤', '010'],
 ])
 assert.deepEqual(parseCsv('a,,c\n'), [['a', '', 'c']]) // 빈 칸은 빈 글자
-
-console.log('csv.test ok')

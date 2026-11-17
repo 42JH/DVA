@@ -229,5 +229,3 @@ const faq: FaqInput = {
 }
 check('POST /api/faqs', { items: [faq] })
 check('PATCH /api/faqs/{id}', faq)
-
-console.log('backendContract.test.ts OK')

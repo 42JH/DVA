@@ -94,5 +94,3 @@ assert.deepEqual([down.lastManager, memberReady(down)], [true, false])
 assert.equal(memberErrors(down, same.phone).role, '기업마다 담당자가 1명 이상 있어야 합니다.')
 const two = [boss, { ...staff, membership: { ...staff.membership, role: 'ORG_ADMIN' as const } }]
 assert.equal(memberChecks({ ...same, role: 'MEMBER' }, null, boss, two).lastManager, false)
-
-console.log('memberForm.test ok')

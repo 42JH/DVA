@@ -49,8 +49,6 @@ assert.deepEqual(
   ],
 )
 
-console.log('lineDiff.test ok')
-
 // 글자 단위: ㅇㅇㅇㅇ → ㅇㅇㄴㄴㅇㅇ 는 ㄴㄴ만 더함
 assert.deepEqual(inlineDiff(['ㅇㅇㅇㅇ'], ['ㅇㅇㄴㄴㅇㅇ']).blocks, [
   [

@@ -58,5 +58,3 @@ assert.equal(
 const b3 = buildCreateOrder({ ...input, paymentMethod: 'MONTHLY' }, 3500, 42)
 assert.equal(b3.customerSeq, 42)
 assert.equal('customer' in b3, false)
-
-console.log('orderCreate OK')

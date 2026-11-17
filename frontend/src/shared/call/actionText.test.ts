@@ -49,5 +49,3 @@ assert.deepEqual(
     [7, [7], '주문 전송: 미완료 주문'],
   ],
 )
-
-console.log('actionText.test.ts OK')
