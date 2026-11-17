@@ -167,6 +167,7 @@ export class ConsultationsRepository {
       await this.database.pool.query<{ activeCallCount: number; observedAt: Date }>(
         `SELECT count(*)::int AS "activeCallCount",statement_timestamp() AS "observedAt"
        FROM call_sessions c WHERE c.registered_at IS NOT NULL AND c.ended_at IS NULL AND c.deleted_at IS NULL
+        AND c.registered_at>statement_timestamp()-interval '2 hours'
         AND (c.incoming_at IS NULL OR c.incoming_at>clock_timestamp()-interval '5 years')
         AND NOT EXISTS(SELECT 1 FROM call_analyses a
           WHERE a.call_session_seq=c.call_session_seq AND a.ai_ended_at IS NOT NULL)`,

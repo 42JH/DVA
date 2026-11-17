@@ -303,6 +303,42 @@ test('PBX receipt ends a registered call before worker delay or S3 upload; repla
   );
 });
 
+test('expired call leaves GET and SSE counts without recording an inferred end', async () => {
+  const input = identity();
+  input.call.incomingAt = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+  const lost = await register(input);
+  await register();
+  const connection = await stream();
+  assert.equal((await connection.next()).activeCallCount, 2);
+
+  const registration = (
+    await pool.query(
+      `UPDATE call_sessions SET registered_at=clock_timestamp()-interval '2 hours'+interval '1 second'
+     WHERE call_session_seq=$1 RETURNING registered_at`,
+      [lost.id],
+    )
+  ).rows[0];
+  await connection.until(1);
+  assert.equal(await count(), 1);
+  const stored = (
+    await pool.query(
+      'SELECT registered_at, started_at, ended_at FROM call_sessions WHERE call_session_seq=$1',
+      [lost.id],
+    )
+  ).rows[0];
+  assert.deepEqual(stored, { ...registration, started_at: null, ended_at: null });
+  assert.equal((await register(input)).id, lost.id);
+  assert.equal(await count(), 1);
+
+  const payload = ending(input);
+  assert.equal((await receipt(payload)).status, 200);
+  const ended = (
+    await pool.query('SELECT ended_at FROM call_sessions WHERE call_session_seq=$1', [lost.id])
+  ).rows[0];
+  assert.equal(ended.ended_at.toISOString(), payload.endedAt);
+  assert.equal(await count(), 1);
+});
+
 test('an AI-ended call leaves GET and SSE counts without overwriting missing PBX times', async () => {
   const call = await register();
   const connection = await stream();
