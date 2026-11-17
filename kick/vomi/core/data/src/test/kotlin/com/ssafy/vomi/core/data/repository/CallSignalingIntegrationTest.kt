@@ -1,5 +1,6 @@
 package com.ssafy.vomi.core.data.repository
 
+import com.ssafy.vomi.core.data.call.unusedVoiceClient
 import com.ssafy.vomi.core.data.call.FakeRtcClient
 import com.ssafy.vomi.core.model.auth.TestAccount
 import com.ssafy.vomi.core.model.call.CallSession
@@ -54,6 +55,8 @@ class CallSignalingIntegrationTest {
             client,
             CallEventsClient(NetworkModule.provideCallEventService(streaming), json, Dispatchers.IO),
             FakeRtcClient(),
+            unusedVoiceClient(),
+            CallTranscriptRepositoryImpl(),
             Dispatchers.IO,
         )
         init { repo.beginSession(account.accountId) }

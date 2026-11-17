@@ -1,5 +1,6 @@
 package com.ssafy.vomi.core.data.repository
 
+import com.ssafy.vomi.core.data.call.unusedVoiceClient
 import com.ssafy.vomi.core.data.call.FakeRtcClient
 import com.ssafy.vomi.core.model.call.CallStatus
 import com.ssafy.vomi.core.network.model.call.CallAction
@@ -60,7 +61,7 @@ class CallRepositoryImplTest {
     @Test fun creationIsColdAndKeepsTheCallersIdempotencyKey() = runTest {
         val service = Service()
         val events = Events(service.getActiveCall())
-        val repo = CallRepositoryImpl(CallClient(service), events, FakeRtcClient(), StandardTestDispatcher(testScheduler))
+        val repo = CallRepositoryImpl(CallClient(service), events, FakeRtcClient(), unusedVoiceClient(), CallTranscriptRepositoryImpl(), StandardTestDispatcher(testScheduler))
         repo.beginSession("kick-test-1")
         val request = repo.createCall("kick-test-2", "stable-request")
         assertTrue(service.requests.isEmpty())
@@ -74,7 +75,7 @@ class CallRepositoryImplTest {
 
     @Test fun eachExplicitActionUsesItsWireActionAndReturnsFreshStatus() = runTest {
         val service = Service()
-        val repo = CallRepositoryImpl(CallClient(service), Events(service.getActiveCall()), FakeRtcClient(), StandardTestDispatcher(testScheduler))
+        val repo = CallRepositoryImpl(CallClient(service), Events(service.getActiveCall()), FakeRtcClient(), unusedVoiceClient(), CallTranscriptRepositoryImpl(), StandardTestDispatcher(testScheduler))
         repo.beginSession("kick-test-1")
         assertEquals(CallStatus.ACCEPTED, repo.acceptCall("call-1").single().status)
         assertEquals(CallStatus.ACCEPTED, repo.callState.value.session!!.status)
@@ -87,7 +88,7 @@ class CallRepositoryImplTest {
     @Test fun activeAndEventResponsesUpdateSharedStateOnlyWhenCollected() = runTest {
         val service = Service().apply { activeCall = call }
         val events = Events(service.getActiveCall().copy(call = service.call.copy(status = "ACCEPTED")))
-        val repo = CallRepositoryImpl(CallClient(service), events, FakeRtcClient(), StandardTestDispatcher(testScheduler))
+        val repo = CallRepositoryImpl(CallClient(service), events, FakeRtcClient(), unusedVoiceClient(), CallTranscriptRepositoryImpl(), StandardTestDispatcher(testScheduler))
         repo.beginSession("kick-test-1")
         assertNull(repo.callState.value.session)
         assertEquals("kick-test-1", repo.getActiveCall().single().accountId)
@@ -97,7 +98,7 @@ class CallRepositoryImplTest {
 
     @Test fun errorsRemainFailuresForTheConsumer() = runTest {
         val service = Service().apply { failure = IOException("offline") }
-        val repo = CallRepositoryImpl(CallClient(service), Events(service.getActiveCall()), FakeRtcClient(), StandardTestDispatcher(testScheduler))
+        val repo = CallRepositoryImpl(CallClient(service), Events(service.getActiveCall()), FakeRtcClient(), unusedVoiceClient(), CallTranscriptRepositoryImpl(), StandardTestDispatcher(testScheduler))
         repo.beginSession("kick-test-1")
         try { repo.getCall("call-1").single(); fail() } catch (_: IOException) { }
     }

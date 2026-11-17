@@ -1,5 +1,6 @@
 package com.ssafy.vomi.feature.call.impl
 
+import com.ssafy.vomi.core.model.call.CallTextSendProgress
 import com.ssafy.vomi.core.data.repository.CallRepository
 import com.ssafy.vomi.core.model.call.CallMediaState
 import com.ssafy.vomi.core.model.call.CallSnapshot
@@ -53,6 +54,7 @@ class CallViewModelTest {
         override fun getCall(callId: String): Flow<CallSession> = error("Unused")
         override fun observeCalls(): Flow<CallSnapshot> = error("Unused")
         override fun observeMedia(): Flow<CallMediaState> = error("Unused")
+        override fun sendTextAudio(callId: String, messageId: String, text: String): Flow<CallTextSendProgress> = error("Unused")
         override fun setMicrophoneEnabled(callId: String, enabled: Boolean): Flow<Unit> = flow {
             callState.value = callState.value.copy(media = callState.value.media.copy(isMicrophoneEnabled = enabled))
             emit(Unit)

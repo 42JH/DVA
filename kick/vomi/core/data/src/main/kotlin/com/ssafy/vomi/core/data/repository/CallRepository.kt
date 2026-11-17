@@ -1,5 +1,6 @@
 package com.ssafy.vomi.core.data.repository
 
+import com.ssafy.vomi.core.model.call.CallTextSendProgress
 import com.ssafy.vomi.core.model.call.CallMediaState
 import com.ssafy.vomi.core.model.call.CallSession
 import com.ssafy.vomi.core.model.call.CallSignalingState
@@ -25,6 +26,7 @@ interface CallRepository {
 
     /** App-owned collection controls the lifetime of the accepted call's media connection. */
     fun observeMedia(): Flow<CallMediaState>
+    fun sendTextAudio(callId: String, messageId: String, text: String): Flow<CallTextSendProgress>
     fun setMicrophoneEnabled(callId: String, enabled: Boolean): Flow<Unit>
 
     fun acceptCall(callId: String): Flow<CallSession>
