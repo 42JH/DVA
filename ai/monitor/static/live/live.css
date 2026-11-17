@@ -41,6 +41,8 @@ body {
   background: var(--bubble);
   display: flex;
   flex-direction: column;
+  justify-content: center; /* 글이 짧아도 말풍선 가운데에 */
+  text-align: center;
 }
 
 .bubble[hidden] { display: none; }
