@@ -1,5 +1,6 @@
 package com.ssafy.vomi.core.data.repository
 
+import com.ssafy.vomi.core.model.call.CallMediaState
 import com.ssafy.vomi.core.model.call.CallSession
 import com.ssafy.vomi.core.model.call.CallSignalingState
 import com.ssafy.vomi.core.model.call.CallSnapshot
@@ -21,6 +22,10 @@ interface CallRepository {
 
     /** Refreshes current state, then receives events with automatic transient-error retries. */
     fun observeCalls(): Flow<CallSnapshot>
+
+    /** App-owned collection controls the lifetime of the accepted call's media connection. */
+    fun observeMedia(): Flow<CallMediaState>
+    fun setMicrophoneEnabled(callId: String, enabled: Boolean): Flow<Unit>
 
     fun acceptCall(callId: String): Flow<CallSession>
     fun rejectCall(callId: String): Flow<CallSession>

@@ -1,5 +1,7 @@
 package com.ssafy.vomi.core.data.call
 
+import com.ssafy.vomi.core.model.call.CallMediaConnection
+import com.ssafy.vomi.core.model.call.CallMediaState
 import com.ssafy.vomi.core.model.call.CallConnection
 import com.ssafy.vomi.core.model.call.CallSession
 import com.ssafy.vomi.core.model.call.CallSignalingState
@@ -10,7 +12,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /** Repository-internal state merging; no authentication, networking or background subscription. */
-internal class CallSessionStore {
+internal class CallSessionStore(
+    private val elapsedRealtime: () -> Long = { System.nanoTime() / 1_000_000 },
+) {
     private val lock = Any()
     private val mutableState = MutableStateFlow(CallSignalingState())
     val state = mutableState.asStateFlow()
@@ -48,7 +52,7 @@ internal class CallSessionStore {
         }
         if (session == null) {
             state.value.session?.let { rememberFinished(it.id) }
-            mutableState.value = state.value.copy(session = null)
+            mutableState.value = state.value.copy(session = null, media = CallMediaState(), startedAtElapsedRealtime = null)
         } else {
             state.value.session?.takeIf { it.id != session.id }?.let { rememberFinished(it.id) }
             mergeSession(session, expectedUserId)
@@ -68,7 +72,30 @@ internal class CallSessionStore {
         if (previous?.id == session.id &&
             (previous.isTerminal || previous.status == CallStatus.ACCEPTED && session.status == CallStatus.REQUESTED)) return
         if (session.isTerminal) rememberFinished(session.id)
-        mutableState.value = state.value.copy(session = session)
+        val resetMedia = previous?.id != session.id || session.isTerminal
+        mutableState.value = state.value.copy(
+            session = session,
+            media = if (resetMedia) CallMediaState() else state.value.media,
+            startedAtElapsedRealtime = if (resetMedia) null else state.value.startedAtElapsedRealtime,
+        )
+    }
+
+    fun applyMedia(media: CallMediaState, userId: String) = synchronized(lock) {
+        val current = state.value
+        if (current.accountId != userId || current.session?.id != media.callId ||
+            current.session?.status != CallStatus.ACCEPTED) return@synchronized
+        val firstConnectedAt = current.startedAtElapsedRealtime ?: if (
+            media.connection == CallMediaConnection.Connected && media.isPeerConnected
+        ) elapsedRealtime() else null
+        mutableState.value = current.copy(media = media, startedAtElapsedRealtime = firstConnectedAt)
+    }
+
+    fun stopMedia(userId: String, callId: String) = synchronized(lock) {
+        val current = state.value
+        if (current.accountId == userId && current.media.callId == callId &&
+            current.media.connection != CallMediaConnection.Failed) {
+            mutableState.value = current.copy(media = CallMediaState(callId = callId))
+        }
     }
 
     private fun rememberFinished(id: String) {

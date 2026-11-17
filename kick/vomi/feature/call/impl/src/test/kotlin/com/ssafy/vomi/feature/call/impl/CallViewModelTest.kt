@@ -1,6 +1,7 @@
 package com.ssafy.vomi.feature.call.impl
 
 import com.ssafy.vomi.core.data.repository.CallRepository
+import com.ssafy.vomi.core.model.call.CallMediaState
 import com.ssafy.vomi.core.model.call.CallSnapshot
 import com.ssafy.vomi.core.data.repository.FriendRepository
 import com.ssafy.vomi.core.model.call.CallConnection
@@ -51,6 +52,11 @@ class CallViewModelTest {
         override fun getActiveCall(): Flow<CallSnapshot> = flow { emit(CallSnapshot(accountId, callState.value.session)) }
         override fun getCall(callId: String): Flow<CallSession> = error("Unused")
         override fun observeCalls(): Flow<CallSnapshot> = error("Unused")
+        override fun observeMedia(): Flow<CallMediaState> = error("Unused")
+        override fun setMicrophoneEnabled(callId: String, enabled: Boolean): Flow<Unit> = flow {
+            callState.value = callState.value.copy(media = callState.value.media.copy(isMicrophoneEnabled = enabled))
+            emit(Unit)
+        }
         override fun acceptCall(callId: String) = action("accept", CallStatus.ACCEPTED)
         override fun rejectCall(callId: String) = action("reject", CallStatus.REJECTED)
         override fun cancelCall(callId: String) = action("cancel", CallStatus.CANCELED)
@@ -78,7 +84,7 @@ class CallViewModelTest {
         assertTrue(vm.uiState.value.suggestions.isEmpty())
         assertNull(vm.uiState.value.summary)
         assertTrue(vm.uiState.value.backchannels.isNotEmpty())
-        vm.tick(); vm.toggleMicrophone(); vm.updateDraft("아직 전송하지 않음"); vm.selectBackchannel(1L)
+        vm.toggleMicrophone(); vm.updateDraft("아직 전송하지 않음"); vm.selectBackchannel(1L)
         assertEquals(0L, vm.uiState.value.elapsedSeconds)
         assertFalse(vm.uiState.value.isMicrophoneEnabled)
         assertEquals("", vm.uiState.value.draft)
@@ -95,7 +101,6 @@ class CallViewModelTest {
         calls.pending!!.complete(Unit)
         assertEquals(CallPhase.Accepted, vm.uiState.value.phase)
         assertFalse(vm.uiState.value.canType)
-        vm.tick()
         assertEquals(0L, vm.uiState.value.elapsedSeconds)
     }
 

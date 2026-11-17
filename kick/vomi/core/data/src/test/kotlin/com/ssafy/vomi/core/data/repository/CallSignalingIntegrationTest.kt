@@ -1,5 +1,6 @@
 package com.ssafy.vomi.core.data.repository
 
+import com.ssafy.vomi.core.data.call.FakeRtcClient
 import com.ssafy.vomi.core.model.auth.TestAccount
 import com.ssafy.vomi.core.model.call.CallSession
 import kotlinx.coroutines.launch
@@ -52,6 +53,7 @@ class CallSignalingIntegrationTest {
         val repo = CallRepositoryImpl(
             client,
             CallEventsClient(NetworkModule.provideCallEventService(streaming), json, Dispatchers.IO),
+            FakeRtcClient(),
             Dispatchers.IO,
         )
         init { repo.beginSession(account.accountId) }

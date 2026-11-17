@@ -6,6 +6,7 @@ import com.ssafy.vomi.core.model.call.CallSignalingState
 import com.ssafy.vomi.core.model.call.CallConnection
 import com.ssafy.vomi.core.model.call.CallStatus
 import com.ssafy.vomi.core.data.repository.UserRepository
+import com.ssafy.vomi.core.model.call.CallMediaState
 import com.ssafy.vomi.core.model.call.CallSnapshot
 import com.ssafy.vomi.core.data.repository.FriendRepository
 import com.ssafy.vomi.core.model.user.UserProfile
@@ -78,6 +79,11 @@ class HomeViewModelTest {
         override fun getActiveCall(): Flow<CallSnapshot> = error("Unused")
         override fun getCall(callId: String): Flow<CallSession> = error("Unused")
         override fun observeCalls(): Flow<CallSnapshot> = error("Unused")
+        override fun observeMedia(): Flow<CallMediaState> = error("Unused")
+        override fun setMicrophoneEnabled(callId: String, enabled: Boolean): Flow<Unit> = flow {
+            callState.value = callState.value.copy(media = callState.value.media.copy(isMicrophoneEnabled = enabled))
+            emit(Unit)
+        }
         override fun acceptCall(callId: String): Flow<CallSession> = error("Unused")
         override fun rejectCall(callId: String): Flow<CallSession> = error("Unused")
         override fun cancelCall(callId: String): Flow<CallSession> = error("Unused")

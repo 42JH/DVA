@@ -1,9 +1,13 @@
 package com.ssafy.vomi.core.data.repository
 
+import android.os.SystemClock
 import com.ssafy.vomi.core.common.network.Dispatcher
 import com.ssafy.vomi.core.common.network.VomiDispatcher
 import com.ssafy.vomi.core.data.call.CallSessionStore
 import com.ssafy.vomi.core.data.mapper.toModel
+import com.ssafy.vomi.core.model.call.CallMediaConnection
+import com.ssafy.vomi.core.model.call.CallMediaState
+import com.ssafy.vomi.core.model.call.CallStatus
 import com.ssafy.vomi.core.model.call.CallConnection
 import com.ssafy.vomi.core.model.call.CallSession
 import com.ssafy.vomi.core.model.call.CallSnapshot
@@ -11,16 +15,25 @@ import com.ssafy.vomi.core.network.model.call.CallAction
 import com.ssafy.vomi.core.network.model.call.CreateCallRequest
 import com.ssafy.vomi.core.network.service.call.CallClient
 import com.ssafy.vomi.core.network.service.call.CallEvents
+import com.ssafy.vomi.core.rtc.RtcClient
 import java.io.IOException
 import javax.inject.Inject
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onCompletion
@@ -31,9 +44,10 @@ import retrofit2.HttpException
 internal class CallRepositoryImpl @Inject constructor(
     private val callClient: CallClient,
     private val callEvents: CallEvents,
+    private val rtcClient: RtcClient,
     @param:Dispatcher(VomiDispatcher.IO) private val ioDispatcher: CoroutineDispatcher,
 ) : CallRepository {
-    private val callSessionStore = CallSessionStore()
+    private val callSessionStore = CallSessionStore(SystemClock::elapsedRealtime)
     override val callState = callSessionStore.state
     private val retryRequests = MutableStateFlow(0L)
     override val reconnectRequests: Flow<Unit> = retryRequests.map { Unit }
@@ -111,6 +125,58 @@ internal class CallRepositoryImpl @Inject constructor(
         )
     }.flowOn(ioDispatcher)
 
+    override fun observeMedia(): Flow<CallMediaState> = channelFlow {
+        val userId = requireUserId()
+        val acceptedCall = callState.map { state ->
+            state.session?.takeIf { state.accountId == userId && it.status == CallStatus.ACCEPTED }?.id
+        }.distinctUntilChanged()
+        combine(acceptedCall, retryRequests) { callId, _ -> callId }.collectLatest { callId ->
+            if (callId == null) return@collectLatest
+            val connecting = CallMediaState(callId, CallMediaConnection.Connecting)
+            callSessionStore.applyMedia(connecting, userId)
+            send(connecting)
+            try {
+                flow {
+                    val response = callClient.joinCall(callId)
+                    currentCoroutineContext().ensureActive()
+                    val current = callState.value
+                    if (current.accountId == userId && current.session?.id == callId &&
+                        current.session?.status == CallStatus.ACCEPTED) {
+                        emitAll(rtcClient.connect(callId, response.url, response.token))
+                    }
+                }.catch { error ->
+                    if (error is HttpException && error.code() == 401) throw error
+                    emit(CallMediaState(callId, CallMediaConnection.Failed))
+                }.collect { media ->
+                    callSessionStore.applyMedia(media, userId)
+                    send(media)
+                }
+            } finally {
+                callSessionStore.stopMedia(userId, callId)
+            }
+        }
+    }.flowOn(ioDispatcher)
+
+    override fun setMicrophoneEnabled(callId: String, enabled: Boolean): Flow<Unit> = flow {
+        val current = callState.value
+        check(current.session?.id == callId && current.session?.status == CallStatus.ACCEPTED &&
+            current.media.callId == callId && current.media.connection == CallMediaConnection.Connected) {
+            "The current voice call is not connected"
+        }
+        rtcClient.setMicrophoneEnabled(callId, enabled)
+        val confirmed = withTimeoutOrNull(5_000.milliseconds) {
+            callState.first { state ->
+                state.accountId != current.accountId || state.session?.id != callId ||
+                    state.media.connection != CallMediaConnection.Connected || state.media.isMicrophoneEnabled == enabled
+            }
+        }
+        check(confirmed != null && confirmed.accountId == current.accountId && confirmed.session?.id == callId &&
+            confirmed.media.connection == CallMediaConnection.Connected && confirmed.media.isMicrophoneEnabled == enabled) {
+            "The shared microphone state was not confirmed"
+        }
+        emit(Unit)
+    }.flowOn(ioDispatcher)
+
     override fun acceptCall(callId: String) = changeCall(callId, CallAction.ACCEPT)
     override fun rejectCall(callId: String) = changeCall(callId, CallAction.REJECT)
     override fun cancelCall(callId: String) = changeCall(callId, CallAction.CANCEL)
@@ -120,6 +186,7 @@ internal class CallRepositoryImpl @Inject constructor(
         val userId = requireUserId()
         emitAll(
             flow {
+                if (action == CallAction.END) rtcClient.disconnect(callId)
                 callClient.updateCall(callId, action)
                 emit(loadCall(callId, userId))
             }.catch { error ->
