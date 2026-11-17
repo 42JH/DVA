@@ -42,7 +42,7 @@ export function useToday() {
     refetchInterval: 15_000, // 최근 통화(통화 중)가 너무 늦지 않게
   })
   const h = home.data
-  const complained = useQuery(dashboardQueries.complainedCalls()) // 통계 카드와 같은 캐시
+  const complained = useQuery(dashboardQueries.complainedCalls('home')) // 통계 카드와 같은 캐시 (실서버 통계가 목데이터일 땐 따로)
   const pct = (n: number | null | undefined) => (n == null ? '—' : `${n.toFixed(1)}%`)
   const pctOf = (v: string) => (v === '—' ? v : `${v}%`)
 
