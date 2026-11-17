@@ -3,13 +3,61 @@
 // shortcut: '말하는 중'은 AI 전사가 마지막으로 바뀐 뒤 이 시간 안이면 말하는 중으로 추측한다. 입이 어긋나면 서버에 speaking 값을 요청한다
 const TALK_HOLD_MS = 800;
 
-const TOOL_LABEL = {
-  record_fields: "접수 정보 기록 중",
-  find_destination: "받는 곳 찾는 중",
-  lookup_orders: "주문 조회 중",
-  search_manual: "안내 자료 검색 중",
-  get_state: "접수 상태 확인 중",
+// 이름·주소·연락처는 화면에 값을 띄우지 않고 항목 이름만 쓴다 (시연 화면이 외부에 보일 수 있음). 라벨은 policy/workflow.toml과 같게
+const FIELD_LABEL = {
+  sender_name: "보내는 분 성함", sender_address: "발송 주소", sender_address_detail: "발송지 상세주소",
+  receiver_name: "받는 분 성함", receiver_phone: "받는 분 연락처",
+  receiver_address: "받는 곳 주소", receiver_address_detail: "받는 곳 상세주소",
+  item_price: "물건 가격", client_comment: "배송 요청 사항", pickup_at: "수거 시각",
 };
+const COUNT_LABEL = { document_count: "서류 봉투", small_box_count: "소형 박스", medium_box_count: "중형 박스", big_box_count: "대형 박스" };
+const BOX_LABEL = { small: "소형 박스", medium: "중형 박스", big: "대형 박스" };
+const QUESTION_MAX = 40;
+
+function recordText(a) {
+  const adding = new Set(a.add_item_counts || []);
+  const parts = [];
+  for (const [key, value] of Object.entries(a)) {
+    if (value == null) continue;
+    if (FIELD_LABEL[key]) parts.push(FIELD_LABEL[key]);
+    else if (COUNT_LABEL[key] && Number.isInteger(value)) {
+      parts.push(value === 0 ? `${COUNT_LABEL[key]} 빼기` : `${COUNT_LABEL[key]} ${value}개${adding.has(key) ? " 추가" : ""}`);
+    }
+  }
+  const box = a.box_suggestion;
+  if (box && BOX_LABEL[box.size] && Number.isInteger(box.count)) parts.push(`${BOX_LABEL[box.size]} ${box.count}개`);
+  if (!parts.length && (a.item_evidence || a.box_size_needed)) parts.push("물품");
+  return parts.length ? `${parts.join(" · ")} 접수 중` : "접수 정보 기록 중";
+}
+
+// 도구 호출 하나 → 말풍선 한 줄. args는 모델이 만든 값이라 형식이 틀릴 수 있어 없는 셈 치고 기본 문장으로 돌아간다
+function toolText(c) {
+  const a = c.args && typeof c.args === "object" ? c.args : {};
+  switch (c.name) {
+    case "search_manual": {
+      const q = typeof a.question === "string" ? a.question.trim() : "";
+      if (!q) return "안내 자료 찾는 중";
+      return `"${q.length > QUESTION_MAX ? q.slice(0, QUESTION_MAX) + "…" : q}" 알아보는 중`;
+    }
+    case "lookup_orders":
+      if (a.other_customer) return "다른 번호로 접수된 주문 조회 중";
+      if (a.receiver_name) return "받는 분 성함으로 주문 조회 중";
+      if (a.scope === "current_call") return "이번 통화에서 접수한 택배 조회 중";
+      if (a.scope === "previous_call") return "지난 통화에서 접수한 주문 조회 중";
+      return "이 번호로 접수된 주문 조회 중";
+    case "find_destination":
+      if (a.recent) return "최근 보낸 곳 찾는 중";
+      if (a.organization) return `${[a.organization, a.department].filter(Boolean).join(" ")} 찾는 중`;
+      if (a.name) return "받는 분 성함으로 주소 찾는 중";
+      return "받는 곳 주소 찾는 중";
+    case "record_fields":
+      return recordText(a);
+    case "get_state":
+      return "지금까지 접수한 내용 확인 중";
+    default:
+      return c.name;
+  }
+}
 
 function lastAt(lines, speaker) {
   for (let i = lines.length - 1; i >= 0; i--) if (lines[i].speaker === speaker) return lines[i].t ?? 0;
@@ -27,7 +75,7 @@ function stateOf(call, agentChangedAt, now) {
   // 모든 도구가 끝난 뒤 시작한 AI 발화만 대답으로 본다. 도구 실행 중 시작한 발화는 대기 멘트로 보고 말풍선을 유지
   // shortcut: 도구가 다 끝난 뒤 백엔드 판단을 기다리며 하는 대기 멘트는 대답으로 오인한다. 문제되면 서버에 위임 완료 시각을 요청한다
   const answered = tools.every((c) => c.done_at != null) && agentAt > Math.max(...tools.map((c) => c.done_at));
-  if (tools.length && !answered) return { kind: "tool", tools: tools.map((c) => TOOL_LABEL[c.name] ?? c.name) };
+  if (tools.length && !answered) return { kind: "tool", tools: tools.map(toolText) };
   const last = lines[lines.length - 1];
   if (!last) return { kind: "idle", tools: [] };
   if (last.speaker === "customer") return { kind: "listening", tools: [] };
