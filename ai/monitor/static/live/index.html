@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>디바콜 라이브</title>
+<!-- 주소가 /monitor/live(끝 슬래시 없음)라 상대 경로는 /monitor/를 가리킨다 → 절대 경로로 쓴다 -->
+<link rel="stylesheet" href="/monitor/live/live.css">
+</head>
+<body>
+<main class="stage">
+  <section id="bubble" class="bubble" hidden aria-live="polite">
+    <ul id="tools"></ul>
+    <span class="tail" aria-hidden="true"></span>
+  </section>
+  <img id="character" class="character" src="/monitor/live/idle.png" alt="AI 상담원">
+</main>
+<script src="/monitor/live/live.js"></script>
+</body>
+</html>

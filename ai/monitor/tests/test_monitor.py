@@ -49,6 +49,30 @@ def test_monitor_lists_calls_and_serves_page(http):
     assert page.text.startswith("<!doctype html>") and page.headers["cache-control"] == "no-store"
 
 
+def test_live_files_require_auth_and_stay_inside_live(http):
+    assert http.get("/monitor/live/idle.png").status_code == 401
+    img = http.get("/monitor/live/idle.png", auth=AUTH)
+    assert img.status_code == 200 and img.headers["content-type"] == "image/png"
+    # 맨 ".."는 클라이언트가 /monitor로 정리해 버려 서버에 안 닿는다 → 인코딩해서 보낸다
+    for name in ("%2E%2E", "..%2Frouter.py", "%2E%2E%2Frouter.py", "nope.png"):
+        assert http.get(f"/monitor/live/{name}", auth=AUTH).status_code == 404
+
+
+def test_live_page_served(http):
+    page = http.get("/monitor/live", auth=AUTH)
+    assert page.text.startswith("<!doctype html>") and page.headers["cache-control"] == "no-store"
+    for name in ("live.css", "live.js"):
+        assert http.get(f"/monitor/live/{name}", auth=AUTH).status_code == 200
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node가 없으면 문법 검사를 건너뛴다")
+def test_live_script_parses():
+    """live.js에 문법 오류가 있으면 캐릭터 화면 전체가 멈춘다."""
+    script = Path(__file__).parents[1] / "static/live/live.js"
+    result = subprocess.run(["node", "--check", str(script)], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+
 def test_bus_drops_for_slow_subscriber():
     bus = Bus()
     q = bus.subscribe()

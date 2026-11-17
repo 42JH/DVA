@@ -20,6 +20,7 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from monitor.bus import Bus
 
 STATIC = Path(__file__).with_name("static")
+LIVE = STATIC / "live"
 _basic = HTTPBasic()
 
 
@@ -66,5 +67,16 @@ def create_monitor_router(list_calls: Callable[[], list[dict]], bus: Bus, keepal
                 bus.unsubscribe(q)
 
         return StreamingResponse(events(), media_type="text/event-stream", headers={"Cache-Control": "no-store"})
+
+    @router.get("/live")
+    async def live_page() -> FileResponse:
+        return FileResponse(LIVE / "index.html", headers={"Cache-Control": "no-store"})
+
+    @router.get("/live/{name}")
+    async def live_file(name: str) -> FileResponse:
+        path = (LIVE / name).resolve()
+        if path.parent != LIVE.resolve() or not path.is_file():  # ../ 등으로 live/ 밖을 열지 못하게
+            raise HTTPException(404)
+        return FileResponse(path)
 
     return router

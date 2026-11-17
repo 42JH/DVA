@@ -1468,3 +1468,12 @@
 - 변경: origin/develop-ai(bae1e629) 기준 로컬 브랜치 fix/S15P31D109-live-waiting-natural에서 render.py의 대기 안내를 바꿨다. 예시 문장을 없애고 "기다려 달라는 뜻만 담은 짧은 한 문장을 직접 지어 한 번", "이 통화에서 이미 한 대기 멘트와 같은 문장 금지"로 두었다. 금지 내용에 공감·감상·위로와 택배 업무와 무관한 이야기를 추가했고, 이전 자유 발화 지시의 "고객이 방금 한 말에 이어지는"은 되살리지 않았다. 생략 조건과 나머지 금지 조건, BE/PBX 계약은 그대로다.
 - 검증: test_policy.py의 대기 안내 테스트를 새 문구 기준으로 바꿨다(예시 세 문장 부재 포함). 전체 AI pytest 927 passed, 14 warnings(기존 의존성 deprecation).
 - 미검증·위험: 실제 Live가 다양하게 말하는지, 무관한 발화와 음성 깨짐이 재발하지 않는지는 실통화로 확인하지 않았다. 음성 깨짐은 문구로 직접 막을 수 없어 재발하면 이 커밋을 되돌린다. persona_check의 가짜 고객은 대기 멘트를 정규식(잠시만요·잠깐만요·잠시만 기다려 주세요)으로 알아보므로 다른 표현의 대기 멘트는 대기로 인식하지 못한다. push·MR·배포는 하지 않았다.
+
+## 2026-11-17 — 관제에 캐릭터 화면용 경로 추가 (/monitor/live)
+
+- 배경: 통화 중 AI 상태(듣기·도구 호출·발화)를 캐릭터 프레임 사진으로 보여 주는 새 화면을 `monitor/static/live/`에 만든다. 기존 `/monitor` 화면(`static/index.html`)은 수정하지 않는다.
+- 변경: origin/develop-ai 기준 로컬 브랜치 feat/monitor-live에서 `monitor/router.py`에 `GET /monitor/live`(live/index.html)와 `GET /monitor/live/{name}`(live/ 안 파일)을 추가했다. 기존 라우터에 붙여 Basic 인증이 그대로 적용된다. `resolve()` 뒤 부모가 live/인지 검사해 `..`로 밖의 파일을 열지 못하게 했다. StaticFiles mount는 라우터 인증이 적용되지 않아 쓰지 않았다. 기존 경로·SSE·스냅샷 형식, BE/PBX 계약은 변경하지 않았다.
+- 검증: test_monitor.py에 인증 401 · png 200 · 인코딩된 `..`/없는 파일 404 테스트를 추가했다. 맨 `..`는 httpx가 요청 전에 `/monitor`로 정리해 서버에 닿지 않으므로 인코딩해서 보낸다. 전체 AI pytest 928 passed, 14 warnings(기존 의존성 deprecation).
+- 미검증·위험: `live/index.html`이 아직 없어 `/monitor/live`는 지금 500이다(다음 작업). 사진은 캐시되므로 같은 이름으로 교체하면 강력 새로고침이 필요하다. push·MR·배포는 하지 않았다.
+- 추가(같은 날): `monitor/static/live/`에 `index.html`·`live.css`·`live.js`를 만들었다. `live.js`는 SSE 스냅샷에서 상태(idle·listening·tool·talking)를 판단해 캐릭터 프레임과 도구 말풍선을 바꾼다. 대기 멘트와 대답은 "모든 도구 done_at 뒤 시작한 AI 발화만 대답"으로 구분한다(서버에 대기 멘트 표시가 없음). 서버 코드 변경 없음. 테스트: `/monitor/live` 응답·`node --check live.js` 추가, monitor 8 passed. 미검증: 실통화·실브라우저 확인 안 함, 말하는 중 판단은 전사 갱신 시각 추측(800ms).
+- 추가(같은 날): 캐릭터 사진 5장을 커밋 전에 256색 팔레트 PNG로 바꿨다(해상도·파일 이름 유지, 투명 유지). 합계 약 8.2MB → 0.87MB. 프로젝트 의존성은 추가하지 않았다(일회용 uv 환경의 Pillow). 미검증: 반투명 단계가 줄어 빛 번짐 가장자리가 어두운 배경에서 거칠어 보이는지는 브라우저로 확인하지 않았다.
