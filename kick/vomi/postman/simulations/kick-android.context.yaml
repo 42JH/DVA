@@ -73,6 +73,30 @@ assumptions:
     source: core/rtc/src/main/kotlin/com/ssafy/vomi/core/rtc/LiveKitRtcClient.kt; core/data/src/main/kotlin/com/ssafy/vomi/core/data/repository/CallRepositoryImpl.kt; feature/call/impl/src/main/kotlin/com/ssafy/vomi/feature/call/impl/CallScreen.kt
     updated_at: '2026-11-17'
 
+  - id: in-call-on-device-captions
+    status: unknown
+    claim: Each foreground app can transcribe its published microphone PCM on device and share interim and final captions with its authenticated LiveKit call peer in the existing screening UI.
+    reason: No test, device capture, model download, server join or two-device check was executed. Android 13+ and a Korean on-device recognizer supporting injected PCM are required; API availability alone does not establish support.
+    verification: Removed standalone speech navigation. Added local RTC audio sinks, nonblocking PCM input, peer-addressed reliable caption packets with participant/call/revision checks, repository-owned transcript state, microphone stop/finalization and foreground/auth lifecycle cleanup. Runtime behavior and device recognition quality remain unverified. Build/static verification only; no backend HTTP contract was changed.
+    source: core/rtc/src/main/kotlin/com/ssafy/vomi/core/rtc/LiveKitRtcClient.kt; core/speech/src/main/kotlin/com/ssafy/vomi/core/speech/AndroidOnDeviceSpeechClient.kt; core/data/src/main/kotlin/com/ssafy/vomi/core/data/repository/SpeechRepositoryImpl.kt; feature/call/impl/src/main/kotlin/com/ssafy/vomi/feature/call/impl/CallScreen.kt
+    updated_at: '2026-11-17'
+
+  - id: in-call-gemini-nano-recommendations
+    status: unknown
+    claim: A supported foreground device can use Gemini Nano through AICore to stream complete reply candidates for the latest remote call caption into inline recommendation cards below the source conversation turn.
+    reason: No device model check, model download, inference, live call or tests were executed. Dependency resolution and compilation do not establish device compatibility, candidate quality or latency.
+    verification: Added an isolated core:ai ML Kit Prompt adapter, existing-DataModule repository binding, bounded speaker-labelled context, streaming JSON preview parsing with stable candidate IDs/slots and completion guards, Result-based call UI state, foreground ownership, stale-result guards and model readiness/download/error controls. Inline cards reveal graphemes progressively and accept only fully displayed completed candidates. Device gestures and visual pacing remain unverified. No backend endpoint or HTTP contract changed. At that verification point text-to-audio sending was still gated; the later server-tts-call-streaming entry records the subsequent implementation and its unverified runtime scope.
+    source: core/ai/src/main/kotlin/com/ssafy/vomi/core/ai/GeminiNanoReplyRecommendationClient.kt; core/data/src/main/kotlin/com/ssafy/vomi/core/data/repository/ReplySuggestionRepositoryImpl.kt; feature/call/impl/src/main/kotlin/com/ssafy/vomi/feature/call/impl/CallViewModel.kt
+    updated_at: '2026-11-17'
+
+  - id: server-tts-call-streaming
+    status: unknown
+    claim: Foreground connected devices can send user-selected or typed text, synthesize it through the existing HTTP PCM endpoint and stream the resulting speech to the call peer for playback.
+    reason: Server source and the Android handoff define the contract, but no HTTP TTS request, simulation, test, device call or playback was executed for this change. Compilation does not establish runtime audio delivery or cancellation behavior.
+    verification: Read develop-backend commit 1305e36d handoff and voice controller. Added peer-addressed text and PCM LiveKit streams, body-close-on-cancel handling, sequential 50-grapheme HTTP requests inside one message audio stream, PCM16 playback, shared STT/text transcript, explicit delivery states and manual retry. Removed the constant false TTS UI gate and local fake-send mutations. Existing mocks and prior evidence were preserved. SDK code and app compilation plus static source inspection are the available checks; runtime support, voice readiness and two-device audio remain unresolved.
+    source: docs/kick-android-api.md; core/data/src/main/kotlin/com/ssafy/vomi/core/data/repository/CallRepositoryImpl.kt; core/data/src/main/kotlin/com/ssafy/vomi/core/data/call/ServerSpeechStream.kt; core/rtc/src/main/kotlin/com/ssafy/vomi/core/rtc/RtcTextStreams.kt; core/rtc/src/main/kotlin/com/ssafy/vomi/core/rtc/PcmSpeechPlayer.kt
+    updated_at: '2026-11-17'
+
 fingerprints:
   - id: initial-android-handoff
     date: '2026-11-13'
