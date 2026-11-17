@@ -97,9 +97,10 @@ class CallViewModelTest {
     }
 
     private class Replies : ReplySuggestionRepository {
-        override fun checkModel(): Flow<ReplyModelState> = error("Unused")
-        override fun prepareModel(): Flow<ReplyModelState> = error("Unused")
-        override fun recommendReplies(messages: List<CallMessage>): Flow<List<ReplySuggestion>> = error("Unused")
+        override fun openModelSession(sessionId: String): Flow<Unit> = flow { emit(Unit); kotlinx.coroutines.awaitCancellation() }
+        override fun checkModel(sessionId: String): Flow<ReplyModelState> = error("Unused")
+        override fun prepareModel(sessionId: String): Flow<ReplyModelState> = error("Unused")
+        override fun recommendReplies(sessionId: String, messages: List<CallMessage>): Flow<List<ReplySuggestion>> = error("Unused")
     }
 
     private class Transcript : CallTranscriptRepository {

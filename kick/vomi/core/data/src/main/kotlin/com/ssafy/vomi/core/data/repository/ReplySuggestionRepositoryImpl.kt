@@ -28,21 +28,23 @@ internal class ReplySuggestionRepositoryImpl @Inject constructor(
 ) : ReplySuggestionRepository {
     private val nextSuggestionId = AtomicLong(0)
 
-    override fun checkModel(): Flow<ReplyModelState> = flow {
+    override fun openModelSession(sessionId: String): Flow<Unit> = replyRecommendationClient.openSession(sessionId)
+
+    override fun checkModel(sessionId: String): Flow<ReplyModelState> = flow {
         emit(ReplyModelState(ReplyModelAvailability.Checking))
-        emit(ReplyModelState(replyRecommendationClient.checkAvailability()))
+        emit(ReplyModelState(replyRecommendationClient.warmup(sessionId)))
     }.flowOn(ioDispatcher)
 
-    override fun prepareModel(): Flow<ReplyModelState> = replyRecommendationClient.downloadModel().flowOn(ioDispatcher)
+    override fun prepareModel(sessionId: String): Flow<ReplyModelState> = replyRecommendationClient.downloadModel(sessionId).flowOn(ioDispatcher)
 
-    override fun recommendReplies(messages: List<CallMessage>): Flow<List<ReplySuggestion>> = flow {
+    override fun recommendReplies(sessionId: String, messages: List<CallMessage>): Flow<List<ReplySuggestion>> = flow {
         require(messages.isNotEmpty() && messages.all { it.isFinal } && messages.last().speaker == CallSpeaker.Remote && messages.last().text.isNotBlank())
         val output = StringBuilder()
         val parser = ReplyStreamParser()
         val ids = LongArray(3) { nextSuggestionId.incrementAndGet() }
         var snapshot = emptyList<ReplySuggestion>()
         withTimeout(30_000.milliseconds) {
-            replyRecommendationClient.generate(buildReplyPrompt(messages)).collect { chunk ->
+            replyRecommendationClient.generate(sessionId, buildReplyPrompt(messages)).collect { chunk ->
                 if (output.length + chunk.length > 8_000) throw ReplyRecommendationException(ReplyRecommendationError.InvalidResponse)
                 output.append(chunk)
                 val completed = mutableSetOf<String>()

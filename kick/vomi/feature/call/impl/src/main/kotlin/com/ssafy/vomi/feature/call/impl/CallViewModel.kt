@@ -62,6 +62,8 @@ internal class CallViewModel @Inject constructor(
     private var microphoneJob: Job? = null
     private var modelDownloadJob: Job? = null
     private var replyModelJob: Job? = null
+    private val replySessionId = UUID.randomUUID().toString()
+    private val replySessionReady = MutableStateFlow(false)
     private val recommendationForeground = MutableStateFlow(false)
     private val replyRetryRequests = MutableStateFlow(0L)
     private var replyRevision = 0L
@@ -70,6 +72,7 @@ internal class CallViewModel @Inject constructor(
         if (initializedCallId != null) return
         initializedCallId = callId
         mutableState.value = CallUiState(callId = callId, backchannels = defaultBackchannels)
+        observeReplyModelSession()
         observeReplyRecommendations()
         viewModelScope.launch {
             callTranscriptRepository.transcriptState.collect { transcript ->
@@ -144,11 +147,32 @@ internal class CallViewModel @Inject constructor(
         recommendationForeground.value = visible
     }
 
+    private fun observeReplyModelSession() {
+        viewModelScope.launch {
+            uiState.map { it.phase != CallPhase.Ended }.distinctUntilChanged().collectLatest { ongoing ->
+                if (!ongoing) return@collectLatest
+                try {
+                    replySuggestionRepository.openModelSession(replySessionId).asResult().collect { result ->
+                        when (result) {
+                            Result.Loading -> Unit
+                            is Result.Success -> replySessionReady.value = true
+                            is Result.Error -> mutableState.update { it.copy(
+                                replyModel = ReplyModelState(), replyModelError = ReplyRecommendationError.Failed,
+                            ) }
+                        }
+                    }
+                } finally {
+                    replySessionReady.value = false
+                }
+            }
+        }
+    }
 
     private fun observeReplyRecommendations() {
         viewModelScope.launch {
-            combine(recommendationForeground, uiState.map { it.phase == CallPhase.Active && !it.isActionPending }.distinctUntilChanged()) {
-                visible, active -> visible && active
+            combine(recommendationForeground, replySessionReady,
+                uiState.map { it.phase != CallPhase.Ended }.distinctUntilChanged()) {
+                visible, ready, ongoing -> visible && ready && ongoing
             }.distinctUntilChanged().collectLatest { eligible ->
                 if (eligible) checkReplyModel()
                 else {
@@ -168,14 +192,14 @@ internal class CallViewModel @Inject constructor(
             val requests = uiState.map { state ->
                 val dialogue = state.replyDialogue()
                 val last = dialogue.lastOrNull()
-                if (state.phase == CallPhase.Active && !state.isActionPending && !state.isSendingText &&
+                if (state.phase == CallPhase.Active && !state.isActionPending && !state.isSendingText && !state.isReplyModelOperationPending &&
                     state.messages.none { !it.isFinal } && state.replyModel.availability == ReplyModelAvailability.Available &&
                     last?.speaker == CallSpeaker.Remote && last.isFinal && last.text.isNotBlank()) {
                     dialogue.takeLast(13)
                 } else null
             }.distinctUntilChanged()
-            combine(recommendationForeground, requests, replyRetryRequests) { visible, messages, retry ->
-                (if (visible) messages else null) to retry
+            combine(recommendationForeground, replySessionReady, requests, replyRetryRequests) { visible, ready, messages, retry ->
+                (if (visible && ready) messages else null) to retry
             }.distinctUntilChanged().collectLatest { (messages, _) ->
                 val revision = ++replyRevision
                 if (messages == null) {
@@ -185,7 +209,7 @@ internal class CallViewModel @Inject constructor(
                 }
                 val sourceId = messages.last().id
                 try {
-                    replySuggestionRepository.recommendReplies(messages).asResult().collect { result ->
+                    replySuggestionRepository.recommendReplies(replySessionId, messages).asResult().collect { result ->
                         if (revision != replyRevision || !isCurrentReplyRequest(messages)) return@collect
                         mutableState.update { state ->
                             when (result) {
@@ -215,7 +239,8 @@ internal class CallViewModel @Inject constructor(
         val state = mutableState.value
         val dialogue = state.replyDialogue()
         val last = dialogue.lastOrNull()
-        return recommendationForeground.value && state.phase == CallPhase.Active && !state.isActionPending && !state.isSendingText &&
+        return recommendationForeground.value && replySessionReady.value && state.phase == CallPhase.Active &&
+            !state.isActionPending && !state.isSendingText && !state.isReplyModelOperationPending &&
             state.messages.none { !it.isFinal } && state.replyModel.availability == ReplyModelAvailability.Available && last?.isFinal == true &&
             last.speaker == CallSpeaker.Remote && dialogue.takeLast(13) == messages
     }
@@ -228,7 +253,8 @@ internal class CallViewModel @Inject constructor(
     fun prepareReplyModel() = performReplyModelOperation(download = true)
 
     private fun performReplyModelOperation(download: Boolean) {
-        if (!recommendationForeground.value || mutableState.value.phase != CallPhase.Active || replyModelJob?.isActive == true) return
+        if (!recommendationForeground.value || !replySessionReady.value ||
+            mutableState.value.phase == CallPhase.Ended || replyModelJob?.isActive == true) return
         // Readiness changes invalidate any pending generation before another SDK operation is started.
         mutableState.update { it.copy(
             replyModel = ReplyModelState(if (download) ReplyModelAvailability.Downloading else ReplyModelAvailability.Checking),
@@ -236,7 +262,7 @@ internal class CallViewModel @Inject constructor(
             isReplyModelOperationPending = true,
         ) }
         replyModelJob = viewModelScope.launch {
-            val operation = if (download) replySuggestionRepository.prepareModel() else replySuggestionRepository.checkModel()
+            val operation = if (download) replySuggestionRepository.prepareModel(replySessionId) else replySuggestionRepository.checkModel(replySessionId)
             try {
                 operation.asResult().collect { result ->
                     mutableState.update { state ->

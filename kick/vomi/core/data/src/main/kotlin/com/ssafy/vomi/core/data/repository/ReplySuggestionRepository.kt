@@ -6,8 +6,10 @@ import com.ssafy.vomi.core.model.call.ReplySuggestion
 import kotlinx.coroutines.flow.Flow
 
 interface ReplySuggestionRepository {
-    fun checkModel(): Flow<ReplyModelState>
-    fun prepareModel(): Flow<ReplyModelState>
+    /** Collection owns a model client until call end or ViewModel cancellation. */
+    fun openModelSession(sessionId: String): Flow<Unit>
+    fun checkModel(sessionId: String): Flow<ReplyModelState>
+    fun prepareModel(sessionId: String): Flow<ReplyModelState>
     /** Streams candidate snapshots; only isComplete candidates may be selected or sent. */
-    fun recommendReplies(messages: List<CallMessage>): Flow<List<ReplySuggestion>>
+    fun recommendReplies(sessionId: String, messages: List<CallMessage>): Flow<List<ReplySuggestion>>
 }

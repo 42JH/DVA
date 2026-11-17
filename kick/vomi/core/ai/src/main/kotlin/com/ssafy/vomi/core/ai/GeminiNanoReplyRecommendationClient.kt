@@ -13,6 +13,8 @@ import com.ssafy.vomi.core.model.ai.ReplyRecommendationError
 import com.ssafy.vomi.core.model.ai.ReplyRecommendationException
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.flow.first
@@ -20,20 +22,48 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 
 /** AICore/ML Kit types are confined to this module. No API key or cloud model is used. */
 internal class GeminiNanoReplyRecommendationClient @Inject constructor() : ReplyRecommendationClient {
-    private val operationMutex = Mutex()
+    private class Session(val id: String) {
+        var model: GenerativeModel? = null
+        var isWarmedUp = false
+    }
 
-    override suspend fun checkAvailability(): ReplyModelAvailability = withModel { model ->
-        emit(availability(model.checkStatus()))
+    private val operationMutex = Mutex()
+    private var session: Session? = null
+
+    override fun openSession(sessionId: String): Flow<Unit> = flow {
+        val ownedSession = operationMutex.withLock {
+            // A new call may arrive before the previous ViewModel finishes clearing.
+            session?.let(::closeSession)
+            Session(sessionId).also { session = it }
+        }
+        try {
+            emit(Unit)
+            awaitCancellation()
+        } finally {
+            // Wait for any cancelled SDK operation before releasing its client.
+            withContext(NonCancellable) {
+                operationMutex.withLock {
+                    if (session === ownedSession) session = null
+                    closeSession(ownedSession)
+                }
+            }
+        }
+    }.flowOn(Dispatchers.IO)
+
+    override suspend fun warmup(sessionId: String): ReplyModelAvailability = withModel(sessionId) { owned, model ->
+        emit(prepareIfAvailable(owned, model))
     }.first()
 
-    override fun downloadModel(): Flow<ReplyModelState> = withModel { model ->
+    override fun downloadModel(sessionId: String): Flow<ReplyModelState> = withModel(sessionId) { owned, model ->
         val current = availability(model.checkStatus())
         when (current) {
-            ReplyModelAvailability.Available -> emit(ReplyModelState(availability(model.checkStatus())))
+            ReplyModelAvailability.Available -> emit(ReplyModelState(prepareIfAvailable(owned, model)))
             ReplyModelAvailability.Downloadable, ReplyModelAvailability.Downloading -> {
+                owned.isWarmedUp = false
                 emit(ReplyModelState(ReplyModelAvailability.Downloading))
                 model.download().collect { progress ->
                     when (progress) {
@@ -44,14 +74,15 @@ internal class GeminiNanoReplyRecommendationClient @Inject constructor() : Reply
                         else -> Unit
                     }
                 }
-                emit(ReplyModelState(availability(model.checkStatus())))
+                // Publish readiness only after the downloaded model has also warmed up.
+                emit(ReplyModelState(prepareIfAvailable(owned, model)))
             }
             else -> throw ReplyRecommendationException(ReplyRecommendationError.Unavailable, current)
         }
     }
 
-    override fun generate(prompt: String): Flow<String> = withModel { model ->
-        val current = availability(model.checkStatus())
+    override fun generate(sessionId: String, prompt: String): Flow<String> = withModel(sessionId) { owned, model ->
+        val current = prepareIfAvailable(owned, model)
         if (current != ReplyModelAvailability.Available) {
             throw ReplyRecommendationException(ReplyRecommendationError.ModelNotReady, current)
         }
@@ -65,11 +96,33 @@ internal class GeminiNanoReplyRecommendationClient @Inject constructor() : Reply
         }
     }
 
-    private fun <T> withModel(block: suspend FlowCollector<T>.(GenerativeModel) -> Unit): Flow<T> = flow {
+    private suspend fun prepareIfAvailable(owned: Session, model: GenerativeModel): ReplyModelAvailability {
+        val current = availability(model.checkStatus())
+        if (current != ReplyModelAvailability.Available) owned.isWarmedUp = false
+        else if (!owned.isWarmedUp) {
+            model.warmup()
+            owned.isWarmedUp = true
+        }
+        return current
+    }
+
+    private fun closeSession(owned: Session) {
+        val model = owned.model
+        owned.model = null
+        owned.isWarmedUp = false
+        model?.close()
+    }
+
+    private fun <T> withModel(
+        sessionId: String,
+        block: suspend FlowCollector<T>.(Session, GenerativeModel) -> Unit,
+    ): Flow<T> = flow {
         operationMutex.withLock {
-            val model = Generation.getClient()
+            val owned = session?.takeIf { it.id == sessionId }
+                ?: throw ReplyRecommendationException(ReplyRecommendationError.ModelNotReady)
             try {
-                block(model)
+                val model = owned.model ?: Generation.getClient().also { owned.model = it }
+                block(owned, model)
             } catch (error: GenAiException) {
                 // Translate only SDK-specific errors; cancellation and other failures propagate.
                 val reason = when (error.errorCode) {
@@ -87,8 +140,6 @@ internal class GeminiNanoReplyRecommendationClient @Inject constructor() : Reply
                     else -> null
                 }
                 throw ReplyRecommendationException(reason, modelAvailability, error)
-            } finally {
-                model.close()
             }
         }
     }.flowOn(Dispatchers.IO)
