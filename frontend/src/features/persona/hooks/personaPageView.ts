@@ -8,7 +8,7 @@ import type { useApplyTest } from '@/features/persona/hooks/useApplyTest'
 import type { Persona, PersonaVersion, PromptKey } from '@/features/persona/api/personaMap'
 
 /** 오른쪽 상담가 카드 한 장 */
-export interface PersonaItem {
+interface PersonaItem {
   personaSeq: number
   name: string
   selected: boolean
@@ -21,7 +21,7 @@ export interface PersonaItem {
 type Badge = { label: string; tone: Tone }
 
 /** 버전 기록 한 줄 (11/11 — Notion 버전 기록처럼 저장 시각 + 수정한 사람) */
-export interface HistoryRow {
+interface HistoryRow {
   version: number
   time: string // '오늘 오후 3:07'
   author: string // 모르면 ''

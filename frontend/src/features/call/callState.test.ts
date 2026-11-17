@@ -7,10 +7,7 @@ const ago = (min: number) => new Date(Date.now() - min * 60_000).toISOString()
 test('통화 상태 — 통화 중 · 분석 중 · 분석 실패 · 분석 완료 (백엔드 판정)', () => {
   const s = (d: Parameters<typeof callState>[0]) => callState(d).label
   const ended = { startedAt: ago(9), endedAt: ago(8) }
-  assert.equal(
-    s({ startedAt: ago(1), endedAt: null, analysisStatus: 'PENDING' }),
-    '통화 중',
-  )
+  assert.equal(s({ startedAt: ago(1), endedAt: null, analysisStatus: 'PENDING' }), '통화 중')
   assert.equal(s({ ...ended, analysisStatus: 'PENDING' }), '분석 중')
   assert.equal(s({ ...ended, analysisStatus: 'FAILED' }), '분석 실패')
   assert.equal(s({ ...ended, analysisStatus: 'EXPIRED' }), '분석 만료')

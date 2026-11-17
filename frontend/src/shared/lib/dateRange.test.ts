@@ -12,5 +12,3 @@ assert.equal(todayYmd(Date.UTC(2026, 9, 31, 14, 59)), '2026-10-31')
 // 달 이동 — 해 넘김
 assert.equal(addMonths('2026-12', 1), '2027-01')
 assert.equal(addMonths('2026-01', -1), '2025-12')
-
-console.log('dateRange.test ok')

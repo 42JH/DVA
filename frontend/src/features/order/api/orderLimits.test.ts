@@ -31,5 +31,3 @@ assert.deepEqual(
   ),
   [false, true, true, false],
 )
-
-console.log('orderLimits ok')

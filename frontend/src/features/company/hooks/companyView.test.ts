@@ -85,5 +85,3 @@ assert.deepEqual(
   companyFacts({ createdAt: '2026-06-11T00:00:00+09:00', memberCount: 18 }, 1).map((f) => f[0]),
   ['등록', '담당자', '사원'],
 )
-
-console.log('companyView.test ok')

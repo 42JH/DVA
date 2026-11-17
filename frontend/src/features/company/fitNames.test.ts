@@ -9,4 +9,3 @@ assert.equal(fitNames(names, 160, w), '한태원, 김지우 외 2명') // 넘치
 assert.equal(fitNames(names, 10, w), '한태원 외 3명') // 아무것도 안 들어가도 첫 이름은 보임
 assert.equal(fitNames(['한태원'], 10, w), '한태원') // 한 명은 그대로
 assert.equal(fitNames([], 100, w), '')
-console.log('fitNames.test.ts OK')

@@ -51,5 +51,3 @@ assert.deepEqual(
   empty.map((r) => [r.key, r.status, r.parcel]),
   [['10519', 'COLLECTING', null]],
 )
-
-console.log('parcelRows.test ok')

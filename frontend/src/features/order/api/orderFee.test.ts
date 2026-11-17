@@ -18,5 +18,3 @@ assert.deepEqual(
   ),
   [true, false, false, true],
 )
-
-console.log('orderFee ok')

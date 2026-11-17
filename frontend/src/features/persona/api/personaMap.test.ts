@@ -125,5 +125,3 @@ const d = [
 ]
 const pd = toPersona(dto(d[0]!, d[1]!, { pendingVersion: d[0]! }))
 assert.deepEqual([pd.applyingVersion, pd.applyError], [5, 'AI_UNAVAILABLE'])
-
-console.log('personaMap OK')

@@ -127,7 +127,7 @@ export function limitsOf(
     feeMissing: v.etcItem.trim() !== '' && shippingFee === 0, // 기타 품목만 있으면 0원 → 서버가 1원 이상 필수라 접수 못 함
   }
 }
-export type OrderLimits = ReturnType<typeof limitsOf>
+type OrderLimits = ReturnType<typeof limitsOf>
 
 /** 칸이 다 채워졌고 규칙 안인가 (adding = 주문 추가 — 배송비 · 검색으로 고른 주소가 더 필요) */
 export const formFilled = (v: OrderFormValues, lim: OrderLimits, adding: boolean) =>

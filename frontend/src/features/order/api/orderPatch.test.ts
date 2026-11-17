@@ -273,5 +273,3 @@ assert.deepEqual(
   ),
   ['결제 방식'],
 )
-
-console.log('orderPatch OK')

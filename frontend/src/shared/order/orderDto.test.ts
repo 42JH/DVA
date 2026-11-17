@@ -117,5 +117,3 @@ assert.equal(c.sender.name, '')
 assert.equal(c.itemPrice, null)
 const d = toOrderDetail(dto({ parcels: [parcel({ origin: address('김', null) })] }))
 assert.equal(d.sender.roadAddress, '서울 강남구 역삼동 737')
-
-console.log('orderDto.test ok')

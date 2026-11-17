@@ -106,5 +106,3 @@ assert.deepEqual(
   ],
   [10, 30],
 )
-
-console.log('callScript.test ok')

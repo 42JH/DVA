@@ -3,9 +3,9 @@ import type { Check, Scenario, TestItem, VersionTest } from '@/features/persona/
 
 /** 표의 한 칸: 통과 · 실패 · 연결 실패 · 시험 중 · 대기 · 결과 없음 */
 export type Cell = 'pass' | 'fail' | 'error' | 'running' | 'queued' | 'none'
-export type Change = '새로 실패' | '새로 통과' | '같음' | ''
+type Change = '새로 실패' | '새로 통과' | '같음' | ''
 /** 한 버전의 시험 상태 — none 시험 전 · running 시험 중 · partial 일부만 시험 · done 전체 시험 끝남 · stale 고치기 전 글의 결과만 있음 */
-export type TestState = 'none' | 'running' | 'partial' | 'done' | 'stale'
+type TestState = 'none' | 'running' | 'partial' | 'done' | 'stale'
 
 type Key = { personaSeq: number; version: number }
 const same = (a: Key, b: Key | null) =>
