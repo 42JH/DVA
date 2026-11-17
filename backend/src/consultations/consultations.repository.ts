@@ -30,6 +30,7 @@ type CallRow = CallDto & {
 };
 
 const CALL_STARTED_AT = 'COALESCE(c.started_at,a.ai_started_at,c.incoming_at)';
+const ACTIVE_CALL_CUTOFF = "statement_timestamp()-interval '2 hours'";
 const CALL_LIST_ORDER = '"startedAt" DESC NULLS LAST,"callSessionSeq" DESC';
 const CALL_PAGE_FIELDS = `page.*,(SELECT min(r.created_at) FROM recordings r WHERE r.call_session_seq=page."callSessionSeq") AS "recordedAt"`;
 
@@ -40,6 +41,7 @@ const callSelect = (
  CASE WHEN a.call_session_seq IS NOT NULL THEN 'COMPLETED'
   WHEN c.analysis_failed_at IS NOT NULL THEN 'FAILED'
   WHEN c.ended_at<=transaction_timestamp()-interval '10 minutes' THEN 'EXPIRED'
+  WHEN c.ended_at IS NULL AND COALESCE(c.registered_at,c.incoming_at)<=${ACTIVE_CALL_CUTOFF} THEN 'EXPIRED'
   ELSE 'PENDING' END AS "analysisStatus",
  ${includeRecordedAt ? '(SELECT min(r.created_at) FROM recordings r WHERE r.call_session_seq=c.call_session_seq) AS "recordedAt",' : ''}
  c.caller_phone_number AS "callerPhoneNumber",o.order_seq AS "orderSeq",o.status AS "orderStatus",o.total_amount AS "orderTotalAmount",
@@ -167,7 +169,7 @@ export class ConsultationsRepository {
       await this.database.pool.query<{ activeCallCount: number; observedAt: Date }>(
         `SELECT count(*)::int AS "activeCallCount",statement_timestamp() AS "observedAt"
        FROM call_sessions c WHERE c.registered_at IS NOT NULL AND c.ended_at IS NULL AND c.deleted_at IS NULL
-        AND c.registered_at>statement_timestamp()-interval '2 hours'
+        AND c.registered_at>${ACTIVE_CALL_CUTOFF}
         AND (c.incoming_at IS NULL OR c.incoming_at>clock_timestamp()-interval '5 years')
         AND NOT EXISTS(SELECT 1 FROM call_analyses a
           WHERE a.call_session_seq=c.call_session_seq AND a.ai_ended_at IS NOT NULL)`,
