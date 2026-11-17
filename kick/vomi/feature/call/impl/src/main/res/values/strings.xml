@@ -45,6 +45,23 @@
     <string name="call_caption_model_scheduled">음성 팩 준비가 예약됐어요. 완료 후 마이크를 켜면 다시 인식해요.</string>
     <string name="call_caption_model_requested">음성 팩 준비를 요청했어요. 완료 후 마이크를 켜서 확인해 주세요.</string>
     <string name="call_caption_retry">자막 다시 연결</string>
+    <string name="call_reply_waiting_for_call">통화가 연결되면 답변을 추천해요</string>
+    <string name="call_reply_checking">AI 답변 추천을 준비하고 있어요</string>
+    <string name="call_reply_downloadable">답변 추천에 필요한 AI 모델을 준비해 주세요</string>
+    <string name="call_reply_downloading">AI 모델을 준비하고 있어요</string>
+    <string name="call_reply_download_progress">AI 모델 준비 중 · %1$d MB</string>
+    <string name="call_reply_unavailable">이 기기에서는 AI 답변 추천을 사용할 수 없어요</string>
+    <string name="call_reply_busy">AI가 다른 요청을 처리 중이에요. 잠시 후 다시 시도해 주세요</string>
+    <string name="call_reply_quota">AI 사용량이 많아요. 잠시 후 다시 시도해 주세요</string>
+    <string name="call_reply_foreground_required">통화 화면에서 추천을 다시 시도해 주세요</string>
+    <string name="call_reply_model_not_ready">AI 답변 추천 준비 상태를 확인해 주세요</string>
+    <string name="call_reply_invalid_response">추천할 문장을 만들지 못했어요. 다시 시도해 주세요</string>
+    <string name="call_reply_failed">답변 추천을 완료하지 못했어요. 다시 시도해 주세요</string>
+    <string name="call_reply_generating">답변을 추천하고 있어요</string>
+    <string name="call_reply_waiting_for_speech">상대방의 말을 기다리고 있어요</string>
+    <string name="call_reply_prepare_model">모델 준비</string>
+    <string name="call_reply_check_again">다시 확인</string>
+    <string name="call_reply_retry">다시 추천</string>
     <string name="call_text_sending">메시지와 음성을 전송하고 있어요</string>
     <string name="call_text_invalid">문장이 비어 있거나 너무 길어요. 나누어 보내 주세요</string>
     <string name="call_text_voice_not_ready">내 목소리가 아직 준비되지 않았어요. 음성 등록 상태를 확인해 주세요</string>
@@ -62,4 +79,6 @@
     <string name="call_text_message_audio_sending">텍스트 전달됨 · 음성 전송 중</string>
     <string name="call_text_message_failed">메시지 전송 실패</string>
     <string name="call_text_message_audio_failed">텍스트 전달됨 · 음성 전송 실패</string>
+    <string name="call_reply_candidate_writing">답변 작성 중…</string>
+    <string name="call_reply_candidate_complete">완성된 추천 답변</string>
 </resources>

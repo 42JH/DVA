@@ -17,6 +17,7 @@ internal fun sampleCallState(friendId: String, friendName: String, isIncoming: B
             CallMessage(1L, CallSpeaker.Local, "안녕하세요. 텍스트로 통화하려고 합니다."),
             CallMessage(2L, CallSpeaker.Remote, "오늘 저녁에 시간 돼?"),
         ),
+        suggestionSourceMessageId = if (isIncoming) null else 2L,
         suggestions = listOf(
             ReplySuggestion(1L, "오늘 저녁 괜찮아요!"),
             ReplySuggestion(2L, "내일 저녁은 어떠세요?", position = 1),

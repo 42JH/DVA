@@ -45,6 +45,10 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.awaitCancellation
 import com.ssafy.vomi.core.designsystem.component.Button
 import com.ssafy.vomi.core.model.call.CallConnection
 import com.ssafy.vomi.core.designsystem.component.LoadingWheel
@@ -59,6 +63,8 @@ import com.ssafy.vomi.feature.call.impl.component.CallTextSendStatus
 import com.ssafy.vomi.feature.call.impl.component.CallCaptionStatus
 import com.ssafy.vomi.feature.call.impl.component.CallHeader
 import com.ssafy.vomi.feature.call.impl.component.CallInput
+import com.ssafy.vomi.feature.call.impl.component.CallReplySuggestions
+import com.ssafy.vomi.feature.call.impl.component.ReplyRecommendationStatus
 import com.ssafy.vomi.feature.call.impl.component.CallQuickReplies
 import com.ssafy.vomi.feature.call.impl.component.CallSummarySheet
 import com.ssafy.vomi.feature.call.impl.component.IncomingCallBanner
@@ -79,6 +85,13 @@ internal fun CallScreen(
         viewModel.onMicrophonePermissionResult(it)
     }
     LaunchedEffect(callId) { viewModel.initialize(callId) }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(lifecycle, viewModel) {
+        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            viewModel.setRecommendationForeground(true)
+            try { awaitCancellation() } finally { viewModel.setRecommendationForeground(false) }
+        }
+    }
     BackHandler(onBack = viewModel::endCall)
     CallContent(
         state = state,
@@ -101,9 +114,9 @@ internal fun CallScreen(
         onRetryConnection = viewModel::retryConnection,
         onRetryCaptions = viewModel::retryCaptions,
         onPrepareSpeechModel = viewModel::prepareSpeechModel,
-
-
-
+        onCheckReplyModel = viewModel::checkReplyModel,
+        onPrepareReplyModel = viewModel::prepareReplyModel,
+        onRetryReplies = viewModel::retryReplyRecommendations,
         onRetryTextAudio = viewModel::retryTextAudio,
         modifier = modifier,
     )
@@ -126,9 +139,9 @@ private fun CallContent(
     onRetryConnection: () -> Unit = {},
     onRetryCaptions: () -> Unit = {},
     onPrepareSpeechModel: () -> Unit = {},
-
-
-
+    onCheckReplyModel: () -> Unit = {},
+    onPrepareReplyModel: () -> Unit = {},
+    onRetryReplies: () -> Unit = {},
     onRetryTextAudio: () -> Unit = {},
 ) {
     var inputBounds by remember { mutableStateOf(Rect.Zero) }
@@ -137,7 +150,7 @@ private fun CallContent(
     var ghostSize by remember { mutableStateOf(IntSize.Zero) }
     var draggedSuggestion by remember { mutableStateOf<DraggedSuggestion?>(null) }
     var inputFocusRequest by remember { mutableIntStateOf(0) }
-    LaunchedEffect(state.canType, state.isSummaryVisible) {
+    LaunchedEffect(state.canType, state.isSummaryVisible, state.suggestionSourceMessageId) {
         draggedSuggestion = null
     }
     Box(modifier = modifier
@@ -210,8 +223,29 @@ private fun CallContent(
                     CallCaptionStatus(state, onRetryCaptions, onPrepareSpeechModel)
                 }
                 val listState = rememberLazyListState()
-                LaunchedEffect(state.messages.lastOrNull()?.id, state.messages.lastOrNull()?.text) {
-                    if (!listState.isScrollInProgress && state.messages.isNotEmpty()) listState.scrollToItem(state.messages.lastIndex)
+                val sourceId = state.suggestionSourceMessageId
+                val hasReplyGroup = sourceId != null && state.messages.any { it.id == sourceId }
+                val showReplyStatus = !hasReplyGroup && state.phase == CallPhase.Active
+                var replyHeight by remember(sourceId) { mutableIntStateOf(0) }
+                val itemCount = state.messages.size + if (hasReplyGroup || showReplyStatus) 1 else 0
+                LaunchedEffect(state.messages.lastOrNull()?.id, state.messages.lastOrNull()?.text, itemCount, replyHeight, draggedSuggestion != null) {
+                    if (draggedSuggestion == null && !listState.isScrollInProgress && itemCount > 0) {
+                        listState.scrollToItem(itemCount - 1)
+                    }
+                }
+                val editReply: (Long) -> Unit = { id -> onSuggestionEdit(id); inputFocusRequest++ }
+                val startReplyDrag: (Long, Offset) -> Unit = { id, position ->
+                    if (state.canType) state.suggestions.find { it.id == id && it.isComplete }?.let {
+                        draggedSuggestion = DraggedSuggestion(id, it.text, position)
+                    }
+                }
+                val endReplyDrag: () -> Unit = {
+                    val drag = draggedSuggestion
+                    if (state.canType && drag != null && inputBounds.contains(drag.position) &&
+                        state.suggestions.any { it.id == drag.id && it.isComplete }) {
+                        editReply(drag.id)
+                    }
+                    draggedSuggestion = null
                 }
                 LazyColumn(
                     state = listState,
@@ -246,6 +280,25 @@ private fun CallContent(
                                 }
                             }
                         }
+                        if (hasReplyGroup && message.id == sourceId) item(key = "replies:" + sourceId) {
+                            CallReplySuggestions(
+                                state = state,
+                                onSuggestionClick = onSuggestionClick,
+                                onSuggestionEdit = editReply,
+                                onDragStart = startReplyDrag,
+                                onDragMove = { draggedSuggestion = draggedSuggestion?.copy(position = it) },
+                                onDragEnd = endReplyDrag,
+                                onDragCancel = { draggedSuggestion = null },
+                                onCheckModel = onCheckReplyModel,
+                                onPrepareModel = onPrepareReplyModel,
+                                onRetry = onRetryReplies,
+                                modifier = Modifier.onSizeChanged { replyHeight = it.height },
+                            )
+                        }
+                    }
+                    if (showReplyStatus) item(key = "reply-model-status") {
+                        ReplyRecommendationStatus(state, onCheckReplyModel, onPrepareReplyModel, onRetryReplies,
+                            modifier = Modifier.fillMaxWidth())
                     }
                 }
                 CallQuickReplies(state = state, onBackchannelClick = onBackchannelClick)
@@ -310,6 +363,18 @@ private fun CallContent(
 @Composable
 private fun CallScreenPreview() {
     CallPreview(sampleCallState("kick-test-2", "싸피 야옹").copy(elapsedSeconds = 2))
+}
+
+@Preview(name = "Streaming recommendations", widthDp = 393, heightDp = 800)
+@Composable
+private fun StreamingRecommendationsPreview() {
+    CallPreview(sampleCallState("kick-test-2", "싸피 야옹").copy(
+        isGeneratingReplies = true,
+        suggestions = listOf(
+            com.ssafy.vomi.core.model.call.ReplySuggestion(11L, "몇 시쯤 볼까?", position = 0),
+            com.ssafy.vomi.core.model.call.ReplySuggestion(12L, "일정 확인하고", isComplete = false, position = 1),
+        ),
+    ))
 }
 
 @Preview(name = "Microphone on", widthDp = 393, heightDp = 800)

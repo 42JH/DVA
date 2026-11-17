@@ -2,6 +2,8 @@ package com.ssafy.vomi.feature.call.impl.model
 
 import com.ssafy.vomi.core.model.call.CallTextError
 import com.ssafy.vomi.core.model.call.CallTextRequest
+import com.ssafy.vomi.core.model.ai.ReplyModelState
+import com.ssafy.vomi.core.model.ai.ReplyRecommendationError
 import com.ssafy.vomi.core.model.speech.SpeechState
 import com.ssafy.vomi.core.model.call.CallMediaConnection
 import com.ssafy.vomi.core.model.call.CallConnection
@@ -35,6 +37,12 @@ internal data class CallUiState(
     val messages: List<CallMessage> = emptyList(),
     val speech: SpeechState = SpeechState(),
     val suggestions: List<ReplySuggestion> = emptyList(),
+    val replyModel: ReplyModelState = ReplyModelState(),
+    val isReplyModelOperationPending: Boolean = false,
+    val replyModelError: ReplyRecommendationError? = null,
+    val isGeneratingReplies: Boolean = false,
+    val replyGenerationError: ReplyRecommendationError? = null,
+    val suggestionSourceMessageId: Long? = null,
     val backchannels: List<Backchannel> = emptyList(),
     val summary: CallSummary? = null,
     val isSummaryVisible: Boolean = false,

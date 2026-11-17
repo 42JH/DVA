@@ -5,7 +5,10 @@ import com.ssafy.vomi.core.data.repository.CallRepository
 import com.ssafy.vomi.core.model.call.CallMediaState
 import com.ssafy.vomi.core.model.call.CallSnapshot
 import com.ssafy.vomi.core.data.repository.FriendRepository
+import com.ssafy.vomi.core.data.repository.ReplySuggestionRepository
+import com.ssafy.vomi.core.model.ai.ReplyModelState
 import com.ssafy.vomi.core.model.call.CallMessage
+import com.ssafy.vomi.core.model.call.ReplySuggestion
 import com.ssafy.vomi.core.data.repository.CallTranscriptRepository
 import com.ssafy.vomi.core.model.call.CallCaption
 import com.ssafy.vomi.core.model.call.CallMessageDelivery
@@ -93,6 +96,12 @@ class CallViewModelTest {
         override fun clearSession() = Unit
     }
 
+    private class Replies : ReplySuggestionRepository {
+        override fun checkModel(): Flow<ReplyModelState> = error("Unused")
+        override fun prepareModel(): Flow<ReplyModelState> = error("Unused")
+        override fun recommendReplies(messages: List<CallMessage>): Flow<List<ReplySuggestion>> = error("Unused")
+    }
+
     private class Transcript : CallTranscriptRepository {
         override val transcriptState = MutableStateFlow(CallTranscriptState())
         override fun beginCall(callId: String) = Unit
@@ -106,7 +115,7 @@ class CallViewModelTest {
 
     @Test fun outgoingUsesServerCallIdAndDoesNotInventMessagesOrAnActiveMediaConnection() {
         val calls = Calls()
-        val vm = CallViewModel(calls, Friends(), Captions(), Transcript()).apply { initialize("call-1") }
+        val vm = CallViewModel(calls, Friends(), Captions(), Replies(), Transcript()).apply { initialize("call-1") }
         assertEquals(CallPhase.Outgoing, vm.uiState.value.phase)
         assertEquals("사용자2", vm.uiState.value.friendName)
         assertTrue(vm.uiState.value.messages.isEmpty())
@@ -122,7 +131,7 @@ class CallViewModelTest {
 
     @Test fun acceptIsGuardedAndAcceptedWaitsForTheFutureMediaLayer() {
         val calls = Calls(incoming = true).apply { pending = CompletableDeferred() }
-        val vm = CallViewModel(calls, Friends(), Captions(), Transcript()).apply { initialize("call-1") }
+        val vm = CallViewModel(calls, Friends(), Captions(), Replies(), Transcript()).apply { initialize("call-1") }
         assertEquals(CallPhase.Incoming, vm.uiState.value.phase)
         vm.acceptIncoming(); vm.acceptIncoming(); vm.endCall()
         assertTrue(vm.uiState.value.isActionPending)
@@ -135,7 +144,7 @@ class CallViewModelTest {
 
     @Test fun failedDeclineKeepsIncomingScreenAndAllowsRetry() {
         val calls = Calls(incoming = true).apply { failure = IOException("offline") }
-        val vm = CallViewModel(calls, Friends(), Captions(), Transcript()).apply { initialize("call-1") }
+        val vm = CallViewModel(calls, Friends(), Captions(), Replies(), Transcript()).apply { initialize("call-1") }
         vm.endCall()
         assertEquals(CallPhase.Incoming, vm.uiState.value.phase)
         assertTrue(vm.uiState.value.hasActionError)
@@ -148,7 +157,7 @@ class CallViewModelTest {
 
     @Test fun nullOrTerminalServerSnapshotClosesTheScreen() {
         val calls = Calls()
-        val vm = CallViewModel(calls, Friends(), Captions(), Transcript()).apply { initialize("call-1") }
+        val vm = CallViewModel(calls, Friends(), Captions(), Replies(), Transcript()).apply { initialize("call-1") }
         calls.callState.value = calls.callState.value.copy(session = null)
         assertEquals(CallPhase.Ended, vm.uiState.value.phase)
         vm.endCall()
@@ -157,14 +166,14 @@ class CallViewModelTest {
 
     @Test fun nameLookupFailureUsesPeerIdAndReinitializationDoesNotSwitchCallIdentity() {
         val calls = Calls()
-        val vm = CallViewModel(calls, Friends(failure = true), Captions(), Transcript()).apply { initialize("call-1") }
+        val vm = CallViewModel(calls, Friends(failure = true), Captions(), Replies(), Transcript()).apply { initialize("call-1") }
         assertEquals("kick-test-2", vm.uiState.value.friendName)
         vm.initialize("other-call")
         assertEquals("call-1", vm.uiState.value.callId)
     }
     @Test fun creationInFlightDisablesConflictingActionsUntilTheCreateCompletes() {
         val calls = Calls(creating = true)
-        val vm = CallViewModel(calls, Friends(), Captions(), Transcript()).apply { initialize("call-1") }
+        val vm = CallViewModel(calls, Friends(), Captions(), Replies(), Transcript()).apply { initialize("call-1") }
         assertTrue(vm.uiState.value.isCreating)
         vm.endCall()
         assertTrue(calls.actions.isEmpty())

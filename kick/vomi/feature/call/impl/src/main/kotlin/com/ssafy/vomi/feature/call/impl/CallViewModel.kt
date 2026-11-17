@@ -14,6 +14,11 @@ import com.ssafy.vomi.core.common.result.Result
 import com.ssafy.vomi.core.common.result.asResult
 import com.ssafy.vomi.core.data.repository.CallRepository
 import com.ssafy.vomi.core.data.repository.FriendRepository
+import com.ssafy.vomi.core.data.repository.ReplySuggestionRepository
+import com.ssafy.vomi.core.model.ai.ReplyModelAvailability
+import com.ssafy.vomi.core.model.ai.ReplyModelState
+import com.ssafy.vomi.core.model.ai.ReplyRecommendationError
+import com.ssafy.vomi.core.model.ai.ReplyRecommendationException
 import com.ssafy.vomi.core.model.call.CallMessage
 import com.ssafy.vomi.core.model.call.CallSpeaker
 import kotlinx.coroutines.cancelAndJoin
@@ -45,6 +50,7 @@ internal class CallViewModel @Inject constructor(
     private val callRepository: CallRepository,
     private val friendRepository: FriendRepository,
     private val speechRepository: SpeechRepository,
+    private val replySuggestionRepository: ReplySuggestionRepository,
     private val callTranscriptRepository: CallTranscriptRepository,
 ) : ViewModel() {
     private val mutableState = MutableStateFlow(CallUiState())
@@ -55,11 +61,16 @@ internal class CallViewModel @Inject constructor(
     private var actionJob: Job? = null
     private var microphoneJob: Job? = null
     private var modelDownloadJob: Job? = null
+    private var replyModelJob: Job? = null
+    private val recommendationForeground = MutableStateFlow(false)
+    private val replyRetryRequests = MutableStateFlow(0L)
+    private var replyRevision = 0L
 
     fun initialize(callId: String) {
         if (initializedCallId != null) return
         initializedCallId = callId
         mutableState.value = CallUiState(callId = callId, backchannels = defaultBackchannels)
+        observeReplyRecommendations()
         viewModelScope.launch {
             callTranscriptRepository.transcriptState.collect { transcript ->
                 if (transcript.callId == callId) mutableState.update {
@@ -126,6 +137,132 @@ internal class CallViewModel @Inject constructor(
                 }
                 delay(1_000.milliseconds)
             }
+        }
+    }
+
+    fun setRecommendationForeground(visible: Boolean) {
+        recommendationForeground.value = visible
+    }
+
+
+    private fun observeReplyRecommendations() {
+        viewModelScope.launch {
+            combine(recommendationForeground, uiState.map { it.phase == CallPhase.Active && !it.isActionPending }.distinctUntilChanged()) {
+                visible, active -> visible && active
+            }.distinctUntilChanged().collectLatest { eligible ->
+                if (eligible) checkReplyModel()
+                else {
+                    replyModelJob?.cancelAndJoin()
+                    mutableState.update { state ->
+                        state.copy(
+                            suggestions = emptyList(), isGeneratingReplies = false, suggestionSourceMessageId = null,
+                            replyGenerationError = null, isReplyModelOperationPending = false,
+                            replyModel = if (state.replyModel.availability == ReplyModelAvailability.Checking ||
+                                state.replyModel.availability == ReplyModelAvailability.Downloading) ReplyModelState() else state.replyModel,
+                        )
+                    }
+                }
+            }
+        }
+        viewModelScope.launch {
+            val requests = uiState.map { state ->
+                val dialogue = state.replyDialogue()
+                val last = dialogue.lastOrNull()
+                if (state.phase == CallPhase.Active && !state.isActionPending && !state.isSendingText &&
+                    state.messages.none { !it.isFinal } && state.replyModel.availability == ReplyModelAvailability.Available &&
+                    last?.speaker == CallSpeaker.Remote && last.isFinal && last.text.isNotBlank()) {
+                    dialogue.takeLast(13)
+                } else null
+            }.distinctUntilChanged()
+            combine(recommendationForeground, requests, replyRetryRequests) { visible, messages, retry ->
+                (if (visible) messages else null) to retry
+            }.distinctUntilChanged().collectLatest { (messages, _) ->
+                val revision = ++replyRevision
+                if (messages == null) {
+                    mutableState.update { it.copy(suggestions = emptyList(), isGeneratingReplies = false,
+                        replyGenerationError = null, suggestionSourceMessageId = null) }
+                    return@collectLatest
+                }
+                val sourceId = messages.last().id
+                try {
+                    replySuggestionRepository.recommendReplies(messages).asResult().collect { result ->
+                        if (revision != replyRevision || !isCurrentReplyRequest(messages)) return@collect
+                        mutableState.update { state ->
+                            when (result) {
+                                Result.Loading -> state.copy(suggestions = emptyList(), isGeneratingReplies = true,
+                                    replyGenerationError = null, suggestionSourceMessageId = sourceId)
+                                is Result.Success -> state.copy(suggestions = result.data, isGeneratingReplies = true)
+                                is Result.Error -> {
+                                    val error = result.exception as? ReplyRecommendationException
+                                    state.copy(
+                                        isGeneratingReplies = false,
+                                        replyGenerationError = error?.reason ?: ReplyRecommendationError.Failed,
+                                        suggestions = state.suggestions.filter { it.isComplete },
+                                        replyModel = error?.modelAvailability?.let { ReplyModelState(it) } ?: state.replyModel,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                } finally {
+                    if (revision == replyRevision) mutableState.update { it.copy(isGeneratingReplies = false) }
+                }
+            }
+        }
+    }
+
+    private fun isCurrentReplyRequest(messages: List<CallMessage>): Boolean {
+        val state = mutableState.value
+        val dialogue = state.replyDialogue()
+        val last = dialogue.lastOrNull()
+        return recommendationForeground.value && state.phase == CallPhase.Active && !state.isActionPending && !state.isSendingText &&
+            state.messages.none { !it.isFinal } && state.replyModel.availability == ReplyModelAvailability.Available && last?.isFinal == true &&
+            last.speaker == CallSpeaker.Remote && dialogue.takeLast(13) == messages
+    }
+
+    private fun CallUiState.replyDialogue() = messages.filter {
+        it.isFinal && it.delivery != CallMessageDelivery.Sending && it.delivery != CallMessageDelivery.Failed
+    }
+
+    fun checkReplyModel() = performReplyModelOperation(download = false)
+    fun prepareReplyModel() = performReplyModelOperation(download = true)
+
+    private fun performReplyModelOperation(download: Boolean) {
+        if (!recommendationForeground.value || mutableState.value.phase != CallPhase.Active || replyModelJob?.isActive == true) return
+        // Readiness changes invalidate any pending generation before another SDK operation is started.
+        mutableState.update { it.copy(
+            replyModel = ReplyModelState(if (download) ReplyModelAvailability.Downloading else ReplyModelAvailability.Checking),
+            replyModelError = null,
+            isReplyModelOperationPending = true,
+        ) }
+        replyModelJob = viewModelScope.launch {
+            val operation = if (download) replySuggestionRepository.prepareModel() else replySuggestionRepository.checkModel()
+            try {
+                operation.asResult().collect { result ->
+                    mutableState.update { state ->
+                        when (result) {
+                            Result.Loading -> state
+                            is Result.Success -> state.copy(replyModel = result.data, replyModelError = null)
+                            is Result.Error -> {
+                                val error = result.exception as? ReplyRecommendationException
+                                state.copy(
+                                    replyModel = ReplyModelState(error?.modelAvailability ?: ReplyModelAvailability.Unknown),
+                                    replyModelError = error?.reason ?: ReplyRecommendationError.Failed,
+                                )
+                            }
+                        }
+                    }
+                }
+            } finally {
+                mutableState.update { it.copy(isReplyModelOperationPending = false) }
+            }
+        }
+    }
+
+    fun retryReplyRecommendations() {
+        if (recommendationForeground.value && mutableState.value.phase == CallPhase.Active && !mutableState.value.isGeneratingReplies) {
+            if (mutableState.value.replyModel.availability == ReplyModelAvailability.Available) replyRetryRequests.update { it + 1 }
+            else checkReplyModel()
         }
     }
 

@@ -19,8 +19,7 @@ class ReplyChipTextTest {
 
         viewModel.selectSuggestion(reply.id)
         assertEquals(reply.text, viewModel.uiState.value.draft)
-        viewModel.sendDraft()
-        assertEquals(reply.text, viewModel.uiState.value.messages.last().text)
+        assertEquals(reply.text, viewModel.draftToSend())
     }
 
     @Test
