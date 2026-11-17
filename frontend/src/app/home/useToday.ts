@@ -10,6 +10,7 @@ import { complaintView } from '@/features/stats/complaintView'
 import { toScreen, type UnansweredDto } from '@/features/faq/api/unansweredApi'
 import { useShell } from '@/shared/lib/shell'
 import { dateTime } from '@/shared/lib/when'
+import { callState } from '@/features/call/callState'
 
 interface HomeDto {
   observedAt: string
@@ -97,7 +98,7 @@ export function useToday() {
       seq: c.callSessionSeq,
       name: c.customerName ?? '',
       at: dateTime(c.startedAt),
-      live: !!c.startedAt && !c.endedAt,
+      live: callState(c).label === '통화 중', // 목록 · 상세와 같은 기준
       // 고객 불만이 있을 때만 (AI 응대 오류 · 근거 없는 답변은 빼고, 11/11 Jira 148)
       complaint: (c.analysis?.complaints ?? []).some(
         (x) => x.type === 'DISSATISFACTION_EXPRESSION' && !!x.target, // 최신 판정본만
