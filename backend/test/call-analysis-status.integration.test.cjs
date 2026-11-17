@@ -101,6 +101,30 @@ test('list and detail expire missing analysis ten minutes after completion and k
   await state(expired, 'COMPLETED');
 });
 
+test('open calls expire after two hours in the list and detail', async () => {
+  const incomingAt = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+  const tracked = await call({ ended: false, incomingAt });
+  await f.pool.query(
+    "UPDATE call_sessions SET registered_at=clock_timestamp()-interval '2 hours' WHERE call_session_seq=$1",
+    [tracked.id],
+  );
+  assert.equal((await state(tracked, 'EXPIRED')).call.endedAt, null);
+  assert.equal(await stamp(tracked), null);
+  assert.equal(await audits(tracked), 0);
+
+  const excluded = await call({ ended: false, incomingAt });
+  await f.pool.query('UPDATE call_sessions SET registered_at=NULL WHERE call_session_seq=$1', [
+    excluded.id,
+  ]);
+  assert.equal((await state(excluded, 'EXPIRED')).call.endedAt, null);
+  assert.equal(await stamp(excluded), null);
+
+  await accepted(await analyse(tracked));
+  await state(tracked, 'COMPLETED');
+  await accepted(await failure(excluded));
+  await state(excluded, 'FAILED');
+});
+
 test('failure uses the existing insights credential, never a business token or administrator cookie', async () => {
   const c = await call();
   for (const headers of [

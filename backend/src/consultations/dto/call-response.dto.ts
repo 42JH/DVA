@@ -7,7 +7,7 @@ export class CallDto {
   @ApiProperty({
     enum: ['PENDING', 'COMPLETED', 'FAILED', 'EXPIRED'],
     description:
-      '정상 분석 저장이면 COMPLETED 우선, 없고 AI 최종 실패 통보가 있으면 FAILED. 둘 다 없고 PBX 통화 종료 후 10분 이상이면 EXPIRED, 그 외 PENDING. 시간 경과만으로 완료 처리하지 않습니다.',
+      '정상 분석 저장이면 COMPLETED 우선, 없고 AI 최종 실패 통보가 있으면 FAILED. 둘 다 없으면 PBX 종료 후 10분 또는 종료 미확인 상태로 등록 후 2시간에 EXPIRED. 등록 시각이 없으면 수신 시각을 사용합니다. 그 외 PENDING.',
   })
   analysisStatus!: 'PENDING' | 'COMPLETED' | 'FAILED' | 'EXPIRED';
 
