@@ -28,7 +28,7 @@ export function useDashboard() {
     // 판정 수(서버 통계)와 불만 있는 통화 목록이 둘 다 와야 그림 — 탭을 넘길 때 따로 기다리지 않게 (11/11 사용자)
     complaint: both(
       useQuery(dashboardQueries.card('complaint-calls', 'ALL')),
-      useQuery(dashboardQueries.complainedCalls()),
+      useQuery(dashboardQueries.complainedCalls('stats')),
       (d, calls: CallListItemDto[]) => ({
         ...complaintView(d, calls),
         capped: calls.length >= FETCH_ALL_MAX, // 받은 통화가 상한 — 그 안에서 센 값

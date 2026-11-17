@@ -37,7 +37,7 @@ type ProcessingKind =
 /** 고객 불만(DISSATISFACTION_EXPRESSION)의 대상 · 강도 (11/11 백엔드 !476). 다른 유형 · 그 전 판정은 null 또는 칸 없음 */
 export type ComplaintTarget = 'ai_service' | 'price_policy' | 'delivery_other'
 export type ComplaintLevel = 'explicit' | 'mild'
-interface CallComplaintDto {
+export interface CallComplaintDto {
   type: ComplaintType
   evidenceText: string // 고객 불만이면 고객이 한 말 그대로
   offsetSeconds: number | null
