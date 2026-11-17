@@ -58,6 +58,13 @@ assumptions:
     verification: On 2026-11-13 UTC both integration tests ran with zero failures or skips. Each environment exercised three calls: A requested B, B accepted and A ended; B rejected a new request; A cancelled another request. Both repositories received the requested/accepted/inactive states. Only dedicated test accounts were used, and their live active-call endpoints were subsequently confirmed null. No LiveKit join, microphone, voice registration, speech synthesis or push-token mutation was called. The fixture supports two bearer identities and optional held SSE; tests use separate mock sessions. CLI 1.76 initially crashed when a streamed proxy response was reset by cancellation; the fixture now ends held streams via a local control route before closing the clients. The final parallel run passed 69 local tests, with the two live tests opted out because each had already passed in separate live runs, and all five selected lint tasks reported zero errors. The final UI build and call tests passed after adding creation-in-flight control guards. No Android device was attached, so device UI interaction remains unverified. A later read-only authentication check had one transient Network failure and passed on isolated rerun; health and both active-call endpoints also returned HTTP 200.
     source: core/data/src/test/kotlin/com/ssafy/vomi/core/data/repository/CallSignalingIntegrationTest.kt; postman/mocks/kick/default.js; docs/kick-android-api.md
     updated_at: '2026-11-14'
+  - id: persisted-auth-and-app-owned-signaling
+    status: unknown
+    claim: Proto DataStore session restoration and app-owned SSE lifecycle preserve runtime authentication and signaling behavior after the repository refactor.
+    reason: The user requested no test execution. Previous runtime evidence above predates this refactor; it does not validate this new ownership arrangement.
+    verification: Added a persistent token-pair/string-user-ID schema, AuthState initialization and restoration, a separate UserRepository, and shared CallSessionStore. CallRepository owns shared callState and an internal CallSessionStore, automatically merging API/SSE results and handling transient retries and recovery through cold Flows, without AuthRepository or ApplicationScope dependencies. MainActivityViewModel coordinates authentication and foreground collection through observeCalls().asResult(), with no direct Store dependency; MainActivity forwards lifecycle state and creates VomiAppState for navigation/UI from supplied authentication and call state. AuthRepository.login now delegates to an AuthDataSource interface, with MockAuthDataSource supplied by AuthModule; the public credential contract has no TestAccount parameter and raw login network errors reach asResult in LoginViewModel. Existing test sources were adapted but not executed. Debug app assembly passed; no server or device requests were made for this refactor.
+    source: core/datastore/src/main/kotlin/com/ssafy/vomi/core/datastore/auth/AuthSessionDataSource.kt; core/data/src/main/kotlin/com/ssafy/vomi/core/data/repository/AuthRepositoryImpl.kt; app/src/main/kotlin/com/ssafy/vomi/MainActivityViewModel.kt; app/src/main/kotlin/com/ssafy/vomi/ui/VomiAppState.kt
+    updated_at: '2026-11-14'
 fingerprints:
   - id: initial-android-handoff
     date: '2026-11-13'
@@ -71,3 +78,7 @@ fingerprints:
     date: '2026-11-14'
     commit: 37bf3ca9 (dirty worktree; signaling implementation in this task)
     cli: '1.76.0'
+  - id: datastore-auth-refactor
+    date: '2026-11-14'
+    commit: ab69acb3 (dirty worktree; persistence and ownership refactor)
+    cli: 'not invoked for this refactor'

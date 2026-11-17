@@ -35,7 +35,7 @@ Motif처럼 Repository 인터페이스와 구현은 `core:data/repository`에 �
 app은 Hilt 구현 수집을 위해 data를 참조합니다.
 
 로그인과 친구 목록은 실제 서버 API에 연결합니다.
-DB 테이블, Proto 메시지, Firebase 설정과 실제 통화 연결은 아직 포함하지 않습니다.
+인증 세션은 Proto DataStore에 저장합니다. DB 테이블, Firebase 설정과 실제 음성 연결은 아직 포함하지 않습니다.
 빈 소스 디렉터리는 Git에 저장되지 않으며, 기능 추가 시 소스 파일과 함께 생성하면 됩니다.
 
 ## 디자인 시스템
@@ -47,7 +47,7 @@ LoadingWheel, BottomSheet 및 GlassSurface를 `core:designsystem`에서 재사�
 
 `VomiBackground`를 화면 컨테이너로 사용하면 검정에서 푸른 회색과 갈색으로 이어지는 통화 배경이 적용됩니다.
 배경은 화면 전체에 그려지고, 자체 `Scaffold`는 safeDrawing 인셋을 콘텐츠에 전달합니다.
-현재 시작 화면은 공통 배경을 사용하는 테스트 계정 선택 화면입니다. 인증 후 친구 목록으로 이동하며, 친구 선택 시 서버에 통화를 요청하고 발신 대기 화면으로 이동합니다.
+앱 시작 시 저장된 인증 세션을 읽는 동안 로딩 화면을 표시합니다. 두 토큰과 사용자 ID가 있으면 자동 로그인하고, 세션이 없으면 테스트 계정 선택 화면을 표시합니다. 인증 후 친구 목록으로 이동하며, 친구 선택 시 서버에 통화를 요청합니다.
 `DesignSystemPreview`에서 이식한 기본 컴포넌트를 미리 볼 수 있습니다.
 
 Android Studio Preview에 필요한 ui-tooling은 debugImplementation으로만 연결합니다.
@@ -67,7 +67,7 @@ FriendClient의 응답은 core:data/mapper에서 core:model의 Friend로 변환�
 
 ## 스크리닝 화면 (발신·수신 신호 연결)
 
-- CallNavKey는 callId만 전달합니다. CallViewModel은 CallRepository의 서버 상태를 관찰하고 친구 목록에서 상대 이름을 찾습니다. 이름 조회가 실패하면 상대 ID를 표시합니다.
+- CallNavKey는 callId만 전달합니다. CallViewModel은 CallRepository.callState를 관찰하고 친구 목록에서 상대 이름을 찾습니다. 이름 조회가 실패하면 상대 ID를 표시합니다.
 - REQUESTED 상태는 현재 계정이 발신자인지에 따라 발신 대기 / 수신 화면으로 표시합니다. 받기·거절·취소·종료는 서버 요청을 완료한 뒤 조회와 SSE로 상태를 확인합니다.
 - ACCEPTED는 수락 완료 상태이며 LiveKit 연결 완료와 구분합니다. 현재 단계에서는 실제 미디어 연결이 없으므로 마이크·입력·전송은 비활성화하고 타이머를 시작하지 않습니다.
 - 런타임은 sampleCallState를 사용하지 않습니다. 대화·AI 추천·요약은 비워 두며 고정 맞장구만 CallDefaults에서 유지합니다. 기존 샘플 대화는 Preview와 로컬 입력 규칙 테스트에만 사용합니다.
@@ -101,19 +101,21 @@ FriendClient의 응답은 core:data/mapper에서 core:model의 Friend로 변환�
 두 값은 debug BuildConfig에만 전달됩니다. release BuildConfig에는 빈 문자열을 사용합니다.
 
 - `feature:login:api` / `impl`: LoginNavKey, LoginViewModel, LoginUiState와 계정 버튼
-- `core:model`: TestAccount, UserSession, LoginError (토큰은 UI 모델에 포함하지 않음)
+- `core:model`: AuthState, AuthLoginResult, UserProfile, LoginError. TestAccount는 테스트 로그인 입력에만 사용하며 인증 세션·프로필에는 저장하지 않음
 - `core:data/repository`: AuthRepository 계약과 AuthRepositoryImpl 구현
+- `core:data/auth`: AuthDataSource 계약, AuthCredentials 로그인 결과와 MockAuthDataSource 구현
 - `core:data/di/DataModule`: Repository와 Provider 바인딩을 한곳에서 관리
 - `core:network`: 공통 Retrofit과 AccountClient / AccountService를 통해 `GET /kick/api/accounts/me` 호출
-- `core:data`: 응답 계정 검증, 메모리 세션 및 AccessTokenProvider
+- `core:data`: 응답 계정 검증, 인증/사용자/통화 Repository, AccessTokenProvider
+- `core:datastore`: AuthSessionDataSource와 Serializer, `core:datastore-proto`: 인증 세션 스키마
 - `app`: 인증 상태에 따라 로그인 / 홈 이동, 디버그 자격 증명 DI
 
-Motif처럼 Repository는 `Flow<UserSession>`을 반환하고, LoginViewModel은 기존 공통 `asResult()`를 통해 `Result.Loading / Success / Error`를 받아 UiState를 갱신합니다. 인증은 Flow를 수집할 때 실행합니다.
+AuthRepository.login(credential)은 Flow<AuthLoginResult>를 반환하고, LoginViewModel은 asResult()로 Loading / Success / Error를 처리합니다. AuthRepository는 AuthDataSource 인터페이스에 의존하며, 현재 AuthModule이 MockAuthDataSource를 연결합니다. Mock 구현만 계정 선택값과 고정 토큰을 해석하고 서버 계정을 검증합니다. 인증에 성공하면 세션을 저장하고, 앱은 DataStore에서 파생한 AuthState로 화면을 결정합니다.
 
 인증이 성공해야 친구 목록에 들어갑니다. 로딩 중에는 두 버튼을 비활성화하고,
 토큰 누락·인증 실패·네트워크 오류를 안내한 뒤 다시 선택할 수 있습니다.
 친구 목록에는 서버에서 받은 현재 계정 이름을 표시합니다. 친구 목록에서 뒤로 가면
-세션과 토큰을 지우고 계정 선택으로 돌아갑니다. 프로세스를 새로 시작하면 다시 선택합니다.
+저장된 세션과 토큰을 지우고 계정 선택으로 돌아갑니다. 앱을 다시 실행하면 저장된 세션을 복원하며, 로그아웃·앱 데이터 삭제 후에는 다시 선택합니다.
 
 계정 선택·인증·세션·친구 목록과 통화 신호가 연결되어 있습니다. LiveKit 미디어 연결은 이후 단계입니다. 이전 미디어 통합 실험 코드는 별도 `feature/android-live-call` 브랜치에 보관되어 있습니다.
 
@@ -184,7 +186,7 @@ AuthRepositoryLiveTest는 명시적으로 활성화했을 때 공통 설정으�
   호출자가 IO dispatcher에서 읽고 사용 완료·취소 시 반드시 닫아야 합니다.
 - 이벤트 Flow는 수집할 때 새 SSE 연결을 열고 수집 취소 시 소켓과 응답 본문을 정리합니다.
   call:null을 포함한 스냅샷을 전달하며 연결 종료와 HTTP·파싱 실패를 오류로 전달합니다.
-  CallRepository가 앱 전경 상태에 맞춰 재연결과 활성 통화 재조회를 관리합니다. FCM 중복 제거는 이후 단계입니다.
+  앱의 MainActivityViewModel이 인증·전경 상태에 맞춰 구독을 시작·취소하고, CallRepository가 재연결과 활성 통화 재조회를 관리합니다. FCM 중복 제거는 이후 단계입니다.
 - 일반 HTTP 오류는 HttpException으로 전달합니다. 서비스별 오류 JSON 형식은 명세에 없어 임의의 공통 오류 DTO를 만들지 않았습니다.
 
 로컬 HTTP 계약 테스트(실제 가입·음성 등록·TTS·FCM 요청 없음):
@@ -208,14 +210,14 @@ AuthRepositoryLiveTest는 별도 활성화 시 두 테스트 계정으로 계정
 
 ## 발신·수신 신호 흐름
 
-CallRepository는 기존 DataModule에서 singleton으로 바인딩하고 core:model의 CallSession / CallStatus / CallSignalingState를 사용합니다.
-SessionViewModel은 앱 lifecycle이 STARTED인 동안만 수신 연결을 활성화합니다. Repository는 인증 계정 변경 시 이전 구독과 상태를 지우고, 화면마다 SSE를 중복으로 열지 않습니다.
+CallRepository는 기존 DataModule에서 singleton으로 바인딩하며 공유 callState를 제공합니다. API 호출·응답 변환과 상태 반영, 생성 중복 방지, 실패 후 재조회, SSE 재연결을 내부에서 관리합니다. AuthRepository, ApplicationScope, 자체 로그인 감시나 전경 상태 의존성은 없습니다.
+MainActivity는 인증 복원 로딩·시작 화면·Activity lifecycle 연결을 담당합니다. MainActivityViewModel은 AuthState와 전달받은 전경 상태를 기준으로 SignedIn + STARTED일 때 SSE를 수집합니다. VomiAppState는 전달받은 인증·통화 상태와 내비게이션을 묶어 앱 UI를 관리하며, VomiApp은 AppState와 로그아웃 콜백을 전달받습니다. 인증 종료 시 구독과 사용자 프로필·로컬 통화 상태를 정리합니다. CallSessionStore는 Repository 내부의 internal 구현으로 통화 상태와 늦은 응답 병합 규칙만 관리합니다. 앱과 기능 ViewModel은 Store를 직접 참조하거나 API 결과를 수동 반영하지 않습니다. MainActivityViewModel은 observeCalls().asResult()로 최종 오류를 받아 HTTP 401에서 로그아웃하며, 화면은 Repository가 제공하는 callState를 관찰합니다.
 
-1. 친구 선택 → HomeViewModel이 UUID requestId를 생성해 createCall Flow를 asResult로 수집합니다. 요청 중 중복 탭을 막고, 같은 친구의 실패 재시도에는 같은 UUID를 씁니다.
+1. 친구 선택 → HomeViewModel이 UUID requestId를 생성해 createCall Flow를 asResult로 수집합니다. Repository가 생성 가능 여부 확인과 isCreating 초기화를 담당하고, HomeViewModel은 같은 친구의 실패 재시도에 같은 UUID를 씁니다.
 2. 서버 통화 ID로 단일 통화 화면을 엽니다. SSE REQUESTED 수신자는 받기·거절 UI를 표시합니다. 반복 이벤트는 동일 callId 화면을 중복으로 열지 않습니다.
 3. 수신자는 accept/reject, 발신자는 수락 전 cancel, 수락 후 양쪽은 end를 요청합니다. 요청 중 버튼과 뒤로 가기 중복 조작을 막으며, 실패 시 로컬 성공으로 처리하지 않고 재시도할 수 있습니다.
 4. 요청 성공 후 통화를 다시 조회합니다. ACCEPTED 이후 REQUESTED 응답이나 종료 이후 늦은 HTTP 응답이 와도 상태를 되돌리지 않습니다.
-5. REJECTED/CANCELED/ENDED/EXPIRED 또는 call:null을 받으면 화면을 닫습니다. 앱 복귀·일시적 단절 후에는 활성 통화를 조회하고 SSE를 재구독하며, 재시도 간격은 1~30초입니다. HTTP 401/403은 자동 재시도를 멈춥니다.
+5. REJECTED/CANCELED/ENDED/EXPIRED 또는 call:null을 받으면 화면을 닫습니다. 앱 복귀·일시적 단절 후에는 활성 통화를 조회하고 SSE를 재구독하며, retryWhen으로 재시도하며 간격은 1~30초이고 정상 SSE 수신 시 재시도 횟수를 초기화합니다. onCompletion은 구독 종료 시 연결 상태를 정리합니다. HTTP 401/403은 자동 재시도를 멈추고, 수동 재시도 요청은 앱이 수집을 다시 시작하도록 전달합니다.
 
 로컬 Postman fixture는 두 인증 계정과 지속 SSE를 지원합니다. 모의 서버 계약 테스트마다 x-mock-session을 분리해 다른 테스트의 초기화에 영향을 받지 않게 합니다.
 
@@ -234,3 +236,17 @@ VOMI_RUN_CALL_LIVE_TESTS=1과 두 KICK_TEST_ACCOUNT 토큰 환경변수를 별�
 
 두 기기에서는 사용자1·사용자2로 로그인한 뒤 앱을 켠 상태에서 친구를 눌러 확인합니다. 상대 수신 화면 표시, 받기 후 양쪽 수락 완료, 거절·발신 취소·종료 후 양쪽 홈 복귀를 확인합니다.
 이 단계의 성공은 신호 연결까지이며 실제 음성이 들리는지와 FCM 백그라운드 알림은 검증 대상에 포함하지 않습니다.
+
+## 인증 세션 저장과 자동 로그인
+
+- auth_session.pb에는 access_token, refresh_token, 문자열 user_id만 저장합니다. TestAccount enum과 이름·프로필은 저장하지 않습니다.
+- 현재 MockAuthDataSource는 선택한 계정 ID를 credential로 받아 실제 access token으로 계정을 검증하고, 임시 mock-refresh-token과 사용자 ID를 AuthCredentials로 반환합니다. Repository가 이 결과를 저장하며 Mock 토큰은 재발급 API에 전송하지 않습니다.
+- 두 토큰이 모두 비어 있지 않고 userId가 있어야 AuthState.SignedIn입니다. AuthState.Initializing 동안은 로그인 화면을 먼저 띄우지 않습니다.
+- AuthRepository.authState는 AuthSessionDataSource.session에서 파생하며, SignedIn을 전달하기 전에 SessionAccessTokenProvider를 갱신합니다. 이후 Interceptor가 저장된 access token을 API에 첨부합니다.
+- 이름 등 프로필은 별도 UserRepository가 GET api/accounts/me로 조회해 메모리에 보관합니다. 로그인 상태와 프로필을 분리하며 로그아웃 시 프로필 캐시도 비웁니다.
+- 앱에서 초기 사용자 조회나 SSE 요청이 HTTP 401로 거절되면 세션을 지우고 로그인으로 돌아갑니다. 현재 서버에는 실제 refresh API가 없어 mock 토큰으로 재발급을 시도하지 않습니다.
+- 나중에 구글 로그인은 Google credential을 전달하는 UI와 백엔드 인증용 AuthDataSource 구현을 연결합니다. 로그인 인터페이스의 credential은 TestAccount 타입에 의존하지 않으며, 실제 access/refresh token과 userId를 반환하면 기존 Repository의 saveSession 흐름을 사용합니다.
+
+로그인 네트워크 예외는 재포장하지 않고 그대로 전달합니다. LoginViewModel이 asResult()의 Error에서 인증 실패·네트워크 오류·서버 오류를 구분하며, 토큰 누락·계정 불일치는 Mock 구현의 검증 오류로 전달합니다.
+
+이 인증 구조 변경에서는 테스트와 실서버 요청을 실행하지 않았습니다. 앱 컴파일 확인과 변경 코드·참조 검토만 수행했습니다. 기존 테스트 코드는 새 인터페이스에 맞춰 갱신했으며 실행 결과를 주장하지 않습니다.
