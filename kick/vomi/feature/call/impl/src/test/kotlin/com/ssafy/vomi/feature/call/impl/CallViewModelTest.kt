@@ -1,6 +1,7 @@
 package com.ssafy.vomi.feature.call.impl
 
 import com.ssafy.vomi.core.data.repository.CallRepository
+import com.ssafy.vomi.core.model.call.CallSnapshot
 import com.ssafy.vomi.core.data.repository.FriendRepository
 import com.ssafy.vomi.core.model.call.CallConnection
 import com.ssafy.vomi.core.model.call.CallSession
@@ -14,6 +15,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -27,24 +29,37 @@ import org.junit.Test
 class CallViewModelTest {
     @Before fun main() { Dispatchers.setMain(UnconfinedTestDispatcher()) }
     @After fun reset() { Dispatchers.resetMain() }
-    private class Calls(incoming: Boolean = false) : CallRepository {
-        override val state = MutableStateFlow(CallSignalingState(
-            accountId = if (incoming) "kick-test-2" else "kick-test-1",
-            session = CallSession("call-1", "kick-test-1", "kick-test-2", CallStatus.REQUESTED),
-            connection = CallConnection.Connected,
-        ))
+    private class Calls(incoming: Boolean = false, creating: Boolean = false) : CallRepository {
+        val accountId = if (incoming) "kick-test-2" else "kick-test-1"
+        override val callState = MutableStateFlow(
+            CallSignalingState(
+                accountId = accountId,
+                session = CallSession("call-1", "kick-test-1", "kick-test-2", CallStatus.REQUESTED),
+                connection = CallConnection.Connected,
+                isCreating = creating,
+            ),
+        )
+        private val retryRequests = MutableStateFlow(0L)
+        override val reconnectRequests: Flow<Unit> = retryRequests.map { Unit }
+        override fun beginSession(userId: String) { callState.value = CallSignalingState(accountId = userId) }
+        override fun clearSession() { callState.value = CallSignalingState() }
+        override fun retryConnection() { retryRequests.value++ }
         val actions = mutableListOf<String>()
         var pending: CompletableDeferred<Unit>? = null
         var failure: Exception? = null
-        override fun setForeground(foreground: Boolean) { }
-        override fun retryConnection() { }
         override fun createCall(calleeId: String, requestId: String): Flow<CallSession> = error("Unused")
-        override fun acceptCall(callId: String): Flow<Unit> = action("accept", CallStatus.ACCEPTED)
-        override fun declineOrEndCall(callId: String): Flow<Unit> = action("end", CallStatus.ENDED)
-        private fun action(name: String, status: CallStatus): Flow<Unit> = flow {
+        override fun getActiveCall(): Flow<CallSnapshot> = flow { emit(CallSnapshot(accountId, callState.value.session)) }
+        override fun getCall(callId: String): Flow<CallSession> = error("Unused")
+        override fun observeCalls(): Flow<CallSnapshot> = error("Unused")
+        override fun acceptCall(callId: String) = action("accept", CallStatus.ACCEPTED)
+        override fun rejectCall(callId: String) = action("reject", CallStatus.REJECTED)
+        override fun cancelCall(callId: String) = action("cancel", CallStatus.CANCELED)
+        override fun endCall(callId: String) = action("end", CallStatus.ENDED)
+        private fun action(name: String, status: CallStatus): Flow<CallSession> = flow {
             actions += name; pending?.await(); failure?.let { throw it }
-            state.value = state.value.copy(session = state.value.session!!.copy(status = status))
-            emit(Unit)
+            val session = callState.value.session!!.copy(status = status)
+            callState.value = callState.value.copy(session = session)
+            emit(session)
         }
     }
     private class Friends(var failure: Boolean = false) : FriendRepository {
@@ -55,7 +70,8 @@ class CallViewModelTest {
     }
 
     @Test fun outgoingUsesServerCallIdAndDoesNotInventMessagesOrAnActiveMediaConnection() {
-        val vm = CallViewModel(Calls(), Friends()).apply { initialize("call-1") }
+        val calls = Calls()
+        val vm = CallViewModel(calls, Friends()).apply { initialize("call-1") }
         assertEquals(CallPhase.Outgoing, vm.uiState.value.phase)
         assertEquals("사용자2", vm.uiState.value.friendName)
         assertTrue(vm.uiState.value.messages.isEmpty())
@@ -99,26 +115,27 @@ class CallViewModelTest {
     @Test fun nullOrTerminalServerSnapshotClosesTheScreen() {
         val calls = Calls()
         val vm = CallViewModel(calls, Friends()).apply { initialize("call-1") }
-        calls.state.value = calls.state.value.copy(session = null)
+        calls.callState.value = calls.callState.value.copy(session = null)
         assertEquals(CallPhase.Ended, vm.uiState.value.phase)
         vm.endCall()
         assertTrue(calls.actions.isEmpty())
     }
 
     @Test fun nameLookupFailureUsesPeerIdAndReinitializationDoesNotSwitchCallIdentity() {
-        val vm = CallViewModel(Calls(), Friends(failure = true)).apply { initialize("call-1") }
+        val calls = Calls()
+        val vm = CallViewModel(calls, Friends(failure = true)).apply { initialize("call-1") }
         assertEquals("kick-test-2", vm.uiState.value.friendName)
         vm.initialize("other-call")
         assertEquals("call-1", vm.uiState.value.callId)
     }
     @Test fun creationInFlightDisablesConflictingActionsUntilTheCreateCompletes() {
-        val calls = Calls().apply { state.value = state.value.copy(isCreating = true) }
+        val calls = Calls(creating = true)
         val vm = CallViewModel(calls, Friends()).apply { initialize("call-1") }
         assertTrue(vm.uiState.value.isCreating)
         vm.endCall()
         assertTrue(calls.actions.isEmpty())
-        calls.state.value = calls.state.value.copy(isCreating = false)
+        calls.callState.value = calls.callState.value.copy(isCreating = false)
         vm.endCall()
-        assertEquals(listOf("end"), calls.actions)
+        assertEquals(listOf("cancel"), calls.actions)
     }
 }

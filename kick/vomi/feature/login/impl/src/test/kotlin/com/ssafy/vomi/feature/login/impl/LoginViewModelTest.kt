@@ -4,7 +4,8 @@ import com.ssafy.vomi.core.data.repository.AuthRepository
 import com.ssafy.vomi.core.data.auth.LoginException
 import com.ssafy.vomi.core.model.auth.LoginError
 import com.ssafy.vomi.core.model.auth.TestAccount
-import com.ssafy.vomi.core.model.auth.UserSession
+import com.ssafy.vomi.core.model.auth.AuthState
+import com.ssafy.vomi.core.model.auth.AuthLoginResult
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -28,18 +29,18 @@ class LoginViewModelTest {
     @After fun resetMain() { Dispatchers.resetMain() }
 
     private class Auth : AuthRepository {
-        override val currentUser = MutableStateFlow<UserSession?>(null)
-        val choices = mutableListOf<TestAccount>()
+        override val authState = MutableStateFlow<AuthState>(AuthState.SignedOut)
+        val choices = mutableListOf<String>()
         var pending: CompletableDeferred<Unit>? = null
         var failure: Exception? = null
-        override fun login(account: TestAccount): Flow<UserSession> = flow {
-            choices += account
+        override fun login(credential: String): Flow<AuthLoginResult> = flow {
+            choices += credential
             pending?.await()
             failure?.let { throw it }
-            currentUser.value = UserSession(account.accountId, "테스트 사용자", account)
-            emit(requireNotNull(currentUser.value))
+            authState.value = AuthState.SignedIn(credential)
+            emit(AuthLoginResult(credential))
         }
-        override fun logout() { currentUser.value = null }
+        override suspend fun logout() { authState.value = AuthState.SignedOut }
     }
 
     @Test fun pendingLoginBlocksOtherButtonAndCompletesWithChosenAccount() {
@@ -48,10 +49,10 @@ class LoginViewModelTest {
         vm.login(TestAccount.User1)
         assertEquals(TestAccount.User1, vm.uiState.value.loadingAccount)
         vm.login(TestAccount.User2)
-        assertEquals(listOf(TestAccount.User1), auth.choices)
+        assertEquals(listOf(TestAccount.User1.accountId), auth.choices)
         auth.pending!!.complete(Unit)
         assertFalse(vm.uiState.value.isLoading)
-        assertEquals(TestAccount.User1, auth.currentUser.value!!.account)
+        assertEquals(AuthState.SignedIn(TestAccount.User1.accountId), auth.authState.value)
     }
 
     @Test fun failedLoginAllowsRetryWithTheOtherButton() {
@@ -62,7 +63,7 @@ class LoginViewModelTest {
         assertFalse(vm.uiState.value.isLoading)
         auth.failure = null
         vm.login(TestAccount.User2)
-        assertEquals(TestAccount.User2, auth.currentUser.value!!.account)
+        assertEquals(AuthState.SignedIn(TestAccount.User2.accountId), auth.authState.value)
         assertNull(vm.uiState.value.error)
     }
 
@@ -81,7 +82,7 @@ class LoginViewModelTest {
         vm.login(TestAccount.User2)
         assertTrue(auth.choices.isEmpty())
         runCurrent()
-        assertEquals(listOf(TestAccount.User1), auth.choices)
-        assertEquals(TestAccount.User1, auth.currentUser.value!!.account)
+        assertEquals(listOf(TestAccount.User1.accountId), auth.choices)
+        assertEquals(AuthState.SignedIn(TestAccount.User1.accountId), auth.authState.value)
     }
 }

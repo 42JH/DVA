@@ -1,7 +1,8 @@
 package com.ssafy.vomi.core.data.repository
 
 import com.ssafy.vomi.core.model.auth.TestAccount
-import com.ssafy.vomi.core.model.auth.UserSession
+import com.ssafy.vomi.core.model.call.CallSession
+import kotlinx.coroutines.launch
 import com.ssafy.vomi.core.model.call.CallConnection
 import com.ssafy.vomi.core.model.call.CallStatus
 import com.ssafy.vomi.core.network.auth.AccessTokenInterceptor
@@ -17,6 +18,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.single
@@ -33,12 +35,7 @@ import org.junit.Test
 
 /** Reuses the production repository, Retrofit and SSE reader. Live writes require a separate opt-in. */
 class CallSignalingIntegrationTest {
-    private class Auth(account: TestAccount) : AuthRepository {
-        override val currentUser = MutableStateFlow<UserSession?>(UserSession(account.accountId, account.accountId, account))
-        override fun login(account: TestAccount): Flow<UserSession> = error("Prevalidated fixture session")
-        override fun logout() { currentUser.value = null }
-    }
-    private class Endpoint(account: TestAccount, token: String, simulationUrl: String?, sessionId: String) {
+    private class Endpoint(private val account: TestAccount, token: String, simulationUrl: String?, sessionId: String) {
         private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         private val provider = object : AccessTokenProvider { override fun getAccessToken(): String = token }
         private val baseHttp = NetworkModule.provideOkHttpClient(AccessTokenInterceptor(provider), HttpLoggingInterceptor())
@@ -53,12 +50,28 @@ class CallSignalingIntegrationTest {
         val accountClient = AccountClient(NetworkModule.provideAccountService(retrofit))
         val client = CallClient(NetworkModule.provideCallService(retrofit))
         val repo = CallRepositoryImpl(
-            Auth(account), client,
+            client,
             CallEventsClient(NetworkModule.provideCallEventService(streaming), json, Dispatchers.IO),
-            scope, Dispatchers.IO,
+            Dispatchers.IO,
         )
+        init { repo.beginSession(account.accountId) }
+        fun start() {
+            scope.launch {
+                repo.observeCalls().catch { /* Failure is available through repo.callState. */ }.collect { }
+            }
+        }
+        suspend fun createCall(peerId: String, requestId: String): CallSession = repo.createCall(peerId, requestId).single()
+        suspend fun acceptCall(callId: String) { repo.acceptCall(callId).single() }
+        suspend fun declineOrEndCall(callId: String) {
+            val session = repo.callState.value.session!!
+            val action = when {
+                session.status == CallStatus.ACCEPTED -> repo.endCall(callId)
+                session.callerId == account.accountId -> repo.cancelCall(callId)
+                else -> repo.rejectCall(callId)
+            }
+            action.single()
+        }
         suspend fun close() {
-            repo.setForeground(false)
             scope.coroutineContext.job.cancelAndJoin()
             http.dispatcher.cancelAll()
             http.connectionPool.evictAll()
@@ -93,34 +106,34 @@ class CallSignalingIntegrationTest {
             }
             // Never take over or terminate a pre-existing test call.
             assumeTrue("Dedicated accounts already have an active call", a.client.getActiveCall().call == null && b.client.getActiveCall().call == null)
-            a.repo.setForeground(true); b.repo.setForeground(true)
-            withTimeout(20_000) { a.repo.state.first { it.connection == CallConnection.Connected } }
-            withTimeout(20_000) { b.repo.state.first { it.connection == CallConnection.Connected } }
+            a.start(); b.start()
+            withTimeout(20_000) { a.repo.callState.first { it.connection == CallConnection.Connected } }
+            withTimeout(20_000) { b.repo.callState.first { it.connection == CallConnection.Connected } }
             for (outcome in listOf("accept-end", "reject", "cancel")) {
-                val created = a.repo.createCall("kick-test-2", UUID.randomUUID().toString()).single()
+                val created = a.createCall("kick-test-2", UUID.randomUUID().toString())
                 ownedCallId = created.id
-                val incoming = withTimeout(15_000) { b.repo.state.first { it.session?.id == created.id } }.session!!
+                val incoming = withTimeout(15_000) { b.repo.callState.first { it.session?.id == created.id } }.session!!
                 assertEquals("kick-test-2", incoming.calleeId)
                 assertEquals(CallStatus.REQUESTED, incoming.status)
                 when (outcome) {
                     "accept-end" -> {
-                        b.repo.acceptCall(created.id).single()
-                        withTimeout(15_000) { a.repo.state.first { it.session?.id == created.id && it.session?.status == CallStatus.ACCEPTED } }
-                        assertEquals(CallStatus.ACCEPTED, b.repo.state.value.session!!.status)
-                        a.repo.declineOrEndCall(created.id).single()
+                        b.acceptCall(created.id)
+                        withTimeout(15_000) { a.repo.callState.first { it.session?.id == created.id && it.session?.status == CallStatus.ACCEPTED } }
+                        assertEquals(CallStatus.ACCEPTED, b.repo.callState.value.session!!.status)
+                        a.declineOrEndCall(created.id)
                         assertEquals("ENDED", a.client.getCall(created.id).status)
                     }
                     "reject" -> {
-                        b.repo.declineOrEndCall(created.id).single()
+                        b.declineOrEndCall(created.id)
                         assertEquals("REJECTED", a.client.getCall(created.id).status)
                     }
                     else -> {
-                        a.repo.declineOrEndCall(created.id).single()
+                        a.declineOrEndCall(created.id)
                         assertEquals("CANCELED", a.client.getCall(created.id).status)
                     }
                 }
-                withTimeout(15_000) { a.repo.state.first { it.session?.isTerminal != false } }
-                withTimeout(15_000) { b.repo.state.first { it.session?.isTerminal != false } }
+                withTimeout(15_000) { a.repo.callState.first { it.session?.isTerminal != false } }
+                withTimeout(15_000) { b.repo.callState.first { it.session?.isTerminal != false } }
                 ownedCallId = null
             }
         } finally {

@@ -1,7 +1,9 @@
 package com.ssafy.vomi.core.data.repository
 
+import com.ssafy.vomi.core.data.auth.InMemoryAuthSessions
+import com.ssafy.vomi.core.model.auth.AuthState
 import com.ssafy.vomi.core.data.auth.SessionAccessTokenProvider
-import com.ssafy.vomi.core.data.auth.TestAccountCredentials
+import com.ssafy.vomi.core.data.auth.MockAuthDataSource
 import com.ssafy.vomi.core.model.auth.TestAccount
 import com.ssafy.vomi.core.network.auth.AccessTokenInterceptor
 import com.ssafy.vomi.core.network.di.NetworkModule
@@ -33,15 +35,15 @@ class AuthRepositoryLiveTest {
         )
         val retrofit = NetworkModule.provideRetrofit(NetworkModule.provideJson(), http)
         val client = AccountClient(NetworkModule.provideAccountService(retrofit))
-        val repository = AuthRepositoryImpl(client, TestAccountCredentials(token1, token2), provider)
+        val repository = AuthRepositoryImpl(MockAuthDataSource(client, token1, token2), InMemoryAuthSessions().source, provider, Dispatchers.IO)
         val streamingHttp = NetworkModule.provideStreamingOkHttpClient(http)
         val streamingRetrofit = NetworkModule.provideStreamingRetrofit(retrofit, streamingHttp)
         val friends = FriendRepositoryImpl(FriendClient(NetworkModule.provideFriendService(retrofit)), Dispatchers.IO)
         val voice = VoiceClient(NetworkModule.provideVoiceService(retrofit), NetworkModule.provideVoiceSpeechService(streamingRetrofit))
         val calls = CallClient(NetworkModule.provideCallService(retrofit))
         val events = CallEventsClient(NetworkModule.provideCallEventService(streamingRetrofit), NetworkModule.provideJson(), Dispatchers.IO)
-        repository.login(TestAccount.User1).single()
-        assertEquals("kick-test-1", repository.currentUser.value!!.id)
+        repository.login(TestAccount.User1.accountId).single()
+        assertEquals("kick-test-1", (repository.authState.first() as AuthState.SignedIn).userId)
         assertTrue(provider.getAccessToken() == token1)
         assertEquals("kick-test-1", client.getCurrentAccount().id)
         assertTrue(friends.getFriends().single().any { it.id == "kick-test-2" })
@@ -49,8 +51,8 @@ class AuthRepositoryLiveTest {
         assertEquals("kick-test-1", calls.getActiveCall().accountId)
         assertEquals("kick-test-1", withTimeout(10_000) { events.events().first() }.accountId)
         // Verify that selecting user 2 preserves its explicit header while user 1 is still cached.
-        repository.login(TestAccount.User2).single()
-        assertEquals("kick-test-2", repository.currentUser.value!!.id)
+        repository.login(TestAccount.User2.accountId).single()
+        assertEquals("kick-test-2", (repository.authState.first() as AuthState.SignedIn).userId)
         assertTrue(provider.getAccessToken() == token2)
         assertEquals("kick-test-2", client.getCurrentAccount().id)
         assertTrue(friends.getFriends().single().any { it.id == "kick-test-1" })

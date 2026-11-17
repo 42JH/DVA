@@ -12,18 +12,16 @@ import com.ssafy.vomi.feature.call.impl.model.CallUiState
 import com.ssafy.vomi.feature.call.impl.model.defaultBackchannels
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 @HiltViewModel
 internal class CallViewModel @Inject constructor(
-    private val calls: CallRepository,
-    private val friends: FriendRepository,
+    private val callRepository: CallRepository,
+    private val friendRepository: FriendRepository,
 ) : ViewModel() {
     private val mutableState = MutableStateFlow(CallUiState())
     val uiState = mutableState.asStateFlow()
@@ -38,7 +36,7 @@ internal class CallViewModel @Inject constructor(
         viewModelScope.launch {
             var namedPeer: String? = null
             var nameJob: Job? = null
-            calls.state.collect { signaling ->
+            callRepository.callState.collect { signaling ->
                 val session = signaling.session?.takeIf { it.id == callId }
                 if (session == null) {
                     mutableState.update { it.copy(phase = CallPhase.Ended, isMicrophoneEnabled = false, isSummaryVisible = false) }
@@ -64,11 +62,12 @@ internal class CallViewModel @Inject constructor(
                         namedPeer = peerId
                         nameJob?.cancel()
                         nameJob = launch {
-                            try {
-                                val name = friends.getFriends().first().find { it.id == peerId }?.name ?: peerId
-                                mutableState.update { if (it.friendId == peerId) it.copy(friendName = name) else it }
-                            } catch (cancelled: CancellationException) { throw cancelled }
-                            catch (_: Exception) { /* Keep the peer ID when name lookup fails. */ }
+                            friendRepository.getFriends().asResult().collect { result ->
+                                if (result is Result.Success) {
+                                    val name = result.data.find { it.id == peerId }?.name ?: peerId
+                                    mutableState.update { if (it.friendId == peerId) it.copy(friendName = name) else it }
+                                }
+                            }
                         }
                     }
                 }
@@ -76,17 +75,24 @@ internal class CallViewModel @Inject constructor(
         }
     }
 
-    fun retryConnection() = calls.retryConnection()
+    fun retryConnection() = callRepository.retryConnection()
     fun acceptIncoming() = performAction(accept = true)
     fun endCall() = performAction(accept = false)
 
     private fun performAction(accept: Boolean) {
-        if (actionJob?.isActive == true || calls.state.value.isCreating) return
-        val state = mutableState.value
-        if (state.phase == CallPhase.Ended || state.phase == CallPhase.Connecting) return
+        if (actionJob?.isActive == true || callRepository.callState.value.isCreating) return
         val callId = initializedCallId ?: return
+        val signaling = callRepository.callState.value
+        val userId = signaling.accountId ?: return
+        val session = signaling.session?.takeIf { it.id == callId && !it.isTerminal } ?: return
+        if (accept && (session.calleeId != userId || session.status != CallStatus.REQUESTED)) return
         actionJob = viewModelScope.launch {
-            val action = if (accept) calls.acceptCall(callId) else calls.declineOrEndCall(callId)
+            val action = when {
+                accept -> callRepository.acceptCall(callId)
+                session.status == CallStatus.ACCEPTED -> callRepository.endCall(callId)
+                session.callerId == userId -> callRepository.cancelCall(callId)
+                else -> callRepository.rejectCall(callId)
+            }
             action.asResult().collect { result ->
                 mutableState.update {
                     when (result) {

@@ -1,47 +1,54 @@
 package com.ssafy.vomi.core.data.repository
 
-import com.ssafy.vomi.core.data.auth.LoginException
-import com.ssafy.vomi.core.data.auth.TestAccountCredentials
-import com.ssafy.vomi.core.model.auth.LoginError
-import com.ssafy.vomi.core.model.auth.TestAccount
-import com.ssafy.vomi.core.model.auth.UserSession
+import com.ssafy.vomi.core.common.network.Dispatcher
+import com.ssafy.vomi.core.common.network.VomiDispatcher
+import com.ssafy.vomi.core.data.auth.AuthDataSource
 import com.ssafy.vomi.core.data.auth.SessionAccessTokenProvider
-import com.ssafy.vomi.core.network.service.account.AccountClient
-import java.io.IOException
-import javax.inject.Inject
-import javax.inject.Singleton
-import kotlinx.coroutines.CancellationException
+import com.ssafy.vomi.core.datastore.auth.AuthSessionDataSource
+import com.ssafy.vomi.core.model.auth.AuthLoginResult
+import com.ssafy.vomi.core.model.auth.AuthState
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import retrofit2.HttpException
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.withContext
+import javax.inject.Inject
 
-@Singleton
-class AuthRepositoryImpl @Inject constructor(
-    private val accountClient: AccountClient,
-    private val credentials: TestAccountCredentials,
+internal class AuthRepositoryImpl @Inject constructor(
+    private val authDataSource: AuthDataSource,
+    private val authSessionDataSource: AuthSessionDataSource,
     private val sessionAccessTokenProvider: SessionAccessTokenProvider,
+    @param:Dispatcher(VomiDispatcher.IO) private val ioDispatcher: CoroutineDispatcher,
 ) : AuthRepository {
-    private val mutableUser = MutableStateFlow<UserSession?>(null)
-    override val currentUser = mutableUser.asStateFlow()
+    override val authState: Flow<AuthState> = authSessionDataSource.session
+        .onEach { session ->
+            sessionAccessTokenProvider.updateAccessToken(if (session.isSignedIn) session.accessToken else null)
+        }
+        .map { if (it.isSignedIn) AuthState.SignedIn(it.userId) else AuthState.SignedOut }
+        .distinctUntilChanged()
+        .flowOn(ioDispatcher)
 
-    override fun login(account: TestAccount): Flow<UserSession> = flow {
-        val selectedToken = credentials.tokenFor(account).trim()
-        if (selectedToken.isEmpty()) throw LoginException(LoginError.MissingToken)
-        val response = try { accountClient.getCurrentAccount(selectedToken) }
-        catch (e: CancellationException) { throw e }
-        catch (e: HttpException) { throw LoginException(if (e.code() in listOf(401, 403)) LoginError.InvalidToken else LoginError.Server) }
-        catch (e: IOException) { throw LoginException(LoginError.Network) }
+    override fun login(credential: String): Flow<AuthLoginResult> = flow {
+        val credentials = authDataSource.login(credential)
         currentCoroutineContext().ensureActive()
-        if (response.id != account.accountId) throw LoginException(LoginError.UnexpectedAccount)
-        sessionAccessTokenProvider.updateAccessToken(selectedToken)
-        val user = UserSession(response.id, response.displayName, account)
-        mutableUser.value = user
-        emit(user)
-    }
+        authSessionDataSource.saveSession(
+            credentials.accessToken,
+            credentials.refreshToken,
+            credentials.userId
+        )
+        sessionAccessTokenProvider.updateAccessToken(credentials.accessToken)
+        emit(AuthLoginResult(credentials.userId))
+    }.flowOn(ioDispatcher)
 
-    override fun logout() { sessionAccessTokenProvider.clearAccessToken(); mutableUser.value = null }
+    override suspend fun logout() {
+        withContext(ioDispatcher) {
+            authSessionDataSource.clearSession()
+            sessionAccessTokenProvider.clearAccessToken()
+        }
+    }
 }

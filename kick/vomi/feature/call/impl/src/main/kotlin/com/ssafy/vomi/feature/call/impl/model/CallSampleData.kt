@@ -5,7 +5,7 @@ import com.ssafy.vomi.core.model.call.CallSpeaker
 import com.ssafy.vomi.core.model.call.CallSummary
 import com.ssafy.vomi.core.model.call.ReplySuggestion
 
-// Preview/test fixtures only. Runtime signaling state comes from CallRepository.
+// Preview/test fixtures only. Runtime state is observed from CallRepository.callState.
 internal fun sampleCallState(friendId: String, friendName: String, isIncoming: Boolean = false) =
     CallUiState(
         friendId = friendId,
