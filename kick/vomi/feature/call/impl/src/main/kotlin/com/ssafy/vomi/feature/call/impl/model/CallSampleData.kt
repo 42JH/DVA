@@ -9,7 +9,6 @@ import com.ssafy.vomi.core.model.call.ReplySuggestion
 // Preview/test fixtures only. Runtime state is observed from CallRepository.callState.
 internal fun sampleCallState(friendId: String, friendName: String, isIncoming: Boolean = false) =
     CallUiState(
-        isTextAudioAvailable = true,
         mediaConnection = CallMediaConnection.Connected,
         friendId = friendId,
         friendName = friendName,
@@ -20,8 +19,8 @@ internal fun sampleCallState(friendId: String, friendName: String, isIncoming: B
         ),
         suggestions = listOf(
             ReplySuggestion(1L, "오늘 저녁 괜찮아요!"),
-            ReplySuggestion(2L, "내일 저녁은 어떠세요?"),
-            ReplySuggestion(3L, "일정 확인하고 다시 말씀드릴게요."),
+            ReplySuggestion(2L, "내일 저녁은 어떠세요?", position = 1),
+            ReplySuggestion(3L, "일정 확인하고 다시 말씀드릴게요.", position = 2),
         ),
         backchannels = defaultBackchannels,
         summary = if (isIncoming) null else CallSummary(

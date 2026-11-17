@@ -1,12 +1,29 @@
 package com.ssafy.vomi.feature.call.impl
 
 import android.os.SystemClock
+import com.ssafy.vomi.core.data.repository.CallTranscriptRepository
+import com.ssafy.vomi.core.model.call.CallMessageDelivery
+import com.ssafy.vomi.core.model.call.CallTextError
+import com.ssafy.vomi.core.model.call.CallTextException
+import com.ssafy.vomi.core.model.call.CallTextRequest
+import com.ssafy.vomi.core.model.call.CallTextSendStage
+import java.util.UUID
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ssafy.vomi.core.common.result.Result
 import com.ssafy.vomi.core.common.result.asResult
 import com.ssafy.vomi.core.data.repository.CallRepository
 import com.ssafy.vomi.core.data.repository.FriendRepository
+import com.ssafy.vomi.core.model.call.CallMessage
+import com.ssafy.vomi.core.model.call.CallSpeaker
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import com.ssafy.vomi.core.data.repository.SpeechRepository
+import com.ssafy.vomi.core.model.speech.SpeechError
+import com.ssafy.vomi.core.model.speech.SpeechException
 import com.ssafy.vomi.core.model.call.CallMediaConnection
 import com.ssafy.vomi.core.model.call.CallStatus
 import com.ssafy.vomi.feature.call.impl.model.CallPhase
@@ -27,18 +44,34 @@ import kotlinx.coroutines.launch
 internal class CallViewModel @Inject constructor(
     private val callRepository: CallRepository,
     private val friendRepository: FriendRepository,
+    private val speechRepository: SpeechRepository,
+    private val callTranscriptRepository: CallTranscriptRepository,
 ) : ViewModel() {
     private val mutableState = MutableStateFlow(CallUiState())
     val uiState = mutableState.asStateFlow()
     private val conversation = CallConversation(mutableState)
     private var initializedCallId: String? = null
+    private var textSendJob: Job? = null
     private var actionJob: Job? = null
     private var microphoneJob: Job? = null
+    private var modelDownloadJob: Job? = null
 
     fun initialize(callId: String) {
         if (initializedCallId != null) return
         initializedCallId = callId
         mutableState.value = CallUiState(callId = callId, backchannels = defaultBackchannels)
+        viewModelScope.launch {
+            callTranscriptRepository.transcriptState.collect { transcript ->
+                if (transcript.callId == callId) mutableState.update {
+                    it.copy(messages = transcript.messages, hasPlaybackError = transcript.hasPlaybackError)
+                }
+            }
+        }
+        viewModelScope.launch {
+            speechRepository.speechState.collect { speech ->
+                if (speech.callId == callId) mutableState.update { it.copy(speech = speech) }
+            }
+        }
         viewModelScope.launch {
             var namedPeer: String? = null
             var nameJob: Job? = null
@@ -96,6 +129,19 @@ internal class CallViewModel @Inject constructor(
         }
     }
 
+    fun retryCaptions() = speechRepository.retryRecognition()
+
+    fun prepareSpeechModel() {
+        if (modelDownloadJob?.isActive == true || mutableState.value.isMicrophoneEnabled) return
+        modelDownloadJob = viewModelScope.launch {
+            speechRepository.downloadKoreanModel().asResult().collect { result ->
+                if (result is Result.Error) mutableState.update {
+                    it.copy(speech = it.speech.copy(error = (result.exception as? SpeechException)?.reason ?: SpeechError.DownloadFailed))
+                }
+            }
+        }
+    }
+
     fun retryConnection() = callRepository.retryConnection()
     fun acceptIncoming() = performAction(accept = true)
     fun endCall() = performAction(accept = false)
@@ -107,7 +153,7 @@ internal class CallViewModel @Inject constructor(
         val userId = signaling.accountId ?: return
         val session = signaling.session?.takeIf { it.id == callId && !it.isTerminal } ?: return
         if (accept && (session.calleeId != userId || session.status != CallStatus.REQUESTED)) return
-        if (!accept) microphoneJob?.cancel()
+        if (!accept) { microphoneJob?.cancel(); textSendJob?.cancel() }
         actionJob = viewModelScope.launch {
             val action = when {
                 accept -> callRepository.acceptCall(callId)
@@ -157,10 +203,60 @@ internal class CallViewModel @Inject constructor(
         if (granted && !mutableState.value.isMicrophoneEnabled) toggleMicrophone()
     }
     fun updateDraft(text: String) = conversation.updateDraft(text)
-    fun sendSuggestion(id: Long) = conversation.sendSuggestion(id)
+    fun sendSuggestion(id: Long) {
+        conversation.suggestionToSend(id)?.let { sendText(it) }
+    }
     fun selectSuggestion(id: Long) = conversation.selectSuggestion(id)
-    fun sendDraft() = conversation.sendDraft()
-    fun selectBackchannel(id: Long) = conversation.selectBackchannel(id)
+    fun sendDraft() { conversation.draftToSend()?.let { sendText(it, fromDraft = true) } }
+    fun selectBackchannel(id: Long) {
+        conversation.backchannelToSend(id)?.let { sendText(it) }
+    }
+
+    fun retryTextAudio() {
+        mutableState.value.failedTextRequest?.let { performTextSend(it, fromDraft = false) }
+    }
+
+    private fun sendText(text: String, fromDraft: Boolean = false) {
+        if (text.isBlank()) return
+        performTextSend(CallTextRequest(UUID.randomUUID().toString(), text.trim()), fromDraft)
+    }
+
+    private fun performTextSend(request: CallTextRequest, fromDraft: Boolean) {
+        if (textSendJob?.isActive == true || !mutableState.value.canType) return
+        val callId = initializedCallId ?: return
+        mutableState.update { it.copy(isSendingText = true, textSendError = null, failedTextRequest = null) }
+        textSendJob = viewModelScope.launch {
+            var finished = false
+            var textDelivered = false
+            try {
+                callRepository.sendTextAudio(callId, request.messageId, request.text).asResult().collect { result ->
+                    when (result) {
+                        Result.Loading -> Unit
+                        is Result.Success -> {
+                            if (result.data.stage == CallTextSendStage.TextSent) textDelivered = true
+                            if (result.data.stage == CallTextSendStage.TextSent && fromDraft) mutableState.update {
+                                if (it.draft.trim() == request.text) it.copy(draft = "") else it
+                            }
+                            if (result.data.stage == CallTextSendStage.Complete) finished = true
+                        }
+                        is Result.Error -> {
+                            finished = true
+                            val reason = (result.exception as? CallTextException)?.reason
+                                ?: if (textDelivered) CallTextError.AudioDelivery else CallTextError.TextDelivery
+                            mutableState.update { it.copy(textSendError = reason,
+                                failedTextRequest = if (reason == CallTextError.InvalidText) null else request) }
+                        }
+                    }
+                }
+            } finally {
+                mutableState.update { state -> state.copy(
+                    isSendingText = false,
+                    textSendError = if (!finished) CallTextError.CallUnavailable else state.textSendError,
+                    failedTextRequest = if (!finished) request else state.failedTextRequest,
+                ) }
+            }
+        }
+    }
     fun showSummary() = conversation.showSummary()
     fun dismissSummary() = conversation.dismissSummary()
 }

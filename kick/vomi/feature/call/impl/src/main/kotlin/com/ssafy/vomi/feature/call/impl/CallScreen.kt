@@ -19,7 +19,6 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
@@ -55,6 +54,9 @@ import com.ssafy.vomi.core.designsystem.component.Text
 import com.ssafy.vomi.core.designsystem.component.VomiBackground
 import com.ssafy.vomi.core.designsystem.theme.VomiTheme
 import com.ssafy.vomi.core.model.call.CallSpeaker
+import com.ssafy.vomi.core.model.call.CallMessageDelivery
+import com.ssafy.vomi.feature.call.impl.component.CallTextSendStatus
+import com.ssafy.vomi.feature.call.impl.component.CallCaptionStatus
 import com.ssafy.vomi.feature.call.impl.component.CallHeader
 import com.ssafy.vomi.feature.call.impl.component.CallInput
 import com.ssafy.vomi.feature.call.impl.component.CallQuickReplies
@@ -97,6 +99,12 @@ internal fun CallScreen(
         onBackchannelClick = viewModel::selectBackchannel,
         onAcceptClick = viewModel::acceptIncoming,
         onRetryConnection = viewModel::retryConnection,
+        onRetryCaptions = viewModel::retryCaptions,
+        onPrepareSpeechModel = viewModel::prepareSpeechModel,
+
+
+
+        onRetryTextAudio = viewModel::retryTextAudio,
         modifier = modifier,
     )
 }
@@ -116,6 +124,12 @@ private fun CallContent(
     onAcceptClick: () -> Unit,
     modifier: Modifier = Modifier,
     onRetryConnection: () -> Unit = {},
+    onRetryCaptions: () -> Unit = {},
+    onPrepareSpeechModel: () -> Unit = {},
+
+
+
+    onRetryTextAudio: () -> Unit = {},
 ) {
     var inputBounds by remember { mutableStateOf(Rect.Zero) }
     var contentOrigin by remember { mutableStateOf(Offset.Zero) }
@@ -124,7 +138,7 @@ private fun CallContent(
     var draggedSuggestion by remember { mutableStateOf<DraggedSuggestion?>(null) }
     var inputFocusRequest by remember { mutableIntStateOf(0) }
     LaunchedEffect(state.canType, state.isSummaryVisible) {
-        if (!state.canType || state.isSummaryVisible) draggedSuggestion = null
+        draggedSuggestion = null
     }
     Box(modifier = modifier
         .fillMaxSize()
@@ -191,65 +205,50 @@ private fun CallContent(
                 if (state.isMicrophonePending) Text(stringResource(R.string.call_microphone_pending), modifier = Modifier.padding(horizontal = 20.dp))
                 if (state.hasMicrophoneError) Text(stringResource(R.string.call_microphone_error), modifier = Modifier.padding(horizontal = 20.dp))
                 if (state.isMicrophonePermissionDenied) Text(stringResource(R.string.call_microphone_permission_denied), modifier = Modifier.padding(horizontal = 20.dp))
-                if (state.phase == CallPhase.Active && !state.isTextAudioAvailable && !state.isMicrophoneEnabled) {
-                    Text(stringResource(R.string.call_text_audio_unavailable), modifier = Modifier.padding(horizontal = 20.dp), style = VomiTheme.typography.captionR12)
+                CallTextSendStatus(state, onRetryTextAudio)
+                if (state.phase == CallPhase.Active || state.phase == CallPhase.Accepted) {
+                    CallCaptionStatus(state, onRetryCaptions, onPrepareSpeechModel)
                 }
                 val listState = rememberLazyListState()
-                LaunchedEffect(state.messages.size) {
-                    if (state.messages.isNotEmpty()) listState.animateScrollToItem(state.messages.lastIndex)
+                LaunchedEffect(state.messages.lastOrNull()?.id, state.messages.lastOrNull()?.text) {
+                    if (!listState.isScrollInProgress && state.messages.isNotEmpty()) listState.scrollToItem(state.messages.lastIndex)
                 }
                 LazyColumn(
                     state = listState,
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth(),
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
                     contentPadding = PaddingValues(horizontal = 20.dp, vertical = 20.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
-                    items(state.messages, key = { it.id }) { message ->
-                        val isLocal = message.speaker == CallSpeaker.Local
-                        Box(
-                            modifier = Modifier.fillMaxWidth(),
-                            contentAlignment = if (isLocal) Alignment.CenterEnd else Alignment.CenterStart
-                        ) {
-                            Text(
-                                text = message.text,
-                                color = if (isLocal) Color(0xFFB9D7FA) else Color(0xFFF8F7FA),
-                                style = VomiTheme.typography.bodyR16,
-                                textAlign = if (isLocal) TextAlign.End else TextAlign.Start,
-                                modifier = Modifier.widthIn(max = 520.dp),
-                            )
+                    state.messages.forEach { message ->
+                        item(key = "message:" + message.id) {
+                            val isLocal = message.speaker == CallSpeaker.Local
+                            Box(
+                                modifier = Modifier.fillMaxWidth(),
+                                contentAlignment = if (isLocal) Alignment.CenterEnd else Alignment.CenterStart
+                            ) {
+                                Column(horizontalAlignment = if (isLocal) Alignment.End else Alignment.Start) {
+                                    Text(
+                                        text = message.text,
+                                        color = (if (isLocal) Color(0xFFB9D7FA) else Color(0xFFF8F7FA)).copy(alpha = if (message.isFinal) 1f else 0.55f),
+                                        style = VomiTheme.typography.bodyR16,
+                                        textAlign = if (isLocal) TextAlign.End else TextAlign.Start,
+                                        modifier = Modifier.widthIn(max = 520.dp),
+                                    )
+                                    if (isLocal && message.textMessageId != null && message.delivery != CallMessageDelivery.Complete) {
+                                        Text(stringResource(when (message.delivery) {
+                                            CallMessageDelivery.Sending -> R.string.call_text_message_sending
+                                            CallMessageDelivery.TextSent -> R.string.call_text_message_audio_sending
+                                            CallMessageDelivery.Failed -> R.string.call_text_message_failed
+                                            CallMessageDelivery.AudioFailed -> R.string.call_text_message_audio_failed
+                                            CallMessageDelivery.Complete -> R.string.call_text_message_sending
+                                        }), style = VomiTheme.typography.captionR12, color = Color.White.copy(alpha = 0.5f))
+                                    }
+                                }
+                            }
                         }
                     }
                 }
-                CallQuickReplies(
-                    state = state,
-                    onSuggestionClick = onSuggestionClick,
-                    onSuggestionEdit = { id ->
-                        onSuggestionEdit(id)
-                        inputFocusRequest++
-                    },
-                    onSuggestionDragStart = { id, position ->
-                        if (state.canType) {
-                            state.suggestions.find { it.id == id }?.let {
-                                draggedSuggestion = DraggedSuggestion(id, it.text, position)
-                            }
-                        }
-                    },
-                    onSuggestionDragMove = { position ->
-                        draggedSuggestion = draggedSuggestion?.copy(position = position)
-                    },
-                    onSuggestionDragEnd = {
-                        val drag = draggedSuggestion
-                        if (state.canType && drag != null && inputBounds.contains(drag.position)) {
-                            onSuggestionEdit(drag.id)
-                            inputFocusRequest++
-                        }
-                        draggedSuggestion = null
-                    },
-                    onSuggestionDragCancel = { draggedSuggestion = null },
-                    onBackchannelClick = onBackchannelClick
-                )
+                CallQuickReplies(state = state, onBackchannelClick = onBackchannelClick)
                 CallInput(
                     state = state,
                     onDraftChange = onDraftChange,

@@ -1,5 +1,8 @@
 package com.ssafy.vomi.feature.call.impl.model
 
+import com.ssafy.vomi.core.model.call.CallTextError
+import com.ssafy.vomi.core.model.call.CallTextRequest
+import com.ssafy.vomi.core.model.speech.SpeechState
 import com.ssafy.vomi.core.model.call.CallMediaConnection
 import com.ssafy.vomi.core.model.call.CallConnection
 import com.ssafy.vomi.core.model.call.Backchannel
@@ -24,18 +27,21 @@ internal data class CallUiState(
     val hasMicrophoneError: Boolean = false,
     val isMicrophonePermissionDenied: Boolean = false,
     val mediaConnection: CallMediaConnection = CallMediaConnection.Disconnected,
-    val isTextAudioAvailable: Boolean = false,
+    val isSendingText: Boolean = false,
+    val textSendError: CallTextError? = null,
+    val failedTextRequest: CallTextRequest? = null,
+    val hasPlaybackError: Boolean = false,
     val draft: String = "",
     val messages: List<CallMessage> = emptyList(),
+    val speech: SpeechState = SpeechState(),
     val suggestions: List<ReplySuggestion> = emptyList(),
     val backchannels: List<Backchannel> = emptyList(),
     val summary: CallSummary? = null,
     val isSummaryVisible: Boolean = false,
 ) {
-    val canType: Boolean get() = phase == CallPhase.Active && !isMicrophoneEnabled && !isMicrophonePending && !isActionPending && !isCreating
-    val canSendTextAudio: Boolean get() = canType && isTextAudioAvailable
-    val canSend: Boolean get() = canSendTextAudio && draft.isNotBlank()
+    val canType: Boolean get() = phase == CallPhase.Active && !isMicrophoneEnabled && !isMicrophonePending && !isActionPending && !isCreating && !isSendingText
+    val canSend: Boolean get() = canType && draft.isNotBlank()
     val canToggleMicrophone: Boolean get() = (phase == CallPhase.Active || phase == CallPhase.Accepted) &&
         mediaConnection == CallMediaConnection.Connected &&
-        !isActionPending && !isCreating && !isMicrophonePending
+        !isActionPending && !isCreating && !isMicrophonePending && !isSendingText
 }
