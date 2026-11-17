@@ -42,7 +42,7 @@ export interface ScenarioScript extends Scenario {
 /** 판정 한 줄 — 코드 검사(정답 값 / 실제 값)와 행동 확인(문장 · '지킴' / '어김: …')이 같은 모양으로 섞여 옴 */
 export interface Check {
   name: string
-  status: 'pass' | 'fail' | 'skip' // skip = 채점 안 함 (사유는 note)
+  status: 'pass' | 'fail' | 'skip' | 'warn' // skip = 채점 안 함, warn = 확인 필요(덧붙인 말 · 받아쓰기 오류, 실패로 세지 않음). 사유는 note
   expected: unknown
   actual: unknown
   note?: string
