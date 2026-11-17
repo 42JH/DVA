@@ -59,6 +59,9 @@ function toolText(c) {
   }
 }
 
+// 서버 단계(app/calls/session.py의 ENDED)는 "ended"를 보내지 않는다. "ended"는 문서(docs/ops/monitor.md)·옛 서버 값
+const ENDED = new Set(["ended", "closing", "closed", "failed", "finalizing", "done"]);
+
 function lastAt(lines, speaker) {
   for (let i = lines.length - 1; i >= 0; i--) if (lines[i].speaker === speaker) return lines[i].t ?? 0;
   return 0;
@@ -66,7 +69,7 @@ function lastAt(lines, speaker) {
 
 // call: 통화 스냅샷(docs/ops/monitor.md) / agentChangedAt: 화면이 AI 전사 변화를 본 시각(ms) / now: 지금(ms)
 function stateOf(call, agentChangedAt, now) {
-  if (!call || call.status === "ended") return { kind: "idle", tools: [] };
+  if (!call || ENDED.has(call.status)) return { kind: "idle", tools: [] };
   const lines = call.transcript || [];
   const customerAt = lastAt(lines, "customer");
   const agentAt = lastAt(lines, "agent");
@@ -89,7 +92,7 @@ const agentSeen = new Map();       // session_id → { sig: 마지막 AI 전사 
 function pickCall() {
   let picked = null;
   for (const c of calls.values()) {
-    if (c.status !== "ended" && (!picked || c.started_at > picked.started_at)) picked = c;
+    if (!ENDED.has(c.status) && (!picked || c.started_at > picked.started_at)) picked = c;
   }
   return picked;
 }
