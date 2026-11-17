@@ -1,4 +1,4 @@
-package com.ssafy.vomi.ui
+package com.ssafy.vomi
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -20,7 +20,7 @@ import kotlinx.coroutines.launch
 import retrofit2.HttpException
 
 @HiltViewModel
-class SessionViewModel @Inject constructor(
+internal class MainActivityViewModel @Inject constructor(
     private val authRepository: AuthRepository,
     private val userRepository: UserRepository,
     private val callRepository: CallRepository,
