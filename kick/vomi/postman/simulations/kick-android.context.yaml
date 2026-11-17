@@ -97,6 +97,14 @@ assumptions:
     source: docs/kick-android-api.md; core/data/src/main/kotlin/com/ssafy/vomi/core/data/repository/CallRepositoryImpl.kt; core/data/src/main/kotlin/com/ssafy/vomi/core/data/call/ServerSpeechStream.kt; core/rtc/src/main/kotlin/com/ssafy/vomi/core/rtc/RtcTextStreams.kt; core/rtc/src/main/kotlin/com/ssafy/vomi/core/rtc/PcmSpeechPlayer.kt
     updated_at: '2026-11-17'
 
+  - id: tts-playback-progress
+    status: unknown
+    claim: Incoming typed messages reveal text with estimated playback progress, and outgoing typed messages dim their unspoken suffix using peer playback acknowledgements.
+    reason: No device, HTTP TTS request, test, simulation or audio playback was executed. The raw PCM endpoint has no character timestamps; glyph positions are interpolated within buffered synthesis segments, not phoneme-aligned.
+    verification: Added known-length PCM segments with unchanged raw audio payload, AudioTrack playback-head progress, versioned peer-validated reliable acknowledgements, retry ownership and interruption handling. UI distinguishes transmission from playback completion. First audio latency can increase because each existing synthesis segment is buffered before publishing. Both peers need the updated protocol for two-sided progress. Compilation and static review do not establish runtime synchronization.
+    source: core/rtc/src/main/kotlin/com/ssafy/vomi/core/rtc/SpeechPlaybackProtocol.kt; core/rtc/src/main/kotlin/com/ssafy/vomi/core/rtc/PcmSpeechPlayer.kt; core/rtc/src/main/kotlin/com/ssafy/vomi/core/rtc/RtcTextStreams.kt; feature/call/impl/src/main/kotlin/com/ssafy/vomi/feature/call/impl/component/CallMessageText.kt
+    updated_at: '2026-11-17'
+
 fingerprints:
   - id: initial-android-handoff
     date: '2026-11-13'
