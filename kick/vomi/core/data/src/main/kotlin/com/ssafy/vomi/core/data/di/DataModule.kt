@@ -1,12 +1,14 @@
 package com.ssafy.vomi.core.data.di
 
+import com.ssafy.vomi.core.data.auth.SessionAccessTokenProvider
 import com.ssafy.vomi.core.data.repository.AuthRepository
 import com.ssafy.vomi.core.data.repository.AuthRepositoryImpl
-import com.ssafy.vomi.core.data.repository.FriendRepository
-import com.ssafy.vomi.core.data.repository.FriendRepositoryImpl
 import com.ssafy.vomi.core.data.repository.CallRepository
 import com.ssafy.vomi.core.data.repository.CallRepositoryImpl
-import com.ssafy.vomi.core.data.auth.SessionAccessTokenProvider
+import com.ssafy.vomi.core.data.repository.FriendRepository
+import com.ssafy.vomi.core.data.repository.FriendRepositoryImpl
+import com.ssafy.vomi.core.data.repository.UserRepository
+import com.ssafy.vomi.core.data.repository.UserRepositoryImpl
 import com.ssafy.vomi.core.network.auth.AccessTokenProvider
 import dagger.Binds
 import dagger.Module
@@ -19,6 +21,7 @@ import javax.inject.Singleton
 abstract class DataModule {
     @Binds @Singleton internal abstract fun bindCallRepository(impl: CallRepositoryImpl): CallRepository
     @Binds @Singleton internal abstract fun bindFriendRepository(impl: FriendRepositoryImpl): FriendRepository
-    @Binds @Singleton abstract fun bindAuthRepository(impl: AuthRepositoryImpl): AuthRepository
+    @Binds @Singleton internal abstract fun bindUserRepository(impl: UserRepositoryImpl): UserRepository
+    @Binds @Singleton internal abstract fun bindAuthRepository(impl: AuthRepositoryImpl): AuthRepository
     @Binds @Singleton abstract fun bindAccessTokenProvider(impl: SessionAccessTokenProvider): AccessTokenProvider
 }
