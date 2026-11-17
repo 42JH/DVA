@@ -39,7 +39,7 @@ export function useCallView(callId: number) {
     go: () => vm.goComplaint(c),
   })
   const summary = call && {
-    state: callState({ ...d!.call, analysis: d!.analysis }),
+    state: callState(d!.call),
     member: memberOf(d!.call),
     name: call.customerName ?? '',
     phone: call.callerNumber ? fmtPhone(call.callerNumber) : '',
