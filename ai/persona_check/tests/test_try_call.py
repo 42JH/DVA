@@ -147,3 +147,26 @@ def test_the_live_faq_file_is_copied_read_only_including_recent_wal_writes(tmp_p
     assert source.read_bytes() == before                                     # 원본은 그대로
     live.close()
     assert not try_call.snapshot_faq(tmp_path / "없음.sqlite3", tmp_path / "x.sqlite3")
+
+
+def test_customer_voice_is_remade_until_it_is_heard_as_the_line(tmp_path, monkeypatch):
+    """TTS가 짧은 이름을 엉뚱하게 읽으면(11/15 "이지은이요." → '이지윤') 받아쓰기로 듣고 다시 만든다. 맞게 들린 것을 저장해 다시 쓴다."""
+    heard = iter(["이지윤이요.", "이지은이요."])
+    made = []
+
+    async def speech(**kw):
+        made.append(kw["input"])
+        return SimpleNamespace(content=bytes([len(made)]) * 4)
+
+    async def transcribe(**kw):
+        return SimpleNamespace(text=next(heard))
+
+    client = SimpleNamespace(audio=SimpleNamespace(speech=SimpleNamespace(create=speech),
+                                                   transcriptions=SimpleNamespace(create=transcribe)))
+    monkeypatch.setattr(try_call, "TTS_DIR", tmp_path)
+    assert asyncio.run(try_call.voice_of(client, "이지은이요.")) == bytes([2]) * 4   # 두 번째 것이 맞게 들림
+    assert asyncio.run(try_call.voice_of(client, "이지은이요.")) == bytes([2]) * 4 and len(made) == 2   # 저장한 것을 다시 씀
+    # 숫자는 받아쓰기가 아라비아 숫자로 적기도 해서 대본 글과도 견준다
+    assert asyncio.run(try_call.heard_as(SimpleNamespace(audio=SimpleNamespace(transcriptions=SimpleNamespace(
+        create=lambda **kw: asyncio.sleep(0, SimpleNamespace(text="010-2345-6789요."))))), b"\0\0",
+        ["공일공 이삼사오 육칠팔구요.", "010-2345-6789요."])) == 1.0

@@ -28,14 +28,6 @@ SCHEMA = {"type": "object", "additionalProperties": False, "required": ["action"
                          "why": {"type": "string"}}}
 
 
-HOLD = re.compile(r"(네,?\s*)?(음,?\s*)?(잠시만요|잠깐만요|잠시만 기다려 주세요|잠시만 기다려주세요)[.!]?")
-
-
-def holding(text: str) -> bool:
-    """AI가 기다려 달라는 말만 했는가("잠시만요."). 묻는 말이 아니니 고객은 모델에게 묻지 않고 기다린다(11/15: 모델이 번호를 먼저 말함)."""
-    return bool(HOLD.fullmatch(" ".join(text.split())))
-
-
 def describe(script: list[str], history: list[tuple[str, str]], said: set[int], facts: str = "") -> str:
     lines = [f"{i}. {'(말함) ' if i in said else ''}{text}" for i, text in enumerate(script, 1)]
     talk = [f"{who}: {text}" for who, text in history] or ["(아직 대화 없음)"]
