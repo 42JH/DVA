@@ -93,6 +93,7 @@ internal fun CallInput(
             icon = if (state.isMicrophoneEnabled) R.drawable.ic_microphone else R.drawable.ic_microphone_off,
             description = stringResource(if (state.isMicrophoneEnabled) R.string.call_mic_off_action else R.string.call_mic_on_action),
             onClick = onMicrophoneClick,
+            enabled = state.canToggleMicrophone,
             modifier = Modifier.size(48.dp),
             color = if (state.isMicrophoneEnabled) Color(0xFFB9D7FA) else Color.White.copy(alpha = 0.22f),
             tint = if (state.isMicrophoneEnabled) Color(0xFF182234) else Color.White,

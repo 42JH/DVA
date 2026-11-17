@@ -1,5 +1,12 @@
 package com.ssafy.vomi.feature.call.impl
 
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+import androidx.compose.ui.platform.LocalContext
+import com.ssafy.vomi.core.model.call.CallMediaConnection
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -65,11 +72,21 @@ internal fun CallScreen(
     viewModel: CallViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val microphonePermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+        viewModel.onMicrophonePermissionResult(it)
+    }
     LaunchedEffect(callId) { viewModel.initialize(callId) }
     BackHandler(onBack = viewModel::endCall)
     CallContent(
         state = state,
-        onMicrophoneClick = viewModel::toggleMicrophone,
+        onMicrophoneClick = {
+            if (state.canToggleMicrophone) {
+                if (state.isMicrophoneEnabled || ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                    viewModel.toggleMicrophone()
+                } else microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
+            }
+        },
         onDraftChange = viewModel::updateDraft,
         onSendClick = viewModel::sendDraft,
         onSummaryClick = viewModel::showSummary,
@@ -150,13 +167,33 @@ private fun CallContent(
                 )
                 if (state.phase == CallPhase.Outgoing || state.phase == CallPhase.Accepted) {
                     Text(
-                        text = stringResource(if (state.phase == CallPhase.Outgoing) R.string.call_outgoing else R.string.call_accepted),
+                        text = stringResource(
+                            if (state.phase == CallPhase.Outgoing) R.string.call_outgoing else when (state.mediaConnection) {
+                                CallMediaConnection.Failed -> R.string.call_media_failed
+                                CallMediaConnection.Reconnecting -> R.string.call_media_reconnecting
+                                CallMediaConnection.Connected -> R.string.call_waiting_for_peer
+                                CallMediaConnection.Disconnected -> R.string.call_media_disconnected
+                                CallMediaConnection.Connecting -> R.string.call_accepted
+                            },
+                        ),
                         modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
                         style = VomiTheme.typography.bodyR16,
                     )
                 }
                 if (state.isActionPending || state.isCreating) Text(stringResource(R.string.call_action_pending), modifier = Modifier.padding(horizontal = 20.dp))
                 if (state.hasActionError) Text(stringResource(R.string.call_action_error), modifier = Modifier.padding(horizontal = 20.dp))
+                if (state.mediaConnection == CallMediaConnection.Failed ||
+                    state.phase == CallPhase.Accepted && state.mediaConnection == CallMediaConnection.Disconnected) {
+                    Button(onClick = onRetryConnection, enabled = !state.isActionPending && !state.isCreating) {
+                        Text(stringResource(R.string.call_retry_media))
+                    }
+                }
+                if (state.isMicrophonePending) Text(stringResource(R.string.call_microphone_pending), modifier = Modifier.padding(horizontal = 20.dp))
+                if (state.hasMicrophoneError) Text(stringResource(R.string.call_microphone_error), modifier = Modifier.padding(horizontal = 20.dp))
+                if (state.isMicrophonePermissionDenied) Text(stringResource(R.string.call_microphone_permission_denied), modifier = Modifier.padding(horizontal = 20.dp))
+                if (state.phase == CallPhase.Active && !state.isTextAudioAvailable && !state.isMicrophoneEnabled) {
+                    Text(stringResource(R.string.call_text_audio_unavailable), modifier = Modifier.padding(horizontal = 20.dp), style = VomiTheme.typography.captionR12)
+                }
                 val listState = rememberLazyListState()
                 LaunchedEffect(state.messages.size) {
                     if (state.messages.isNotEmpty()) listState.animateScrollToItem(state.messages.lastIndex)
@@ -257,7 +294,7 @@ private fun CallContent(
         if (state.connection == CallConnection.Failed && state.phase != CallPhase.Ended) {
             Column(modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp)) {
                 Text(stringResource(R.string.call_connection_failed))
-                Button(onClick = onRetryConnection) { Text(stringResource(R.string.call_retry_connection)) }
+                Button(onClick = onRetryConnection, enabled = !state.isActionPending && !state.isCreating) { Text(stringResource(R.string.call_retry_connection)) }
             }
         }
         if (state.isSummaryVisible) CallSummarySheet(

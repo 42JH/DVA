@@ -65,7 +65,7 @@ internal fun CallQuickReplies(
             items(state.backchannels, key = { it.id }) { reply ->
                 ReplyChip(
                     text = reply.text,
-                    enabled = state.canType,
+                    enabled = state.canSendTextAudio,
                     containerColor = Color(0xFFFFE4A3).copy(alpha = 0.16f),
                     contentColor = Color.White,
                     modifier = Modifier.widthIn(min = 60.dp, max = chipMaxWidth),
@@ -80,14 +80,14 @@ internal fun CallQuickReplies(
             items(state.suggestions, key = { it.id }) { reply ->
                 ReplyChip(
                     text = reply.text,
-                    enabled = state.canType,
+                    enabled = state.canSendTextAudio,
                     containerColor = Color.White.copy(alpha = 0.14f),
                     contentColor = Color.White,
                     modifier = Modifier
                         .widthIn(min = 60.dp, max = chipMaxWidth)
                         .suggestionDragSource(
                             id = reply.id,
-                            enabled = state.canType,
+                            enabled = state.canSendTextAudio,
                             onStart = onSuggestionDragStart,
                             onMove = onSuggestionDragMove,
                             onEnd = onSuggestionDragEnd,

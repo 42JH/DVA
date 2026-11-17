@@ -26,7 +26,7 @@ internal class CallConversation(private val mutableState: MutableStateFlow<CallU
     fun sendSuggestion(id: Long) {
         mutableState.update { state ->
             val suggestion = state.suggestions.find { it.id == id }
-            if (state.canType && suggestion != null) state.appendLocalMessage(suggestion.text) else state
+            if (state.canSendTextAudio && suggestion != null) state.appendLocalMessage(suggestion.text) else state
         }
     }
 
@@ -46,7 +46,7 @@ internal class CallConversation(private val mutableState: MutableStateFlow<CallU
     fun selectBackchannel(id: Long) {
         mutableState.update { state ->
             val backchannel = state.backchannels.find { it.id == id }
-            if (state.canType && backchannel != null) state.appendLocalMessage(backchannel.text) else state
+            if (state.canSendTextAudio && backchannel != null) state.appendLocalMessage(backchannel.text) else state
         }
     }
 

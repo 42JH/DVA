@@ -1,5 +1,6 @@
 package com.ssafy.vomi.feature.call.impl.model
 
+import com.ssafy.vomi.core.model.call.CallMediaConnection
 import com.ssafy.vomi.core.model.call.CallMessage
 import com.ssafy.vomi.core.model.call.CallSpeaker
 import com.ssafy.vomi.core.model.call.CallSummary
@@ -8,6 +9,8 @@ import com.ssafy.vomi.core.model.call.ReplySuggestion
 // Preview/test fixtures only. Runtime state is observed from CallRepository.callState.
 internal fun sampleCallState(friendId: String, friendName: String, isIncoming: Boolean = false) =
     CallUiState(
+        isTextAudioAvailable = true,
+        mediaConnection = CallMediaConnection.Connected,
         friendId = friendId,
         friendName = friendName,
         phase = if (isIncoming) CallPhase.Incoming else CallPhase.Active,
