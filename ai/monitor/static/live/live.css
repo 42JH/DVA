@@ -1,0 +1,66 @@
+:root {
+  --page: #f5f5f5;
+  --bubble: #d9d9d9;
+  --text: #111;
+  --character-h: 62vh;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--page);
+  color: var(--text);
+  font: 24px/1.5 system-ui, sans-serif;
+}
+
+.stage {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end; /* 캐릭터를 화면 아래에 붙인다 */
+}
+
+.bubble {
+  position: relative;
+  width: min(640px, 90vw);
+  min-height: 240px;
+  max-height: calc(100vh - var(--character-h) - 72px); /* 도구가 많이 쌓여도 캐릭터를 밀어내지 않게 */
+  margin-bottom: 64px; /* 꼬리 점 자리 */
+  padding: 40px 56px;
+  border-radius: 16px;
+  background: var(--bubble);
+  display: flex;
+  flex-direction: column;
+}
+
+.bubble[hidden] { display: none; }
+
+.bubble h2 { margin: 0 0 16px; font-size: 28px; }
+
+/* 스크롤은 말풍선이 아니라 목록에: 말풍선에 overflow를 걸면 바깥의 꼬리 점이 잘린다 */
+.bubble ul { margin: 0; padding: 0; list-style: none; min-height: 0; overflow: auto; }
+
+/* 생각 꼬리: 큰 점(span) → 중간(::before) → 작은(::after), 캐릭터 머리 쪽으로 */
+.tail,
+.tail::before,
+.tail::after {
+  position: absolute;
+  border-radius: 50%;
+  background: var(--bubble);
+}
+
+.tail { left: 20%; bottom: -52px; width: 34px; height: 34px; }
+.tail::before { content: ""; left: 40px; top: 42px; width: 20px; height: 20px; }
+.tail::after { content: ""; left: 64px; top: 66px; width: 12px; height: 12px; }
+
+.character {
+  height: var(--character-h);
+  width: auto;
+  max-width: 90vw;
+  object-fit: contain;
+  object-position: bottom; /* 프레임 크기가 달라도 발밑을 맞춘다 */
+}
