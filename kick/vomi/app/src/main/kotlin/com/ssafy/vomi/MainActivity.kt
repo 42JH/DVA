@@ -45,7 +45,7 @@ class MainActivity : ComponentActivity() {
                 try {
                     awaitCancellation()
                 } finally {
-                    viewModel.setForeground(false)
+                    if (!isChangingConfigurations) viewModel.setForeground(false)
                 }
             }
         }

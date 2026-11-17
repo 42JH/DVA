@@ -50,6 +50,17 @@ internal class MainActivityViewModel @Inject constructor(
                                 }
                             }
                         }
+                        launch {
+                            foreground.collectLatest { visible ->
+                                if (visible) {
+                                    callRepository.observeMedia().asResult().collect { result ->
+                                        if (result is Result.Error && (result.exception as? HttpException)?.code() == 401) {
+                                            authRepository.logout()
+                                        }
+                                    }
+                                }
+                            }
+                        }
                         combine(foreground, callRepository.reconnectRequests) { visible, _ -> visible }
                             .collectLatest { visible ->
                                 if (visible) {
