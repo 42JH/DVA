@@ -6,5 +6,3 @@ enum class TestAccount(val accountId: String) {
 }
 
 data class UserSession(val id: String, val displayName: String, val account: TestAccount)
-
-enum class LoginError { MissingToken, InvalidToken, Network, Server, UnexpectedAccount }
