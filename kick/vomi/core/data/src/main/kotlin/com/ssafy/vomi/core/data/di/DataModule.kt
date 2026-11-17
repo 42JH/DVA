@@ -9,6 +9,8 @@ import com.ssafy.vomi.core.data.repository.CallRepository
 import com.ssafy.vomi.core.data.repository.CallRepositoryImpl
 import com.ssafy.vomi.core.data.repository.FriendRepository
 import com.ssafy.vomi.core.data.repository.FriendRepositoryImpl
+import com.ssafy.vomi.core.data.repository.ReplySuggestionRepository
+import com.ssafy.vomi.core.data.repository.ReplySuggestionRepositoryImpl
 import com.ssafy.vomi.core.data.repository.SpeechRepository
 import com.ssafy.vomi.core.data.repository.SpeechRepositoryImpl
 import com.ssafy.vomi.core.data.repository.UserRepository
@@ -26,6 +28,7 @@ abstract class DataModule {
     @Binds @Singleton internal abstract fun bindCallTranscriptRepository(impl: CallTranscriptRepositoryImpl): CallTranscriptRepository
     @Binds @Singleton internal abstract fun bindCallRepository(impl: CallRepositoryImpl): CallRepository
     @Binds @Singleton internal abstract fun bindFriendRepository(impl: FriendRepositoryImpl): FriendRepository
+    @Binds @Singleton internal abstract fun bindReplySuggestionRepository(impl: ReplySuggestionRepositoryImpl): ReplySuggestionRepository
     @Binds @Singleton internal abstract fun bindSpeechRepository(impl: SpeechRepositoryImpl): SpeechRepository
     @Binds @Singleton internal abstract fun bindUserRepository(impl: UserRepositoryImpl): UserRepository
     @Binds @Singleton internal abstract fun bindAuthRepository(impl: AuthRepositoryImpl): AuthRepository

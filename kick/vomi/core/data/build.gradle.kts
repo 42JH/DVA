@@ -14,6 +14,7 @@ dependencies {
     implementation(projects.core.network)
     implementation(projects.core.rtc)
     implementation(projects.core.speech)
+    implementation(projects.core.ai)
     implementation(projects.core.database)
     implementation(projects.core.datastore)
     implementation(libs.kotlinx.coroutines.android)
