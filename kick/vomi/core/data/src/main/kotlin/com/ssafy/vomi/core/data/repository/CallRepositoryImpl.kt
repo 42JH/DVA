@@ -1,7 +1,10 @@
 package com.ssafy.vomi.core.data.repository
 
 import android.os.SystemClock
-import com.ssafy.vomi.core.data.call.serverSpeechStream
+import com.ssafy.vomi.core.data.call.serverSpeechSegments
+import com.ssafy.vomi.core.model.call.CallTextPlayback
+import com.ssafy.vomi.core.model.call.CallTextPlaybackStatus
+import java.util.UUID
 import com.ssafy.vomi.core.data.call.speechTextParts
 import com.ssafy.vomi.core.model.call.CallMediaEvent
 import com.ssafy.vomi.core.model.call.CallMessageDelivery
@@ -171,7 +174,10 @@ internal class CallRepositoryImpl @Inject constructor(
                             when (event) {
                                 is CallMediaEvent.Media -> emit(event.state)
                                 is CallMediaEvent.TextReceived -> callTranscriptRepository.putText(
-                                    event.callId, event.messageId, CallSpeaker.Remote, event.text, CallMessageDelivery.Complete,
+                                    event.callId, event.messageId, CallSpeaker.Remote, event.text, CallMessageDelivery.Complete, event.playbackId,
+                                )
+                                is CallMediaEvent.TextPlayback -> callTranscriptRepository.applyTextPlayback(
+                                    event.callId, event.messageId, event.speaker, event.playback,
                                 )
                                 is CallMediaEvent.PlaybackStatus -> callTranscriptRepository.setPlaybackError(event.callId, event.hasError)
                             }
@@ -185,6 +191,7 @@ internal class CallRepositoryImpl @Inject constructor(
                     send(media)
                 }
             } finally {
+                callTranscriptRepository.interruptTextPlaybacks(callId)
                 callSessionStore.stopMedia(userId, callId)
             }
         }
@@ -196,6 +203,7 @@ internal class CallRepositoryImpl @Inject constructor(
         if (value.isEmpty() || value.length > 10_000 || messageId.length !in 1..100) throw CallTextException(CallTextError.InvalidText)
         val parts = speechTextParts(value)
         if (!outgoingAudioMutex.tryLock()) throw CallTextException(CallTextError.Busy)
+        val playbackId = UUID.randomUUID().toString()
         var textDelivered = false
         var completed = false
         var recorded = false
@@ -211,24 +219,34 @@ internal class CallRepositoryImpl @Inject constructor(
             textDelivered = previous?.delivery in setOf(CallMessageDelivery.TextSent, CallMessageDelivery.AudioFailed, CallMessageDelivery.Complete)
             callTranscriptRepository.putText(callId, messageId, CallSpeaker.Local, value, CallMessageDelivery.Sending)
             recorded = true
+            callTranscriptRepository.beginTextPlayback(callId, messageId, playbackId)
             if (!textDelivered) {
                 callTranscriptRepository.setTextDelivery(callId, messageId, CallMessageDelivery.Sending)
                 send(CallTextSendProgress(messageId, CallTextSendStage.SendingText))
-                rtcClient.sendText(callId, messageId, value)
+                rtcClient.sendText(callId, messageId, value, playbackId)
                 textDelivered = true
             }
             callTranscriptRepository.setTextDelivery(callId, messageId, CallMessageDelivery.TextSent)
             send(CallTextSendProgress(messageId, CallTextSendStage.TextSent))
             send(CallTextSendProgress(messageId, CallTextSendStage.SendingAudio))
-            rtcClient.sendSpeech(callId, messageId, serverSpeechStream(voiceClient, parts, ioDispatcher))
+            rtcClient.sendSpeech(callId, messageId, playbackId, serverSpeechSegments(voiceClient, value, parts, ioDispatcher))
             callTranscriptRepository.setTextDelivery(callId, messageId, CallMessageDelivery.Complete)
             completed = true
             send(CallTextSendProgress(messageId, CallTextSendStage.Complete))
         } finally {
             withContext(NonCancellable) {
                 guard.cancelAndJoin()
-                if (recorded && !completed) callTranscriptRepository.setTextDelivery(callId, messageId,
-                    if (textDelivered) CallMessageDelivery.AudioFailed else CallMessageDelivery.Failed)
+                if (recorded && !completed) {
+                    callTranscriptRepository.setTextDelivery(callId, messageId,
+                        if (textDelivered) CallMessageDelivery.AudioFailed else CallMessageDelivery.Failed)
+                    val last = callTranscriptRepository.transcriptState.value.messages.find {
+                        it.textMessageId == messageId && it.speaker == CallSpeaker.Local
+                    }?.playback
+                    callTranscriptRepository.applyTextPlayback(callId, messageId, CallSpeaker.Local,
+                        CallTextPlayback(playbackId, (last?.sequence ?: 0) + 1, last?.spokenTextEnd ?: 0, CallTextPlaybackStatus.Interrupted))
+                    try { withTimeoutOrNull(500.milliseconds) { rtcClient.cancelSpeech(callId, messageId, playbackId) } }
+                    catch (_: Exception) { /* Preserve the original synthesis/send error. */ }
+                }
                 outgoingAudioMutex.unlock()
             }
         }

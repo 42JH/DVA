@@ -1,5 +1,6 @@
 package com.ssafy.vomi.core.rtc
 
+import com.ssafy.vomi.core.model.call.CallSpeechSegment
 import com.ssafy.vomi.core.model.call.CallCaption
 import com.ssafy.vomi.core.model.speech.PcmAudioFrame
 import com.ssafy.vomi.core.model.call.CallMediaEvent
@@ -12,7 +13,8 @@ interface RtcClient {
     fun observeLocalAudio(callId: String): Flow<PcmAudioFrame>
     fun observeCaptions(callId: String, peerId: String): Flow<CallCaption>
     suspend fun publishCaption(callId: String, peerId: String, caption: CallCaption)
-    suspend fun sendText(callId: String, messageId: String, text: String)
-    suspend fun sendSpeech(callId: String, messageId: String, chunks: Flow<ByteArray>)
+    suspend fun sendText(callId: String, messageId: String, text: String, playbackId: String)
+    suspend fun sendSpeech(callId: String, messageId: String, playbackId: String, segments: Flow<CallSpeechSegment>)
+    suspend fun cancelSpeech(callId: String, messageId: String, playbackId: String)
     suspend fun disconnect(callId: String)
 }

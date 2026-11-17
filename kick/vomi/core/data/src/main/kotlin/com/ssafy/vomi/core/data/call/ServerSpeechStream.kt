@@ -1,5 +1,7 @@
 package com.ssafy.vomi.core.data.call
 
+import com.ssafy.vomi.core.model.call.CallSpeechSegment
+import java.io.ByteArrayOutputStream
 import com.ssafy.vomi.core.model.call.CallTextError
 import com.ssafy.vomi.core.model.call.CallTextException
 import com.ssafy.vomi.core.network.service.voice.VoiceClient
@@ -8,12 +10,29 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
-import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 
-internal fun serverSpeechStream(voiceClient: VoiceClient, parts: List<String>, ioDispatcher: CoroutineDispatcher): Flow<ByteArray> = flow {
-    for (part in parts) emitAll(serverSpeechPart(voiceClient, part, ioDispatcher))
+internal fun serverSpeechSegments(
+    voiceClient: VoiceClient,
+    text: String,
+    parts: List<String>,
+    ioDispatcher: CoroutineDispatcher,
+): Flow<CallSpeechSegment> = flow {
+    var cursor = 0
+    var totalBytes = 0L
+    parts.forEachIndexed { index, part ->
+        val start = text.indexOf(part, cursor)
+        check(start >= cursor)
+        val audio = ByteArrayOutputStream()
+        serverSpeechPart(voiceClient, part, ioDispatcher).collect { chunk ->
+            totalBytes += chunk.size
+            if (totalBytes > 5_760_000L) throw CallTextException(CallTextError.InvalidAudio)
+            audio.write(chunk)
+        }
+        emit(CallSpeechSegment(start, part, audio.toByteArray(), index == parts.lastIndex))
+        cursor = start + part.length
+    }
 }
 
 private fun serverSpeechPart(voiceClient: VoiceClient, text: String, ioDispatcher: CoroutineDispatcher): Flow<ByteArray> = channelFlow {

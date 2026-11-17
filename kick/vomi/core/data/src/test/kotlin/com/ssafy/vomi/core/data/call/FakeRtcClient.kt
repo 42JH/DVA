@@ -1,5 +1,6 @@
 package com.ssafy.vomi.core.data.call
 
+import com.ssafy.vomi.core.model.call.CallSpeechSegment
 import com.ssafy.vomi.core.model.call.CallCaption
 import com.ssafy.vomi.core.model.speech.PcmAudioFrame
 import com.ssafy.vomi.core.model.call.CallMediaEvent
@@ -15,7 +16,8 @@ internal class FakeRtcClient : RtcClient {
     override fun observeLocalAudio(callId: String): Flow<PcmAudioFrame> = flow { awaitCancellation() }
     override fun observeCaptions(callId: String, peerId: String): Flow<CallCaption> = flow { awaitCancellation() }
     override suspend fun publishCaption(callId: String, peerId: String, caption: CallCaption) = Unit
-    override suspend fun sendText(callId: String, messageId: String, text: String) = Unit
-    override suspend fun sendSpeech(callId: String, messageId: String, chunks: Flow<ByteArray>) = Unit
+    override suspend fun sendText(callId: String, messageId: String, text: String, playbackId: String) = Unit
+    override suspend fun sendSpeech(callId: String, messageId: String, playbackId: String, segments: Flow<CallSpeechSegment>) = Unit
+    override suspend fun cancelSpeech(callId: String, messageId: String, playbackId: String) = Unit
     override suspend fun disconnect(callId: String) = Unit
 }

@@ -10,6 +10,7 @@ import com.ssafy.vomi.core.model.ai.ReplyModelState
 import com.ssafy.vomi.core.model.call.CallMessage
 import com.ssafy.vomi.core.model.call.ReplySuggestion
 import com.ssafy.vomi.core.data.repository.CallTranscriptRepository
+import com.ssafy.vomi.core.model.call.CallTextPlayback
 import com.ssafy.vomi.core.model.call.CallCaption
 import com.ssafy.vomi.core.model.call.CallMessageDelivery
 import com.ssafy.vomi.core.model.call.CallSpeaker
@@ -109,8 +110,11 @@ class CallViewModelTest {
         override fun clearSession() = Unit
         override fun applyCaption(speaker: CallSpeaker, caption: CallCaption) = Unit
         override fun discardPartialCaptions(callId: String) = Unit
-        override fun putText(callId: String, messageId: String, speaker: CallSpeaker, text: String, delivery: CallMessageDelivery) = Unit
+        override fun putText(callId: String, messageId: String, speaker: CallSpeaker, text: String, delivery: CallMessageDelivery, playbackId: String?) = Unit
         override fun setTextDelivery(callId: String, messageId: String, delivery: CallMessageDelivery) = Unit
+        override fun beginTextPlayback(callId: String, messageId: String, playbackId: String) = Unit
+        override fun applyTextPlayback(callId: String, messageId: String, speaker: CallSpeaker, playback: CallTextPlayback) = Unit
+        override fun interruptTextPlaybacks(callId: String) = Unit
         override fun setPlaybackError(callId: String, failed: Boolean) = Unit
     }
 

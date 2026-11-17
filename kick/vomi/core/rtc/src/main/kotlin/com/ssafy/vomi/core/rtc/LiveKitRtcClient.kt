@@ -1,6 +1,7 @@
 package com.ssafy.vomi.core.rtc
 
 import android.content.Context
+import com.ssafy.vomi.core.model.call.CallSpeechSegment
 import com.ssafy.vomi.core.model.call.CallCaption
 import com.ssafy.vomi.core.model.speech.PcmAudioFrame
 import com.ssafy.vomi.core.model.speech.SpeechError
@@ -203,14 +204,19 @@ internal class LiveKitRtcClient @Inject constructor(
         activeRoom?.takeIf { it.callId == callId && !it.stop.isCompleted },
     ) { "The voice room is no longer active" }
 
-    override suspend fun sendText(callId: String, messageId: String, text: String) {
+    override suspend fun sendText(callId: String, messageId: String, text: String, playbackId: String) {
         val streams = withContext(Dispatchers.Main.immediate) { checkNotNull(requireRoom(callId).textStreams) }
-        streams.sendText(messageId, text)
+        streams.sendText(messageId, text, playbackId)
     }
 
-    override suspend fun sendSpeech(callId: String, messageId: String, chunks: Flow<ByteArray>) {
+    override suspend fun sendSpeech(callId: String, messageId: String, playbackId: String, segments: Flow<CallSpeechSegment>) {
         val streams = withContext(Dispatchers.Main.immediate) { checkNotNull(requireRoom(callId).textStreams) }
-        streams.sendSpeech(messageId, chunks)
+        streams.sendSpeech(messageId, playbackId, segments)
+    }
+
+    override suspend fun cancelSpeech(callId: String, messageId: String, playbackId: String) {
+        val streams = withContext(Dispatchers.Main.immediate) { requireRoom(callId).textStreams }
+        streams?.cancelSpeech(messageId, playbackId)
     }
 
     override suspend fun disconnect(callId: String) {

@@ -7,16 +7,20 @@ import com.ssafy.vomi.core.model.call.CallTextError
 import com.ssafy.vomi.core.model.call.CallTextException
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 
-/** The handoff format is headerless 16 kHz PCM16 LE mono. Never load the entire audio in memory. */
+/** Headerless 16 kHz PCM16 LE mono. Progress follows frames played, never frames merely written. */
 internal class PcmSpeechPlayer {
-    suspend fun play(chunks: Flow<ByteArray>) = withContext(Dispatchers.IO) {
+    suspend fun play(chunks: Flow<ByteArray>, expectedBytes: Long? = null, onProgress: (Long) -> Unit = {}) = withContext(Dispatchers.IO) {
         val minimum = AudioTrack.getMinBufferSize(16_000, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
         check(minimum > 0) { "Call audio output is unavailable" }
         val track = AudioTrack.Builder()
@@ -31,25 +35,40 @@ internal class PcmSpeechPlayer {
             check(track.state == AudioTrack.STATE_INITIALIZED)
             track.play()
             withTimeout(180_000.milliseconds) {
-                chunks.collect { chunk ->
-                    currentCoroutineContext().ensureActive()
-                    val bytes = carry?.let { byteArrayOf(it) + chunk } ?: chunk
-                    val evenLength = bytes.size - bytes.size % 2
-                    carry = if (evenLength < bytes.size) bytes.last() else null
-                    var offset = 0
-                    while (offset < evenLength) {
-                        currentCoroutineContext().ensureActive()
-                        val count = track.write(bytes, offset, evenLength - offset, AudioTrack.WRITE_NON_BLOCKING)
-                        if (count < 0) error("Call audio write failed")
-                        if (count == 0) delay(10.milliseconds)
-                        else { offset += count; writtenBytes += count }
-                        if (writtenBytes > MAX_PCM_BYTES) throw CallTextException(CallTextError.InvalidAudio)
+                coroutineScope {
+                    val progressJob = launch {
+                        while (isActive) {
+                            onProgress(track.playbackHeadPosition.toLong() and 0xffffffffL)
+                            delay(40.milliseconds)
+                        }
                     }
-                }
-                if (carry != null || writtenBytes == 0L) throw CallTextException(CallTextError.InvalidAudio)
-                // Successful writes can still be buffered. Preserve the last syllable before releasing output.
-                withTimeout(5_000.milliseconds) {
-                    while ((track.playbackHeadPosition.toLong() and 0xffffffffL) < writtenBytes / 2) delay(10.milliseconds)
+                    try {
+                        chunks.collect { chunk ->
+                            currentCoroutineContext().ensureActive()
+                            val bytes = carry?.let { byteArrayOf(it) + chunk } ?: chunk
+                            val evenLength = bytes.size - bytes.size % 2
+                            carry = if (evenLength < bytes.size) bytes.last() else null
+                            var offset = 0
+                            while (offset < evenLength) {
+                                currentCoroutineContext().ensureActive()
+                                val count = track.write(bytes, offset, evenLength - offset, AudioTrack.WRITE_NON_BLOCKING)
+                                if (count < 0) error("Call audio write failed")
+                                if (count == 0) delay(10.milliseconds)
+                                else { offset += count; writtenBytes += count }
+                                if (writtenBytes > MAX_PCM_BYTES || expectedBytes != null && writtenBytes > expectedBytes) {
+                                    throw CallTextException(CallTextError.InvalidAudio)
+                                }
+                            }
+                        }
+                        if (carry != null || writtenBytes == 0L || expectedBytes != null && expectedBytes != writtenBytes) {
+                            throw CallTextException(CallTextError.InvalidAudio)
+                        }
+                        // Drain buffered samples before publishing completion or releasing output.
+                        withTimeout(5_000.milliseconds) {
+                            while ((track.playbackHeadPosition.toLong() and 0xffffffffL) < writtenBytes / 2) delay(10.milliseconds)
+                        }
+                    } finally { progressJob.cancelAndJoin() }
+                    onProgress(track.playbackHeadPosition.toLong() and 0xffffffffL)
                 }
             }
         } finally {
