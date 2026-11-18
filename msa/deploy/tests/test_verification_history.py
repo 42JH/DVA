@@ -69,10 +69,13 @@ class VerificationHistoryTests(unittest.TestCase):
         self.assertEqual(self.selection()['paritySuites'], ['customer', 'consultation', 'order'])
 
     def test_changed_migration_or_verifier_requires_fresh_database_check(self):
-        self.history(self.deployed)
         for filename in ('msa/liquibase/changelog/order/005.sql', 'msa/liquibase/Dockerfile',
-                         'msa/liquibase/verify.py', 'msa/liquibase/ci-command.sh'):
+                         'msa/liquibase/verify.py', 'msa/liquibase/ci-command.sh',
+                         'msa/parity/ci_verification.py', 'msa/parity/ci_workspace.py',
+                         'msa/parity/ci_images.py', 'msa/deploy/plan-apps.py',
+                         'msa/parity/reference-tests.patch'):
             with self.subTest(filename=filename):
+                self.history(self.git('rev-parse', 'HEAD'))
                 self.commit(filename, 'changed execution input')
                 self.assertTrue(self.selection()['database'])
 
@@ -80,6 +83,62 @@ class VerificationHistoryTests(unittest.TestCase):
         self.history(self.deployed)
         self.commit('msa/liquibase/README.md', 'documentation only')
         self.assertFalse(self.selection()['database'])
+
+    def test_reference_code_change_reuses_database_proof_but_keeps_the_api_matrix(self):
+        baseline = {'commit': '1' * 40, 'inventory': {'migrations': [
+            {'file': 'backend/migrations/001-bootstrap.sql', 'sha256': 'a' * 64}]}}
+        self.commit('msa/parity/baseline.json', json.dumps(baseline))
+        passed = self.git('rev-parse', 'HEAD')
+        self.history(passed)
+        baseline['commit'] = '2' * 40
+        self.commit('msa/parity/baseline.json', json.dumps(baseline))
+        result = self.selection()
+        self.assertFalse(result['database'])
+        self.assertEqual(result['paritySuites'], ['operations', 'customer', 'consultation', 'order'])
+        self.assertTrue(result['events'])
+        self.assertTrue(result['deployment'])
+        image_id = 'sha256:' + 'b' * 64
+        with patch.object(verification, 'ROOT', self.root), \
+                patch.object(images, 'prepared_image', return_value=image_id), \
+                patch.object(images, 'source_commit', return_value=self.git('rev-parse', 'HEAD')), \
+                patch.dict(os.environ, DB_IMAGE='verified-image'):
+            verification.reuse_database()
+        report = json.loads((self.root / 'msa/liquibase/verification.json').read_text())
+        self.assertTrue(report['passed'])
+        self.assertEqual(report['verificationOrigin']['commit'], passed)
+        self.assertEqual(report['verificationOrigin']['build'], 42)
+        self.assertEqual(report['imageId'], image_id)
+
+    def test_changed_or_invalid_source_migrations_never_reuse_database_proof(self):
+        migration = {'file': 'backend/migrations/001-bootstrap.sql', 'sha256': 'a' * 64}
+        baseline = {'commit': '1' * 40, 'inventory': {'migrations': [migration]}}
+        self.commit('msa/parity/baseline.json', json.dumps(baseline))
+        self.history(self.git('rev-parse', 'HEAD'))
+        candidates = [
+            {'commit': '2' * 40, 'inventory': {'migrations': [{**migration, 'sha256': 'b' * 64}]}},
+            {'commit': '2' * 40, 'inventory': {'migrations': [migration,
+                {'file': 'backend/migrations/002-next.sql', 'sha256': 'b' * 64}]}},
+            {'commit': '2' * 40, 'inventory': {'migrations': [{**migration, 'file': 'backend/migrations/002-renamed.sql'}]}},
+            {}, {'commit': 'invalid', 'inventory': {'migrations': [migration]}},
+            {'commit': '2' * 40, 'inventory': {'migrations': []}},
+            {'commit': '2' * 40, 'inventory': {'migrations': [migration, migration]}},
+            {'commit': '2' * 40, 'inventory': {'migrations': [{**migration, 'sha256': 'invalid'}]}},
+            {'commit': '2' * 40, 'inventory': {'migrations': [{**migration, 'file': '../private.sql'}]}},
+        ]
+        for candidate in candidates:
+            with self.subTest(candidate=candidate):
+                self.commit('msa/parity/baseline.json', json.dumps(candidate))
+                self.assertTrue(self.selection()['database'])
+                with patch.object(verification, 'ROOT', self.root), \
+                        self.assertRaisesRegex(RuntimeError, 'fresh verification'):
+                    verification.reuse_database()
+
+    def test_invalid_previous_source_inventory_cannot_establish_a_reusable_proof(self):
+        self.commit('msa/parity/baseline.json', 'invalid JSON')
+        self.history(self.git('rev-parse', 'HEAD'))
+        self.commit('msa/parity/baseline.json', json.dumps({'commit': '2' * 40,
+            'inventory': {'migrations': [{'file': 'backend/migrations/001-bootstrap.sql', 'sha256': 'a' * 64}]}}))
+        self.assertTrue(self.selection()['database'])
 
     def test_event_test_change_selects_event_checks_without_business_matrix(self):
         self.history(self.deployed)
@@ -89,13 +148,14 @@ class VerificationHistoryTests(unittest.TestCase):
         self.assertFalse(result['database'])
         self.assertEqual(result['paritySuites'], [])
 
-    def test_final_checker_change_does_not_run_unrelated_business_or_event_suites(self):
+    def test_order_shared_checker_helpers_select_only_the_order_suite(self):
         self.history(self.deployed)
-        self.commit('msa/parity/final-parity.cjs', 'updated manual diagnostic')
+        self.commit('msa/parity/final-parity.cjs', 'changed order schema and response helpers')
         result = self.selection()
         self.assertFalse(result['events'])
         self.assertFalse(result['database'])
-        self.assertEqual(result['paritySuites'], [])
+        self.assertEqual(result['paritySuites'], ['order'])
+        self.assertEqual((self.out / 'services.txt').read_text(), '')
 
     def test_service_documentation_does_not_rebuild_or_retest_runtime(self):
         self.history(self.deployed)

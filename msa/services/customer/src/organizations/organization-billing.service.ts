@@ -60,6 +60,30 @@ export class OrganizationBillingService {
       }
     });
   }
+  async readCustomer(id: number, month?: string) {
+    return this.database.transaction(async (client) => {
+      const customer = await client.query(
+        'SELECT customer_seq FROM customers WHERE customer_seq=$1 AND deleted_at IS NULL FOR SHARE',
+        [id],
+      );
+      if (!customer.rowCount) throw new ApiException(404, 'NOT_FOUND', '고객을 찾을 수 없습니다.');
+      try {
+        return await requestBilling(
+          this.endpoint('customer'),
+          this.config.get('CUSTOMER_AUTH_TOKEN', { infer: true }),
+          {
+            eventId: randomUUID(),
+            source: 'customer',
+            eventType: 'CustomerBillingReadRequested',
+            payload: { id, month: month ?? null },
+          },
+        );
+      } catch (error) {
+        this.failure(error);
+      }
+    });
+  }
+
   async companies() {
     return (
       await this.database.pool.query<{ id: number }>(

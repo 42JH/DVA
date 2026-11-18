@@ -22,6 +22,8 @@ export class ConfirmPaymentDto {
 }
 export class EmptyPaymentDto {}
 export class PaymentStatusDto {
+  @ApiProperty() autoCharge!: boolean;
+  @ApiProperty() cardPaymentFailed!: boolean;
   @ApiProperty({ format: 'uuid' }) token!: string;
   @ApiProperty() orderName!: string;
   @ApiProperty({ type: String, nullable: true }) senderName!: string | null;

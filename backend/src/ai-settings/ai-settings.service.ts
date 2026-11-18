@@ -32,6 +32,62 @@ export class AiSettingsService {
     private readonly audit: AuditService,
   ) {}
 
+  async remove(ids: number[], actorId: number, requestId: string): Promise<void> {
+    await this.database.transaction(async (client) => {
+      await this.repository.lock(client);
+      const targets = await this.repository.deletionTargets(
+        [...ids].sort((a, b) => a - b),
+        client,
+      );
+      if (targets.length !== ids.length)
+        throw new ApiException(
+          404,
+          'NOT_FOUND',
+          '삭제할 분류 중 찾을 수 없거나 이미 삭제된 분류가 있습니다.',
+        );
+      if (targets.some((row) => row.active))
+        throw new ApiException(
+          409,
+          'INVALID_STATE',
+          '현재 AI가 사용하는 ACTIVE 분류는 다른 분류 적용 완료 후 삭제해 주세요.',
+        );
+      const removed = await this.repository.removeMany(ids, client);
+      for (const id of removed.versions)
+        await this.audit.recordSuccess(
+          {
+            actorId,
+            targetId: id,
+            targetType: 'AI_PERSONA_VERSION',
+            action: 'PERSONA_VERSION_DELETED',
+            requestId,
+          },
+          client,
+        );
+      for (const id of removed.drafts)
+        await this.audit.recordSuccess(
+          {
+            actorId,
+            targetId: id,
+            targetType: 'AI_PERSONA',
+            action: 'PERSONA_DRAFT_DELETED',
+            requestId,
+          },
+          client,
+        );
+      for (const row of targets)
+        await this.audit.recordSuccess(
+          {
+            actorId,
+            targetId: row.id,
+            targetType: 'AI_PERSONA',
+            action: 'PERSONA_DELETED',
+            requestId,
+          },
+          client,
+        );
+    });
+  }
+
   async list(query: PersonaListQueryDto) {
     const page = await this.repository.personas(query);
     return new ListResponse(

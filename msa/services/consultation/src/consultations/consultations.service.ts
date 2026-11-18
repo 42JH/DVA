@@ -11,6 +11,9 @@ import type { PoolClient } from 'pg';
 import { CallSessionRepository } from './call-session.repository';
 import { CallEndRepository } from './call-end.repository';
 import type { CallEndedPayload } from '../webhooks/pbx/pbx-webhook.payload';
+import type { CallQueryDto } from './dto/call-query.dto';
+import type { CallDetailDto } from './dto/call-response.dto';
+import { RecordingPlaybackService } from './recording-playback.service';
 @Injectable()
 export class ConsultationsService {
   constructor(
@@ -20,7 +23,23 @@ export class ConsultationsService {
     private readonly repository: ConsultationsRepository,
     private readonly database: DatabaseService,
     private readonly draftDeletion: CallDraftDeletionClient,
+    private readonly playback: RecordingPlaybackService,
   ) {}
+  async ongoingCaller(client: PoolClient, id: number) {
+    const call = await this.sessions.caller(client, id);
+    if (!call)
+      throw new ApiException(404, 'NOT_FOUND', '통화를 찾을 수 없습니다.');
+    if (call.endedAt !== null)
+      throw new ApiException(
+        409,
+        'INVALID_STATE',
+        '종료된 통화에서는 고객 기본 주소를 수정할 수 없습니다.',
+      );
+    if (!call.phone)
+      throw new ApiException(403, 'FORBIDDEN', '통화 발신번호가 필요합니다.');
+    return call;
+  }
+
   attachRecording(client: PoolClient, callId: number, objectKey: string) {
     return this.sessions.attachRecording(client, callId, objectKey);
   }
@@ -61,50 +80,76 @@ export class ConsultationsService {
     return session.id;
   }
 
+  async recoverOrderCall(
+    client: PoolClient,
+    id: number,
+    input: CallIdentityDto & { callerPhoneNumber: string },
+  ) {
+    await this.endings.lockCaller(client, input.callerPhoneNumber);
+    if ((await this.sessions.existingCall(client, input)) !== id)
+      throw new ApiException(
+        409,
+        'EVENT_PAYLOAD_CONFLICT',
+        '같은 이벤트의 내용을 변경할 수 없습니다.',
+      );
+    await this.endings.matchPending(
+      client,
+      input.callerPhoneNumber,
+      input.incomingAt,
+    );
+  }
+
   attachCustomer(client: PoolClient, callId: number, customerId: number) {
     return this.sessions.attachCustomer(client, callId, customerId);
   }
 
-  async delete(id: number, adminId: number, requestId: string): Promise<void> {
+  async delete(
+    id: number | number[],
+    adminId: number,
+    requestId: string,
+  ): Promise<void> {
+    const ids = (Array.isArray(id) ? [...id] : [id]).sort((a, b) => a - b);
     await this.database
       .transaction(async (client) => {
         await client.query("SET LOCAL lock_timeout='2s'");
-        const call = await this.repository.lockForDeletion(client, id);
-        if (!call)
-          throw new ApiException(
-            404,
-            'NOT_FOUND',
-            '통화 기록을 찾을 수 없습니다.',
+        for (const id of ids) {
+          const call = await this.repository.lockForDeletion(client, id);
+          if (!call)
+            throw new ApiException(
+              404,
+              'NOT_FOUND',
+              '통화 기록을 찾을 수 없습니다.',
+            );
+          if (
+            !call.endedAt ||
+            (await this.repository.recordingInProgress(client, id))
+          )
+            throw new ApiException(
+              409,
+              'INVALID_STATE',
+              '통화 종료와 녹취 저장이 완료된 뒤 삭제해 주세요.',
+            );
+          if (
+            call.orderFinalizedAt === null &&
+            (await this.draftDeletion.blocked(id))
+          )
+            throw new ApiException(
+              409,
+              'INVALID_STATE',
+              '배송 초안의 주문 확정을 마친 뒤 통화를 삭제해 주세요.',
+            );
+          await this.repository.softDelete(client, id);
+          await this.audit.recordSuccess(
+            {
+              actorId: adminId,
+              targetId: id,
+              targetType: 'CALL_SESSION',
+              action: 'CALL_DELETED',
+              requestId,
+            },
+            client,
           );
-        if (
-          !call.endedAt ||
-          (await this.repository.recordingInProgress(client, id))
-        )
-          throw new ApiException(
-            409,
-            'INVALID_STATE',
-            '통화 종료와 녹취 저장이 완료된 뒤 삭제해 주세요.',
-          );
-        if (
-          call.orderFinalizedAt === null &&
-          (await this.draftDeletion.blocked(id))
-        )
-          throw new ApiException(
-            409,
-            'INVALID_STATE',
-            '배송 초안의 주문 확정을 마친 뒤 통화를 삭제해 주세요.',
-          );
-        await this.repository.softDelete(client, id);
-        await this.audit.recordSuccess(
-          {
-            actorId: adminId,
-            targetId: id,
-            targetType: 'CALL_SESSION',
-            action: 'CALL_DELETED',
-            requestId,
-          },
-          client,
-        );
+        }
       })
       .catch((error: unknown) => {
         if (
@@ -120,6 +165,41 @@ export class ConsultationsService {
           );
         throw error;
       });
+  }
+
+  async findMany(query: CallQueryDto) {
+    const from = query.from === undefined ? undefined : Date.parse(query.from);
+    const to = query.to === undefined ? undefined : Date.parse(query.to);
+    if (
+      (from !== undefined && !Number.isFinite(from)) ||
+      (to !== undefined && !Number.isFinite(to)) ||
+      (from !== undefined && to !== undefined && from >= to)
+    )
+      throw new ApiException(
+        400,
+        'INVALID_REQUEST',
+        '시작 시각은 종료 시각보다 빨라야 합니다.',
+      );
+    return new ListResponse(await this.repository.findMany(query), query.limit);
+  }
+
+  async findOne(id: number): Promise<CallDetailDto> {
+    const row = await this.repository.findOne(id);
+    if (!row)
+      throw new ApiException(404, 'NOT_FOUND', '통화 기록을 찾을 수 없습니다.');
+    const { analysis, ...call } = row;
+    const recordings = await this.repository.findRecordings(id);
+    return {
+      call,
+      analysis,
+      aiActionCount: await this.repository.countActions(id),
+      recordings: await Promise.all(
+        recordings.map(async ({ objectKey, ...recording }) => ({
+          ...recording,
+          ...(await this.playback.create(objectKey)),
+        })),
+      ),
+    };
   }
 
   async findTranscript(id: number, query: TranscriptQueryDto) {

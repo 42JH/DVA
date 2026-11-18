@@ -1,3 +1,4 @@
+import { CustomerListItemDto } from './dto/customer-response.dto';
 import { Injectable } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import { PageRows, readPage } from '../common/pagination-query';
@@ -13,8 +14,39 @@ import {
 const columns =
   'customer_seq AS "customerSeq", name, phone_number AS "phoneNumber", status,monthly_billing_enabled AS "monthlyBillingEnabled",address_data AS address';
 
+const availablePaymentMethods = `CASE WHEN c.status<>'ACTIVE' THEN '[]'::jsonb ELSE
+  '["billing"]'::jsonb || CASE WHEN
+    (m.membership_seq IS NULL AND c.monthly_billing_enabled)
+    OR (m.status='ACTIVE' AND o.status='ACTIVE' AND o.monthly_billing_enabled AND m.monthly_billing_enabled)
+    THEN '["credit"]'::jsonb ELSE '[]'::jsonb END
+  || CASE WHEN m.status='ACTIVE' AND o.status='ACTIVE' AND m.group_billing_enabled AND EXISTS(SELECT 1 FROM payment_cards pc WHERE pc.organization_seq=o.organization_seq AND pc.status='ACTIVE' AND pc.deleted_at IS NULL AND pc.expiration_year*12+pc.expiration_month>=extract(year FROM clock_timestamp() AT TIME ZONE 'Asia/Seoul')*12+extract(month FROM clock_timestamp() AT TIME ZONE 'Asia/Seoul'))
+    THEN '["groupBilling"]'::jsonb ELSE '[]'::jsonb END END`;
+
 @Injectable()
 export class CustomersRepository {
+  async lockMany(client: PoolClient, ids: number[]): Promise<number[]> {
+    const result = await client.query<{ id: number }>(
+      'SELECT customer_seq AS id FROM customers WHERE customer_seq=ANY($1::int[]) AND deleted_at IS NULL ORDER BY customer_seq FOR UPDATE',
+      [ids],
+    );
+    return result.rows.map((row) => row.id);
+  }
+
+  async removeMany(client: PoolClient, ids: number[]): Promise<void> {
+    await client.query(
+      'UPDATE memberships SET deleted_at=clock_timestamp() WHERE customer_seq=ANY($1::int[]) AND deleted_at IS NULL',
+      [ids],
+    );
+    await client.query(
+      'UPDATE personal_pins SET deleted_at=clock_timestamp() WHERE customer_seq=ANY($1::int[]) AND deleted_at IS NULL',
+      [ids],
+    );
+    await client.query(
+      'UPDATE customers SET deleted_at=clock_timestamp() WHERE customer_seq=ANY($1::int[]) AND deleted_at IS NULL',
+      [ids],
+    );
+  }
+
   constructor(private readonly database: DatabaseService) {}
 
   async updateIdentities(client: PoolClient, rows: EmployeeCustomerIdentity[]): Promise<void> {
@@ -51,18 +83,13 @@ export class CustomersRepository {
           'customerSeq',c.customer_seq,'name',c.name,'phoneNumber',c.phone_number,'status',c.status,'monthlyBillingEnabled',c.monthly_billing_enabled,'address',c.address_data) END,
         'membership', CASE WHEN c.status='ACTIVE' AND m.membership_seq IS NOT NULL THEN jsonb_build_object(
           'membershipSeq',m.membership_seq,'customerSeq',m.customer_seq,'organizationSeq',m.organization_seq,
-          'employeeNo',m.employee_no,'role',m.role,'status',m.status,'departmentSeq',m.department_seq) END,
+          'employeeNo',m.employee_no,'role',m.role,'status',m.status,'departmentSeq',m.department_seq,'monthlyBillingEnabled',m.monthly_billing_enabled,'groupBillingEnabled',m.group_billing_enabled) END,
         'organization', CASE WHEN c.status='ACTIVE' AND o.organization_seq IS NOT NULL THEN jsonb_build_object(
-          'organizationSeq',o.organization_seq,'name',o.name,'status',o.status,'monthlyBillingEnabled',o.monthly_billing_enabled) END,
+          'organizationSeq',o.organization_seq,'name',o.name,'status',o.status,'monthlyBillingEnabled',o.monthly_billing_enabled,
+          'groupCardRegistered',EXISTS(SELECT 1 FROM payment_cards pc WHERE pc.organization_seq=o.organization_seq AND pc.status='ACTIVE' AND pc.deleted_at IS NULL AND pc.expiration_year*12+pc.expiration_month>=extract(year FROM clock_timestamp() AT TIME ZONE 'Asia/Seoul')*12+extract(month FROM clock_timestamp() AT TIME ZONE 'Asia/Seoul'))) END,
         'department',CASE WHEN c.status='ACTIVE' AND d.department_seq IS NOT NULL THEN jsonb_build_object(
           'departmentSeq',d.department_seq,'organizationSeq',d.organization_seq,'name',d.name,'groupBillingEnabled',d.group_billing_enabled) END,
-        'availablePaymentMethods',CASE WHEN c.status<>'ACTIVE' THEN '[]'::jsonb ELSE
-          '["billing"]'::jsonb || CASE WHEN
-            (m.membership_seq IS NULL AND c.monthly_billing_enabled)
-            OR (m.status='ACTIVE' AND o.status='ACTIVE' AND o.monthly_billing_enabled)
-            THEN '["credit"]'::jsonb ELSE '[]'::jsonb END
-          || CASE WHEN m.status='ACTIVE' AND o.status='ACTIVE' AND d.group_billing_enabled
-            THEN '["groupBilling"]'::jsonb ELSE '[]'::jsonb END END,
+        'availablePaymentMethods',${availablePaymentMethods},
         'availableUsageTypes', CASE
           WHEN c.status<>'ACTIVE' THEN '[]'::jsonb
           WHEN m.status='ACTIVE' AND o.status='ACTIVE' THEN '["PERSONAL","COMPANY"]'::jsonb
@@ -103,13 +130,19 @@ export class CustomersRepository {
     return result.rows[0]?.id ?? null;
   }
 
-  async list(query: ListCustomersQueryDto): Promise<PageRows<Customer>> {
-    const result = await readPage<Customer>(
+  async list(query: ListCustomersQueryDto): Promise<PageRows<CustomerListItemDto>> {
+    const result = await readPage<CustomerListItemDto>(
       this.database.pool,
-      `SELECT ${columns} FROM customers
-       WHERE deleted_at IS NULL AND ($1::text IS NULL OR strpos(lower(name), lower($1)) > 0)
-         AND ($2::text IS NULL OR phone_number = $2)
-         AND ($3::text IS NULL OR status = $3)`,
+      `SELECT c.customer_seq AS "customerSeq",c.name,c.phone_number AS "phoneNumber",c.status,
+         c.monthly_billing_enabled AS "monthlyBillingEnabled",c.address_data AS address,
+         ${availablePaymentMethods} AS "availablePaymentMethods"
+       FROM customers c
+       LEFT JOIN memberships m ON m.customer_seq=c.customer_seq AND m.deleted_at IS NULL
+       LEFT JOIN organizations o ON o.organization_seq=m.organization_seq AND o.deleted_at IS NULL
+       LEFT JOIN departments d ON d.department_seq=m.department_seq AND d.organization_seq=m.organization_seq AND d.deleted_at IS NULL
+       WHERE c.deleted_at IS NULL AND ($1::text IS NULL OR strpos(lower(c.name), lower($1)) > 0)
+         AND ($2::text IS NULL OR strpos(c.phone_number, $2) > 0)
+         AND ($3::text IS NULL OR c.status = $3)`,
       [query.q || null, query.phoneNumber ?? null, query.status ?? null],
       query,
       '"customerSeq" DESC',

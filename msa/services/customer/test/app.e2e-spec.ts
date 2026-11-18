@@ -25,7 +25,7 @@ describe('Customer read API (e2e)', () => {
   beforeAll(async () => {
     const module = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(DatabaseService)
-      .useValue({ pool })
+      .useValue({ pool, referencePool: pool })
       .overrideProvider(AuthService)
       .useValue(auth)
       .overrideProvider(AuditService)
@@ -140,20 +140,28 @@ describe('Customer read API (e2e)', () => {
       .expect(({ body }: { body: { paths: Record<string, Record<string, unknown>> } }) => {
         const paths = body.paths;
         for (const [path, methods] of Object.entries({
-          '/api/customers': ['get', 'post'],
+          '/api/customers': ['delete', 'get', 'post'],
           '/api/customers/context': ['post'],
           '/api/customers/{id}': ['get', 'patch'],
+          '/api/customers/{id}/billing': ['get'],
+          '/api/customers/{id}/card': ['get', 'put'],
+          '/api/customers/cards': ['delete'],
           '/api/customers/{id}/pins': ['get', 'post'],
           '/api/pins/{id}': ['patch'],
-          '/api/companies': ['get', 'post'],
+          '/api/pins': ['delete'],
+          '/api/companies': ['delete', 'get', 'post'],
           '/api/companies/search': ['get'],
           '/api/companies/members/search': ['get'],
-          '/api/companies/{id}': ['get', 'patch', 'delete'],
+          '/api/companies/{id}': ['get', 'patch'],
           '/api/companies/{id}/billing': ['get'],
-          '/api/companies/{id}/members': ['get', 'post'],
+          '/api/companies/{id}/group-card': ['get', 'put'],
+          '/api/companies/group-cards': ['delete'],
+          '/api/companies/{id}/members': ['get', 'patch', 'post'],
           '/api/companies/{id}/departments': ['get', 'post'],
-          '/api/members/{id}': ['patch', 'delete'],
-          '/api/departments/{id}': ['patch', 'delete'],
+          '/api/members/{id}': ['patch'],
+          '/api/members': ['delete'],
+          '/api/departments/{id}': ['patch'],
+          '/api/departments': ['delete'],
         })) {
           expect(Object.keys(paths[path]).sort()).toEqual(methods.sort());
         }
@@ -161,6 +169,7 @@ describe('Customer read API (e2e)', () => {
         expect(paths['/internal/billing/rollover']).toBeUndefined();
         expect(paths['/internal/audit/flush']).toBeUndefined();
         expect(paths['/internal/call-scope']).toBeUndefined();
+        expect(paths['/internal/card-call-scope/callback']).toBeUndefined();
       });
   });
   it('authenticates internal audit barriers independently of administrator cookies', async () => {
@@ -211,6 +220,28 @@ describe('Customer read API (e2e)', () => {
         .send(invalid)
         .expect(422);
   });
+  it('rejects forged card scope callbacks independently of public authentication', async () => {
+    const token = app.get(ConfigService).get<string>('CONSULTATION_AUTH_TOKEN')!;
+    await request(app.getHttpServer())
+      .post('/internal/card-call-scope/callback')
+      .send({})
+      .expect(403);
+    await request(app.getHttpServer())
+      .post('/internal/card-call-scope/callback')
+      .set('Authorization', 'Bearer ' + token)
+      .send({})
+      .expect(422);
+    await request(app.getHttpServer())
+      .post('/internal/card-call-scope/callback')
+      .set('Authorization', 'Bearer ' + token)
+      .send({
+        eventId: '00000000-0000-4000-8000-000000000052',
+        source: 'consultation',
+        eventType: 'PaymentCardCallScopeRequested',
+        payload: { consultationAddress: null },
+      })
+      .expect(503);
+  });
   it('requires current sessions for administrator reads and preserves error envelopes', async () => {
     await request(app.getHttpServer())
       .get('/api/customers')
@@ -237,6 +268,10 @@ describe('Customer read API (e2e)', () => {
     await request(app.getHttpServer())
       .get('/api/companies/search?q=test')
       .set('Cookie', 'dva_session=stale')
+      .set('Authorization', 'Bearer ' + businessToken)
+      .expect(401);
+    await request(app.getHttpServer())
+      .get('/api/companies/search?q=test')
       .set('Authorization', 'Bearer ' + businessToken)
       .expect(200);
     await request(app.getHttpServer())

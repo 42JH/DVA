@@ -208,7 +208,7 @@ test('call context without an order is matched to its recording and retries neve
   assert.equal((await repeated.json()).data.callSessionSeq, callId);
   assert.deepEqual(await session(), ended);
   const orders = await fetch(urls[0] + '/api/orders', {
-    headers: { call_session_seq: String(callId) },
+    headers: { ...businessHeaders(), call_session_seq: String(callId) },
   });
   assert.equal(orders.status, 409);
   await workers[1].processPending();

@@ -1,12 +1,12 @@
-import { CallerContextEnvelopeDto, CallerContextRequestDto } from './dto/caller-context.dto';
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Headers,
-  Patch,
   HttpCode,
   Param,
+  Patch,
   Post,
   Query,
   Req,
@@ -21,10 +21,15 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { AuditOperation } from '../audit/audit-operation';
 import * as authGuard from '../auth/auth.guard';
 import { ErrorResponseDto } from '../common/dto/api-response.dto';
 import { CustomersService } from './customers.service';
+import { AuditOperation } from '../audit/audit-operation';
+import { CallerContextEnvelopeDto, CallerContextRequestDto } from './dto/caller-context.dto';
+import { DeleteCustomersDto } from './dto/delete-customers.dto';
+import { BillingMonthQueryDto } from '../organizations/dto/billing-month.dto';
+import { CustomerBillingMonthEnvelopeDto } from './dto/customer-billing-month.dto';
+import { OrganizationBillingService } from '../organizations/organization-billing.service';
 import {
   CreateCustomerDto,
   CustomerIdParamsDto,
@@ -46,7 +51,40 @@ import {
 @ApiResponse({ status: 503, type: ErrorResponseDto })
 @Controller('customers')
 export class CustomersController {
-  constructor(private readonly customers: CustomersService) {}
+  constructor(
+    private readonly customers: CustomersService,
+    private readonly billing: OrganizationBillingService,
+  ) {}
+
+  @Get(':id/billing')
+  @ApiCookieAuth('adminSession')
+  @ApiOperation({
+    summary: '고객 개인 월결제 사용액 조회',
+    description:
+      '모든 ACTIVE 관리자. 결제 확정 시각의 한국 시간 월을 기준으로 개인 월결제 원금만 합산합니다. month 생략 시 한국 시간 이번 달입니다.',
+  })
+  @ApiOkResponse({ type: CustomerBillingMonthEnvelopeDto })
+  billingMonth(@Param() params: CustomerIdParamsDto, @Query() query: BillingMonthQueryDto) {
+    return this.billing.readCustomer(params.id, query.month);
+  }
+
+  @Delete()
+  @HttpCode(204)
+  @ApiCookieAuth('adminSession')
+  @AuditOperation({ action: 'CUSTOMER_DELETED', targetType: 'CUSTOMER', target: 'none' })
+  @ApiOperation({
+    summary: '고객 단건·다건 soft delete',
+    description:
+      '모든 ACTIVE 관리자 세션·허용 Origin 전용. customerSeqs 배열 1~100개. 고객과 소속·개인 PIN을 soft delete하며 주문·통화·결제 이력은 보존합니다. 미존재·기삭제가 있거나 감사 저장에 실패하면 전체 롤백합니다. 잠금 경합은 409입니다.',
+  })
+  @ApiNoContentResponse({ description: '전체 삭제 완료. 응답 본문 없음.' })
+  removeMany(@Body() input: DeleteCustomersDto, @Req() request: authGuard.AuthRequest) {
+    return this.customers.removeMany(
+      input.customerSeqs,
+      request.admin.adminUserSeq,
+      request.requestId,
+    );
+  }
 
   @Post('context')
   @HttpCode(200)
@@ -66,7 +104,8 @@ export class CustomersController {
   @ApiCookieAuth('adminSession')
   @ApiOperation({
     summary: '고객 목록',
-    description: '모든 ACTIVE 관리자. 고객 번호 내림차순. AI 초기 데이터 조회는 별도 API입니다.',
+    description:
+      '모든 ACTIVE 관리자. 고객 번호 내림차순. availablePaymentMethods는 고객 확인 API와 동일한 현재 결제 가능 수단이며 탈퇴 고객은 빈 배열입니다. 실제 주문·결제 시 자격은 다시 확인합니다. AI 초기 데이터 조회는 별도 API입니다.',
   })
   @ApiOkResponse({ type: CustomersEnvelopeDto })
   list(@Query() query: ListCustomersQueryDto) {
@@ -99,6 +138,7 @@ export class CustomersController {
   find(@Param() params: CustomerIdParamsDto, @Req() request: authGuard.AuthRequest) {
     return this.customers.find(params.id, Boolean(request.admin));
   }
+
   @Patch(':id')
   @AuditOperation({ action: 'CUSTOMER_UPDATED', targetType: 'CUSTOMER', target: 'id' })
   @authGuard.MvpAiCustomerAccess()

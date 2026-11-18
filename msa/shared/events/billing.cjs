@@ -5,7 +5,7 @@ const keys = (value, expected) => object(value) && Object.keys(value).sort().joi
 const id = value => Number.isInteger(value) && value > 0 && value <= 2147483647;
 const name = value => typeof value === 'string';
 const month = value => typeof value === 'string' && /^(?!0000)[0-9]{4}-(0[1-9]|1[0-2])$/.test(value);
-const amount = value => Number.isSafeInteger(value) && value >= 0;
+const amount = value => Number.isInteger(value) && value >= 0;
 
 function validateBilling(event, type, source) {
   validateEvent(event);
@@ -14,6 +14,9 @@ function validateBilling(event, type, source) {
   if (type === 'BillingReadRequested')
     valid &&= source === 'customer' && keys(p, 'id,month,organizationName') && id(p.id) &&
       (p.month === null || month(p.month)) && (p.organizationName === null || name(p.organizationName));
+  else if (type === 'CustomerBillingReadRequested')
+    valid &&= source === 'customer' && keys(p, 'id,month') && id(p.id) &&
+      (p.month === null || month(p.month));
   else if (type === 'BillingOrganizationsReadRequested')
     valid &&= source === 'order' && keys(p, '');
   else if (type === 'BillingRolloverRequested') {
@@ -73,6 +76,9 @@ async function requestBilling(url, token, event) {
   if (event.eventType==='BillingOrganizationsReadRequested'
     ? !Array.isArray(value) || !value.every(id) || new Set(value).size!==value.length
     : event.eventType==='BillingRolloverRequested' ? typeof value!=='boolean'
+    : event.eventType==='CustomerBillingReadRequested' ?
+      !keys(value,'customerSeq,month,monthlyAmount') || value.customerSeq!==event.payload.id ||
+      !month(value.month) || (event.payload.month!==null && value.month!==event.payload.month) || !amount(value.monthlyAmount)
     : !keys(value,'groupBillingAmount,month,monthlyAmount,organizationName,organizationSeq') ||
       value.organizationSeq!==event.payload.id || !month(value.month) ||
       (event.payload.month!==null && value.month!==event.payload.month) ||

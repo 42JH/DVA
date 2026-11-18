@@ -4,10 +4,10 @@ DO $$
 DECLARE n integer;
 BEGIN
  SELECT count(*) INTO n FROM pg_tables WHERE schemaname='public';
- IF n<>30 THEN RAISE EXCEPTION 'Expected 30 public tables, found %',n; END IF;
+ IF n<>31 THEN RAISE EXCEPTION 'Expected 31 public tables, found %',n; END IF;
  SELECT count(*) INTO n FROM pg_constraint c JOIN pg_namespace s ON s.oid=c.connamespace
  WHERE s.nspname='public' AND c.contype='f';
- IF n<>25 THEN RAISE EXCEPTION 'Expected 25 foreign keys, found %',n; END IF;
+ IF n<>28 THEN RAISE EXCEPTION 'Expected 28 foreign keys, found %',n; END IF;
  SELECT count(*) INTO n FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid
  JOIN pg_namespace s ON s.oid=c.relnamespace WHERE s.nspname='public' AND NOT t.tgisinternal;
  IF n<>10 THEN RAISE EXCEPTION 'Expected 10 business triggers, found %',n; END IF;
@@ -230,7 +230,7 @@ BEGIN
     AND tgname='faq_question_examples_reset' AND tgenabled='O')
   OR NOT EXISTS(SELECT 1 FROM db_migrations.applied_versions WHERE version='052-faq-question-examples.sql') THEN
   RAISE EXCEPTION 'FAQ question snapshots, independent retention or migration missing'; END IF;
- RAISE NOTICE 'PASS: 29 public tables, 25 FKs, 10 triggers, company PIN retirement/FAQ snapshots/dashboard/retention/retry/payment recovery schema and migration ledger';
+ RAISE NOTICE 'PASS: core schema, constraints, triggers and migration ledger';
  IF to_regclass('public.order_parcel_drafts') IS NULL
   OR NOT EXISTS(SELECT 1 FROM db_migrations.applied_versions WHERE version='055-parcel-draft-intake.sql')
   OR NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='order_parcel_drafts' AND column_name='order_seq' AND udt_name='int4' AND is_nullable='YES')
@@ -265,6 +265,35 @@ BEGIN
   OR to_regclass('public.call_sessions_finalized_customer_idx') IS NULL
   OR to_regclass('public.call_sessions_finalized_caller_idx') IS NULL THEN
   RAISE EXCEPTION 'Incomplete latest call indexes or migration missing'; END IF;
+ IF NOT EXISTS(SELECT 1 FROM db_migrations.applied_versions WHERE version='063-member-payment-policy.sql')
+  OR (SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='memberships'
+   AND column_name IN ('monthly_billing_enabled','group_billing_enabled') AND udt_name='bool' AND is_nullable='NO')<>2 THEN
+  RAISE EXCEPTION 'Employee payment policy schema or migration missing'; END IF;
+ IF NOT EXISTS(SELECT 1 FROM db_migrations.applied_versions WHERE version='064-payment-cards.sql')
+  OR to_regclass('public.payment_cards') IS NULL
+  OR (SELECT count(*) FROM pg_constraint WHERE conrelid=to_regclass('public.payment_cards') AND contype='f')<>2
+  OR NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='public.order_payment_requests'::regclass
+   AND contype='f' AND confrelid=to_regclass('public.payment_cards') AND confdeltype='n')
+  OR (SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='order_payment_requests'
+   AND column_name IN ('payment_card_seq','card_payment_order_id','card_payment_failed'))<>3
+  OR (SELECT count(*) FROM pg_index WHERE indexrelid IN (to_regclass('public.payment_cards_customer_active'),to_regclass('public.payment_cards_company_active'))
+   AND indisvalid AND indisunique)<>2
+  OR to_regclass('public.payment_card_requests_pending') IS NULL THEN
+  RAISE EXCEPTION 'Registered payment card schema or migration missing'; END IF;
+ IF NOT EXISTS(SELECT 1 FROM db_migrations.applied_versions WHERE version='065-persona-soft-delete.sql')
+  OR (SELECT count(*) FROM information_schema.columns WHERE table_schema='public'
+   AND table_name IN ('ai_personas','ai_persona_versions','ai_persona_drafts') AND column_name='deleted_at'
+   AND udt_name='timestamptz' AND is_nullable='YES' AND column_default IS NULL)<>3
+  OR NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='public.ai_persona_versions'::regclass
+   AND conname='ai_persona_deleted_inactive_check' AND convalidated) THEN
+  RAISE EXCEPTION 'Persona soft deletion schema or migration missing'; END IF;
+ IF NOT EXISTS(SELECT 1 FROM db_migrations.applied_versions WHERE version='067-customer-cascade-retention.sql')
+  OR to_regclass('public.customers_related_deletion_due_idx') IS NULL
+  OR to_regclass('public.orders_deleted_retention_idx') IS NULL
+  OR to_regclass('public.calls_deleted_retention_idx') IS NULL
+  OR to_regclass('public.parcel_drafts_deleted_retention_idx') IS NULL THEN
+  RAISE EXCEPTION 'Customer cascade deletion or retention migration missing'; END IF;
+ RAISE NOTICE 'PASS: 31 public tables, 28 FKs, 10 triggers including employee policy, registered cards and customer cascade retention';
 END $$;
 SELECT version,sha256,applied_at FROM db_migrations.applied_versions ORDER BY version;
 SELECT schemaname,tablename FROM pg_tables

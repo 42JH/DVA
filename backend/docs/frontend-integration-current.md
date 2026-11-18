@@ -1,8 +1,12 @@
 # 프론트 파트 연동 명세 — 2026-11-04
 
+관리자 권한은 SYSTEM_ADMIN·OPERATOR 두 개이며 계정 관리 4개만 최상위 전용입니다. DELETE와 권한의 최신 통합 계약은 [프론트 전달 명세](frontend-delete-admin-roles.md)를 우선합니다.
+
+DELETE의 최신 URL·배열 body·권한은 [전체 DELETE 통합 명세](delete-array-contracts.md)를 우선합니다. 기존 단건 DELETE URL은 제거합니다.
+
 로그인·가입·비밀번호 처리의 429는 `RATE_LIMITED`와 초 단위 `Retry-After`로 안내한다. 이름·새 비밀번호 상한과 기존 비밀번호 입력 호환성은 [S04 인증 제한 계약](auth-request-limits.md)을 따른다. 기존 성공 응답·쿠키·업무 API 요청 형식은 유지한다.
 
-[휴대전화 번호 입력 계약](mobile-phone-integration.md): 업무 전화번호는 정확히 11자리 숫자 문자열이다. 폼의 10~11자리 허용을 11자리로 맞춘다. 고객·직원·PIN·주문 입력과 완성 전화번호 필터에 적용한다.
+[전화번호 입력 계약](mobile-phone-integration.md): 고객 식별은 기존 11자리, 배송 발송인은 휴대전화 11자리, 수령인·PIN은 지역번호·070도 허용한다. 폼 검증과 전송값은 최신 통합 명세를 따른다.
 
 코드 기준: `feature/ai-dashboard`, DB migration `050`까지. 운영 API에 적용된 상태는 별도 확인한다. 이번 문서는 실제 요청·표시·갱신에 필요한 현재 계약을 모으며, 구버전 문서의 수거 시각·콜백·좌표·통화 분류·기본 결제수단·물리 삭제 설명보다 우선한다.
 
@@ -14,9 +18,10 @@ AI 상담 성능 대시보드 GET 4개·고객 탭·현재/직전 활성 버전 
 
 - 프론트는 배포된 BE의 `/api`를 base path로 사용한다. 같은 origin이면 상대 경로 `/api/...`로 호출하고, 다른 origin이면 실제 환경 설정을 사용한다.
 - 관리자 인증은 HttpOnly `dva_session` 쿠키다. fetch는 `credentials: 'include'`. AI 서비스 토큰을 브라우저에 넣지 않는다.
+- 기업 공유 배송지 `GET /api/companies/search?q=...`도 같은 관리자 세션으로 조회한다. 기업·소속·고객 ACTIVE 및 주소가 있는 사원만 반환하며, [관리자 배송지 조회 명세](company-directory-admin-access.md)를 따른다. 사번·주소 없는 사원 검색 API는 별도로 유지한다.
 - 고객 확인·등록·상세·수정도 관리자 화면에서는 유효한 세션을 보낸다. 익명 호출은 지원하지 않는다. [S01 업무 토큰](ai-business-auth.md)은 AI 서버 전용이며 프론트 인증 방식은 유지한다.
 - 변경 요청은 허용된 Origin과 JSON Content-Type이 필요하다. 브라우저 Origin을 임의 값으로 덮어쓰지 않는다. 프론트 도메인은 서버 `CORS_ORIGINS`에 정확히 허용되어 있어야 한다. 이번 문서 작성으로 서버 CORS·nginx가 바뀌지는 않는다.
-- ACTIVE인 OPERATOR·SUPERVISOR·SYSTEM_ADMIN이 일반 업무를 사용한다. 관리자 계정 관리는 SYSTEM_ADMIN, 페르소나 편집·publish·AI 옵션은 SUPERVISOR·SYSTEM_ADMIN이다. 로그인하지 않았거나 계정이 비활성이면 해당 로그인/권한 처리를 수행한다.
+- ACTIVE인 OPERATOR·SYSTEM_ADMIN이 일반 업무를 사용한다. 관리자 계정 관리는 SYSTEM_ADMIN, 페르소나 편집·publish·AI 옵션은 OPERATOR·SYSTEM_ADMIN이다. 로그인하지 않았거나 계정이 비활성이면 해당 로그인/권한 처리를 수행한다.
 
 ```javascript
 const response = await fetch('/api/calls?limit=20&offset=0', {
@@ -177,7 +182,7 @@ source.onerror = () => {
 | SUBMISSION_FAILED | 자동 재시도 종료, 담당자 확인 |
 | CANCELLED         | 취소                          |
 
-화면 목록의 query는 `statusGroup`이다. `PAID` 탭은 PAID·SUBMITTING·ACCEPTED, `SUBMISSION_FAILED` 탭은 SUBMITTING_FAILED·SUBMISSION_FAILED를 포함한다. 그룹명과 각 행의 실제 status를 구분한다. 일반 주문 조회의 `status` 필터와도 섞지 않는다.
+화면 목록의 query는 `statusGroup`이다. 전체는 생략하고 COLLECTING·notPaid·PAID·ACCEPTED·SUBMISSION_FAILED·CANCELLED의 6개 그룹을 사용한다. `PAID`는 PAID·SUBMITTING·SUBMITTING_FAILED, `ACCEPTED`는 ACCEPTED, `SUBMISSION_FAILED`는 SUBMISSION_FAILED만 포함한다. `statusCounts.accepted`를 접수 완료 탭 건수로 사용하며 기존 `paid`·`submissionFailed`도 새 그룹 기준이다. 각 행의 실제 status는 유지하며 일반 주문 조회의 `status` 필터와도 섞지 않는다. [변경 명세](order-status-groups.md)를 따른다.
 
 디버 요청은 최대 10초, 첫 전송부터 10분 동안 최소 1분 간격으로 BE가 자동 재시도한다. 프론트의 refresh·재호출은 이 기한을 연장하지 않는다. 자동 재시도 중 매분 수동 API를 반복 호출하지 않는다. 명시적 재시도 버튼은 `POST /api/admin/orders/{id}/retry`이며 현재 상태를 재조회하고 409·처리 중을 구분한다. 수동 재시도도 자동 기한을 새로 열지 않는다. ACCEPTED만 접수 성공이다.
 
@@ -191,14 +196,14 @@ BE가 삭제·만료 조건을 적용하므로 프론트는 DB에 직접 쿼리�
 
 | API                                     | 조건·영향                                                                                                                               |
 | --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `DELETE /api/orders/{id}`               | 관리자, 본문 없음. COLLECTING/CANCELLED/ACCEPTED 중 진행 통화·승인·안내 발송 등 차단 조건이 없을 때 숨김. 결제 취소·청구 금액 변경 아님 |
-| `DELETE /api/calls/{id}`                | 관리자, 본문 없음. PBX 종료 확인 + 연결 녹취 저장 완료 후 숨김. 주문은 보존                                                             |
-| `DELETE /api/admins/{id}`               | SYSTEM_ADMIN만 OPERATOR/SUPERVISOR 삭제, 대상 세션 즉시 폐기. SYSTEM_ADMIN 삭제 금지                                                    |
-| `DELETE /api/companies/{id}`            | 기업·부서·소속·기업 PIN을 함께 숨김                                                                                                     |
-| `DELETE /api/departments/{id}`          | 부서·그 소속·해당 기업 PIN을 숨김                                                                                                       |
-| `DELETE /api/members/{id}`              | 소속만 숨김. 고객 보존                                                                                                                  |
+| `DELETE /api/orders` + `{ orderSeqs: [id] }` | 관리자, 본문 없음. COLLECTING/CANCELLED/ACCEPTED 중 진행 통화·승인·안내 발송 등 차단 조건이 없을 때 숨김. 결제 취소·청구 금액 변경 아님 |
+| `DELETE /api/calls` + `{ callSessionSeqs: [id] }` | 관리자, 본문 없음. PBX 종료 확인 + 연결 녹취 저장 완료 후 숨김. 주문은 보존                                                             |
+| `DELETE /api/admins` + `{ adminUserSeqs: [id] }` | SYSTEM_ADMIN만 OPERATOR 삭제, 대상 세션 즉시 폐기. SYSTEM_ADMIN 삭제 금지                                                    |
+| `DELETE /api/companies` + `{ organizationSeqs: [id] }` | 기업·부서·소속·기업 PIN을 함께 숨김                                                                                                     |
+| `DELETE /api/departments` + `{ departmentSeqs: [id] }` | 부서·그 소속·해당 기업 PIN을 숨김                                                                                                       |
+| `DELETE /api/members` + `{ membershipSeqs: [id] }` | 소속만 숨김. 고객 보존                                                                                                                  |
 | `DELETE /api/faqs`                      | `{ faqEntrySeqs: [...] }`. 원문 보관, AI DELETE 알림                                                                                    |
-| `DELETE /api/unanswered-questions/{id}` | OPEN 삭제, DELETED 재호출 204, REGISTERED 409                                                                                           |
+| `DELETE /api/unanswered-questions` + `{ unansweredQuestionSeqs: [id] }` | OPEN 삭제, DELETED 재호출 204, REGISTERED 409                                                                                           |
 
 신규 주문·통화 DELETE는 성공 204, 이미 삭제/미존재/만료면 404, 진행 상태 409 INVALID_STATE, 잠금 경합 409 REQUEST_IN_PROGRESS다. notPaid는 취소를 먼저 처리하고 PAID·SUBMITTING·중간/최종 접수 실패는 결제·접수 결과부터 확인한다. 녹취 RECEIVED/FAILED/업로드 중에는 통화 DELETE가 409다. 발급된 URL은 기존 최대 5분 만료까지 유효할 수 있다.
 
@@ -208,7 +213,7 @@ BE가 삭제·만료 조건을 적용하므로 프론트는 DB에 직접 쿼리�
 
 ### 관리자
 
-`PATCH /api/admins/{id}`에 `{ "role": "SUPERVISOR" }`를 보내 권한을 바꾼다. role 생략 시 기존 권한, status 생략 시 기존 상태를 유지한다. role/status 중 하나 이상 필요하며 SYSTEM_ADMIN 승격·SYSTEM_ADMIN 대상 변경은 허용하지 않는다. 비활성화·삭제·비밀번호 변경의 세션 종료 동작을 유지한다.
+`PATCH /api/admins/{id}`에 `{ "role": "OPERATOR" }`를 보내 권한을 바꾼다. role 생략 시 기존 권한, status 생략 시 기존 상태를 유지한다. role/status 중 하나 이상 필요하며 SYSTEM_ADMIN 승격·SYSTEM_ADMIN 대상 변경은 허용하지 않는다. 비활성화·삭제·비밀번호 변경의 세션 종료 동작을 유지한다.
 
 ### FAQ·미답변
 

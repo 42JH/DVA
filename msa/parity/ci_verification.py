@@ -32,6 +32,37 @@ def changed(base, paths, root=None):
     return result.returncode == 1
 
 
+def database_changed(base, root=None):
+    root = ROOT if root is None else root
+    baseline_path = 'msa/parity/baseline.json'
+    if changed(base, [path for path in DB_PATHS if path != baseline_path], root):
+        return True
+    if not changed(base, [baseline_path], root):
+        return False
+    try:
+        signatures = []
+        for revision in (base, 'HEAD'):
+            document = json.loads(subprocess.check_output(
+                ['git', 'show', revision + ':' + baseline_path], cwd=root,
+                text=True, stderr=subprocess.DEVNULL))
+            if not re.fullmatch(r'[0-9a-f]{40}', document['commit']):
+                raise ValueError('Invalid reference commit')
+            migrations = document['inventory']['migrations']
+            if not isinstance(migrations, list) or not migrations:
+                raise ValueError('Missing source migrations')
+            for row in migrations:
+                if (not isinstance(row, dict) or set(row) != {'file', 'sha256'}
+                    or not re.fullmatch(r'backend/migrations/[0-9]{3}-[A-Za-z0-9._-]+\.sql', row['file'])
+                    or not re.fullmatch(r'[0-9a-f]{64}', row['sha256'])):
+                    raise ValueError('Invalid source migration')
+            if len({row['file'] for row in migrations}) != len(migrations):
+                raise ValueError('Duplicate source migration')
+            signatures.append(migrations)
+        return signatures[0] != signatures[1]
+    except (subprocess.CalledProcessError, ValueError, TypeError, KeyError):
+        return True
+
+
 def previous(scope, fallback='', root=None):
     root = ROOT if root is None else root
     if scope not in SCOPES:
@@ -70,7 +101,7 @@ def record(scope):
 def reuse_database():
     from ci_images import prepared_image, source_commit
     origin = previous('database', os.environ.get('MSA_BASE_COMMIT', ''))
-    if changed(origin['commit'], DB_PATHS):
+    if database_changed(origin['commit']):
         raise RuntimeError('Database inputs changed; a fresh verification is required')
     image_id = prepared_image('liquibase')
     if not image_id:

@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { privateAddress } from '@dva/events/call-event-reference.cjs';
 const developmentSecurityLogKey = randomBytes(32).toString('hex');
 export interface Environment {
   AUTH_PROXY_HOPS: number;
@@ -15,10 +16,14 @@ export interface Environment {
   OPERATIONS_URL: string;
   CUSTOMER_URL: string;
   ORDER_URL?: string;
+  MSA_INSTANCE_IP?: string;
   CUSTOMER_AUTH_TOKEN: string;
   CONSULTATION_AUTH_TOKEN: string;
   PBX_WEBHOOK_TOKEN?: string;
+  AI_BUSINESS_TOKEN?: string;
   AI_INSIGHTS_TOKEN?: string;
+  CALL_ANALYSIS_OPENAI_API_KEY?: string;
+  CALL_ANALYSIS_CONCURRENCY: number;
   AWS_REGION: string;
   S3_RECORDINGS_BUCKET?: string;
   RECORDING_ALLOWED_HOSTS: string[];
@@ -80,6 +85,29 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
   if (swagger !== 'true' && swagger !== 'false') errors.push('SWAGGER_ENABLED');
   const token = raw.PBX_WEBHOOK_TOKEN;
   const insightsToken = raw.AI_INSIGHTS_TOKEN;
+  const businessToken = raw.AI_BUSINESS_TOKEN;
+  if (
+    businessToken !== undefined &&
+    businessToken !== '' &&
+    (typeof businessToken !== 'string' ||
+      !/^[\x21-\x7e]{32,256}$/.test(businessToken))
+  )
+    errors.push('AI_BUSINESS_TOKEN');
+  const analysisKey = raw.CALL_ANALYSIS_OPENAI_API_KEY;
+  if (
+    analysisKey !== undefined &&
+    analysisKey !== '' &&
+    (typeof analysisKey !== 'string' ||
+      analysisKey.length < 20 ||
+      !/^[\x21-\x7e]+$/.test(analysisKey))
+  )
+    errors.push('CALL_ANALYSIS_OPENAI_API_KEY');
+  const analysisConcurrency = raw.CALL_ANALYSIS_CONCURRENCY ?? '2';
+  if (
+    typeof analysisConcurrency !== 'string' ||
+    !/^[1-4]$/.test(analysisConcurrency)
+  )
+    errors.push('CALL_ANALYSIS_CONCURRENCY');
   if (
     insightsToken !== undefined &&
     insightsToken !== '' &&
@@ -116,17 +144,28 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
         ? securityLogKey
         : developmentSecurityLogKey,
     NODE_ENV: nodeEnv as Environment['NODE_ENV'],
+    MSA_INSTANCE_IP:
+      typeof raw.MSA_INSTANCE_IP === 'string' && raw.MSA_INSTANCE_IP
+        ? raw.MSA_INSTANCE_IP
+        : undefined,
     PORT: port('PORT', 3004),
     DB_HOST: required('DB_HOST'),
     DB_PORT: port('DB_PORT', 5432),
     DB_USER: required('DB_USER'),
     DB_PASSWORD: required('DB_PASSWORD'),
     DB_NAME: required('DB_NAME'),
+    AI_BUSINESS_TOKEN:
+      typeof businessToken === 'string' && businessToken
+        ? businessToken
+        : undefined,
     AI_INSIGHTS_TOKEN:
       typeof insightsToken === 'string' && insightsToken
         ? insightsToken
         : undefined,
     CORS_ORIGINS: origins,
+    CALL_ANALYSIS_OPENAI_API_KEY:
+      typeof analysisKey === 'string' && analysisKey ? analysisKey : undefined,
+    CALL_ANALYSIS_CONCURRENCY: Number(analysisConcurrency) || 2,
     SWAGGER_ENABLED: swagger === 'true',
     OPERATIONS_URL: required('OPERATIONS_URL'),
     CUSTOMER_URL: required('CUSTOMER_URL'),
@@ -220,6 +259,12 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
       errors.push('ORDER_URL');
     }
   }
+  if (
+    raw.MSA_INSTANCE_IP !== undefined &&
+    raw.MSA_INSTANCE_IP !== '' &&
+    !privateAddress(raw.MSA_INSTANCE_IP)
+  )
+    errors.push('MSA_INSTANCE_IP');
   if (errors.length) throw new EnvironmentValidationError(errors);
   return config;
 }

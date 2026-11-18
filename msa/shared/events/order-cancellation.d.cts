@@ -10,6 +10,7 @@ export interface OrderCancellationEvent extends Event {
     command: OrderCancellationCommand;
     caller?: { phone: string | null; endedAt: string | null; orderSeq: number | null };
     customerSeq?: number;
+    unpaidOnly?: true;
   };
 }
 export function validateOrderCancellation(event: unknown, source: 'order' | 'consultation' | 'customer'): asserts event is OrderCancellationEvent;

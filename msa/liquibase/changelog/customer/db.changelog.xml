@@ -33,4 +33,16 @@
   <changeSet id="007-retire-company-pins" author="dva" dbms="postgresql" runInTransaction="true">
     <sqlFile path="007-retire-company-pins.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
   </changeSet>
+  <changeSet id="008-member-payment-policy" author="dva" dbms="postgresql" runInTransaction="true">
+    <sqlFile path="008-member-payment-policy.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
+  </changeSet>
+  <changeSet id="009-payment-cards" author="dva" dbms="postgresql" runInTransaction="true">
+    <sqlFile path="009-payment-cards.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
+  </changeSet>
+  <changeSet id="010-customer-status-index" author="dva" dbms="postgresql" runInTransaction="true">
+    <sqlFile path="010-customer-status-index.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
+  </changeSet>
+  <changeSet id="011-outbox-pending-order-index" author="dva" dbms="postgresql" runInTransaction="true">
+    <sqlFile path="011-outbox-pending-order-index.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
+  </changeSet>
 </databaseChangeLog>

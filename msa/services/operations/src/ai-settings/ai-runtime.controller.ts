@@ -5,11 +5,17 @@ import { ErrorResponseDto } from '../common/dto/api-response.dto';
 import { AiSettingsAccess } from './ai-settings-access';
 import { PersonaApplicationService } from './persona-application.service';
 import { PersonaApplyResultDto, RuntimeConfigQueryDto } from './dto/persona-application.dto';
-import { PersonaVersionResponseDto } from './dto/persona-response.dto';
+import { AiPersonaVersionResponseDto } from './dto/persona-response.dto';
 import { AuditOperation } from '../audit/audit-operation';
+import { PersonaVersion } from './ai-settings.types';
+import { PERSONA_PROMPT_FIELDS } from './persona-prompt';
+
+const adminFields = new Set<string>([...PERSONA_PROMPT_FIELDS, 'createdByAdminUserName']);
+const aiVersion = (version: PersonaVersion) =>
+  Object.fromEntries(Object.entries(version).filter(([key]) => !adminFields.has(key)));
 
 @ApiTags('AI Settings')
-@Roles('SYSTEM_ADMIN')
+@Roles('OPERATOR', 'SYSTEM_ADMIN')
 @ApiResponse({
   status: 400,
   description: '상태·버전 번호·적용 결과 형식 오류.',
@@ -36,15 +42,15 @@ export class AiRuntimeController {
   })
   @ApiOkResponse({
     description: '해당 상태의 전체 설정 버전 한 개.',
-    type: PersonaVersionResponseDto,
+    type: AiPersonaVersionResponseDto,
   })
   @ApiResponse({
     status: 404,
     description: '해당 상태의 페르소나 없음. 임의 기본 페르소나를 선택하지 않습니다.',
     type: ErrorResponseDto,
   })
-  config(@Query() query: RuntimeConfigQueryDto) {
-    return this.applications.runtime(query.status);
+  async config(@Query() query: RuntimeConfigQueryDto) {
+    return aiVersion(await this.applications.runtime(query.status));
   }
 
   @Post('apply-result')
@@ -64,7 +70,7 @@ export class AiRuntimeController {
   @ApiOkResponse({
     description:
       '확인 후 ACTIVE 또는 실패가 기록된 PENDING. HTTP 성공만으로 적용 여부를 판단하지 말고 status를 확인합니다.',
-    type: PersonaVersionResponseDto,
+    type: AiPersonaVersionResponseDto,
   })
   @ApiResponse({
     status: 409,
@@ -72,7 +78,7 @@ export class AiRuntimeController {
       '교체된 대기 요청 또는 버전·applicationId 불일치. AI는 신규 통화를 열기 전에 다시 동기화해야 합니다.',
     type: ErrorResponseDto,
   })
-  result(@Body() input: PersonaApplyResultDto, @Req() request: AuthRequest) {
-    return this.applications.result(input, request.requestId);
+  async result(@Body() input: PersonaApplyResultDto, @Req() request: AuthRequest) {
+    return aiVersion(await this.applications.result(input, request.requestId));
   }
 }

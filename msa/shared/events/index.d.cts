@@ -14,7 +14,15 @@ export function createReceiver<Client>(options: {
 }): (event: Event, authorization: string) => Promise<{eventId: string; status: string}>;
 export function createRelay(options: {
   pool: { connect(): Promise<unknown> }; source: string;
-  destinations: Record<string, {url: string; token: string}>; timeoutMs?: number;
-}): () => Promise<boolean>;
-export function sendEvent(url: string, token: string, event: Event): Promise<void>;
+  destinations: Record<string, {url: string; token: string}>; timeoutMs?: number; eventTypes?: string[];
+}): (auditTransactions?: readonly string[]) => Promise<boolean>;
+export function flushAuditSnapshot(
+  pool: { query(sql: string, values: unknown[]): PromiseLike<unknown> },
+  relay: (auditTransactions: readonly string[]) => Promise<boolean>,
+  reconcile: (ids: string[]) => Promise<void>, ids: string[],
+): Promise<void>;
+export function sendEvent(
+  url: string, token: string, event: Event, signal?: AbortSignal | null,
+  extraHeaders?: { 'X-Dva-Audit-Snapshot': '1' },
+): Promise<void>;
 export function validateEvent(event: unknown): asserts event is Event;

@@ -1,4 +1,3 @@
-import { SearchMembersQueryDto } from './dto/search-members.dto';
 import { Injectable } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import { DatabaseService } from '../database/database.service';
@@ -11,9 +10,11 @@ import {
   InlineMemberDto,
   ListMembersQueryDto,
   UpdateMemberDto,
+  UpdateMemberPaymentsDto,
 } from './dto/member-request.dto';
-import { MemberCandidate } from './members.types';
+import { MemberCandidate, Membership } from './members.types';
 import { CustomersService } from '../customers/customers.service';
+import { SearchMembersQueryDto } from './dto/search-members.dto';
 
 @Injectable()
 export class MembersService {
@@ -81,7 +82,13 @@ export class MembersService {
     adminId: number,
     requestId: string,
   ): Promise<void> {
-    if (input.role === undefined && input.status === undefined && input.departmentSeq === undefined)
+    if (
+      input.role === undefined &&
+      input.status === undefined &&
+      input.departmentSeq === undefined &&
+      input.monthlyBillingEnabled === undefined &&
+      input.groupBillingEnabled === undefined
+    )
       throw new ApiException(400, 'INVALID_REQUEST', '변경할 표시 역할 또는 상태를 입력해 주세요.');
     await this.write(async (client) => {
       const member = await this.repository.member(id, client);
@@ -104,13 +111,47 @@ export class MembersService {
     });
   }
 
-  async remove(id: number, adminId: number, requestId: string): Promise<void> {
+  async remove(id: number | number[], adminId: number, requestId: string): Promise<void> {
+    const ids = (Array.isArray(id) ? [...id] : [id]).sort((a, b) => a - b);
     await this.write(async (client) => {
-      const member = await this.repository.member(id, client);
-      if (!member) throw new ApiException(404, 'NOT_FOUND', '구성원을 찾을 수 없습니다.');
-      await this.repository.customer(member.customerSeq, client);
-      await this.repository.remove(id, client);
-      await this.record('MEMBERSHIP_REMOVED', 'MEMBERSHIP', id, adminId, requestId, client);
+      const rows: Array<Membership | undefined> = [];
+      for (const id of ids) rows.push(await this.repository.member(id, client));
+      if (rows.some((row) => !row))
+        throw new ApiException(404, 'NOT_FOUND', '구성원을 찾을 수 없습니다.');
+      await this.repository.lockCustomers(
+        rows.map((row) => row!.customerSeq).sort((a, b) => a - b),
+        client,
+      );
+      for (const id of ids) {
+        await this.repository.remove(id, client);
+        await this.record('MEMBERSHIP_REMOVED', 'MEMBERSHIP', id, adminId, requestId, client);
+      }
+    });
+  }
+
+  async updatePayments(
+    companyId: number,
+    input: UpdateMemberPaymentsDto,
+    adminId: number,
+    requestId: string,
+  ): Promise<void> {
+    if (input.monthlyBillingEnabled === undefined && input.groupBillingEnabled === undefined)
+      throw new ApiException(400, 'INVALID_REQUEST', '변경할 결제 권한을 입력해 주세요.');
+    await this.write(async (client) => {
+      const rows = await Promise.all(
+        input.membershipSeqs.map((id) => this.repository.member(id, client)),
+      );
+      if (rows.some((row) => !row || row.organizationSeq !== companyId))
+        throw new ApiException(404, 'NOT_FOUND', '해당 기업의 구성원을 지정해 주세요.');
+      await this.repository.lockCustomers(
+        rows.map((row) => row!.customerSeq).sort((a, b) => a - b),
+        client,
+      );
+      await this.company(companyId, client);
+      for (const id of [...input.membershipSeqs].sort((a, b) => a - b)) {
+        await this.repository.update(id, input, client);
+        await this.record('MEMBERSHIP_UPDATED', 'MEMBERSHIP', id, adminId, requestId, client);
+      }
     });
   }
 
@@ -125,6 +166,10 @@ export class MembersService {
     const rows = items.filter((row): row is InlineMemberDto => !('customerSeq' in row));
     const references = items.filter((row): row is CreateMemberDto => 'customerSeq' in row);
     await this.write(async (client) => {
+      await this.customers.lockOrderPhones(
+        client,
+        rows.map((row) => row.phoneNumber),
+      );
       const before = await this.repository.candidates(companyId, rows, client);
       await this.repository.lockCustomers(
         [...before.map((row) => row.customerSeq), ...references.map((row) => row.customerSeq)],
@@ -205,6 +250,8 @@ export class MembersService {
           employeeNo: row.employeeNo,
           departmentSeq: row.departmentSeq,
           role: row.role,
+          monthlyBillingEnabled: row.monthlyBillingEnabled,
+          groupBillingEnabled: row.groupBillingEnabled,
         })),
         client,
       );

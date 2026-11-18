@@ -93,7 +93,7 @@ try:
 
     checks = {'customer': 'customer-check.sql', 'order': 'order-storage-check.sql', 'consultation': 'consultation-pbx-check.sql',
               'delivery': 'delivery-storage-check.sql', 'operations': 'operations-check.sql'}
-    for service, tables, fks in [('customer',8,7),('order',11,3),('consultation',12,9),('delivery',4,1),('operations',17,8)]:
+    for service, tables, fks in [('customer',9,9),('order',11,3),('consultation',12,9),('delivery',4,1),('operations',17,8)]:
         db = service + '_db'
         sql('postgres', f'CREATE ROLE {service}_app LOGIN;\nCREATE DATABASE {db} OWNER {service}_app;\nREVOKE ALL ON DATABASE {db} FROM PUBLIC;', service+'-setup')
         lb(service, db, 'validate', service+'-validate')
@@ -102,7 +102,7 @@ try:
         assert before == '0', before
         lb(service, db, 'update', service+'-update')
         catalog = sql(db, "SELECT (SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tablename NOT IN ('databasechangelog','databasechangeloglock')), (SELECT count(*) FROM pg_constraint WHERE contype='f' AND connamespace='public'::regnamespace), (SELECT count(*) FROM databasechangelog);", service+'-catalog')
-        changesets = {'customer': 7, 'operations': 10, 'consultation': 8, 'order': 4, 'delivery': 3}[service]
+        changesets = {'customer': 11, 'operations': 14, 'consultation': 12, 'order': 7, 'delivery': 3}[service]
         assert catalog == f'{tables}|{fks}|{changesets}', catalog
         owners = sql(db, f"SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tableowner <> '{service}_app';", service+'-owners')
         assert owners == '0', owners
@@ -113,6 +113,7 @@ try:
         if service in checks:
             sql(db, (SOURCE / checks[service]).read_text(encoding='utf-8'), service+'-workflow', service+'_app')
         if service == 'customer':
+            assert sql(db, "SELECT indisvalid AND pg_get_expr(indpred,indrelid)='(delivered_at IS NULL)' AND pg_get_indexdef(indexrelid,1,true)='outbox_seq' FROM pg_index WHERE indexrelid='public.outbox_pending_order_idx'::regclass;", 'customer-outbox-pending-index') == 't'
             sql(db, (SOURCE / 'customer-reads-check.sql').read_text(encoding='utf-8'), 'customer-reads-workflow', 'customer_app')
         if service == 'operations':
             sql(db, (SOURCE / 'faqs-check.sql').read_text(encoding='utf-8'), 'faqs-workflow', 'operations_app')
@@ -160,6 +161,74 @@ try:
     output = ci_command('customer', db, 'apply', 'stale-approval-rejected', approved, failure=True)
     assert 'Pending changes changed after preview' in output, output
     assert sql(db, 'SELECT id,md5sum,dateexecuted FROM databasechangelog ORDER BY orderexecuted;', 'stale-approval-preserves-history') == applied
+    db = 'customer_payment_upgrade_db'
+    sql('postgres', f'CREATE DATABASE {db} OWNER customer_app;', 'member-payment-upgrade-setup')
+    lb('customer', db, 'update-count', 'member-payment-upgrade-baseline', extra=('--count=7',))
+    sql(db, """INSERT INTO organizations(name,status) VALUES('existing company','ACTIVE');
+      INSERT INTO customers(name,phone_number,status) VALUES('one','01012345001','ACTIVE'),('two','01012345002','ACTIVE'),('three','01012345003','ACTIVE');
+      INSERT INTO departments(organization_seq,name,group_billing_enabled) VALUES(1,'enabled',true),(1,'disabled',false);
+      INSERT INTO memberships(customer_seq,organization_seq,department_seq,employee_no,role,status)
+        VALUES(1,1,1,'1','MEMBER','ACTIVE'),(2,1,2,'2','MEMBER','INACTIVE'),(3,1,NULL,'3','MEMBER','ACTIVE');""",
+        'member-payment-upgrade-fixture', 'customer_app')
+    history = sql(db, 'SELECT id,md5sum,dateexecuted FROM databasechangelog ORDER BY orderexecuted;', 'member-payment-upgrade-history')
+    migration = (BASE / 'changelog/customer/008-member-payment-policy.sql').read_text(encoding='utf-8')
+    run(['docker', 'exec', '-i', name, 'psql', '-X', '-At', '-v', 'ON_ERROR_STOP=1',
+         '-U', 'customer_app', '-d', db], 'member-payment-atomic-failure',
+        'BEGIN;\n' + migration + '\nSELECT 1/0;\nCOMMIT;', failure=True)
+    assert sql(db, """SELECT
+      (SELECT count(*) FROM information_schema.columns WHERE table_name='memberships' AND column_name IN ('monthly_billing_enabled','group_billing_enabled')),
+      (SELECT column_default FROM information_schema.columns WHERE table_name='organizations' AND column_name='monthly_billing_enabled'),
+      (SELECT count(*) FROM memberships);""", 'member-payment-atomic-preserved') == '0|false|3'
+    lb('customer', db, 'update', 'member-payment-upgrade-current')
+    assert sql(db, """SELECT string_agg(membership_seq||':'||monthly_billing_enabled||':'||group_billing_enabled,',' ORDER BY membership_seq) FROM memberships;
+      SELECT monthly_billing_enabled FROM organizations WHERE organization_seq=1;
+      INSERT INTO organizations(name,status) VALUES('new company','ACTIVE') RETURNING monthly_billing_enabled;""",
+        'member-payment-upgrade-values', 'customer_app') == '1:true:true,2:true:false,3:true:false\nf\nt\nINSERT 0 1'
+    assert sql(db, 'SELECT id,md5sum,dateexecuted FROM databasechangelog WHERE orderexecuted<=7 ORDER BY orderexecuted;', 'member-payment-upgrade-history-preserved') == history
+    db = 'admin_role_upgrade_db'
+    sql('postgres', f'CREATE DATABASE {db} OWNER operations_app;', 'admin-role-upgrade-setup')
+    lb('operations', db, 'update-count', 'admin-role-upgrade-baseline', extra=('--count=12',))
+    sql(db, """INSERT INTO admin_users(login_id,name,password_hash,role,status,created_at,last_login_at,deleted_at)
+      SELECT 'legacy-role-'||n,'private-name-'||n,'unchanged-password-'||n,
+        CASE WHEN n<=4 THEN 'SUPERVISOR' WHEN n=5 THEN 'OPERATOR' ELSE 'SYSTEM_ADMIN' END,
+        CASE WHEN n=2 THEN 'PENDING' WHEN n=3 THEN 'INACTIVE' ELSE 'ACTIVE' END,
+        '2020-01-01Z','2025-02-03Z',CASE WHEN n=4 THEN '2026-01-01Z'::timestamptz END
+      FROM generate_series(1,6) n;
+      INSERT INTO admin_sessions(session_token_hash,admin_user_seq,created_at,expires_at)
+      SELECT lpad(n::text,64,'0'),n,'2026-11-01Z','2026-11-01T09:00:00Z' FROM generate_series(1,6) n;""",
+        'admin-role-upgrade-fixture', 'operations_app')
+    snapshot = """SELECT jsonb_build_object(
+      'admins',(SELECT jsonb_agg(to_jsonb(a) ORDER BY admin_user_seq) FROM admin_users a),
+      'sessions',(SELECT jsonb_agg(to_jsonb(s) ORDER BY admin_user_seq) FROM admin_sessions s),
+      'audits',(SELECT jsonb_agg(to_jsonb(a) ORDER BY audit_log_seq) FROM audit_logs a));"""
+    before = json.loads(sql(db, snapshot, 'admin-role-upgrade-before'))
+    history = sql(db, 'SELECT id,md5sum,dateexecuted FROM databasechangelog ORDER BY orderexecuted;', 'admin-role-upgrade-history')
+    sql(db, """CREATE FUNCTION reject_role_migration_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+      IF NEW.action='ADMIN_ACCESS_CHANGED' AND NEW.target_seq=2 THEN RAISE EXCEPTION 'private migration audit failure'; END IF;
+      RETURN NEW; END $$; CREATE TRIGGER reject_role_migration_audit BEFORE INSERT ON audit_logs
+      FOR EACH ROW EXECUTE FUNCTION reject_role_migration_audit();""", 'admin-role-audit-failure-setup', 'operations_app')
+    lb('operations', db, 'update', 'admin-role-audit-failure', failure=True)
+    assert json.loads(sql(db, snapshot, 'admin-role-audit-failure-preserved')) == before
+    assert sql(db, 'SELECT id,md5sum,dateexecuted FROM databasechangelog ORDER BY orderexecuted;', 'admin-role-failure-history-preserved') == history
+    sql(db, 'DROP TRIGGER reject_role_migration_audit ON audit_logs; DROP FUNCTION reject_role_migration_audit();', 'admin-role-audit-failure-cleanup', 'operations_app')
+    lb('operations', db, 'update', 'admin-role-upgrade-current')
+    after = json.loads(sql(db, snapshot, 'admin-role-upgrade-after'))
+    assert after['sessions'] == before['sessions']
+    assert after['admins'] == [{**row, 'role': 'OPERATOR' if row['role']=='SUPERVISOR' else row['role']} for row in before['admins']]
+    assert len(after['audits']) == 4
+    assert len({row['request_id'] for row in after['audits']}) == 1
+    assert uuid.UUID(after['audits'][0]['request_id']).version == 4
+    for target, row in enumerate(after['audits'], 1):
+        assert row['actor_type']=='SYSTEM' and row['actor_seq'] is None
+        assert row['action']=='ADMIN_ACCESS_CHANGED' and row['target_type']=='ADMIN_USER' and row['target_seq']==target
+        assert row['result']=='SUCCESS' and row['metadata']=={}
+        assert row['actor_name'] is None and row['target_admin_name'] is None
+    assert sql(db, 'SELECT id,md5sum,dateexecuted FROM databasechangelog WHERE orderexecuted<=12 ORDER BY orderexecuted;', 'admin-role-upgrade-history-preserved') == history
+    lb('operations', db, 'update', 'admin-role-upgrade-repeat')
+    assert json.loads(sql(db, snapshot, 'admin-role-upgrade-no-duplicate')) == after
+    run(['docker','exec','-i',name,'psql','-X','-At','-v','ON_ERROR_STOP=1','-U','operations_app','-d',db],
+        'admin-role-legacy-value-rejected', "UPDATE admin_users SET role='SUPERVISOR' WHERE admin_user_seq=1;", failure=True)
+    assert json.loads(sql(db, snapshot, 'admin-role-invalid-value-preserved')) == after
     verify_order_schema(BASE, sql, report)
     verify_parcel_draft_schema(BASE, logs, sql, lb, report)
     report['passed'] = True

@@ -1,6 +1,7 @@
 """Compare operations against the unchanged monolith on disposable Docker DBs."""
 import json
 import importlib.util
+import shutil
 from pathlib import Path
 import subprocess
 import time
@@ -34,7 +35,7 @@ def main():
         run('docker', 'create', '--name', name, '--label', LABEL, '--network', RUN,
             *args, image, *command, label=name + '-create')
         resources.append(('container', name))
-        if '--test' in command:
+        if '--test' in command and image != images.get('monolith'):
             copy('msa/parity/fixture-reset.cjs', name, '/app/service/test/fixture-reset.cjs')
 
     def complete(name):
@@ -129,6 +130,32 @@ def main():
                   '-e', 'SECURITY_LOG_HMAC_KEY=' + uuid.uuid4().hex + uuid.uuid4().hex,
                   '-e', 'CONSULTATION_AUTH_TOKEN=' + password,
                   '-e', 'CONSULTATION_URL=http://consultation-app:3004']
+        role_maps = {}
+        for side in ('monolith', 'operations'):
+            name = RUN + '-' + side + '-role-metadata'
+            create(name, images[side], *common, '-e', 'NODE_ENV=test', '-e', 'DB_HOST=db',
+                   command=('node', '-e', "require('reflect-metadata');const {adminRoles}=require('./inventory.cjs');console.log(JSON.stringify(adminRoles(require('./dist/app.module').AppModule)))"))
+            copy('msa/parity/inventory.cjs', name, '/app/' + ('service/' if side == 'operations' else '') + 'inventory.cjs')
+            complete(name)
+            role_maps[side] = json.loads(run('docker', 'logs', name, label=side + '-role-map'))
+        owned = {route['method'] + ' ' + route['path'] for route in json.loads(
+            (ROOT / 'msa/parity/baseline.json').read_text())['inventory']['routes'] if route['service'] == 'operations'}
+        expected_roles = {route: roles for route, roles in role_maps['monolith'].items() if route in owned}
+        assert len(role_maps['monolith']) == 95 and expected_roles
+        # The pinned monolith predates persona-check. Verify each new public route and role.
+        persona_routes = (
+            'GET /scenarios', 'GET /scenarios/:id', 'GET /runs', 'POST /runs',
+            'POST /runs/:runId/stop', 'GET /runs/:runId', 'GET /runs/:runId/:scenario/verdict',
+            'GET /runs/:runId/:scenario/record', 'GET /runs/:runId/:scenario/audio',
+        )
+        for route in persona_routes:
+            method, path = route.split()
+            expected_roles[f'{method} /api/persona-check{path}'] = ['OPERATOR', 'SYSTEM_ADMIN']
+        assert role_maps['operations'] == expected_roles, 'Operations public role metadata differs'
+        report['adminRouteRoles'] = role_maps
+        name = RUN + '-persona-check-contract'
+        create(name, images['operations-checks'], command=('node', '--test', 'test/persona-check.test.cjs'))
+        complete(name)
         name = RUN + '-persona-peer'
         create(name, images['operations-checks'], '--network-alias', 'persona-fixture',
                '-e', 'NODE_ENV=test', '-e', 'AI_PERSONA_TOKEN=' + password,
@@ -143,17 +170,47 @@ def main():
                '--test-concurrency=1', 'test/auth.test.cjs', 'test/auth.integration.test.cjs'))
         run('docker', 'cp', str(runtime), name + ':/app/service/test/customer-runtime', label='auth-consumer-runtime')
         for file in ('auth.test.cjs', 'auth.integration.test.cjs'):
-            copy('backend/test/' + file, name, '/app/service/test/' + file)
+            source = ROOT / 'backend/test' / file
+            if file == 'auth.integration.test.cjs':
+                # Cross-domain rows do not exist in the operations DB; assert absence instead.
+                text = source.read_text(encoding='utf-8')
+                for table, alias in (('customers', 'customers'), ('orders', 'orders'), ('call_sessions', 'calls')):
+                    original = f'(SELECT count(*) FROM {table}) AS {alias}'
+                    assert text.count(original) == 1, 'Source ownership snapshot changed: ' + table
+                    text = text.replace(original, f'(SELECT to_regclass(\'{table}\')::text) AS {alias}')
+                original = 'assert.equal(routes.size, 95);'
+                assert text.count(original) == 1, 'Source administrator route scope changed'
+                # Compare public owned routes; MSA health/private event controllers have no monolith counterpart.
+                scope = json.dumps(sorted(expected_roles))
+                text = text.replace(original, f'''const ownedRoutes = {scope};
+  for (const route of routes.keys()) if (!ownedRoutes.includes(route)) routes.delete(route);
+  assert.deepEqual([...routes.keys()].sort(), ownedRoutes);
+  assert.equal(routes.size, {len(expected_roles)});''')
+                source = runtime.parent / file
+                source.write_text(text, encoding='utf-8')
+            copy(source, name, '/app/service/test/' + file)
         copy('msa/parity/auth-consumer-fixture.cjs', name, '/app/service/test/auth-consumer-fixture.cjs')
+        copy('backend/migrations', name, '/app/service/migrations')
         complete(name)
         # Auth bootstrap requires zero administrators; persona fixtures create their own.
         # Run the unchanged suites separately so Node's file sorting cannot reverse them.
         name = RUN + '-' + side + '-persona-suite'
         create(name, images[side + '-checks'], *common, '--add-host=db:' + addresses[side],
                '-e', 'NODE_ENV=test', '-e', 'DB_HOST=db', command=('node',
-               '--test', '--test-concurrency=1', 'test/ai-settings.test.cjs', 'test/ai-settings.integration.test.cjs'))
+               '--test', '--test-concurrency=1',
+               # Backend cache/request coalescing is explicitly outside this migration.
+               '--test-skip-pattern=^(shared option reads isolate callers, expire on settlement and separate rotated credentials|health shares only the upstream probe and checks each caller database independently)$',
+               'test/ai-settings.test.cjs', 'test/ai-settings.integration.test.cjs'))
         for file in (ROOT / 'backend/test').glob('ai-settings*.cjs'):
-            copy(file.relative_to(ROOT), name, '/app/service/test/' + file.name)
+            source = file
+            if file.name == 'ai-settings-deletion.cjs':
+                text = file.read_text(encoding='utf-8')
+                start = text.index("  test('historical and late call analyses retain deleted persona version references'")
+                end = text.index("  test('deletion and AI activation serialize", start)
+                # This cross-owner case runs through real APIs in call-analysis-parity.
+                source = runtime.parent / file.name
+                source.write_text(text[:start] + text[end:], encoding='utf-8')
+            copy(source, name, '/app/service/test/' + file.name)
         for file in ('helpers/ai-settings.cjs', 'helpers/application.cjs'):
             copy('backend/test/' + file, name, '/app/service/test/' + file)
         copy('backend/migrations', name, '/app/service/migrations')
@@ -241,7 +298,7 @@ def main():
         create(name, images['operations-checks'], '-e', 'NODE_ENV=test',
                '-e', 'PGUSER=operations_app', '-e', 'PGPASSWORD=' + password,
                '-e', 'PGDATABASE=dva_webhook_test', '-e', 'CONSULTATION_AUTH_TOKEN=' + password,
-               command=('node', '--test', 'test/faqs-parity.test.cjs'))
+               command=('node', '--test', '--test-name-pattern=^FAQ production', 'test/faqs-parity.test.cjs'))
         copy('msa/parity/faqs-parity.test.cjs', name, '/app/service/test/faqs-parity.test.cjs')
         complete(name)
         # All ordinary API comparisons run with notifications disabled, then use real workers.
@@ -268,7 +325,7 @@ def main():
         name=RUN+'-faq-after-restart'
         create(name,images['operations-checks'],'-e','NODE_ENV=test','-e','PGUSER=operations_app',
                '-e','PGPASSWORD='+password,'-e','PGDATABASE=dva_webhook_test',
-               '-e','AI_FAQ_TOKEN='+password,'-e','FAQ_RECOVERY=after',
+               '-e','AI_FAQ_TOKEN='+password,'-e','AI_BUSINESS_TOKEN='+password,'-e','FAQ_RECOVERY=after',
                command=('node','--test','test/faq-recovery.test.cjs'))
         copy('msa/parity/faq-recovery.test.cjs',name,'/app/service/test/faq-recovery.test.cjs')
         run('docker','cp',str(LOGS/'faq-before-restart.json'),name+':/app/service/test/faq-before-restart.json',label='faq-recovery-copy-state')
@@ -289,6 +346,37 @@ def main():
                 {'readinessProbe': {'httpGet': {'path': '/operations/health/ready'}}}]}}}},
             {'kind': 'Service', 'spec': {'ports': [{'name': 'http', 'port': 3005}]}},
         ])
+        probe = LOGS / 'retention-probe'
+        probe.mkdir(exist_ok=True)
+        for file in ('faqs-parity.test.cjs', 'fixture-reset.cjs'):
+            shutil.copyfile(ROOT / 'msa/parity' / file, probe / file)
+        at = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+        projections = {}
+        for phase in ('timer', 'preserves'):
+            if phase == 'preserves':
+                for app in ('monolith-faq-app', 'operations-faq-app', 'operations-app', 'consultation-app'):
+                    run('docker', 'stop', RUN + '-' + app, label=app + '-stop-before-retention')
+            for side in ('monolith', 'operations'):
+                name = RUN + '-' + side + '-retention-' + phase
+                image = images['monolith'] if side == 'monolith' else images['operations-checks']
+                create(name, image, '-e', 'NODE_ENV=test', '-e', 'PGHOST=' + side + '-db',
+                       '-e', 'PGUSER=operations_app', '-e', 'PGPASSWORD=' + password,
+                       '-e', 'PGDATABASE=dva_webhook_test', '-e', 'RETENTION_AT=' + at,
+                       command=('node', '--test', '--test-name-pattern=^operations retention ' + phase,
+                                'test/faqs-parity.test.cjs'))
+                run('docker', 'cp', str(probe) + '/.',
+                    name + ':/app/' + ('' if side == 'monolith' else 'service/') + 'test',
+                    label=name + '-copy-retention-probe')
+                complete(name)
+                if phase == 'preserves':
+                    output = run('docker', 'logs', name, label=side + '-retention-projection')
+                    for line in output.splitlines():
+                        try: value = json.loads(line.removeprefix('# '))
+                        except ValueError: continue
+                        if 'retentionProjection' in value: projections[side] = value
+        assert len(projections) == 2 and projections['monolith'] == projections['operations']
+        report['operationsRetention'] = {'matched': True, 'expiryBatch': 1000,
+                                        'liveTimer': True, 'failureRollback': True}
         report['passed'] = True
     finally:
         for kind, name in reversed(resources):

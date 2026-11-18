@@ -18,7 +18,7 @@ import {
 const FROM_CALLS = 'FROM call_sessions c LEFT JOIN call_analyses a USING(call_session_seq)';
 const CALL_DURATION_MS =
   '(extract(epoch FROM (COALESCE(c.ended_at,a.ai_ended_at)-COALESCE(c.started_at,a.ai_started_at)))*1000)';
-const CALL_FILTER = `WHERE c.deleted_at IS NULL AND (c.incoming_at IS NULL OR c.incoming_at>transaction_timestamp()-interval '5 years')
+const CALL_FILTER = `WHERE c.deleted_at IS NULL
  AND COALESCE(c.ended_at,a.ai_ended_at) IS NOT NULL
  AND ($1::text='ALL' OR ($1='NEW' AND a.is_new_customer IS TRUE) OR ($1='EXISTING' AND a.is_new_customer IS FALSE))`;
 
@@ -41,13 +41,12 @@ export class DashboardRepository {
        SELECT jsonb_build_object('todayOrderCount',(
         SELECT count(*) FROM orders o CROSS JOIN bounds b
         WHERE o.created_at>=b.from_at AND o.created_at<b.to_at AND o.deleted_at IS NULL
-         AND COALESCE(o.closed_at,o.created_at)>transaction_timestamp()-interval '5 years'
+         AND NOT o.migrated_to_parcel_drafts
          AND NOT EXISTS(SELECT 1 FROM order_parcel_drafts d WHERE d.legacy_order_seq=o.order_seq)
        ),'todayCallCount',(
         SELECT count(*) ${FROM_CALLS} CROSS JOIN bounds b
         WHERE COALESCE(c.started_at,a.ai_started_at,c.incoming_at)>=b.from_at
          AND COALESCE(c.started_at,a.ai_started_at,c.incoming_at)<b.to_at AND c.deleted_at IS NULL
-         AND (c.incoming_at IS NULL OR c.incoming_at>transaction_timestamp()-interval '5 years')
        )) AS data`,
       [observedAt],
       client,
@@ -66,7 +65,7 @@ export class DashboardRepository {
   }
 
   private stageDropoffsSql(shared = false): string {
-    return `WITH calls AS (
+    return `WITH calls AS ${shared ? 'NOT MATERIALIZED ' : ''}(
       ${shared ? 'SELECT is_new_customer,dropoff_stage FROM dashboard_calls' : `SELECT a.is_new_customer,m.dropoff_stage ${FROM_CALLS} LEFT JOIN call_dashboard_metrics m USING(call_session_seq) ${CALL_FILTER}`}
      ), summary AS (
       SELECT count(*) AS total,count(*) FILTER(WHERE is_new_customer IS NULL) AS unknown_customer,
@@ -89,7 +88,7 @@ export class DashboardRepository {
   }
 
   private registrationTimeSql(shared = false): string {
-    return `WITH calls AS (
+    return `WITH calls AS ${shared ? 'NOT MATERIALIZED ' : ''}(
       ${shared ? 'SELECT is_new_customer,ai_persona_version_seq,registered_parcel_count,duration_ms FROM dashboard_calls' : `SELECT a.is_new_customer,a.ai_persona_version_seq,a.registered_parcel_count,${CALL_DURATION_MS} AS duration_ms ${FROM_CALLS} ${CALL_FILTER}`}
      ), summary AS (
       SELECT count(*) AS total,count(*) FILTER(WHERE is_new_customer IS NULL) AS unknown_customer,
@@ -133,22 +132,28 @@ export class DashboardRepository {
 
   private complaintCallsSql(shared = false): string {
     const types = shared ? '$3' : '$2';
-    return `WITH calls AS (
+    return `WITH calls AS ${shared ? 'NOT MATERIALIZED ' : ''}(
       ${shared ? 'SELECT call_session_seq,is_new_customer,has_complaint,complaints FROM dashboard_calls' : `SELECT c.call_session_seq,a.is_new_customer,a.has_complaint,a.complaints ${FROM_CALLS} ${CALL_FILTER}`}
-     ), summary AS (
-      SELECT count(*) AS total,count(*) FILTER(WHERE is_new_customer IS NULL) AS unknown_customer,
-       count(has_complaint) AS assessed,count(*) FILTER(WHERE has_complaint IS TRUE) AS complained FROM calls
      ), call_types AS (
-      SELECT DISTINCT c.call_session_seq,item->>'type' AS type
+      SELECT DISTINCT c.call_session_seq,item->>'type' AS type,
+       (item->>'type' IN ('INFORMATION_RECOGNITION_ERROR','INTENT_RECOGNITION_ERROR','INTERRUPTION','SLOW_RESPONSE')
+        OR (item->>'type'='DISSATISFACTION_EXPRESSION' AND item->>'target'='ai_service')) AS quality
       FROM calls c CROSS JOIN LATERAL jsonb_array_elements(c.complaints) item WHERE c.has_complaint IS TRUE
-     ), types AS (SELECT type,count(*) AS n FROM call_types WHERE type=ANY(${types}::text[]) GROUP BY type),
+     ), quality_types AS (SELECT DISTINCT call_session_seq,type FROM call_types WHERE quality),
+     quality_calls AS (SELECT DISTINCT call_session_seq FROM quality_types),
+     summary AS (
+      SELECT count(*) AS total,count(*) FILTER(WHERE c.is_new_customer IS NULL) AS unknown_customer,
+       count(c.has_complaint) AS assessed,count(q.call_session_seq) AS complained
+      FROM calls c LEFT JOIN quality_calls q USING(call_session_seq)
+     ), types AS (SELECT type,count(*) AS n FROM quality_types GROUP BY type),
      type_total AS (SELECT COALESCE(sum(n),0) AS n FROM types)
      SELECT jsonb_build_object('customerType',$1::text,'endedCallCount',s.total,'unclassifiedCustomerCallCount',s.unknown_customer,
       'assessedCallCount',s.assessed,'unassessedCallCount',s.total-s.assessed,'complaintCallCount',s.complained,
       'complaintRatePercent',s.complained*100.0/NULLIF(s.assessed,0),'typeTotalCount',t.n,
       'legacyTypeCallCount',(SELECT count(DISTINCT call_session_seq) FROM call_types WHERE type IS NULL OR NOT(type=ANY(${types}::text[]))),
       'types',(SELECT jsonb_agg(jsonb_build_object('type',code,'callCount',COALESCE(types.n,0),
-       'sharePercent',COALESCE(types.n,0)*100.0/NULLIF(t.n,0)) ORDER BY position)
+       'referenceOnly',code='UNSUPPORTED_ANSWER',
+       'sharePercent',CASE WHEN code='UNSUPPORTED_ANSWER' THEN NULL ELSE COALESCE(types.n,0)*100.0/NULLIF(t.n,0) END) ORDER BY position)
        FROM unnest(${types}::text[]) WITH ORDINALITY AS keys(code,position) LEFT JOIN types ON types.type=code)) AS data
      FROM summary s CROSS JOIN type_total t`;
   }
@@ -159,7 +164,7 @@ export class DashboardRepository {
 
   private responseWaitSql(shared = false): string {
     const types = shared ? '$4' : '$2';
-    return `WITH calls AS (
+    return `WITH calls AS ${shared ? 'NOT MATERIALIZED ' : ''}(
       ${shared ? 'SELECT is_new_customer,duration_ms,total_wait_ms,latency_stats,response_wait_received_at FROM dashboard_calls' : `SELECT a.is_new_customer,${CALL_DURATION_MS} AS duration_ms,m.total_wait_ms,m.latency_stats,m.response_wait_received_at ${FROM_CALLS} LEFT JOIN call_dashboard_metrics m USING(call_session_seq) ${CALL_FILTER}`}
      ), measured AS (
       SELECT * FROM calls WHERE response_wait_received_at IS NOT NULL AND total_wait_ms<=duration_ms
@@ -182,15 +187,18 @@ export class DashboardRepository {
      FROM summary s CROSS JOIN totals t`;
   }
 
-  performance(
+  async performance(
     customerType: DashboardCustomerType,
     client: PoolClient,
   ): Promise<HomeAiPerformanceDto> {
+    await client.query("SET LOCAL work_mem = '16MB'");
     return this.read(
       `WITH dashboard_calls AS MATERIALIZED (
        SELECT c.call_session_seq,a.is_new_customer,a.ai_persona_version_seq,a.registered_parcel_count,
-        a.has_complaint,a.complaints,${CALL_DURATION_MS} AS duration_ms,
-        m.dropoff_stage,m.total_wait_ms,m.latency_stats,m.response_wait_received_at
+        a.has_complaint,CASE WHEN a.has_complaint IS TRUE THEN a.complaints END AS complaints,
+        ${CALL_DURATION_MS} AS duration_ms,m.dropoff_stage,m.total_wait_ms,
+        CASE WHEN m.response_wait_received_at IS NOT NULL THEN m.latency_stats END AS latency_stats,
+        m.response_wait_received_at
        ${FROM_CALLS} LEFT JOIN call_dashboard_metrics m USING(call_session_seq) ${CALL_FILTER}
       ) SELECT jsonb_build_object('stageDropoffs',(${this.stageDropoffsSql(true)}),
        'registrationTime',(${this.registrationTimeSql(true)}),

@@ -1,6 +1,8 @@
+import { preparedQuery } from '../database/prepared-query';
 import { Injectable } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import { readPage } from '../common/pagination-query';
+import { searchSequence } from '../common/search-sequence';
 import { ParcelDraftQueryDto } from './dto/parcel-draft.dto';
 import { AdminOrderListQueryDto } from './dto/admin-order-list.dto';
 import { OrderIntakeCall, ParcelDraftRow } from './parcel-drafts.types';
@@ -11,7 +13,7 @@ const columns = `draft_seq AS "draftSeq",reserved_order_seq AS "reservedOrderSeq
  legacy_order_seq AS "legacyOrderSeq",legacy_order_parcel_seq AS "legacyOrderParcelSeq",
  created_at AS "createdAt",updated_at AS "updatedAt",retention_started_at AS "retentionStartedAt"`;
 // A deleted newer call must not revive the older incomplete parcels it superseded.
-const available = `d.deleted_at IS NULL AND d.retention_started_at>transaction_timestamp()-interval '5 years'
+const available = `d.deleted_at IS NULL
  AND (NOT(d.status='INCOMPLETE' OR (d.source_draft_seq IS NOT NULL AND d.status IN('READY','EDITING')))
  OR (d.retention_started_at>transaction_timestamp()-interval '24 hours' AND NOT EXISTS(
    SELECT 1 FROM call_sessions newer
@@ -79,8 +81,10 @@ export class ParcelDraftsRepository {
   async draft(client: PoolClient, id: number, update = false) {
     const row = (
       await client.query<ParcelDraftRow>(
-        `SELECT ${columns} FROM order_parcel_drafts d WHERE draft_seq=$1 AND ${available}${update ? ' FOR UPDATE OF d' : ''}`,
-        [id],
+        preparedQuery(
+          `SELECT ${columns} FROM order_parcel_drafts d WHERE draft_seq=$1 AND ${available}${update ? ' FOR UPDATE OF d' : ''}`,
+          [id],
+        ),
       )
     ).rows[0];
     if (
@@ -88,8 +92,10 @@ export class ParcelDraftsRepository {
       row &&
       !(
         await client.query(
-          `SELECT 1 FROM order_parcel_drafts d WHERE draft_seq=$1 AND ${available.replaceAll('transaction_timestamp()', 'clock_timestamp()')}`,
-          [id],
+          preparedQuery(
+            `SELECT 1 FROM order_parcel_drafts d WHERE draft_seq=$1 AND ${available.replaceAll('transaction_timestamp()', 'clock_timestamp()')}`,
+            [id],
+          ),
         )
       ).rowCount
     )
@@ -122,7 +128,7 @@ export class ParcelDraftsRepository {
         (customer_seq IS NULL AND (call_session_seq=$7 OR (status='INCOMPLETE' AND caller_phone_number=$8))))
        AND ($2::text='ALL' OR status=$2)
        AND ($3::int IS NULL OR call_session_seq=$3) AND ($4::int IS NULL OR call_session_seq=$4)
-       AND ($6::int IS NULL OR legacy_order_seq=$6) AND ($5::text IS NULL OR strpos(lower(normalize(concat_ws(' ',
+       AND ($6::int IS NULL OR legacy_order_seq=$6) AND ($5::text IS NULL OR d.reserved_order_seq=$13::int OR strpos(lower(normalize(concat_ws(' ',
         parcel_data->'origin'->>'name',parcel_data->'origin'->>'phoneNumber',parcel_data->'origin'->>'roadAddress',parcel_data->'origin'->>'jibunAddress',
         parcel_data->'destination'->>'name',parcel_data->'destination'->>'phoneNumber',parcel_data->'destination'->>'roadAddress',parcel_data->'destination'->>'jibunAddress',
         parcel_data->'origin'->>'detailAddress',parcel_data->'destination'->>'detailAddress'),NFC)),lower(normalize($5,NFC)))>0
@@ -144,6 +150,7 @@ export class ParcelDraftsRepository {
         query.to ?? null,
         query.organizationSeq ?? null,
         phoneQuery || null,
+        call === null ? searchSequence(query.q, 'DV-') : null,
       ],
     };
   }

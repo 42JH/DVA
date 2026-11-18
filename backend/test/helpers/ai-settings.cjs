@@ -119,7 +119,7 @@ module.exports = function aiSettingsFixture() {
     process.env.AI_AGENT_URL = `http://127.0.0.1:${ai.address().port}`;
     app = await startTestApp(apps, { log: (entry) => logs.push(entry) });
     base = await app.getUrl();
-    for (const role of ['SYSTEM_ADMIN', 'OPERATOR', 'SUPERVISOR']) {
+    for (const role of ['SYSTEM_ADMIN', 'OPERATOR', 'OPERATOR']) {
       const id = (
         await pool.query(
           "INSERT INTO admin_users(login_id,name,password_hash,role,status) VALUES($1,'설정 테스트 관리자','not-for-login',$2,'ACTIVE') RETURNING admin_user_seq",

@@ -5,6 +5,7 @@ import {
   HttpCode,
   Post,
   Header,
+  Headers,
   SetMetadata,
 } from '@nestjs/common';
 import { validateEvent } from '@dva/events';
@@ -21,7 +22,7 @@ export class AuditController {
   @Post('flush')
   @HttpCode(200)
   @Header('Cache-Control', 'no-store')
-  async flush(@Body() event: unknown) {
+  async flush(@Body() event: unknown, @Headers('x-dva-audit-snapshot') snapshot?: string) {
     try {
       validateEvent(event);
     } catch {
@@ -37,8 +38,11 @@ export class AuditController {
       ids.some((id) => typeof id !== 'string' || !uuid.test(id))
     )
       throw new HttpException({ error: 'INVALID_AUDIT_EVENT' }, 422);
-    await this.audit.reconcile(ids as string[]);
-    await this.audit.flush();
+    if (snapshot === '1') await this.audit.flushSnapshot(ids as string[]);
+    else {
+      await this.audit.reconcile(ids as string[]);
+      await this.audit.flush();
+    }
     return { eventId: event.eventId, status: 'processed' };
   }
 }

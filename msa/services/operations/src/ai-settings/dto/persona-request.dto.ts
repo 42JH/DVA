@@ -1,6 +1,10 @@
 import { ApiProperty, ApiPropertyOptional, OmitType, PartialType } from '@nestjs/swagger';
 import { Transform, TransformFnParams } from 'class-transformer';
 import {
+  IsArray,
+  ArrayMinSize,
+  ArrayMaxSize,
+  ArrayUnique,
   IsIn,
   IsInt,
   IsNumber,
@@ -14,7 +18,56 @@ import {
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import { TURN_WAIT_LEVELS, type TurnWaitLevel } from '../ai-settings.types';
 
-export class CreatePersonaDto {
+export class DeletePersonasDto {
+  @ApiProperty({
+    type: [Number],
+    minItems: 1,
+    maxItems: 100,
+    description: '삭제할 분류 ID. 한 개이면 단건, 여러 개이면 다건. 중복 불가.',
+  })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(100)
+  @ArrayUnique()
+  @IsInt({ each: true })
+  @Min(1, { each: true })
+  @Max(2147483647, { each: true })
+  aiPersonaSeqs!: number[];
+}
+
+export class PersonaPromptInputDto {
+  @ApiProperty({ description: '역할 본문. 제목 없이 줄바꿈·원문 보존.' })
+  @IsString()
+  @Matches(/\S/)
+  role!: string;
+
+  @ApiProperty({ description: '성격 본문.' })
+  @IsString()
+  @Matches(/\S/)
+  personality!: string;
+
+  @ApiProperty({ description: '발화 톤 본문.' })
+  @IsString()
+  @Matches(/\S/)
+  tone!: string;
+
+  @ApiProperty({ description: '발화 속도에 관한 지시문. 숫자 speakingRate와 별개.' })
+  @IsString()
+  @Matches(/\S/)
+  speedInstruction!: string;
+
+  @ApiProperty({ description: '맞장구 본문.' })
+  @IsString()
+  @Matches(/\S/)
+  backchannel!: string;
+
+  @ApiProperty({ description: '끼어들기 대응 본문.' })
+  @IsString()
+  @Matches(/\S/)
+  interruption!: string;
+}
+
+export class CreatePersonaDto extends PersonaPromptInputDto {
   @ApiProperty({
     description: '변경하지 않는 고유 코드. 대소문자를 구분합니다.',
     example: 'parcel',
@@ -27,14 +80,6 @@ export class CreatePersonaDto {
   @IsString()
   @Matches(/\S/)
   name!: string;
-
-  @ApiProperty({
-    description: '역할·말투·응대 규칙을 포함한 전체 프롬프트. 원문을 보존합니다.',
-    example: '차분한 한국어로 택배 접수를 안내합니다.',
-  })
-  @IsString()
-  @Matches(/\S/)
-  promptText!: string;
 
   @ApiPropertyOptional({
     description: 'GET /api/ai/options의 음성 ID. 생략·null은 AI 기본 음성.',

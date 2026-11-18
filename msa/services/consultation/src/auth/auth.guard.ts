@@ -5,7 +5,7 @@ import {
   SetMetadata,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { timingSafeEqual } from 'node:crypto';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import type { Environment } from '../config/environment';
 import { Reflector } from '@nestjs/core';
 import { Request } from 'express';
@@ -22,7 +22,10 @@ import type { AuditActorType } from '../audit/audit.types';
 import { AuditService } from '../audit/audit.service';
 import type { AuthenticationType } from '../observability/security-events';
 export const SESSION_COOKIE = 'dva_session';
+export const AiBusinessAccess = () => SetMetadata('auth:ai-business', true);
 export const PublicAuth = () => SetMetadata('auth:public', true);
+export const MvpAiCustomerAccess = () =>
+  SetMetadata('auth:mvp-ai-customer', true);
 export const Roles = (...roles: AdminRole[]) =>
   SetMetadata('auth:roles', roles);
 export type AuthRequest = Request & {
@@ -71,6 +74,12 @@ export class AuthGuard implements CanActivate {
   private async checkAccess(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<AuthRequest>();
     const targets = [context.getHandler(), context.getClass()];
+    if (
+      this.reflector.getAllAndOverride<boolean>('auth:ai-business', targets)
+    ) {
+      this.authenticateAi(request);
+      return true;
+    }
     const fromCustomer = this.reflector.getAllAndOverride<boolean>(
       'auth:internal-customer',
       targets,
@@ -111,6 +120,18 @@ export class AuthGuard implements CanActivate {
       }
     }
     request.sessionToken = readSessionToken(request) ?? '';
+    if (
+      this.reflector.getAllAndOverride<boolean>(
+        'auth:mvp-ai-customer',
+        targets,
+      ) &&
+      !(request.headers.cookie ?? '')
+        .split(';')
+        .some((part) => part.trim().startsWith(`${SESSION_COOKIE}=`))
+    ) {
+      this.authenticateAi(request);
+      return true;
+    }
     if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method)) {
       const origin = request.get('Origin');
       if (
@@ -129,5 +150,36 @@ export class AuthGuard implements CanActivate {
     if (roles && !roles.includes(request.admin.role))
       throw new ApiException(403, 'FORBIDDEN', '접근 권한이 없습니다.');
     return true;
+  }
+
+  private authenticateAi(request: AuthRequest): void {
+    request.securityAuthType = 'ai_business';
+    const expected = this.config.get('AI_BUSINESS_TOKEN', { infer: true });
+    if (!expected)
+      throw new ApiException(
+        503,
+        'DEPENDENCY_UNAVAILABLE',
+        'AI 업무 인증이 설정되지 않았습니다.',
+      );
+    const authorization = request.get('Authorization') ?? '';
+    const count = request.rawHeaders.filter(
+      (value, index) =>
+        index % 2 === 0 && value.toLowerCase() === 'authorization',
+    ).length;
+    if (
+      count !== 1 ||
+      !authorization.startsWith('Bearer ') ||
+      !timingSafeEqual(
+        createHash('sha256').update(authorization.slice(7)).digest(),
+        createHash('sha256').update(expected).digest(),
+      )
+    )
+      throw new ApiException(
+        401,
+        'UNAUTHORIZED',
+        '유효한 AI 업무 인증이 필요합니다.',
+      );
+    delete request.securityAuthType;
+    request.auditActorType = 'AI';
   }
 }

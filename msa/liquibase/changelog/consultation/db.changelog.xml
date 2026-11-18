@@ -30,4 +30,16 @@
   <changeSet id="008-order-intake" author="dva" dbms="postgresql" runInTransaction="true">
     <sqlFile path="008-order-intake.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
   </changeSet>
+  <changeSet id="009-call-analysis-failure" author="dva" dbms="postgresql" runInTransaction="true">
+    <sqlFile path="009-call-analysis-failure.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
+  </changeSet>
+  <changeSet id="010-call-complaint-judging" author="dva" dbms="postgresql" runInTransaction="true">
+    <sqlFile path="010-call-complaint-judging.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
+  </changeSet>
+  <changeSet id="011-latest-finalized-call" author="dva" dbms="postgresql" runInTransaction="true">
+    <sqlFile path="011-latest-finalized-call.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
+  </changeSet>
+  <changeSet id="012-call-action-index" author="dva" dbms="postgresql" runInTransaction="true">
+    <sqlFile path="012-call-action-index.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
+  </changeSet>
 </databaseChangeLog>

@@ -32,6 +32,8 @@ spec:
           ports:
             - name: http
               containerPort: 3002
+          envFrom:
+            - secretRef: {name: order-runtime, optional: true}
           env:
             - name: NODE_ENV
               value: production
@@ -40,6 +42,9 @@ spec:
             - name: SECURITY_LOG_HMAC_KEY
               valueFrom:
                 secretKeyRef: {name: msa-security-logs, key: hmac-key}
+            - name: MSA_INSTANCE_IP
+              valueFrom:
+                fieldRef: {fieldPath: status.podIP}
             - name: DB_HOST
               valueFrom:
                 secretKeyRef: {name: order-db, key: PGHOST}
@@ -66,6 +71,9 @@ spec:
               value: http://consultation:3004
             - name: DELIVERY_URL
               value: http://delivery:3003
+            - name: AI_BUSINESS_TOKEN
+              valueFrom:
+                secretKeyRef: {name: msa-ai-business, key: AI_BUSINESS_TOKEN, optional: true}
             - name: CORS_ORIGINS
               value: "https://13.209.59.180,https://k15d109.p.ssafy.io"
             - name: SWAGGER_ENABLED
@@ -133,7 +141,22 @@ spec:
     - host: k15d109.p.ssafy.io
       http:
         paths:
+          - path: /api/payments
+            pathType: Prefix
+            backend:
+              service:
+                name: order
+                port:
+                  number: 3002
+          - path: /api/parcel-drafts
+            pathType: Prefix
+            backend:
+              service: { name: order, port: { number: 3002 } }
           - path: /api/orders
+            pathType: Prefix
+            backend:
+              service: { name: order, port: { number: 3002 } }
+          - path: /api/admin/parcel-drafts
             pathType: Prefix
             backend:
               service: { name: order, port: { number: 3002 } }

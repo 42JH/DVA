@@ -6,6 +6,9 @@ import {
   RequestMethod,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { metricsHandler } from '@dva/events/observability.cjs';
+import { DatabaseService } from './database/database.service';
+import { httpMetrics } from './observability/http-metrics';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import {
   ErrorResponseDto,
@@ -23,6 +26,9 @@ export function configureApplication(
   logger = new Logger('Http'),
 ): void {
   const config = app.get<ConfigService<Environment, true>>(ConfigService);
+  const { pool } = app.get(DatabaseService);
+  const metrics = metricsHandler(pool, httpMetrics);
+  app.getHttpAdapter().get('/internal/metrics', metrics);
   // Preserve the monolith Nginx PBX prefix rewrite on direct MSA ingress traffic.
   app.use((request: Request, _response: Response, next: NextFunction) => {
     if (request.path.replace(/\/$/, '') === '/api/webhooks/pbx/call-ended')
@@ -38,7 +44,11 @@ export function configureApplication(
   const scopeParser = json({ limit: '256kb' });
   // Keep Nest's default public parser; only the authenticated internal envelope needs extra space.
   app.use(
-    ['/internal/call-scope', '/internal/order-cancellation'],
+    [
+      '/internal/call-scope',
+      '/internal/order-cancellation',
+      '/internal/parcel-draft-write',
+    ],
     (request: Request, response: Response, next: NextFunction) => {
       scopeParser(request, response, next);
     },
@@ -69,6 +79,8 @@ export function configureApplication(
   });
   app.setGlobalPrefix(API_PREFIX, {
     exclude: [
+      { path: 'internal/card-call-scope', method: RequestMethod.ALL },
+      { path: 'internal/card-call-scope/caller', method: RequestMethod.ALL },
       {
         path: 'internal/legacy-draft-call-bindings/read',
         method: RequestMethod.ALL,
@@ -77,11 +89,33 @@ export function configureApplication(
         path: 'internal/legacy-draft-call-bindings/prune',
         method: RequestMethod.ALL,
       },
+      { path: 'internal/parcel-draft-write', method: RequestMethod.ALL },
+      {
+        path: 'internal/parcel-draft-write/recover',
+        method: RequestMethod.ALL,
+      },
+      {
+        path: 'internal/parcel-draft-write/reference',
+        method: RequestMethod.ALL,
+      },
+      { path: 'internal/parcel-draft-write/events', method: RequestMethod.ALL },
       { path: 'internal/faq-call-sources', method: RequestMethod.ALL },
       { path: 'internal/caller-context', method: RequestMethod.ALL },
       { path: 'internal/call-scope', method: RequestMethod.ALL },
       { path: 'internal/order-cancellation', method: RequestMethod.ALL },
       { path: 'internal/order-read', method: RequestMethod.ALL },
+      { path: 'internal/admin-order-read', method: RequestMethod.ALL },
+      { path: 'internal/parcel-draft-read', method: RequestMethod.ALL },
+      { path: 'internal/parcel-draft-delete', method: RequestMethod.ALL },
+      { path: 'internal/parcel-draft-read/call', method: RequestMethod.ALL },
+      {
+        path: 'internal/order-draft-call-references',
+        method: RequestMethod.ALL,
+      },
+      {
+        path: 'internal/call-event-order-scope/continue',
+        method: RequestMethod.ALL,
+      },
       { path: 'internal/order-deletion-check', method: RequestMethod.ALL },
       { path: 'internal/audit/flush', method: RequestMethod.ALL },
       { path: 'consultation/health', method: RequestMethod.ALL },

@@ -1,0 +1,582 @@
+import { callerPhone } from '../common/caller-phone';
+import type {
+  RecipientAddress,
+  RecipientPin,
+  RecipientReceipt,
+} from '@dva/events/order-recipient-pins.cjs';
+import {
+  ORDER_CREATION_LOCK,
+  type CustomerCreationReceipt,
+  type CreatedOrderCustomer,
+} from '@dva/events/order-customer-write.cjs';
+import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { randomUUID } from 'node:crypto';
+import type { PoolClient } from 'pg';
+import { enqueue } from '@dva/events';
+import { commandHash } from '@dva/events/call-scope.cjs';
+import { OrderReadError } from '@dva/events/order-read.cjs';
+import { readCallbackUrl } from '@dva/events/read-scope.cjs';
+import { requestDraftCallReferences } from '@dva/events/parcel-drafts.cjs';
+import {
+  requestDraftWrite,
+  requestWriteReference,
+  type OwnerCallWriteReceipt,
+  type CallOrderLink,
+  type LegacyCallWrite,
+  type OrderCallIdentity,
+  type CustomerReference,
+  type DraftWriteCall,
+  type DraftWriteCommand,
+  type DraftWriteEvent,
+  type DraftWriteResult,
+  type WriteReferenceEvent,
+  type StoredPaymentCard,
+} from '@dva/events/parcel-draft-write.cjs';
+import { AuditService } from '../audit/audit.service';
+import { ApiException, type ErrorCode } from '../common/errors/api.exception';
+import type { Environment } from '../config/environment';
+import { DatabaseService } from '../database/database.service';
+import type {
+  IntakeCall,
+  IntakeCompletion,
+  PaymentPolicy,
+  BillingSnapshot,
+} from '@dva/events/order-intake-write.cjs';
+import { writeOrder } from './order-write';
+
+export interface CustomerReferenceScope {
+  id: string;
+  address: string | null;
+}
+
+type ActiveWrite = {
+  event: DraftWriteEvent;
+  before: Pick<DraftWriteCall, 'callSessionSeq' | 'customerSeq' | 'intakeVersion'> | null;
+  call: DraftWriteCall | null;
+  receipt: OwnerCallWriteReceipt | null;
+  link: CallOrderLink | null;
+  customerReceipt: RecipientReceipt | null;
+  recipientAddresses: RecipientAddress[] | null;
+  recipientOrderSeq: number | null;
+  customerCreationReceipt: CustomerCreationReceipt | null;
+  legacyCall: LegacyCallWrite | null;
+};
+
+@Injectable()
+export class ParcelDraftWriteScope {
+  private readonly local = new AsyncLocalStorage<ActiveWrite>();
+  private readonly writes = new Map<string, ActiveWrite>();
+
+  constructor(
+    private readonly database: DatabaseService,
+    private readonly config: ConfigService<Environment, true>,
+    private readonly audit: AuditService,
+  ) {}
+
+  async request(command: DraftWriteCommand): Promise<Record<string, unknown>> {
+    try {
+      const result = await requestDraftWrite(
+        this.config.get('CONSULTATION_URL', { infer: true }) + '/internal/parcel-draft-write',
+        this.config.get('CUSTOMER_AUTH_TOKEN', { infer: true }),
+        {
+          eventId: randomUUID(),
+          source: 'order',
+          eventType: 'ParcelDraftWriteRequested',
+          payload: {
+            command,
+            orderAddress: this.config.get('MSA_INSTANCE_IP', { infer: true }) ?? null,
+          },
+        },
+      );
+      return result.data;
+    } catch (error) {
+      this.failure(error);
+    }
+  }
+
+  run(
+    event: DraftWriteEvent,
+    work: () => Promise<Record<string, unknown>>,
+  ): Promise<DraftWriteResult> {
+    const call = event.payload.call ?? null;
+    const state: ActiveWrite = {
+      event,
+      before: call && { ...call },
+      call: null,
+      receipt: null,
+      link: null,
+      customerReceipt: null,
+      recipientAddresses: null,
+      recipientOrderSeq: null,
+      customerCreationReceipt: null,
+      legacyCall: null,
+    };
+    this.writes.set(event.eventId, state);
+    return this.local.run(state, async () => {
+      try {
+        return this.result(await work());
+      } finally {
+        this.writes.delete(event.eventId);
+      }
+    });
+  }
+
+  private result(data: Record<string, unknown>): DraftWriteResult {
+    const state = this.active;
+    const result = { data, receipt: state.receipt };
+    if (['OrderCreated', 'ManualOrderCreated'].includes(state.event.payload.command.operation))
+      return {
+        ...result,
+        customerReceipt: state.customerReceipt,
+        customerCreationReceipt: state.customerCreationReceipt,
+      };
+    return ['OrderSubmitted', 'AdminParcelDraftSubmitted'].includes(
+      state.event.payload.command.operation,
+    )
+      ? { ...result, customerReceipt: state.customerReceipt }
+      : result;
+  }
+
+  recipients(scopeId: string, id: number): RecipientAddress[] {
+    const state = this.writes.get(scopeId);
+    if (!state || state.recipientOrderSeq !== id || state.recipientAddresses === null)
+      throw new ApiException(
+        503,
+        'DEPENDENCY_UNAVAILABLE',
+        '서비스를 일시적으로 사용할 수 없습니다.',
+      );
+    return state.recipientAddresses;
+  }
+
+  async prepareRecipientPins(
+    client: PoolClient,
+    id: number,
+    customerSeq: number,
+    addresses: RecipientAddress[],
+    adminId: number | null,
+    requestId: string,
+  ) {
+    this.active.recipientAddresses = addresses;
+    this.active.recipientOrderSeq = id;
+    const pins = await this.reference<RecipientPin[]>('customer', 'RecipientPinsPrepared', {
+      id,
+      customerSeq,
+    });
+    if (pins.length === 0) return;
+    const eventId = await enqueue(client, {
+      destination: 'customer',
+      eventType: 'OrderRecipientPinsWritten',
+      aggregateSeq: id,
+      payload: { orderSeq: id, writeEventId: this.active.event.eventId },
+    });
+    this.active.customerReceipt = {
+      eventId,
+      payload: {
+        orderSeq: id,
+        customerSeq,
+        pins,
+        adminId,
+        requestId,
+        writeEventId: this.active.event.eventId,
+      },
+    };
+  }
+
+  private get active(): ActiveWrite {
+    const state = this.local.getStore();
+    if (!state) throw new Error('Draft write scope is not held');
+    return state;
+  }
+
+  async transaction<T extends Record<string, unknown>>(
+    work: (client: PoolClient) => Promise<T>,
+  ): Promise<T> {
+    const state = this.active;
+    const event = state.event;
+    const command = event.payload.command;
+    if (command.operation === 'OrderIntakeSealed') return writeOrder(this.database, work);
+    const hash = commandHash(
+      command.operation === 'OrderIntakeFinalized' ? { ...command, requestId: '' } : command,
+    );
+    let replay = false;
+    const result = await writeOrder(this.database, async (client) => {
+      const inserted = await client.query(
+        'INSERT INTO inbox_events(event_id,source,event_type,payload) VALUES($1,$2,$3,$4) ON CONFLICT(event_id) DO NOTHING RETURNING event_id',
+        [
+          event.eventId,
+          event.source,
+          event.eventType,
+          {
+            requestHash: hash,
+            ...(['OrderCreated', 'ManualOrderCreated'].includes(command.operation)
+              ? { creationKey: command.key }
+              : {}),
+          },
+        ],
+      );
+      if (!inserted.rowCount) {
+        const existing = (
+          await client.query<{
+            source: string;
+            event_type: string;
+            payload: { requestHash: string; result: DraftWriteResult };
+          }>('SELECT source,event_type,payload FROM inbox_events WHERE event_id=$1', [
+            event.eventId,
+          ])
+        ).rows[0];
+        if (
+          existing.source !== event.source ||
+          existing.event_type !== event.eventType ||
+          existing.payload.requestHash !== hash
+        )
+          throw new ApiException(
+            409,
+            'EVENT_PAYLOAD_CONFLICT',
+            '같은 이벤트의 내용을 변경할 수 없습니다.',
+          );
+        replay = true;
+        state.receipt = existing.payload.result.receipt;
+        state.customerReceipt = existing.payload.result.customerReceipt ?? null;
+        state.customerCreationReceipt = existing.payload.result.customerCreationReceipt ?? null;
+        const data = existing.payload.result.data as T;
+        const order = (data.result ?? data) as { paymentRequest?: Record<string, unknown> };
+        const request = order?.paymentRequest;
+        // Receipts written before card support have neither a card attachment nor a card failure.
+        if (
+          request &&
+          !Object.hasOwn(request, 'autoCharge') &&
+          !Object.hasOwn(request, 'cardPaymentFailed')
+        ) {
+          const restored = {
+            ...order,
+            paymentRequest: { ...request, autoCharge: false, cardPaymentFailed: false },
+          };
+          return (data.result ? { ...data, result: restored } : restored) as T;
+        }
+        return data;
+      }
+      if (['OrderCreated', 'ManualOrderCreated'].includes(command.operation))
+        await client.query('SELECT pg_advisory_xact_lock($1,hashtext($2))', [
+          ORDER_CREATION_LOCK,
+          event.eventId,
+        ]);
+      const data = await work(client);
+      if (command.operation === 'OrderIntakeFinalized' && data.finalization === null) {
+        await client.query('DELETE FROM inbox_events WHERE event_id=$1', [event.eventId]);
+        return data;
+      }
+      if (state.legacyCall) {
+        const eventId = await enqueue(client, {
+          destination: 'consultation',
+          eventType: 'LegacyOrderCallWritten',
+          aggregateSeq: state.legacyCall.callSessionSeq,
+          payload: { ...state.legacyCall },
+        });
+        state.receipt = { eventId, payload: state.legacyCall };
+      } else if (state.link) {
+        const eventId = await enqueue(client, {
+          destination: 'consultation',
+          eventType: 'OrderCallLinked',
+          aggregateSeq: state.link.callSessionSeq,
+          payload: { ...state.link },
+        });
+        state.receipt = { eventId, payload: state.link };
+      } else if (
+        state.before &&
+        state.call &&
+        (state.before.customerSeq !== state.call.customerSeq ||
+          state.before.intakeVersion !== state.call.intakeVersion)
+      ) {
+        const payload = {
+          callSessionSeq: state.call.callSessionSeq,
+          beforeVersion: state.before.intakeVersion,
+          afterVersion: state.call.intakeVersion,
+          customerSeq: state.call.customerSeq,
+        };
+        const eventId = await enqueue(client, {
+          destination: 'consultation',
+          eventType: 'ParcelDraftCallWritten',
+          aggregateSeq: payload.callSessionSeq,
+          payload,
+        });
+        state.receipt = { eventId, payload };
+      }
+      await client.query('UPDATE inbox_events SET payload=payload || $2::jsonb WHERE event_id=$1', [
+        event.eventId,
+        JSON.stringify({ result: this.result(data) }),
+      ]);
+      return data;
+    });
+    if (replay) await this.audit.flush();
+    return result;
+  }
+
+  private reference<T>(
+    owner: 'customer' | 'consultation',
+    operation: WriteReferenceEvent['payload']['operation'],
+    input: Record<string, unknown>,
+    referenceScope?: CustomerReferenceScope,
+  ): Promise<T> {
+    const event = this.local.getStore()?.event;
+    return requestWriteReference<T>(
+      readCallbackUrl(
+        this.config.get(owner === 'customer' ? 'CUSTOMER_URL' : 'CONSULTATION_URL', {
+          infer: true,
+        }),
+        owner === 'customer'
+          ? '/internal/call-read-references/parcel-draft-write/reference'
+          : '/internal/parcel-draft-write/reference',
+        referenceScope
+          ? referenceScope.address
+          : ((owner === 'customer'
+              ? event?.payload.customerAddress
+              : event?.payload.consultationAddress) ?? null),
+      ),
+      this.config.get('CUSTOMER_AUTH_TOKEN', { infer: true }),
+      {
+        eventId: randomUUID(),
+        source: 'order',
+        eventType: 'ParcelDraftWriteReferenceRequested',
+        payload: { operation, input },
+      },
+      referenceScope?.id ?? event?.eventId,
+    ).catch((error: unknown) => this.failure(error));
+  }
+
+  customer(id: number) {
+    return this.reference<CustomerReference | null>('customer', 'CustomerRead', { id });
+  }
+
+  customerByPhone(phone: string) {
+    return this.reference<CustomerReference | null>('customer', 'CustomerPhoneRead', { phone });
+  }
+
+  async prepareOrderCustomer(
+    client: PoolClient,
+    input: { customerSeq?: number; customer?: { name: string; phoneNumber: string } },
+  ) {
+    const result = await this.reference<{
+      customer: CustomerReference;
+      created: CreatedOrderCustomer | null;
+    }>(
+      'customer',
+      'CustomerOrderResolved',
+      input.customer === undefined
+        ? { customerSeq: input.customerSeq }
+        : { customer: input.customer },
+    );
+    if (result.created) {
+      const command = this.active.event.payload.command;
+      const eventId = await enqueue(client, {
+        destination: 'customer',
+        eventType: 'OrderCustomerCreated',
+        aggregateSeq: result.created.customerSeq,
+        payload: {
+          customerSeq: result.created.customerSeq,
+          writeEventId: this.active.event.eventId,
+        },
+      });
+      this.active.customerCreationReceipt = {
+        eventId,
+        payload: {
+          writeEventId: this.active.event.eventId,
+          customer: result.created,
+          adminId: command.adminId,
+          requestId: command.requestId,
+        },
+      };
+    }
+    return result.customer;
+  }
+
+  async ensureCall(call: OrderCallIdentity) {
+    const customer = await this.reference<CustomerReference | null>(
+      'customer',
+      'CallCustomerRead',
+      { phone: callerPhone(call.callerPhoneNumber) },
+    );
+    return this.reference<number>('consultation', 'CallEnsured', {
+      call,
+      customerSeq: customer?.customerSeq ?? null,
+    });
+  }
+
+  creationAllowed(id: number, orderSeq: number) {
+    return this.reference<boolean>('consultation', 'CallCreationChecked', { id, orderSeq });
+  }
+
+  async recoverCreation(client: PoolClient, key: string, callId: number | null) {
+    const calls = await client.query<OwnerCallWriteReceipt>(
+      "SELECT event_id AS \"eventId\",payload FROM outbox_events WHERE destination='consultation' AND event_type='LegacyOrderCallWritten' AND delivered_at IS NULL AND payload->>'creationKey'=$1 ORDER BY outbox_seq",
+      [key],
+    );
+    for (const receipt of calls.rows)
+      if (receipt.payload.callSessionSeq === callId)
+        await this.reference<boolean>('consultation', 'LegacyCallApplied', { receipt });
+    const customers = await client.query<{ writeEventId: string }>(
+      "SELECT i.event_id AS \"writeEventId\" FROM outbox_events o JOIN inbox_events i ON i.event_id=(o.payload->>'writeEventId')::uuid WHERE o.destination='customer' AND o.event_type='OrderCustomerCreated' AND o.delivered_at IS NULL AND i.payload->>'creationKey'=$1 ORDER BY o.outbox_seq",
+      [key],
+    );
+    for (const row of customers.rows)
+      await this.reference<boolean>('customer', 'CustomerCreationApplied', row);
+  }
+
+  async linkCreatedOrder(id: number, orderSeq: number | null, customerSeq: number | null) {
+    const before = this.active.call;
+    if (!before || before.callSessionSeq !== id) throw new Error('Creation call is not held');
+    if (customerSeq !== null) await this.resolveCallCustomer(id, customerSeq);
+    if (orderSeq !== null) {
+      this.active.call = await this.reference<DraftWriteCall | null>(
+        'consultation',
+        'CallOrderLinked',
+        { id, orderSeq, customerSeq },
+      );
+    }
+    const call = this.active.call!;
+    const command = this.active.event.payload.command;
+    this.active.legacyCall = {
+      creationKey: command.key!,
+      callSessionSeq: id,
+      beforeCustomerSeq: this.active.before!.customerSeq,
+      customerSeq: call.customerSeq,
+      orderSeq: call.orderSeq,
+      call: (command.input.call as OrderCallIdentity | undefined) ?? null,
+      adminId: command.adminId,
+      requestId: command.requestId,
+    };
+  }
+
+  canUsePin(customerSeq: number, pinSeq: number) {
+    return this.reference<boolean>('customer', 'PinChecked', { customerSeq, pinSeq });
+  }
+
+  paymentPolicy(id: number, referenceScope?: CustomerReferenceScope) {
+    return this.reference<PaymentPolicy>(
+      'customer',
+      'CustomerPaymentPolicyRead',
+      { id },
+      referenceScope,
+    );
+  }
+  paymentCard(customerSeq: number | null, organizationSeq: number | null) {
+    return this.reference<number | null>('customer', 'CustomerPaymentCardRead', {
+      customerSeq,
+      organizationSeq,
+    });
+  }
+  billingSnapshot(organizationSeq: number | null, departmentSeq: number | null) {
+    return this.reference<BillingSnapshot>('customer', 'OrderBillingSnapshotRead', {
+      organizationSeq,
+      departmentSeq,
+    });
+  }
+  approvalCard(
+    customerSeq: number | null,
+    organizationSeq: number | null,
+    referenceScope: CustomerReferenceScope,
+  ) {
+    return this.reference<StoredPaymentCard | null>(
+      'customer',
+      'CustomerApprovalCardRead',
+      { customerSeq, organizationSeq },
+      referenceScope,
+    );
+  }
+  intakeCall(id: number) {
+    return this.reference<IntakeCall | null>('consultation', 'IntakeCallRead', { id });
+  }
+  sealIntake(id: number, payload: IntakeCompletion) {
+    return this.reference<IntakeCall | null>('consultation', 'IntakeCallSealed', { id, payload });
+  }
+  orderCustomer(id: number, referenceScope?: CustomerReferenceScope) {
+    return this.reference<CustomerReference | null>(
+      'customer',
+      'OrderCustomerRead',
+      { id },
+      referenceScope,
+    );
+  }
+  async linkOrder(id: number, orderSeq: number, customerSeq: number) {
+    const before = this.active.call;
+    if (!before || before.callSessionSeq !== id || before.orderSeq !== null)
+      throw new Error('Order call is not held');
+    const linked = await this.reference<DraftWriteCall | null>('consultation', 'CallOrderLinked', {
+      id,
+      orderSeq,
+      customerSeq,
+    });
+    if (!linked || linked.orderSeq !== orderSeq || linked.customerSeq === null)
+      throw new Error('Order call link was not applied');
+    this.active.link = {
+      callSessionSeq: id,
+      beforeOrderSeq: null,
+      beforeCustomerSeq: before.customerSeq,
+      orderSeq,
+      customerSeq: linked.customerSeq,
+    };
+    this.active.call = linked;
+  }
+  async call(id: number) {
+    const call = await this.reference<DraftWriteCall | null>('consultation', 'CallRead', { id });
+    this.active.call = call;
+    if (
+      ['OrderCreated', 'ManualOrderCreated'].includes(
+        this.active.event.payload.command.operation,
+      ) &&
+      !this.active.before &&
+      call
+    )
+      this.active.before = { ...call };
+    return call;
+  }
+
+  async resolveCallCustomer(id: number, customerSeq: number) {
+    const call = await this.reference<DraftWriteCall | null>(
+      'consultation',
+      'CallCustomerResolved',
+      { id, customerSeq },
+    );
+    if (!call) throw new ApiException(404, 'NOT_FOUND', '통화를 찾을 수 없습니다.');
+    this.active.call = call;
+  }
+
+  async bumpCall(id: number) {
+    const version = await this.reference<number>('consultation', 'CallBumped', { id });
+    const call = this.active.call;
+    if (!call || call.callSessionSeq !== id || version !== call.intakeVersion + 1)
+      throw new Error('Draft call version changed inside its write scope');
+    call.intakeVersion = version;
+    return version;
+  }
+
+  readCalls(input: { callIds: number[]; customerIds: number[]; phones: string[] }) {
+    const event = this.active.event;
+    return requestDraftCallReferences(
+      readCallbackUrl(
+        this.config.get('CONSULTATION_URL', { infer: true }),
+        '/internal/order-draft-call-references',
+        event.payload.consultationAddress ?? null,
+      ),
+      this.config.get('CUSTOMER_AUTH_TOKEN', { infer: true }),
+      input,
+      event.eventId,
+    ).catch((error: unknown) => this.failure(error));
+  }
+
+  failure(error: unknown): never {
+    if (error instanceof OrderReadError)
+      throw new ApiException(
+        error.status,
+        error.error.code as ErrorCode,
+        error.error.message,
+        error.error.details,
+      );
+    throw new ApiException(
+      503,
+      'DEPENDENCY_UNAVAILABLE',
+      '서비스를 일시적으로 사용할 수 없습니다.',
+    );
+  }
+}

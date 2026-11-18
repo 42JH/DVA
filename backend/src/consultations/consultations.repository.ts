@@ -1,4 +1,5 @@
 import { readPage, PageRows } from '../common/pagination-query';
+import { searchSequence } from '../common/search-sequence';
 import { Injectable } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
 import { CallQueryDto } from './dto/call-query.dto';
@@ -29,16 +30,21 @@ type CallRow = CallDto & {
 };
 
 const CALL_STARTED_AT = 'COALESCE(c.started_at,a.ai_started_at,c.incoming_at)';
+const ACTIVE_CALL_CUTOFF = "statement_timestamp()-interval '2 hours'";
+const CALL_LIST_ORDER = '"startedAt" DESC NULLS LAST,"callSessionSeq" DESC';
+const CALL_PAGE_FIELDS = `page.*,(SELECT min(r.created_at) FROM recordings r WHERE r.call_session_seq=page."callSessionSeq") AS "recordedAt"`;
 
 const callSelect = (
   includeRecordedAt = true,
+  callSource = 'call_sessions c',
 ) => `SELECT c.call_session_seq AS "callSessionSeq",c.provider_call_id AS "providerCallId",
  CASE WHEN a.call_session_seq IS NOT NULL THEN 'COMPLETED'
   WHEN c.analysis_failed_at IS NOT NULL THEN 'FAILED'
   WHEN c.ended_at<=transaction_timestamp()-interval '10 minutes' THEN 'EXPIRED'
+  WHEN c.ended_at IS NULL AND COALESCE(c.registered_at,c.incoming_at)<=${ACTIVE_CALL_CUTOFF} THEN 'EXPIRED'
   ELSE 'PENDING' END AS "analysisStatus",
  ${includeRecordedAt ? '(SELECT min(r.created_at) FROM recordings r WHERE r.call_session_seq=c.call_session_seq) AS "recordedAt",' : ''}
- c.caller_phone_number AS "callerPhoneNumber",c.order_seq AS "orderSeq",o.status AS "orderStatus",o.total_amount AS "orderTotalAmount",
+ c.caller_phone_number AS "callerPhoneNumber",o.order_seq AS "orderSeq",o.status AS "orderStatus",o.total_amount AS "orderTotalAmount",
  ${CALL_STARTED_AT} AS "startedAt",COALESCE(c.ended_at,a.ai_ended_at) AS "endedAt",
  customer.customer_seq AS "customerSeq",customer.name AS "customerName",company.name AS "organizationName",
  a.ai_persona_version_seq AS "aiPersonaVersionSeq",v.name AS "personaName",v.version AS "personaVersion",
@@ -48,7 +54,7 @@ const callSelect = (
  a.faq_answer_count AS "faqAnswerCount",a.order_lookup_count AS "orderLookupCount",
  a.cancelled_parcel_count AS "cancelledParcelCount",a.has_handoff_request AS "hasHandoffRequest",
  a.has_callback_request AS "hasCallbackRequest"
- FROM call_sessions c LEFT JOIN orders o ON o.order_seq=c.order_seq AND o.deleted_at IS NULL
+ FROM ${callSource} LEFT JOIN orders o ON o.order_seq=c.order_seq AND o.deleted_at IS NULL
  LEFT JOIN customers customer ON customer.customer_seq=COALESCE(o.customer_seq,c.customer_seq) AND customer.deleted_at IS NULL
  LEFT JOIN memberships membership ON membership.customer_seq=customer.customer_seq AND membership.deleted_at IS NULL
  LEFT JOIN organizations company ON company.organization_seq=membership.organization_seq AND company.deleted_at IS NULL
@@ -95,7 +101,23 @@ function callResult(row: CallRow): CallListItemDto {
             aiEndedAt: aiEndedAt!,
             repeatQuestionCount,
             hasComplaint,
-            complaints: complaints!,
+            complaints: (complaints ?? []).map((complaint) => ({
+              type: complaint.type,
+              evidenceText: complaint.evidenceText,
+              offsetSeconds: complaint.offsetSeconds,
+              utteranceOrders: complaint.utteranceOrders,
+              target:
+                complaint.type === 'DISSATISFACTION_EXPRESSION' &&
+                ['ai_service', 'price_policy', 'delivery_other'].includes(complaint.target ?? '')
+                  ? complaint.target
+                  : null,
+              level:
+                complaint.type === 'DISSATISFACTION_EXPRESSION' &&
+                ['explicit', 'mild'].includes(complaint.level ?? '')
+                  ? complaint.level
+                  : null,
+              referenceOnly: complaint.type === 'UNSUPPORTED_ANSWER',
+            })),
             analysedAt,
           },
   };
@@ -107,7 +129,7 @@ export class ConsultationsRepository {
     return (
       await client.query<{ endedAt: Date | null }>(
         `SELECT ended_at AS "endedAt" FROM call_sessions
-      WHERE call_session_seq=$1 AND deleted_at IS NULL AND (incoming_at IS NULL OR incoming_at>clock_timestamp()-interval '5 years') FOR UPDATE`,
+      WHERE call_session_seq=$1 AND deleted_at IS NULL FOR UPDATE`,
         [id],
       )
     ).rows[0];
@@ -147,6 +169,7 @@ export class ConsultationsRepository {
       await this.database.pool.query<{ activeCallCount: number; observedAt: Date }>(
         `SELECT count(*)::int AS "activeCallCount",statement_timestamp() AS "observedAt"
        FROM call_sessions c WHERE c.registered_at IS NOT NULL AND c.ended_at IS NULL AND c.deleted_at IS NULL
+        AND c.registered_at>${ACTIVE_CALL_CUTOFF}
         AND (c.incoming_at IS NULL OR c.incoming_at>clock_timestamp()-interval '5 years')
         AND NOT EXISTS(SELECT 1 FROM call_analyses a
           WHERE a.call_session_seq=c.call_session_seq AND a.ai_ended_at IS NOT NULL)`,
@@ -158,12 +181,10 @@ export class ConsultationsRepository {
   constructor(private readonly database: DatabaseService) {}
 
   async findMany(query: CallQueryDto, client?: PoolClient): Promise<PageRows<CallListItemDto>> {
-    const conditions: string[] = [
-      "c.deleted_at IS NULL AND (c.incoming_at IS NULL OR c.incoming_at>transaction_timestamp()-interval '5 years')",
-    ];
-    const values: Array<string | number | boolean> = [];
+    const conditions: string[] = ['c.deleted_at IS NULL'];
+    const values: Array<string | number | boolean | null> = [];
     for (const [value, column, operator] of [
-      [query.orderSeq, 'c.order_seq', '='],
+      [query.orderSeq, 'o.order_seq', '='],
       [query.organizationSeq, 'company.organization_seq', '='],
       [query.orderStatus, 'o.status', '='],
       [query.callerPhoneNumber, 'c.caller_phone_number', '='],
@@ -180,24 +201,73 @@ export class ConsultationsRepository {
     if (query.q) {
       values.push(query.q);
       const parameter = `$${values.length}`;
+      values.push(searchSequence(query.q, '#'));
+      const sequenceParameter = `$${values.length}`;
       conditions.push(`(strpos(lower(normalize(customer.name,NFC)),lower(normalize(${parameter},NFC)))>0
-        OR strpos(c.caller_phone_number,${parameter})>0)`);
+        OR strpos(c.caller_phone_number,${parameter})>0
+        OR c.call_session_seq=${sequenceParameter}::int)`);
     }
-    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const database = client ?? this.database.pool;
+    if (conditions.length === 1) {
+      const result = await this.unfilteredPage(database, query);
+      return { ...result, rows: result.rows.map(callResult) };
+    }
     const result = await readPage<CallRow>(
-      client ?? this.database.pool,
-      `${callSelect(false)} ${where}`,
+      database,
+      `${callSelect(false)} WHERE ${conditions.join(' AND ')}`,
       values,
       query,
-      '"startedAt" DESC NULLS LAST,"callSessionSeq" DESC',
-      `page.*,(SELECT min(r.created_at) FROM recordings r WHERE r.call_session_seq=page."callSessionSeq") AS "recordedAt"`,
+      CALL_LIST_ORDER,
+      CALL_PAGE_FIELDS,
     );
     return { ...result, rows: result.rows.map(callResult) };
   }
 
+  private async unfilteredPage(
+    database: PoolClient | DatabaseService['pool'],
+    query: CallQueryDto,
+  ): Promise<PageRows<CallRow>> {
+    // Use the started_at index where possible, and resolve the fallback before merging page keys.
+    const result = await database.query<CallRow & { __total_count: string }>(
+      `WITH page_keys AS MATERIALIZED (
+        SELECT call_session_seq FROM (
+          (SELECT c.call_session_seq,c.started_at
+           FROM call_sessions c WHERE c.deleted_at IS NULL AND c.started_at IS NOT NULL
+           ORDER BY c.started_at DESC NULLS LAST,c.call_session_seq DESC
+           LIMIT ($1::bigint + $2::bigint))
+          UNION ALL
+          (SELECT c.call_session_seq,COALESCE(a.ai_started_at,c.incoming_at) AS started_at
+           FROM call_sessions c LEFT JOIN call_analyses a USING(call_session_seq)
+           WHERE c.deleted_at IS NULL AND c.started_at IS NULL
+           ORDER BY started_at DESC NULLS LAST,c.call_session_seq DESC
+           LIMIT ($1::bigint + $2::bigint))
+        ) matching_keys ORDER BY started_at DESC NULLS LAST,call_session_seq DESC
+        LIMIT $1 OFFSET $2
+      ), page AS (
+        ${callSelect(false, 'page_keys JOIN call_sessions c USING(call_session_seq)')}
+      ), totals AS (
+        SELECT count(*) AS __total_count FROM call_sessions WHERE deleted_at IS NULL
+      )
+      SELECT ${CALL_PAGE_FIELDS},totals.__total_count FROM totals
+      LEFT JOIN page ON true ORDER BY ${CALL_LIST_ORDER}`,
+      [query.limit + 1, query.offset],
+    );
+    const total_count = Number(result.rows[0]?.__total_count ?? NaN);
+    if (!Number.isSafeInteger(total_count) || total_count < 0)
+      throw new RangeError('Invalid query total count');
+    const rows = result.rows
+      .filter((row) => row.callSessionSeq !== null)
+      .map((row) => {
+        const call: CallRow & { __total_count?: string } = { ...row };
+        delete call.__total_count;
+        return call;
+      });
+    return { rows, total_count };
+  }
+
   async findOne(id: number): Promise<CallListItemDto | undefined> {
     const result = await this.database.pool.query<CallRow>(
-      `${callSelect()} WHERE c.call_session_seq=$1 AND c.deleted_at IS NULL AND (c.incoming_at IS NULL OR c.incoming_at>clock_timestamp()-interval '5 years')`,
+      `${callSelect()} WHERE c.call_session_seq=$1 AND c.deleted_at IS NULL`,
       [id],
     );
     return result.rows[0] ? callResult(result.rows[0]) : undefined;
@@ -208,7 +278,7 @@ export class ConsultationsRepository {
       await this.database.pool.query<RecordingRow>(
         `SELECT recording_seq AS "recordingSeq",created_at AS "createdAt",object_key AS "objectKey"
        FROM recordings WHERE call_session_seq=$1 AND EXISTS(SELECT 1 FROM call_sessions c WHERE c.call_session_seq=$1
-        AND c.deleted_at IS NULL AND (c.incoming_at IS NULL OR c.incoming_at>clock_timestamp()-interval '5 years')) ORDER BY recording_seq`,
+        AND c.deleted_at IS NULL) ORDER BY recording_seq`,
         [id],
       )
     ).rows;
@@ -218,7 +288,7 @@ export class ConsultationsRepository {
     return (
       (
         await this.database.pool.query(
-          "SELECT 1 FROM call_sessions WHERE call_session_seq=$1 AND deleted_at IS NULL AND (incoming_at IS NULL OR incoming_at>clock_timestamp()-interval '5 years')",
+          'SELECT 1 FROM call_sessions WHERE call_session_seq=$1 AND deleted_at IS NULL',
           [id],
         )
       ).rowCount === 1

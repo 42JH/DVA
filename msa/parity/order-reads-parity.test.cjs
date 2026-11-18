@@ -2,7 +2,7 @@ const { truncateFixture } = require('./fixture-reset.cjs');
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { randomUUID, createHash } = require('node:crypto');
+const { randomUUID, createHash, createCipheriv, randomBytes } = require('node:crypto');
 const { Pool } = require('pg');
 const { OrdersService } = require('../dist/orders/orders.service');
 const { OrdersRepository } = require('../dist/orders/orders.repository');
@@ -10,15 +10,51 @@ const tokens = ['a'.repeat(64), 'b'.repeat(64), 'c'.repeat(64)];
 const headers = { Cookie: 'dva_session='+tokens[0] };
 const ai = id => ({ call_session_seq:String(id) });
 const pause = ms => new Promise(resolve=>setTimeout(resolve,ms));
-const orderTables = ['orders','order_parcels','order_payment_requests','organization_billing_months','order_billing_charges','empty_ai_order_results'];
+const orderTables = ['orders','order_parcels','order_payment_requests','organization_billing_months','order_billing_charges','empty_ai_order_results','order_parcel_drafts'];
+async function companyCardFixture(database, id) {
+  const nonce = randomBytes(12), cipher = createCipheriv('aes-256-gcm', Buffer.from('11'.repeat(32), 'hex'), nonce);
+  cipher.setAAD(Buffer.from(String(id)));
+  const encrypted = Buffer.concat([nonce, cipher.update('card-success', 'utf8'), cipher.final(), cipher.getAuthTag()]).toString('base64');
+  const key = '00000000-0000-4000-8000-' + String(id).padStart(12, '0');
+  await database.query(`INSERT INTO payment_cards(payment_card_seq,organization_seq,registration_key,request_hash,provider_customer_key,
+    provider_environment,encrypted_billing_key,expiration_year,expiration_month,masked_number,status)
+    OVERRIDING SYSTEM VALUE VALUES($1,$1,$2,'workflow-fixture',$2,'test',$3,2099,12,'1234********5678','ACTIVE')`, [id,key,encrypted]);
+}
+function cardPaymentValue(value, key, identities, started) {
+  if (['paid_at','occurred_at'].includes(key) && Date.parse(value) === Date.parse('2030-03-02T00:01:00Z')) return value;
+  if (key === 'card_payment_order_id' ||
+      (['provider_payment_key','provider_reference'].includes(key) && value.startsWith('card-payment-'))) {
+    const prefix = key === 'card_payment_order_id' ? '' : 'card-payment-';
+    const id = value.slice(prefix.length);
+    assert.match(id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+    if (!identities.has(id)) identities.set(id, 'card-transaction-' + identities.size);
+    return prefix + identities.get(id);
+  }
+  if (['approval_started_at','approval_next_check_at','completed_at'].includes(key)) {
+    const offset = key === 'approval_next_check_at' ? 60000 : 0;
+    const time = Date.parse(value) - offset;
+    if (time >= started - 1000 && time <= Date.now() + 1000) return '<generated ' + key + '>';
+  }
+}
 
 test('four order read APIs preserve monolith HTTP and stored data across owner databases', async t => {
   assert.equal(process.env.PGDATABASE,'dva_webhook_test');
   const databases = Object.fromEntries(['monolith','operations','customer','consultation','order'].map(name=>[name,new Pool({host:name+'-db',user:name+'_app'})]));
-  const retention=[];
-  t.after(async()=> { for(const client of retention) { await client.query('ROLLBACK');client.release(); } await Promise.all(Object.values(databases).map(db=>db.end())); });
+  const retention=[],fixturePhones=[];
+  t.after(async()=> {
+    try {
+      for(const client of [...retention,...fixturePhones]) { await client.query('ROLLBACK');client.release(); }
+      for(const db of [databases.monolith,databases.order])await db.query('DELETE FROM order_parcel_drafts WHERE draft_seq BETWEEN 13001 AND 13008');
+      for(const db of [databases.monolith,databases.customer]){
+        await db.query('DELETE FROM memberships WHERE membership_seq BETWEEN 6101 AND 6105');
+        await db.query('DELETE FROM organizations WHERE organization_seq BETWEEN 6001 AND 6003');
+      }
+      for(const db of [databases.monolith,databases.order])await db.query('DELETE FROM organization_billing_months WHERE organization_seq BETWEEN 6001 AND 6003');
+      for(const db of [databases.monolith,databases.consultation])await db.query("DELETE FROM call_sessions WHERE provider_call_id LIKE 'draft-reference-%'");
+    } finally { await Promise.all(Object.values(databases).map(db=>db.end())); }
+  });
   const reference=databases.monolith;
-  const owners={operations:['admin_users','admin_sessions','audit_logs'],customer:['customers','personal_pins'],consultation:['call_sessions'],order:orderTables};
+  const owners={operations:['admin_users','admin_sessions','audit_logs'],customer:['customers','personal_pins','organizations','memberships','payment_cards'],consultation:['call_sessions'],order:orderTables};
   const sides=[{name:'monolith',base:'http://monolith-app:3000'}, {name:'msa',base:'http://order-app:3002'}];
   for (const [service,port] of [['monolith',3000],['operations',3005],['customer',3001],['consultation',3004],['order',3002]]) {
     const url=`http://${service}-app:${port}/${service==='monolith'?'api':service}/docs-json`;
@@ -36,7 +72,7 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
   await truncateFixture(reference, 'TRUNCATE '+[...orderTables,'customers','organizations','call_sessions','admin_users','audit_logs','shipments'].join(',')+' RESTART IDENTITY CASCADE');
   for(const [owner,tables] of Object.entries(owners)) await truncateFixture(databases[owner], 'TRUNCATE '+tables.join(',')+' RESTART IDENTITY CASCADE');
   for(const db of [reference,databases.operations]) {
-    for(const [i,role] of ['OPERATOR','SUPERVISOR','SYSTEM_ADMIN'].entries()) {
+    for(const [i,role] of ['OPERATOR','OPERATOR','SYSTEM_ADMIN'].entries()) {
       await db.query(`INSERT INTO admin_users(admin_user_seq,login_id,name,password_hash,role,status,created_at)
         OVERRIDING SYSTEM VALUE VALUES($1,$2,'조회 담당자','fixture-never-used-for-login',$3,'ACTIVE','2025-01-01T00:00:00Z')`,[i+1,'read'+i,role]);
       await db.query(`INSERT INTO admin_sessions(session_token_hash,admin_user_seq,created_at,expires_at) VALUES($1,$2,'2025-01-01T00:00:00Z','2094-01-01T00:00:00Z')`,[createHash('sha256').update(tokens[i]).digest('hex'),i+1]);
@@ -49,6 +85,15 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
     await db.query(`INSERT INTO personal_pins(personal_pin_seq,customer_seq,address_data,version) OVERRIDING SYSTEM VALUE
       VALUES(2,1,$1,9)`,[{name:'원본 변경됨',phoneNumber:'01000000001',roadAddress:'새 도로',jibunAddress:'새 지번',dongName:'새 동',postalCode:'11111'}]);
   }
+  for(const db of [reference,databases.customer]){
+    for(const [id,status,deleted]of [[6001,'INACTIVE',null],[6002,'ACTIVE','2026-01-01Z'],[6003,'ACTIVE',null]])await db.query(
+      "INSERT INTO organizations(organization_seq,name,status,created_at,deleted_at) OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,'2025-01-01Z',$4)",[id,'현재 기업 '+id,status,deleted]);
+    for(const [id,customer,org,status,deleted]of [[6101,1,6001,'INACTIVE',null],[6102,3,6001,'ACTIVE',null],[6103,4,6001,'ACTIVE',null],[6104,2,6002,'ACTIVE',null],[6105,5,6003,'ACTIVE','2026-01-01Z']])await db.query(
+      "INSERT INTO memberships(membership_seq,customer_seq,organization_seq,employee_no,status,deleted_at) OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,$4,$5,$6)",[id,customer,org,'00'+id,status,deleted]);
+  }
+  for (const db of [reference, databases.customer])
+    await db.query("INSERT INTO payment_cards(payment_card_seq,customer_seq,registration_key,request_hash,provider_customer_key,provider_environment,expiration_year,expiration_month,status,created_at,updated_at) OVERRIDING SYSTEM VALUE VALUES(1,1,'11111111-1111-4111-8111-111111111111','fixed-card-request','22222222-2222-4222-8222-222222222222','test',2099,12,'FAILED','2025-01-01Z','2025-01-01Z')");
+
   const statuses=['COLLECTING','notPaid','PAID','SUBMITTING','SUBMITTING_FAILED','ACCEPTED','SUBMISSION_FAILED','CANCELLED','ACCEPTED','ACCEPTED','COLLECTING','ACCEPTED','ACCEPTED','ACCEPTED','COLLECTING'];
   for(const db of [reference,databases.order]) {
     const client=await db.connect();
@@ -84,18 +129,59 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
         ['00000000-0000-4000-8000-000000000001',1002,null,null,'2094-01-01T00:00:00Z'],
         ['00000000-0000-4000-8000-000000000002',1002,'2030-01-01T00:00:00Z',null,'2094-01-01T00:00:00Z'],
         ['00000000-0000-4000-8000-000000000003',1003,null,null,'2000-01-01T00:00:00Z'],
-        ['00000000-0000-4000-8000-000000000004',1006,null,'2030-01-01T00:00:00Z','2094-01-01T00:00:00Z']])
+        ['00000000-0000-4000-8000-000000000004',1006,null,'2030-01-01T00:00:00Z','2094-01-01T00:00:00Z'],
+        ['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',1004,null,null,'2094-01-01T00:00:00Z'],
+        ['00000000-0000-4000-8000-000000000006',1012,null,null,'2094-01-01T00:00:00Z'],
+        ['00000000-0000-4000-8000-000000000007',1013,null,null,'2094-01-01T00:00:00Z']])
         await client.query(`INSERT INTO order_payment_requests(payment_request_id,order_seq,amount,expires_at,created_at,invalidated_at,completed_at,provider_reference,notification_status,completion_notification_status)
           VALUES($1,$2,7000,$3,'1999-01-01T00:00:00Z',$4,$5,$6,'SENT',CASE WHEN $5::timestamptz IS NULL THEN 'WAITING' ELSE 'SENT' END)`,[id,order,expires,invalid,completed,completed?'stored-reference':null]);
+      await client.query("UPDATE order_payment_requests SET card_payment_order_id=payment_request_id,payment_card_seq=CASE WHEN payment_request_id IN ('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000004') THEN 1 ELSE NULL END,card_payment_failed=payment_request_id IN ('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000002')");
+      await client.query("UPDATE order_payment_requests SET approval_started_at='2030-01-01T00:00:00Z' WHERE payment_request_id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'");
+      await client.query('UPDATE order_parcels SET origin_name=$1 WHERE order_parcel_seq=20041', ['닫는 </script> & "이름"']);
       await client.query('COMMIT');
     } catch(error) { await client.query('ROLLBACK');throw error; } finally { client.release(); }
   }
+  const seedCallGuard=await databases.consultation.connect();fixturePhones.push(seedCallGuard);
+  await seedCallGuard.query('BEGIN');
+  // Keep only the expired read fixture while production GC and table-lock probes remain enabled.
+  await seedCallGuard.query("SELECT pg_advisory_xact_lock(hashtextextended('call-end:01010190000',0))");
   for(const db of [reference,databases.consultation]) {
     for(let n=1;n<=10;n++) await db.query(`INSERT INTO call_sessions(call_session_seq,provider_call_id,caller_phone_number,customer_seq,order_seq,incoming_at,started_at,ended_at,deleted_at,registered_at)
       OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,$4,$5,$6,CASE WHEN $7::timestamptz IS NULL THEN NULL ELSE '2030-01-01T00:00:00Z'::timestamptz END,$7,$8,'2030-01-01T00:00:00Z')`,
-      [1010+n,'read-call-'+n,n===4?null:n===5?'01099999999':'0100000000'+(n===10?4:[1,2,3][n-1]??1),n===10?4:null,n===6?1001:null,
+      [1010+n,'read-call-'+n,n===9?'01010190000':n===4?null:n===5?'01099999999':'0100000000'+(n===10?4:[1,2,3][n-1]??1),n===10?4:null,n===6?1001:null,
         n===9?'2010-01-01T00:00:00Z':'2030-01-01T00:00:00Z',[6,7].includes(n)?'2030-01-02T00:00:00Z':null,n===8?'2026-01-01T00:00:00Z':null]);
   }
+  const longDraftPhone='장'.repeat(40000);
+  const draftCalls=[
+    [1101,1,'01000000001','2030-01-01T00:00:00.123456Z',null,null,null,null],
+    [1099,1,'01000000001','2030-01-01T00:00:00.123457Z','2030-01-01Z','2030-01-02Z','2030-01-02Z','2030-01-03Z'],
+    [1103,1,'01000000001','2031-01-01Z','2031-01-01Z','2031-01-02Z',null,null],
+    [1104,4,'01000000004',null,'2030-01-01T00:00:00.987654Z','2030-01-02Z',null,null],
+    [1105,3,'01000000003','2030-01-01T00:00:00.222222Z',null,null,null,null],
+    [1106,null,longDraftPhone,'2030-01-02Z','2030-01-02Z','2030-01-03Z','2030-01-03Z',null],
+    [1108,3,'01000000003','2030-01-01T00:00:00.222222Z','2030-01-01Z','2030-01-02Z','2030-01-02Z',null],
+  ];
+  for(const db of [reference,databases.consultation])for(const [id,customer,phone,incoming,started,ended,finalized,deleted] of draftCalls)
+    await db.query(`INSERT INTO call_sessions(call_session_seq,provider_call_id,customer_seq,caller_phone_number,incoming_at,started_at,ended_at,order_finalized_at,deleted_at,registered_at,order_completion_received_at,order_completion_payload,order_finalization_result)
+      OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'2030-01-01Z',
+        CASE WHEN $8::timestamptz IS NULL THEN NULL ELSE $7::timestamptz END,
+        CASE WHEN $8::timestamptz IS NULL THEN NULL ELSE '{}'::jsonb END,
+        CASE WHEN $8::timestamptz IS NULL THEN NULL ELSE '{}'::jsonb END)`,[id,'draft-reference-'+id,customer,phone,incoming,started,ended,finalized,deleted]);
+  const drafts=[
+    [13001,1101,1,'01000000001','INCOMPLETE',null,30001],
+    [13002,1105,3,'01000000003','INCOMPLETE',null,30002],
+    [13003,1104,4,'01000000004','INCOMPLETE',null,30003],
+    [13004,null,null,longDraftPhone,'INCOMPLETE',null,30004],
+    [13005,null,null,'no matching historical caller','INCOMPLETE',null,30005],
+    [13006,1099,1,'01000000001','RESUMED',null,30006],
+    [13007,null,1,'01000000001','READY',13006,30006],
+    [13008,1101,null,'01000000001','INCOMPLETE',null,30008],
+  ].map(row=>[...row,randomUUID()]);
+  for(const db of [reference,databases.order])for(const [id,call,customer,phone,status,source,reserved,uuid] of drafts)
+    await db.query(`INSERT INTO order_parcel_drafts(draft_seq,call_session_seq,customer_seq,caller_phone_number,status,source_draft_seq,reserved_order_seq,
+      client_parcel_id,created_by_admin_user_seq,creation_payload,parcel_data,created_at,updated_at,retention_started_at)
+      OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,$4,$5,$6,$7,$8,1,'{}','{}','2030-01-01Z','2030-01-01Z','2030-01-01Z')`,
+      [id,call,customer,phone,status,source,reserved,uuid]);
   await reference.query(`INSERT INTO shipments(order_parcel_seq,tracking_number,status) VALUES(20061,'private-shipment-tracking','sent')`);
   // Retain expired fixtures while exercising their HTTP/SQL invisibility with production purgers enabled.
   for(const [db,table,column,id] of [[reference,'orders','order_seq',1013],[databases.order,'orders','order_seq',1013],
@@ -122,10 +208,20 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
   for(const owner of Object.keys(owners)) messageCounts[owner]=await snapshot(databases[owner],['outbox_events','inbox_events']);
   let compared=0;
   async function request(side,path,expected,extra,requestId) {
-    const response=await fetch(side.base+path,{headers:{...extra,'X-Request-Id':requestId},signal:AbortSignal.timeout(20000)});
-    const body=await response.json();
+    const response=await fetch(side.base+path,{headers:{Authorization:'Bearer '+process.env.PGPASSWORD,...extra,'X-Request-Id':requestId},signal:AbortSignal.timeout(20000)});
+    const text=await response.text();
+    const body=response.headers.get('content-type')?.includes('application/json') ? JSON.parse(text) : text;
     assert.equal(response.status,expected,side.name+' '+path+' '+JSON.stringify(body));
     assert.equal(response.headers.get('x-request-id'),requestId);assert.equal(response.headers.get('cache-control'),'no-store');
+    if(path.startsWith('/api/payments/')&&expected===200) {
+      assert.equal(response.headers.get('referrer-policy'),'no-referrer');
+      if(!path.startsWith('/api/payments/requests/')) {
+        assert.equal(response.headers.get('x-content-type-options'),'nosniff');
+        assert.equal(response.headers.get('x-frame-options'),'DENY');
+        assert.equal(response.headers.get('content-security-policy'),"default-src 'self'; script-src 'self' https://js.tosspayments.com; style-src 'self'; style-src-attr 'unsafe-inline'; connect-src 'self' https://*.tosspayments.com https://*.toss.im; frame-src https:; img-src 'self' data: https:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'");
+        assert.equal(response.headers.get('content-type'),path.endsWith('.js')?'text/javascript; charset=utf-8':path.endsWith('.css')?'text/css; charset=utf-8':'text/html; charset=utf-8');
+      } else assert.equal(response.headers.get('content-type'),'application/json; charset=utf-8');
+    }
     return body;
   }
   async function compare(path,expected=200,extra=headers) {
@@ -146,11 +242,281 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
       }
       for(const child of Object.values(value)) schemas(child);
     }
-    for(const path of ['/api/orders','/api/orders/{id}','/api/admin/orders','/api/customers/{id}/addresses']) {
-      assert.deepEqual(documents[1].paths[path].get,documents[0].paths[path].get,path);
-      schemas(documents[0].paths[path].get);
+    for(const path of ['/api/orders','/api/orders/{id}','/api/admin/orders','/api/customers/{id}/addresses','/api/payments/requests/{id}','/api/parcel-drafts','/api/parcel-drafts/{id}']) {
+      const source = structuredClone(documents[0].paths[path].get);
+      // The pinned monolith predates the number search in !672.
+      const description = {
+        '/api/admin/orders': '표시 주문번호(DV-00140 또는 140) 정확히 일치. 발송인·수령인 이름·전화번호·주소 부분 검색도 지원합니다. NFC·대소문자 무시. %·_는 일반 문자.',
+        '/api/parcel-drafts': '관리자는 예약 주문번호(DV-00140 또는 140)로 정확히 일치 검색할 수 있습니다. 발송·수령 이름/전화/주소 부분 검색. 전화번호는 하이픈 허용.',
+      }[path];
+      if (description) source.parameters.find(parameter => parameter.name === 'q').description = description;
+      assert.deepEqual(documents[1].paths[path].get, source, path);
+      schemas(source);
     }
     assert.ok(visited.size>5);
+  });
+  await t.test('payment reads preserve every state, exact HTML/assets, escaping and public access without changing stored data',async()=> {
+    for(const [number,status] of [[1,'PENDING'],[2,'CANCELLED'],[3,'EXPIRED'],[4,'PAID'],[5,'REVIEW_REQUIRED']]) {
+      const id=number===5?'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa':'00000000-0000-4000-8000-'+String(number).padStart(12,'0');
+      const view=await compare('/api/payments/requests/'+id,200,{});
+      assert.equal(view.data.status,status);
+      assert.equal(view.data.token,id);
+      assert.equal(view.data.autoCharge,[1,4].includes(number));
+      assert.equal(view.data.cardPaymentFailed,[1,2].includes(number));
+      await compare('/api/payments/requests/'+id.toUpperCase(),200,{Cookie:'dva_session=invalid'});
+      for(const mode of ['p','success','fail']) {
+        const html=await compare('/api/payments/'+mode+'/'+id,200,{});
+        assert.ok(html.includes('id="payment-data" type="application/json"'));
+        if(number===5) {
+          assert.ok(html.includes('닫는 &lt;/script&gt; &amp; &quot;이름&quot;'));
+          assert.ok(!html.includes('닫는 </script>'));
+          const data=JSON.parse(/<script id="payment-data" type="application\/json">(.*?)<\/script>/s.exec(html)[1]);
+          assert.equal(data.senderName,'닫는 </script> & "이름"');
+        }
+      }
+    }
+    for(const mode of ['requests','p','success','fail']) {
+      for(const id of ['00000000-0000-4000-8000-000000000006','00000000-0000-4000-8000-000000000007','ffffffff-ffff-4fff-8fff-ffffffffffff'])
+        await compare('/api/payments/'+mode+'/'+id,404,{});
+      for(const id of ['invalid','00000000-0000-1000-8000-000000000001'])
+        await compare('/api/payments/'+mode+'/'+id,400,{});
+    }
+    for(const name of ['checkout.js','style.css']) await compare('/api/payments/assets/'+name,200,{});
+    for(const name of ['secret.key','%2e%2e%2fpackage.json']) await compare('/api/payments/assets/'+name,404,{});
+    const documents=await Promise.all(sides.map(async side=>(await fetch(side.base+'/api/docs-json')).json()));
+    assert.deepEqual(documents[1].paths['/api/payments/requests/{id}'].get,documents[0].paths['/api/payments/requests/{id}'].get);
+    for(const name of ['PaymentStatusDto','RequestMetaDto','ErrorResponseDto']) assert.deepEqual(documents[1].components.schemas[name],documents[0].components.schemas[name],name);
+    for(const document of documents) for(const path of ['/api/payments/assets/{name}','/api/payments/p/{id}','/api/payments/success/{id}','/api/payments/fail/{id}']) assert.equal(document.paths[path],undefined);
+  });
+  await t.test('order customer references keep service authentication, current visibility and read-only receipts',async()=> {
+    const {requestReferences}=require('@dva/events/call-read-references.cjs');
+    const base='http://customer-app:3001';
+    const path='/internal/call-read-references/for-orders';
+    const customerToken=process.env.CUSTOMER_AUTH_TOKEN;
+    const consultationToken=process.env.CONSULTATION_AUTH_TOKEN;
+    const ids=[1,3,4,5,7];
+    const expected=(await reference.query(`SELECT c.customer_seq,c.name,o.organization_seq,o.name AS organization_name FROM customers c
+      LEFT JOIN memberships m ON m.customer_seq=c.customer_seq AND m.deleted_at IS NULL
+      LEFT JOIN organizations o ON o.organization_seq=m.organization_seq AND o.deleted_at IS NULL
+      WHERE c.customer_seq=ANY($1::int[]) AND c.deleted_at IS NULL ORDER BY c.customer_seq`,[ids])).rows;
+    assert.deepEqual(await requestReferences('customer',base+path,customerToken,ids,'order'),expected);
+    const maximum=Array.from({length:250},(_,n)=>n+1);
+    const maximumExpected=(await reference.query('SELECT customer_seq FROM customers WHERE customer_seq=ANY($1::int[]) AND deleted_at IS NULL ORDER BY customer_seq',[maximum])).rows;
+    assert.deepEqual((await requestReferences('customer',base+path,customerToken,maximum,'order')).map(row=>({customer_seq:row.customer_seq})),maximumExpected);
+    const packet={eventId:randomUUID(),source:'order',eventType:'CallReadReferencesRequested',payload:{ids}};
+    async function post(target,body,token,expectedStatus) {
+      const response=await fetch(base+target,{method:'POST',headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},body:JSON.stringify(body)});
+      assert.equal(response.status,expectedStatus);
+      if(expectedStatus===200) {
+        assert.equal(response.headers.get('cache-control'),'no-store');
+        assert.deepEqual(await response.json(),{eventId:packet.eventId,status:'processed',payload:expected});
+      } else await response.body?.cancel();
+    }
+    for(const token of [undefined,'wrong',consultationToken]) await post(path,packet,token,403);
+    for(const body of [{...packet,source:'consultation'},{...packet,source:'customer'},
+      {...packet,payload:{ids:[]}},{...packet,payload:{ids:[1,1]}},
+      {...packet,payload:{ids:maximum.concat(251)}},{...packet,payload:{ids,sql:'SELECT private'}}])
+      await post(path,body,customerToken,422);
+    await post(path,packet,customerToken,200);
+    await post(path,packet,customerToken,200);
+    await post('/api'+path,packet,customerToken,404);
+    await post('/internal/call-read-references',{...packet,source:'consultation'},customerToken,403);
+    const old=await requestReferences('customer',base+'/internal/call-read-references',consultationToken,ids);
+    assert.deepEqual(old,expected);
+    const document=await (await fetch(base+'/api/docs-json')).json();
+    assert.ok(!Object.keys(document.paths).some(path=>path.includes('call-read-references')));
+  });
+  await t.test('draft call references reproduce original availability including deleted newer calls, tuple precision and large legacy phones',async()=> {
+    const {requestDraftCallReferences,requestParcelDraftCommand}=require('@dva/events/parcel-drafts.cjs');
+    const base='http://consultation-app:3004';const path='/internal/order-draft-call-references';
+    const token=process.env.CUSTOMER_AUTH_TOKEN;
+    const scope={callIds:[1101,1099,1104,1105],customerIds:[1,3,4],phones:['01000000001',longDraftPhone,'no matching historical caller']};
+    const refs=await requestDraftCallReferences(base+path,token,scope);
+    assert.match(refs.calls.find(r=>r.call_session_seq===1101).started_at,/\.123456/);
+    assert.equal(refs.customers.find(r=>r.customer_seq===1).call_session_seq,1099);
+    assert.equal(refs.customers.find(r=>r.customer_seq===3).call_session_seq,1108);
+    assert.equal(refs.phones.find(r=>r.caller_phone_number===longDraftPhone).call_session_seq,1106);
+    const visible=(await databases.order.query(`WITH origins AS(
+      SELECT * FROM jsonb_to_recordset($1::jsonb) AS c(call_session_seq int,started_at timestamptz)),
+      latest AS(SELECT call_session_seq,customer_seq,NULL::text AS caller_phone_number,started_at FROM jsonb_to_recordset($2::jsonb) AS c(call_session_seq int,customer_seq int,started_at timestamptz)
+        UNION ALL SELECT call_session_seq,NULL::int,caller_phone_number,started_at FROM jsonb_to_recordset($3::jsonb) AS c(call_session_seq int,caller_phone_number text,started_at timestamptz))
+      SELECT d.draft_seq FROM order_parcel_drafts d WHERE d.deleted_at IS NULL AND d.retention_started_at>transaction_timestamp()-interval '5 years'
+       AND (NOT(d.status='INCOMPLETE' OR(d.source_draft_seq IS NOT NULL AND d.status IN('READY','EDITING')))
+        OR(d.retention_started_at>transaction_timestamp()-interval '24 hours' AND NOT EXISTS(
+          SELECT 1 FROM latest newer LEFT JOIN order_parcel_drafts source ON source.draft_seq=d.source_draft_seq
+          LEFT JOIN origins origin ON origin.call_session_seq=COALESCE(d.call_session_seq,source.call_session_seq)
+          WHERE ((d.customer_seq IS NOT NULL AND newer.customer_seq=d.customer_seq)OR(d.customer_seq IS NULL AND newer.caller_phone_number=d.caller_phone_number))
+           AND(newer.started_at,newer.call_session_seq)>(COALESCE(origin.started_at,d.retention_started_at),COALESCE(origin.call_session_seq,0))))) ORDER BY d.draft_seq`,
+      [JSON.stringify(refs.calls),JSON.stringify(refs.customers),JSON.stringify(refs.phones)])).rows.map(r=>r.draft_seq);
+    assert.deepEqual(visible,[13003,13005,13006,13007]);
+    for(const [id] of drafts) {
+      const response=await fetch(sides[0].base+'/api/parcel-drafts/'+id,{headers});
+      assert.equal(response.status,visible.includes(id)?200:404,'original draft availability '+id);
+      const body=await response.json();if(response.ok)assert.equal(body.data.draftSeq,id);
+    }
+    const concurrent=await Promise.all(Array.from({length:5},()=>requestDraftCallReferences(base+path,token,scope)));
+    for(const result of concurrent)assert.deepEqual(result,refs);
+    const packet={eventId:randomUUID(),source:'order',eventType:'DraftCallReferencesRequested',payload:{callIds:Array.from({length:250},(_,n)=>n+1),customerIds:[],phones:[],phoneHashes:[]}};
+    const maximum=await requestParcelDraftCommand(base+path,token,packet);assert.deepEqual(maximum,{calls:[],customers:[],phones:[]});
+    async function post(target,body,credential,expected) {
+      const response=await fetch(base+target,{method:'POST',headers:{'Content-Type':'application/json',...(credential?{Authorization:'Bearer '+credential}:{})},body:JSON.stringify(body)});
+      assert.equal(response.status,expected);await response.body?.cancel();
+    }
+    for(const credential of [undefined,'wrong',process.env.CONSULTATION_AUTH_TOKEN])await post(path,packet,credential,403);
+    for(const body of [{...packet,source:'consultation'},{...packet,payload:{...packet.payload,callIds:[1,1]}},
+      {...packet,payload:{...packet.payload,callIds:packet.payload.callIds.concat(251)}},{...packet,payload:{...packet.payload,sql:'SELECT private'}},
+      {...packet,payload:{...packet.payload,phones:['x'.repeat(257)]}}])await post(path,body,token,422);
+    await post(path,{...packet,payload:{...packet.payload,phones:[longDraftPhone]}},token,413);
+    await post('/api'+path,packet,token,404);
+    const document=await(await fetch(base+'/api/docs-json')).json();assert.ok(!Object.keys(document.paths).some(p=>p.includes('order-draft-call-references')));
+  });
+  await t.test('admin read scopes reuse saturated owner pools and retain one snapshot during edits',async()=> {
+    const {createServer}=require('node:http'),{networkInterfaces}=require('node:os');
+    const {requestReferences,requestOrderOrganization}=require('@dva/events/call-read-references.cjs');
+    const {requestDraftCallReferences}=require('@dva/events/parcel-drafts.cjs');
+    const address=Object.values(networkInterfaces()).flat().find(row=>row.family==='IPv4'&&!row.internal)?.address;
+    assert.ok(address);
+    const token=process.env.CUSTOMER_AUTH_TOKEN,consToken=process.env.CONSULTATION_AUTH_TOKEN;
+    const customerBase='http://customer-app:3001',consultationBase='http://consultation-app:3004';
+    const oldName=(await databases.customer.query('SELECT name FROM customers WHERE customer_seq=1')).rows[0].name;
+    const oldStarted=(await databases.consultation.query("SELECT to_jsonb(incoming_at)#>>'{}' AS started FROM call_sessions WHERE call_session_seq=1101")).rows[0].started;
+    let entered,release;const arrivals=new Promise(r=>entered=r),gate=new Promise(r=>release=r),seen=[];let pending=[];
+    const counts={all:0,incomplete:0,notPaid:0,paid:0,accepted:0,submissionFailed:0,cancelled:0};
+    const server=createServer(async(req,res)=>{
+      try {
+        assert.equal(req.url,'/internal/admin-order-read');assert.equal(req.headers.authorization,'Bearer '+token);
+        const chunks=[];for await(const chunk of req)chunks.push(chunk);const packet=JSON.parse(Buffer.concat(chunks));
+        assert.equal(packet.source,'customer');seen.push(packet.eventId);if(seen.length===5)entered();await gate;
+        const customer=await requestReferences('customer',customerBase+'/internal/call-read-references/for-orders',token,[1],'order',packet.eventId);
+        assert.equal(customer[0].name,oldName);
+        const refs=await requestDraftCallReferences(consultationBase+'/internal/order-draft-call-references',token,{callIds:[1101],customerIds:[],phones:[]},packet.eventId);
+        assert.equal(refs.calls[0].started_at,oldStarted);
+        assert.deepEqual(await requestOrderOrganization(customerBase+'/internal/call-read-references/order-organization',token,2147483647,packet.eventId),{organization_seq:2147483647,organization_name:null,customer_seqs:[]});
+        res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({eventId:packet.eventId,status:'processed',payload:{data:[],hasNext:false,total_count:0,statusCounts:counts}}));
+      } catch(error) {res.writeHead(500,{'Content-Type':'application/json'});res.end(JSON.stringify({error:String(error)}));}
+    });
+    await new Promise(r=>server.listen(3002,'0.0.0.0',r));
+    const post=(base,path,body,auth=token,scope)=>fetch(base+path,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+auth,...(scope===undefined?{}:{'X-Msa-Read-Scope':scope})},body:JSON.stringify(body),signal:AbortSignal.timeout(25000)});
+    const packet=()=>({eventId:randomUUID(),source:'order',eventType:'AdminOrdersReadRequested',payload:{query:{limit:20,offset:0},orderAddress:address}});
+    const referencePacket={eventId:randomUUID(),source:'order',eventType:'CallReadReferencesRequested',payload:{ids:[1]}};
+    try {
+      assert.equal((await post(consultationBase,'/internal/admin-order-read',packet(),'wrong')).status,403);
+      assert.equal((await post(consultationBase,'/internal/admin-order-read',{...packet(),source:'customer'})).status,422);
+      const forged=packet();forged.payload.orderAddress='169.254.169.254';assert.equal((await post(consultationBase,'/internal/admin-order-read',forged)).status,422);
+      assert.equal((await post(customerBase,'/internal/call-read-references/admin-orders',packet(),token)).status,403);
+      pending=Array.from({length:5},()=>post(consultationBase,'/internal/admin-order-read',packet()));
+      let timer;try{await Promise.race([arrivals,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('owner pool scope did not enter')),10000);})]);}finally{clearTimeout(timer);}
+      await databases.customer.query("UPDATE customers SET name='수정된 고객' WHERE customer_seq=1");
+      await databases.consultation.query("UPDATE call_sessions SET incoming_at='2030-01-01T00:00:00.123459Z' WHERE call_session_seq=1101");
+      release();
+      for(const response of await Promise.all(pending)){const body=await response.json();assert.equal(response.status,200,JSON.stringify(body));assert.deepEqual(body.payload.statusCounts,counts);}
+      assert.equal(new Set(seen).size,5);
+      for(const scope of ['invalid',...seen])assert.equal((await post(customerBase,'/internal/call-read-references/for-orders',referencePacket,token,scope)).status,scope==='invalid'?422:503);
+      const draft={eventId:randomUUID(),source:'order',eventType:'DraftCallReferencesRequested',payload:{callIds:[1101],customerIds:[],phones:[],phoneHashes:[]}};
+      assert.equal((await post(consultationBase,'/internal/order-draft-call-references',draft,token,seen[0])).status,503);
+      assert.equal((await requestReferences('customer',customerBase+'/internal/call-read-references/for-orders',token,[1],'order'))[0].name,'수정된 고객');
+      assert.equal((await requestDraftCallReferences(consultationBase+'/internal/order-draft-call-references',token,{callIds:[1101],customerIds:[],phones:[]})).calls[0].started_at,'2030-01-01T00:00:00.123459+00:00');
+      for(const [base,prefix]of [[customerBase,'customer'],[consultationBase,'consultation']]){
+        const document=await(await fetch(base+'/'+prefix+'/docs-json')).json();assert.ok(!JSON.stringify(document.paths).includes('admin-order-read'));assert.ok(!JSON.stringify(document.paths).includes('order-organization'));
+      }
+    } finally {
+      release();await Promise.allSettled(pending);await new Promise(r=>server.close(r));
+      await databases.customer.query('UPDATE customers SET name=$1 WHERE customer_seq=1',[oldName]);
+      await databases.consultation.query('UPDATE call_sessions SET incoming_at=$1 WHERE call_session_seq=1101',[oldStarted]);
+    }
+  });
+  await t.test('parcel draft read scopes preserve stored and anonymous callers and hold authorization locks',async()=>{
+    const {createServer}=require('node:http'),{networkInterfaces}=require('node:os');
+    const {requestDraftRead}=require('@dva/events/order-read.cjs');
+    const {requestDraftReadCall}=require('@dva/events/parcel-drafts.cjs');
+    const {requestReferences}=require('@dva/events/call-read-references.cjs');
+    const address=Object.values(networkInterfaces()).flat().find(row=>row.family==='IPv4'&&!row.internal)?.address;
+    const base='http://consultation-app:3004',token=process.env.CUSTOMER_AUTH_TOKEN;
+    // Keep 120KB Unicode payloads without glibc comparing two long repeated Hangul prefixes.
+    const longPhone='scope:'+'입'.repeat(39998);assert.equal(Buffer.byteLength(longPhone),120000);
+    const cases=[[15001,1,'different stored phone',true,'2030-01-01Z',false,null,200,1],
+      [15002,null,'01000000001',true,'2030-01-01Z',false,null,200,1],
+      [15003,null,'unknown caller',true,'2030-01-01Z',false,null,200,null],
+      [15004,3,'01000000003',true,'2030-01-01Z',false,null,403,null],
+      [15005,4,'01000000004',true,'2030-01-01Z',false,null,403,null],
+      [15006,null,null,true,'2030-01-01Z',false,null,403,null],
+      [15007,1,'01000000001',false,'2030-01-01Z',false,null,409,null],
+      [15008,1,'01000000001',true,null,false,null,404,null],
+      [15009,1,'01000000001',true,'2010-01-01Z',false,null,404,null],
+      [15010,1,'01000000001',true,'2030-01-01Z',true,null,200,1],
+      [15011,1,'01000000001',true,'2030-01-01Z',false,'2030-01-02Z',404,null],
+      [15012,null,longPhone,true,'2030-01-01Z',false,null,200,null]];
+    for(const db of [reference,databases.consultation])for(const [id,customer,phone,enabled,incoming,ended,deleted]of cases)await db.query(
+      `INSERT INTO call_sessions(call_session_seq,provider_call_id,customer_seq,caller_phone_number,order_intake_enabled,incoming_at,registered_at,started_at,ended_at,deleted_at)
+       OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,$4,$5,$6,'2030-01-01Z',CASE WHEN $7 THEN '2030-01-01Z'::timestamptz ELSE NULL END,CASE WHEN $7 THEN '2030-01-02Z'::timestamptz ELSE NULL END,$8)`,
+      [id,'draft-read-scope-'+id,customer,phone,enabled,incoming,ended,deleted]);
+    const retained=[];for(const db of [reference,databases.consultation]){const client=await db.connect();await client.query('BEGIN');await client.query('SELECT 1 FROM call_sessions WHERE call_session_seq=15009 FOR KEY SHARE');retained.push(client);}
+    let hold=false,arrivals=[],entered,release;const gate=new Promise(r=>release=r),ready=new Promise(r=>entered=r);let pending=[],updates=[];
+    const packet=id=>({eventId:randomUUID(),source:'order',eventType:'ParcelDraftReadRequested',payload:{command:{operation:'ParcelDraftsListed',id:null,callSessionSeq:id,query:{limit:20,offset:0,status:'ALL',callSessionSeq:id??2147483647}},orderAddress:address}});
+    const server=createServer(async(req,res)=>{
+      try{
+        assert.equal(req.url,'/internal/parcel-draft-read');assert.equal(req.headers.authorization,'Bearer '+token);
+        const chunks=[];for await(const chunk of req)chunks.push(chunk);const bytes=Buffer.concat(chunks);assert.ok(bytes.length<4096);const event=JSON.parse(bytes);
+        assert.equal(event.source,'customer');const id=event.payload.command.callSessionSeq;
+        assert.equal(event.payload.customerSeq,id===null?null:cases.find(c=>c[0]===id)[8]);
+        if(hold){arrivals.push(event.eventId);if(arrivals.length===5)entered();await gate;}
+        if(id!==null){const call=await requestDraftReadCall(base+'/internal/parcel-draft-read/call',token,id,event.eventId);
+          assert.equal(call.callerPhoneNumber,cases.find(c=>c[0]===id)[2]);if(hold)assert.equal(call.endedAt,null);
+          await assert.rejects(requestDraftReadCall(base+'/internal/parcel-draft-read/call',token,1101,event.eventId));}
+        await requestReferences('customer','http://customer-app:3001/internal/call-read-references/for-orders',token,[1],'order',event.eventId);
+        res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({eventId:event.eventId,status:'processed',payload:{data:[],hasNext:false,total_count:0}}));
+      }catch(error){res.writeHead(500,{'Content-Type':'application/json'});res.end(JSON.stringify({error:String(error)}));}
+    });
+    await new Promise(r=>server.listen(3002,'0.0.0.0',r));
+    const post=(path,event,auth=token,scope)=>fetch(base+path,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+auth,...(scope===undefined?{}:{'X-Msa-Read-Scope':scope})},body:JSON.stringify(event),signal:AbortSignal.timeout(30000)});
+    try{
+      for(const id of [null,...cases.map(c=>c[0])]){
+        const expected=id===null?200:cases.find(c=>c[0]===id)[7];
+        const original=await fetch(sides[0].base+'/api/parcel-drafts?status=ALL&callSessionSeq='+(id??2147483647),{headers:{Authorization:'Bearer '+process.env.PGPASSWORD,...(id===null?headers:ai(id))}});
+        const oracle=await original.json();assert.equal(original.status,expected,'source context '+id);
+        const response=await post('/internal/parcel-draft-read',packet(id));const body=await response.json();assert.equal(response.status,expected,'context '+id+' '+JSON.stringify(body));
+        if(expected===200)assert.deepEqual(body.payload,oracle);else assert.deepEqual(body.error,oracle.error);
+      }
+      assert.equal((await post('/internal/parcel-draft-read',packet(15001),'wrong')).status,403);
+      assert.equal((await post('/internal/parcel-draft-read',{...packet(15001),source:'customer'})).status,422);
+      const lookup={eventId:randomUUID(),source:'order',eventType:'ParcelDraftReadCallRequested',payload:{callSessionSeq:15001}};
+      assert.equal((await post('/internal/parcel-draft-read/call',lookup,token,randomUUID())).status,503);
+      assert.equal((await post('/internal/parcel-draft-read/call',lookup,token,'invalid')).status,422);
+      for(const kind of ['call','customer']){
+        let oracle;
+        for(const side of ['source','msa']){
+          const db=kind==='call'?(side==='source'?reference:databases.consultation):(side==='source'?reference:databases.customer);
+          const client=await db.connect();let reading;
+          try{
+            await client.query('BEGIN');
+            await client.query(kind==='call'?"UPDATE call_sessions SET order_intake_enabled=false WHERE call_session_seq=15001":"UPDATE customers SET status='WITHDRAWN' WHERE customer_seq=1");
+            reading=side==='source'?fetch(sides[0].base+'/api/parcel-drafts?status=ALL&callSessionSeq=15001',{headers:{Authorization:'Bearer '+process.env.PGPASSWORD,...ai(15001)}}):post('/internal/parcel-draft-read',packet(15001));
+            const pattern=kind==='call'?'%FROM call_sessions WHERE %FOR SHARE%':'%FROM customers WHERE %FOR SHARE%';
+            let blocked=false;for(let i=0;i<200;i++){if((await db.query("SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE wait_event_type='Lock' AND query LIKE $1) AS blocked",[pattern])).rows[0].blocked){blocked=true;break;}await pause(10);}assert.ok(blocked,side+' pending '+kind+' authorization');
+            await client.query('COMMIT');
+            const response=await reading,body=await response.json();assert.equal(response.status,kind==='call'?409:403,side+' observes committed '+kind+' '+JSON.stringify(body));
+            if(side==='source')oracle=body.error;else assert.deepEqual(body.error,oracle);
+          } finally {
+            await client.query('ROLLBACK');client.release();await reading?.catch(()=>{});
+            await db.query(kind==='call'?"UPDATE call_sessions SET order_intake_enabled=true WHERE call_session_seq=15001":"UPDATE customers SET status='ACTIVE' WHERE customer_seq=1");
+          }
+        }
+      }
+      hold=true;pending=Array.from({length:5},()=>post('/internal/parcel-draft-read',packet(15001)));
+      let timer;try{await Promise.race([ready,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('draft pools did not enter')),10000);})]);}finally{clearTimeout(timer);}
+      updates=[databases.consultation.query("UPDATE call_sessions SET ended_at='2030-01-02Z',started_at='2030-01-01Z' WHERE call_session_seq=15001"),databases.customer.query("UPDATE customers SET status='WITHDRAWN' WHERE customer_seq=1")];
+      for(const [db,pattern]of [[databases.consultation,'UPDATE call_sessions SET ended_at%'],[databases.customer,'UPDATE customers SET status=%']]){
+        let blocked=false;for(let i=0;i<200;i++){if((await db.query("SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE wait_event_type='Lock' AND query LIKE $1) AS blocked",[pattern])).rows[0].blocked){blocked=true;break;}await pause(10);}assert.ok(blocked,'authorization update was not blocked');
+      }
+      release();for(const response of await Promise.all(pending)){const body=await response.json();assert.equal(response.status,200,JSON.stringify(body));}await Promise.all(updates);
+      hold=false;assert.equal((await post('/internal/parcel-draft-read',packet(15001))).status,403);
+      for(const scope of arrivals)assert.equal((await post('/internal/parcel-draft-read/call',lookup,token,scope)).status,503);
+    } finally {
+      release();await Promise.allSettled(pending);await Promise.allSettled(updates);await new Promise(r=>server.close(r));
+      await databases.customer.query("UPDATE customers SET status='ACTIVE' WHERE customer_seq=1");
+      for(const client of retained){await client.query('ROLLBACK');client.release();}
+      for(const db of [reference,databases.consultation])await db.query("DELETE FROM call_sessions WHERE provider_call_id LIKE 'draft-read-scope-%'");
+    }
   });
   await t.test('all roles, filters, stable order, page boundaries and totals',async()=> {
     for(const token of tokens) await compare('/api/orders',200,{Cookie:'dva_session='+token});
@@ -187,8 +553,134 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
   await t.test('admin screen searches NFC, formatted phones and literal special characters and groups states',async()=> {
     for(const query of ['', '?limit=1','?offset=999','?q=한글','?q=010-9876-5432','?q=%25','?q=_','?q=%27%20OR%201%3D1--',
       '?from=2030-02-01T00:00:00Z&to=2030-02-10T00:00:00Z&limit=2']) await compare('/api/admin/orders'+query);
-    for(const group of ['COLLECTING','notPaid','PAID','SUBMISSION_FAILED','CANCELLED']) await compare('/api/admin/orders?statusGroup='+group);
+    const byNumber = async (q, filters = {}) => request(
+      sides[1], '/api/admin/orders?' + new URLSearchParams({ q, ...filters }), 200, headers, randomUUID(),
+    );
+    for (const q of ['1001', ' dv-01001 ']) {
+      const body = await byNumber(q);
+      assert.deepEqual(body.data.map(row => [row.orderSeq, row.draftSeq, row.parcels.length]), [[1001, null, 0]]);
+      assert.equal(body.total_count, 1);
+      assert.equal(body.statusCounts.all, 1);
+    }
+    for (const q of ['DV-01012', 'DV-01013', 'DV-2147483648'])
+      assert.equal((await byNumber(q)).total_count, 0);
+    assert.equal((await byNumber('DV-01001', { from: '2030-02-02T00:00:00Z' })).total_count, 0);
+    for(const group of ['COLLECTING','notPaid','PAID','ACCEPTED','SUBMISSION_FAILED','CANCELLED']) await compare('/api/admin/orders?statusGroup='+group);
+    for(const organization of [6001,6002,6003,2147483647])for(const group of ['', '&statusGroup=COLLECTING','&statusGroup=PAID','&statusGroup=CANCELLED'])await compare('/api/admin/orders?organizationSeq='+organization+group+'&limit=1&offset=1');
+    for(const query of ['?organizationSeq=0','?organizationSeq=2147483648','?organizationSeq=1&organizationSeq=2'])await compare('/api/admin/orders'+query,400);
+    const original=await compare('/api/admin/orders?limit=1&offset=1');
+    for(const query of ['?limit=100','?limit=1&offset=999','?statusGroup=PAID','?statusGroup=COLLECTING'])assert.deepEqual((await compare('/api/admin/orders'+query)).statusCounts,original.statusCounts);
+    const path='/api/admin/orders?limit=2',requestId=randomUUID(),expected=await request(sides[0],path,200,headers,requestId);
+    await Promise.all(Array.from({length:12},async()=>assert.deepEqual(await request(sides[1],path,200,headers,requestId),expected)));
     await compare('/api/admin/orders',401,{});
+    try {
+      for(const db of [reference,databases.order])await db.query(`INSERT INTO order_parcel_drafts(draft_seq,reserved_order_seq,client_parcel_id,created_by_admin_user_seq,creation_payload,parcel_data,status,created_at,updated_at,retention_started_at)
+        OVERRIDING SYSTEM VALUE SELECT 14000+n,40000+n,gen_random_uuid(),1,'{}','{"origin":{"name":"분할 초안 한글_%","phoneNumber":"01098765432"},"documentCount":2,"otherItemDescription":"메모"}'::jsonb,
+        'INCOMPLETE','2030-01-01Z','2030-01-01Z','2030-01-01Z' FROM generate_series(1,251) n`);
+      const draft = await byNumber('DV-40001', { statusGroup: 'COLLECTING' });
+      assert.deepEqual(draft.data.map(row => [row.orderSeq, row.draftSeq]), [[40001, 14001]]);
+      assert.equal(draft.total_count, 1);
+      assert.deepEqual(draft.statusCounts, { all: 1, incomplete: 1, notPaid: 0, paid: 0, accepted: 0, submissionFailed: 0, cancelled: 0 });
+      const wrongGroup = await byNumber('40001', { statusGroup: 'notPaid' });
+      assert.equal(wrongGroup.total_count, 0);
+      assert.deepEqual(wrongGroup.statusCounts, draft.statusCounts);
+      for(const query of ['?q='+encodeURIComponent('분할 초안 한글_%'),'','?statusGroup=COLLECTING','?q=010-9876-5432'])for(const offset of [0,249,250,251])await compare('/api/admin/orders'+(query||'?')+(query?'&':'')+'limit=1&offset='+offset);
+    } finally {for(const db of [reference,databases.order])await db.query('DELETE FROM order_parcel_drafts WHERE draft_seq BETWEEN 14001 AND 14251');}
+
+  });
+  await t.test('parcel draft public reads preserve snapshots, all statuses, caller scope and filtered totals',async()=>{
+    const largePhone='reads:'+'입'.repeat(39998),retained=[];assert.equal(Buffer.byteLength(largePhone),120000);
+    const old=(await reference.query("SELECT to_jsonb(clock_timestamp()-interval '2 days')#>>'{}' AS instant")).rows[0].instant;
+    const contexts=[
+      {id:16001,customer:1,phone:'different stored phone'}, {id:16002,customer:null,phone:'01000000001'},
+      {id:16003,customer:1,phone:'01000000001',ended:true}, {id:16004,customer:2,phone:'01000000002'},
+      {id:16005,customer:null,phone:'anonymous repeated'}, {id:16006,customer:null,phone:'anonymous repeated'},
+      {id:16007,customer:null,phone:'anonymous repeated',ended:true},{id:16008,customer:null,phone:largePhone},
+      {id:16009,customer:null,phone:null},{id:16010,customer:3,phone:'01000000001'},
+      {id:16011,customer:4,phone:'01000000001'},{id:16012,customer:null,phone:'01000000003'},
+      {id:16013,customer:1,phone:'01000000001',enabled:false},{id:16014,customer:1,phone:'01000000001',deleted:true},
+      {id:16015,customer:1,phone:'01000000001',missingIncoming:true},{id:16016,customer:1,phone:'01000000001',expired:true},
+      {id:16017,customer:1,phone:'01000000001',ended:true,finalized:true},{id:16018,customer:1,phone:'01000000001',ended:true,order:1006},
+    ];
+    const rows=[
+      {id:17001,status:'READY',call:16001},{id:17002,status:'EDITING',call:16001},{id:17003,status:'INCOMPLETE',call:16001},
+      {id:17004,status:'RESUMED',call:16001},{id:17005,status:'READY',source:17004,reserved:72004},
+      {id:17006,status:'CANCELLED',call:16001},{id:17007,status:'CONVERTED',call:16001,order:1006,parcel:20061,reserved:1006},
+      {id:17008,status:'READY',call:16004,customer:2},{id:17009,status:'READY',call:16005,customer:null,phone:'anonymous repeated'},
+      {id:17010,status:'INCOMPLETE',customer:null,phone:'anonymous repeated'}, {id:17011,status:'READY',customer:null,phone:'anonymous repeated'},
+      {id:17012,status:'INCOMPLETE',call:16006,customer:null,phone:'anonymous repeated'}, {id:17013,status:'INCOMPLETE',customer:4},
+      {id:17014,status:'READY',call:16003},{id:17015,status:'EDITING',customer:3},{id:17016,status:'READY',deleted:true},
+      {id:17017,status:'READY',retention:'2010-01-01Z'},{id:17018,status:'INCOMPLETE',retention:old},
+      {id:17020,status:'RESUMED',call:16001},{id:17019,status:'READY',source:17020,reserved:72020,retention:old},
+      {id:17021,status:'READY',retention:old},{id:17022,status:'INCOMPLETE',call:1101},
+      {id:17023,status:'INCOMPLETE',customer:null,phone:largePhone}, {id:17024,status:'READY',legacy:999999},
+      {id:17025,status:'CONVERTED',call:16018,order:1006,parcel:20062,reserved:88001},
+      {id:17026,status:'INCOMPLETE',customer:null,phone:'01000000003'},
+      {id:17027,status:'READY',call:16007,customer:null,phone:'anonymous repeated'},
+    ];
+    const uuids=new Map(rows.map(row=>[row.id,randomUUID()]));
+    const party={name:'보존 한글_%',phoneNumber:'01098765432',roadAddress:'서울 도로',jibunAddress:'서울 지번',detailAddress:null,dongName:null,postalCode:'00123'};
+    try {
+      for(const db of [reference,databases.consultation])for(const c of contexts)await db.query(`INSERT INTO call_sessions(call_session_seq,provider_call_id,customer_seq,caller_phone_number,order_seq,incoming_at,registered_at,started_at,ended_at,deleted_at,
+        order_intake_enabled,order_intake_version,order_completion_received_at,order_completion_payload,order_finalized_at,order_finalization_result)
+        OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,$4,$5,$6,'2032-01-01Z',CASE WHEN $7 THEN '2032-01-01Z'::timestamptz ELSE NULL END,CASE WHEN $7 THEN '2032-01-02Z'::timestamptz ELSE NULL END,$8,$9,7,
+        CASE WHEN $10 THEN '2032-01-02Z'::timestamptz ELSE NULL END,CASE WHEN $10 THEN '{}'::jsonb ELSE NULL END,
+        CASE WHEN $10 THEN '2032-01-03Z'::timestamptz ELSE NULL END,CASE WHEN $10 THEN '{}'::jsonb ELSE NULL END)`,
+        [c.id,'draft-public-'+c.id,c.customer,c.phone,c.order??null,c.missingIncoming?null:c.expired?'2010-01-01Z':c.finalized?'2031-01-01Z':'2032-01-01Z',!!c.ended,c.deleted?'2032-01-02Z':null,c.enabled!==false,!!c.finalized]);
+      for(const db of [reference,databases.consultation]){const client=await db.connect();await client.query('BEGIN');await client.query('SELECT 1 FROM call_sessions WHERE call_session_seq=16016 FOR KEY SHARE');retained.push(client);}
+      for(const db of [reference,databases.order])for(const d of rows){
+        const parcel={origin:party,destination:{...party,name:'Alice_100%',detailAddress:'1201호'},documentCount:1,smallBoxCount:0,mediumBoxCount:0,bigBoxCount:0,itemPrice:10000,notifiedPrice:3500,clientComment:'</script> & 보존',otherItemDescription:'문서',originPin:null};
+        await db.query(`INSERT INTO order_parcel_drafts(draft_seq,reserved_order_seq,call_session_seq,customer_seq,caller_phone_number,created_by_admin_user_seq,client_parcel_id,creation_payload,parcel_data,status,version,source_draft_seq,order_seq,order_parcel_seq,legacy_order_seq,legacy_order_parcel_seq,created_at,updated_at,retention_started_at,deleted_at)
+          OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,$4,$5,$6,$7,'{"private":"never return"}',$8,$9,23,$10,$11,$12,$13,$14,'2032-01-01Z','2032-01-02Z',$15,$16)`,
+          [d.id,d.reserved??55000+d.id,d.call??null,Object.hasOwn(d,'customer')?d.customer:1,d.phone??'01000000001',d.call?null:1,uuids.get(d.id),parcel,d.status,d.source??null,d.order??null,d.parcel??null,d.legacy??null,d.legacy?888888:null,d.retention??'2032-01-01Z',d.deleted?'2032-01-03Z':null]);
+      }
+      for(const query of ['', '?status=ALL','?limit=1','?offset=999','?status=ALL&limit=2&offset=1','?customerSeq=1','?customerSeq=4','?callSessionSeq=16001','?legacyOrderSeq=999999',
+        '?q='+encodeURIComponent('한글'),'?q=010-9876-5432','?q=%25','?q=_','?q=%27%20OR%201%3D1--','?from=2032-01-01T00:00:00Z&to=2033-01-01T00:00:00Z'])await compare('/api/parcel-drafts'+query);
+      const byNumber = (q, extra = headers) => request(
+        sides[1], '/api/parcel-drafts?' + new URLSearchParams({ q, status: 'ALL' }), 200, extra, randomUUID(),
+      );
+      for (const q of ['DV-72001', '72001']) {
+        const body = await byNumber(q);
+        assert.deepEqual(body.data.map(row => [row.reservedOrderSeq, row.draftSeq]), [[72001, 17001]]);
+        assert.equal(body.total_count, 1);
+        assert.equal((await byNumber(q, ai(16001))).total_count, 0);
+      }
+      for (const q of ['DV-72016', 'DV-72017', 'DV-2147483648'])
+        assert.equal((await byNumber(q)).total_count, 0);
+      for(const status of ['READY','EDITING','INCOMPLETE','CONVERTED','CANCELLED','RESUMED'])await compare('/api/parcel-drafts?status='+status);
+      for(const company of [6001,6002,6003,2147483647])await compare('/api/parcel-drafts?status=ALL&organizationSeq='+company);
+      for(const row of rows)await compare('/api/parcel-drafts/'+row.id,[17016,17017,17018,17019,17022].includes(row.id)?404:200);
+      const admin=await compare('/api/parcel-drafts/17013');assert.equal(admin.data.customerSeq,4);assert.equal(admin.data.intakeVersion,null);assert.ok(!Object.hasOwn(admin.data,'creationPayload'));
+      for(const role of tokens)await compare('/api/parcel-drafts?status=ALL&limit=1',200,{Cookie:'dva_session='+role,call_session_seq:'ignored-for-admin'});
+      for(const [call,id,status]of [[16001,17001,200],[16001,17008,404],[16001,17024,200],[16002,17001,200],
+        [16003,17014,200],[16003,17001,404],[16005,17009,200],[16005,17010,200],[16005,17011,404],
+        [16006,17012,200],[16007,17027,200],[16007,17010,404],[16008,17023,200],[16012,17026,200],[16017,17001,404],[16018,17025,200]]){
+        const value=await compare('/api/parcel-drafts/'+id,status,ai(call));if(status===200)assert.equal(value.data.intakeVersion,7);
+      }
+      for(const call of [16001,16002,16003,16005,16007,16008,16012,16017,16018])await compare('/api/parcel-drafts?status=ALL',200,ai(call));
+      for(const query of ['?status=ALL&customerSeq=2','?status=ALL&customerSeq=4'])await compare('/api/parcel-drafts'+query,403,ai(16001));
+      await compare('/api/parcel-drafts?customerSeq=1',403,ai(16005));
+      await compare('/api/parcel-drafts?status=ALL&callSessionSeq=16001',200,ai(16003));
+      for(const [call,status]of [[16009,403],[16010,403],[16011,403],[16013,409],[16014,404],[16015,404],[16016,404],[2147483647,404]]){
+        await compare('/api/parcel-drafts?status=ALL',status,ai(call));await compare('/api/parcel-drafts/17001',status,ai(call));
+      }
+      for(const query of ['?status=UNKNOWN','?status=READY&status=EDITING','?customerSeq=0','?customerSeq=1&customerSeq=2','?organizationSeq=0','?legacyOrderSeq=0','?callSessionSeq=0','?limit=101','?offset=-1','?q='+'x'.repeat(201),'?unexpected=1','?from=2032-01-01','?from=2033-01-01T00:00:00Z&to=2032-01-01T00:00:00Z'])await compare('/api/parcel-drafts'+query,400);
+      await compare('/api/parcel-drafts?q='+encodeURIComponent('\0'),500);
+      for(const call of [undefined,'bad','0','2147483648'])await compare('/api/parcel-drafts',400,call===undefined?{}:{call_session_seq:call});
+      await compare('/api/parcel-drafts',401,{Authorization:''});await compare('/api/parcel-drafts/17001',401,{Cookie:'dva_session=bad'});
+      const path='/api/parcel-drafts?status=ALL&callSessionSeq=16001&limit=1',requestId=randomUUID(),expected=await request(sides[0],path,200,ai(16001),requestId);
+      await Promise.all(Array.from({length:12},async()=>assert.deepEqual(await request(sides[1],path,200,ai(16001),requestId),expected)));
+      try{
+        const ids=Array.from({length:251},(_,n)=>18001+n),keys=ids.map(()=>randomUUID());
+        for(const db of [reference,databases.order])await db.query(`INSERT INTO order_parcel_drafts(draft_seq,reserved_order_seq,client_parcel_id,created_by_admin_user_seq,creation_payload,parcel_data,status,created_at,updated_at,retention_started_at)
+          OVERRIDING SYSTEM VALUE SELECT n,200000+n,key,1,'{}','{"origin":{"name":"초안 분할 확인"}}','INCOMPLETE','2032-01-01Z','2032-01-01Z','2032-01-01Z' FROM unnest($1::int[],$2::uuid[]) AS entries(n,key)`,[ids,keys]);
+        for(const offset of [0,249,250,251])await compare('/api/parcel-drafts?q='+encodeURIComponent('초안 분할 확인')+'&limit=1&offset='+offset);
+      }finally{for(const db of [reference,databases.order])await db.query('DELETE FROM order_parcel_drafts WHERE draft_seq BETWEEN 18001 AND 18251');}
+    } finally {
+      for(const client of retained){await client.query('ROLLBACK');client.release();}
+      for(const db of [reference,databases.order])await db.query('DELETE FROM order_parcel_drafts WHERE draft_seq BETWEEN 17001 AND 17027');
+      for(const db of [reference,databases.consultation])await db.query("DELETE FROM call_sessions WHERE provider_call_id LIKE 'draft-public-%'");
+    }
   });
   await t.test('previous addresses use accepted active snapshots, existing customers and caller bounds',async()=> {
     for(const direction of ['ORIGIN','DESTINATION']) for(const query of ['', '&limit=1','&offset=100','&q=한글','&q=%25',
@@ -209,8 +701,108 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
     for(const call of [undefined,'','abc','0','-1','2147483648','1,2']) await compare('/api/orders',400,call===undefined?{}:ai(call));
     for(const cookie of ['dva_session=expired','dva_session='+tokens[0]+'; dva_session='+tokens[0]]) await compare('/api/orders',401,{Cookie:cookie,...ai(1011)});
     for(const query of ['', '?direction=BAD','?direction=ORIGIN&unknown=1','?direction=ORIGIN&direction=DESTINATION','?direction=ORIGIN&limit=101']) await compare('/api/customers/1/addresses'+query,400);
-    for(const query of ['?statusGroup=ACCEPTED','?q='+encodeURIComponent('\0'),'?q='+'x'.repeat(201)]) await compare('/api/admin/orders'+query,400);
+    for(const query of ['?statusGroup=UNKNOWN','?q='+encodeURIComponent('\0'),'?q='+'x'.repeat(201)]) await compare('/api/admin/orders'+query,400);
   });
+  await t.test('payment eligibility preserves member settings, company cards and source row locks', async (policyTest) => {
+    const { OrderPaymentsRepository: OriginalPayments } = require('./monolith-runtime/orders/order-payments.repository');
+    const { ParcelDraftWriteController: CustomerWrites } = require('./customer-runtime/customers/parcel-draft-write.controller');
+    const { validatePolicy } = require('@dva/events/order-intake-write.cjs');
+    const original = new OriginalPayments();
+    const candidate = new CustomerWrites(null, null, null, null, null);
+    const customerId = 700201, companyId = 700202, departmentId = 700203;
+    const membershipId = 700204, cardId = 700205;
+    const registrationKey = randomUUID(), providerKey = randomUUID();
+    const date = (await reference.query("SELECT extract(year FROM clock_timestamp() AT TIME ZONE 'Asia/Seoul')::int AS year_value,extract(month FROM clock_timestamp() AT TIME ZONE 'Asia/Seoul')::int AS month_value")).rows[0];
+    const owners = [{ db: reference, source: true }, { db: databases.customer, source: false }];
+    policyTest.after(async () => {
+      for (const { db } of owners) {
+        await db.query('DELETE FROM payment_cards WHERE payment_card_seq=$1', [cardId]);
+        await db.query('DELETE FROM memberships WHERE membership_seq=$1', [membershipId]);
+        await db.query('DELETE FROM departments WHERE department_seq=$1', [departmentId]);
+        await db.query('DELETE FROM organizations WHERE organization_seq=$1', [companyId]);
+        await db.query('DELETE FROM customers WHERE customer_seq=$1', [customerId]);
+      }
+    });
+    for (const { db } of owners) {
+      await db.query("INSERT INTO customers(customer_seq,name,phone_number,status,monthly_billing_enabled) OVERRIDING SYSTEM VALUE VALUES($1,'자격 검증 고객','01056000001','ACTIVE',true)", [customerId]);
+      await db.query("INSERT INTO organizations(organization_seq,name,status,monthly_billing_enabled) OVERRIDING SYSTEM VALUE VALUES($1,'자격 검증 기업','ACTIVE',true)", [companyId]);
+      await db.query("INSERT INTO departments(department_seq,organization_seq,name,group_billing_enabled) OVERRIDING SYSTEM VALUE VALUES($1,$2,'자격 검증 부서',false)", [departmentId, companyId]);
+      await db.query("INSERT INTO memberships(membership_seq,customer_seq,organization_seq,employee_no,status,monthly_billing_enabled,group_billing_enabled) OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,'00560001','ACTIVE',true,true)", [membershipId, customerId, companyId]);
+      await db.query("INSERT INTO payment_cards(payment_card_seq,organization_seq,registration_key,request_hash,provider_customer_key,provider_environment,encrypted_billing_key,masked_number,expiration_year,expiration_month,status) OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,'fixture-policy-hash',$4,'test','fixture-policy-key','************1234',2099,12,'ACTIVE')", [cardId, companyId, registrationKey, providerKey]);
+    }
+    const cases = [
+      { name: 'valid company card without department', cardLock: true },
+      { name: 'member monthly disabled', memberMonthly: false },
+      { name: 'company monthly disabled', companyMonthly: false },
+      { name: 'inactive membership', memberStatus: 'INACTIVE' },
+      { name: 'inactive company', companyStatus: 'INACTIVE' },
+      { name: 'withdrawn customer', customerStatus: 'WITHDRAWN' },
+      { name: 'deleted customer', customerDeleted: true },
+      { name: 'deleted membership uses personal policy', memberDeleted: true },
+      { name: 'deleted company uses personal policy', companyDeleted: true },
+      { name: 'personal monthly disabled', memberDeleted: true, customerMonthly: false },
+      { name: 'member group disabled', memberGroup: false },
+      { name: 'deleted group card', cardDeleted: true },
+      { name: 'expired group card', year: 2000, month: 1 },
+      { name: 'registering group card', cardStatus: 'REGISTERING' },
+      { name: 'current Seoul month remains usable', year: date.year_value, month: date.month_value },
+      { name: 'department flag does not grant member access', department: true, departmentGroup: true, memberGroup: false },
+      { name: 'member access works with disabled department flag', department: true, departmentLock: true },
+      { name: 'member access survives department soft deletion', department: true, departmentDeleted: true },
+    ];
+    const defaults = { customerMonthly: true, customerStatus: 'ACTIVE', customerDeleted: false,
+      companyMonthly: true, companyStatus: 'ACTIVE', companyDeleted: false, memberMonthly: true,
+      memberGroup: true, memberStatus: 'ACTIVE', memberDeleted: false, department: false,
+      departmentGroup: false, departmentDeleted: false, cardStatus: 'ACTIVE', cardDeleted: false,
+      year: 2099, month: 12 };
+    for (const item of cases) {
+      const state = { ...defaults, ...item }, values = [];
+      for (const owner of owners) {
+        const { db } = owner;
+        const historical = '2026-01-01T00:00:00Z';
+        await db.query('UPDATE customers SET status=$2,monthly_billing_enabled=$3,deleted_at=$4 WHERE customer_seq=$1', [customerId, state.customerStatus, state.customerMonthly, state.customerDeleted ? historical : null]);
+        await db.query('UPDATE organizations SET status=$2,monthly_billing_enabled=$3,deleted_at=$4 WHERE organization_seq=$1', [companyId, state.companyStatus, state.companyMonthly, state.companyDeleted ? historical : null]);
+        await db.query('UPDATE memberships SET status=$2,monthly_billing_enabled=$3,group_billing_enabled=$4,department_seq=$5,deleted_at=$6 WHERE membership_seq=$1', [membershipId, state.memberStatus, state.memberMonthly, state.memberGroup, state.department ? departmentId : null, state.memberDeleted ? historical : null]);
+        await db.query('UPDATE departments SET group_billing_enabled=$2,deleted_at=$3 WHERE department_seq=$1', [departmentId, state.departmentGroup, state.departmentDeleted ? historical : null]);
+        await db.query('UPDATE payment_cards SET status=$2,expiration_year=$3,expiration_month=$4,deleted_at=$5 WHERE payment_card_seq=$1', [cardId, state.cardStatus, state.year, state.month, state.cardDeleted ? historical : null]);
+        const client = await db.connect();
+        try {
+          await client.query('BEGIN');
+          const result = owner.source
+            ? await original.eligibility(client, customerId)
+            : await candidate.paymentPolicy(client, customerId);
+          if (!owner.source) validatePolicy(result);
+          values.push({ monthly: result.monthly, group: result.group,
+            organizationSeq: result.organizationSeq, departmentSeq: result.departmentSeq });
+          if (item.cardLock || item.departmentLock) {
+            const competing = await db.connect();
+            let committed = false;
+            try {
+              await competing.query('BEGIN');
+              if (item.cardLock) await assert.rejects(
+                competing.query('SELECT payment_card_seq FROM payment_cards WHERE payment_card_seq=$1 FOR UPDATE NOWAIT', [cardId]),
+                error => error.code === '55P03',
+              );
+              else {
+                await competing.query('SELECT department_seq FROM departments WHERE department_seq=$1 FOR UPDATE NOWAIT', [departmentId]);
+                await competing.query("UPDATE departments SET name='결제 직전 부서 이름' WHERE department_seq=$1", [departmentId]);
+                await competing.query('COMMIT');
+                committed = true;
+                const name = owner.source
+                  ? (await client.query('SELECT name FROM departments WHERE department_seq=$1', [departmentId])).rows[0].name
+                  : (await candidate.paymentPolicy(client, customerId)).departmentName;
+                assert.equal(name, '결제 직전 부서 이름');
+              }
+            } finally { if (!committed) await competing.query('ROLLBACK');competing.release(); }
+          }
+        } finally { await client.query('ROLLBACK');client.release(); }
+      }
+      assert.deepEqual(values[1], values[0], item.name);
+    }
+    t.diagnostic('payment eligibility matches '+cases.length+' stored-data cases and card/department lock behavior');
+  });
+
+
   await t.test('more simultaneous AI reads than any owner pool finish without a callback deadlock',async()=> {
     const path='/api/orders/1001',requestId=randomUUID();
     // Sample the unchanged oracle once before saturating the MSA owner callbacks.
@@ -224,6 +816,225 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
       assert.deepEqual(await snapshot(databases[owner],tables),before[owner],owner+' unchanged');
       assert.deepEqual(await snapshot(reference,tables),referenceBefore[owner],'monolith '+owner+' unchanged');
       assert.deepEqual(await snapshot(databases[owner],['outbox_events','inbox_events']),messageCounts[owner],owner+' query messages not persisted');
+    }
+  });
+  await t.test('customer retention keeps references from deleted and expired orders without storing query events',async()=> {
+    const {requestRetainedCustomers}=require('@dva/events/call-read-references.cjs');
+    const ids=[7,6,4,3,2,1],url=sides[1].base+'/internal/call-read-references',token=process.env.CUSTOMER_AUTH_TOKEN;
+    for(const db of [reference,databases.order]){
+      const client=await db.connect();
+      try{
+        await client.query('BEGIN');
+        await client.query("SET LOCAL session_replication_role='replica'");
+        await client.query(`INSERT INTO orders(order_seq,customer_seq,status,payment_method_type,total_amount,creation_source,created_at,updated_at,closed_at,deleted_at)
+          OVERRIDING SYSTEM VALUE VALUES(29501,4,'CANCELLED','cat',0,'ADMIN','2010-01-01Z','2010-01-01Z','2010-01-01Z','2010-01-02Z'),
+          (29502,6,'CANCELLED','cat',0,'ADMIN','2010-01-01Z','2010-01-01Z','2010-01-01Z',NULL)`);
+        await client.query('COMMIT');
+      }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
+    }
+    try{
+      const stored=await snapshot(databases.order,[...orderTables,'outbox_events','inbox_events']);
+      const expected=(await reference.query('SELECT DISTINCT customer_seq FROM orders WHERE customer_seq=ANY($1::int[]) ORDER BY customer_seq',[ids])).rows.map(row=>row.customer_seq);
+      assert.ok(expected.includes(4),'soft-deleted order retains its customer');
+      assert.ok(expected.includes(6),'expired closed order retains its customer');
+      assert.ok(!expected.includes(7),'customer without an order is not retained');
+      assert.deepEqual(await requestRetainedCustomers(url,token,ids),expected);
+      assert.deepEqual(await requestRetainedCustomers(url,token,[7]),[]);
+      const event={eventId:randomUUID(),source:'customer',eventType:'CustomerOrderReferencesReadRequested',payload:{ids}};
+      async function post(body,credential){const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+credential},body:JSON.stringify(body),signal:AbortSignal.timeout(5000)});return{status:response.status,body:await response.json()};}
+      assert.equal((await post(event,'invalid')).status,403);
+      assert.equal((await post({...event,source:'consultation'},token)).status,422);
+      assert.equal((await post({...event,payload:{ids:[4,4]}},token)).status,422);
+      assert.deepEqual((await post(event,token)).body,{eventId:event.eventId,status:'processed',payload:expected});
+      assert.deepEqual(await snapshot(databases.order,[...orderTables,'outbox_events','inbox_events']),stored);
+    }finally{
+      for(const db of [reference,databases.order])await db.query('DELETE FROM orders WHERE order_seq IN (29501,29502)');
+    }
+  });
+  await t.test('customer card retention reproduces the original foreign-key nulling and recovers failed event delivery',async()=>{
+    const {RetentionRepository}=require('./customer-runtime/retention/retention.repository');
+    const {createRelay}=require('@dva/events');
+    const cards=[29601,29602,29603],requests=[1,2,3,4,7].map(n=>'00000000-0000-4000-8000-'+String(n).padStart(12,'0'));
+    const url=sides[1].base+'/internal/call-read-references/events',token=process.env.CUSTOMER_AUTH_TOKEN;
+    const links=async db=>(await db.query('SELECT to_jsonb(r) AS row FROM order_payment_requests r WHERE payment_request_id=ANY($1::uuid[]) ORDER BY payment_request_id',[requests])).rows;
+    const original=await links(reference);
+    const keeper=await databases.customer.connect();await keeper.query('SELECT pg_advisory_lock(20261103,157)');retention.push(keeper);
+    for(const db of [reference,databases.customer])for(const id of cards)await db.query(`INSERT INTO payment_cards(payment_card_seq,customer_seq,registration_key,request_hash,provider_customer_key,provider_environment,expiration_year,expiration_month,status,created_at,updated_at,deleted_at)
+      OVERRIDING SYSTEM VALUE VALUES($1,1,$2,'retention-fixture',$2,'test',2099,12,'FAILED','2010-01-01Z','2010-01-01Z',$3)`,[id,'00000000-0000-4000-8000-'+String(id).padStart(12,'0'),id===29603?'2026-01-01Z':'2010-01-01Z']);
+    for(const db of [reference,databases.order]){
+      const client=await db.connect();try{await client.query('BEGIN');await client.query("SET LOCAL session_replication_role='replica'");
+        for(const [n,id]of requests.entries())await client.query('UPDATE order_payment_requests SET payment_card_seq=$2 WHERE payment_request_id=$1',[id,n===4?29603:n%2?29602:29601]);
+        await client.query('COMMIT');
+      }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
+    }
+    const transaction=async work=>{try{await keeper.query('BEGIN');const result=await work(keeper);await keeper.query('COMMIT');return result;}catch(error){await keeper.query('ROLLBACK');throw error;}};
+    try{
+      await reference.query('DELETE FROM payment_cards WHERE payment_card_seq=ANY($1::int[])',[[29601,29602]]);
+      await new RetentionRepository({transaction}).purgeDatabase();
+      const event=(await databases.customer.query("SELECT event_id,event_type,payload FROM outbox_events WHERE event_type='CustomerPaymentCardsPurged' AND payload->'ids'=$1::jsonb",[JSON.stringify([29601,29602])])).rows;
+      assert.equal(event.length,1);const row=event[0],packet={eventId:row.event_id,source:'customer',eventType:row.event_type,payload:row.payload};
+      const post=async(body,credential=token)=>{const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+credential},body:JSON.stringify(body),signal:AbortSignal.timeout(5000)});return{status:response.status,body:await response.json()};};
+      assert.equal((await post(packet,'invalid')).status,403);
+      assert.equal((await post({...packet,source:'order'})).status,422);
+      assert.equal((await post({...packet,payload:{ids:[29601,29601]}})).status,422);
+      const waiting=await links(databases.order);
+      const relay=createRelay({pool:databases.customer,source:'customer',eventTypes:['CustomerPaymentCardsPurged'],destinations:{order:{url,token}}});
+      await databases.order.query("CREATE FUNCTION retention_card_fault() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'controlled card reference failure'; END $$; CREATE TRIGGER retention_card_fault BEFORE UPDATE OF payment_card_seq ON order_payment_requests FOR EACH ROW EXECUTE FUNCTION retention_card_fault()");
+      try{assert.equal(await relay(),true);assert.deepEqual(await links(databases.order),waiting);assert.equal((await databases.order.query('SELECT 1 FROM inbox_events WHERE event_id=$1',[packet.eventId])).rowCount,0);}finally{await databases.order.query('DROP TRIGGER retention_card_fault ON order_payment_requests; DROP FUNCTION retention_card_fault()');}
+      const retry=(await databases.customer.query('SELECT delivered_at,attempt_count FROM outbox_events WHERE event_id=$1',[packet.eventId])).rows[0];assert.equal(retry.delivered_at,null);assert.equal(retry.attempt_count,1);
+      await databases.customer.query("UPDATE outbox_events SET next_attempt_at=clock_timestamp()-interval '1 second' WHERE event_id=$1",[packet.eventId]);
+      assert.equal(await relay(),true);assert.deepEqual(await links(databases.order),await links(reference));
+      assert.deepEqual((await links(reference)).map(row=>row.row.payment_card_seq),[null,null,null,null,29603]);
+      assert.deepEqual(await post(packet),{status:200,body:{eventId:packet.eventId,status:'duplicate'}});
+      assert.equal((await post({...packet,payload:{ids:[29603]}})).status,409);
+      assert.deepEqual(await links(databases.order),await links(reference));
+      assert.equal((await databases.order.query('SELECT 1 FROM inbox_events WHERE event_id=$1',[packet.eventId])).rowCount,1);
+    }finally{
+      try{
+        for(const db of [reference,databases.order])for(const {row}of original)await db.query('UPDATE order_payment_requests SET payment_card_seq=$2 WHERE payment_request_id=$1',[row.payment_request_id,row.payment_card_seq]);
+        for(const db of [reference,databases.customer])await db.query('DELETE FROM payment_cards WHERE payment_card_seq=ANY($1::int[])',[cards]);
+      }finally{await keeper.query('SELECT pg_advisory_unlock(20261103,157)');retention.splice(retention.indexOf(keeper),1);keeper.release();}
+    }
+  });
+  await t.test('call retention removes only its original empty results and fences failed and duplicate deliveries',async()=>{
+    const ids=[29701,29702,29703],url=sides[1].base+'/internal/call-read-references/events',token=process.env.CUSTOMER_AUTH_TOKEN;
+    for(const db of [reference,databases.order])for(const id of ids)await db.query("INSERT INTO empty_ai_order_results(request_id,call_session_seq,received_at) VALUES($1,$2,'2020-01-01Z')",['10000000-0000-4000-8000-'+String(id).padStart(12,'0'),id]);
+    const rows=async db=>(await db.query('SELECT to_jsonb(r) AS row FROM empty_ai_order_results r WHERE call_session_seq=ANY($1::int[]) ORDER BY call_session_seq',[ids])).rows;
+    const event={eventId:randomUUID(),source:'consultation',eventType:'ConsultationCallsPurged',payload:{ids:ids.slice(0,2)}};
+    const post=async(body,credential=token)=>{const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+credential},body:JSON.stringify(body),signal:AbortSignal.timeout(5000)});return{status:response.status,body:await response.json()};};
+    try{
+      const before=await rows(databases.order);
+      assert.equal((await post(event,'invalid')).status,403);assert.equal((await post({...event,source:'customer'})).status,422);assert.equal((await post({...event,payload:{ids:[29701,29701]}})).status,422);
+      assert.deepEqual(await rows(databases.order),before);assert.equal((await databases.order.query('SELECT 1 FROM inbox_events WHERE event_id=$1',[event.eventId])).rowCount,0);
+      await databases.order.query("CREATE FUNCTION retention_call_result_fault() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'controlled call result failure'; END $$; CREATE TRIGGER retention_call_result_fault BEFORE DELETE ON empty_ai_order_results FOR EACH ROW EXECUTE FUNCTION retention_call_result_fault()");
+      try{assert.equal((await post(event)).status,500);assert.deepEqual(await rows(databases.order),before);assert.equal((await databases.order.query('SELECT 1 FROM inbox_events WHERE event_id=$1',[event.eventId])).rowCount,0);}finally{await databases.order.query('DROP TRIGGER retention_call_result_fault ON empty_ai_order_results; DROP FUNCTION retention_call_result_fault()');}
+      for(const id of event.payload.ids)await reference.query('DELETE FROM empty_ai_order_results WHERE call_session_seq=$1',[id]);
+      assert.deepEqual(await post(event),{status:200,body:{eventId:event.eventId,status:'processed'}});assert.deepEqual(await rows(databases.order),await rows(reference));assert.equal((await rows(reference)).length,1);
+      assert.deepEqual(await post(event),{status:200,body:{eventId:event.eventId,status:'duplicate'}});assert.equal((await post({...event,payload:{ids:[29703]}})).status,409);assert.deepEqual(await rows(databases.order),await rows(reference));
+    }finally{for(const db of [reference,databases.order])await db.query('DELETE FROM empty_ai_order_results WHERE call_session_seq=ANY($1::int[])',[ids]);}
+  });
+  await t.test('the production consultation timer delivers committed call expiry to the real order owner',async()=>{
+    const id=29801,phone='01098889999',guard=await databases.consultation.connect();retention.push(guard);
+    let locked=true,ackLocked=false;
+    await guard.query("SELECT pg_advisory_lock(hashtextextended('call-end:'||$1,0))",[phone]);
+    try{
+      await guard.query('SELECT pg_advisory_lock(20261114,29801)');ackLocked=true;
+      await databases.consultation.query("CREATE FUNCTION retention_call_ack_gate() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.event_type='ConsultationCallsPurged' AND NEW.aggregate_seq=29801 AND NEW.delivered_at IS NOT NULL AND OLD.delivered_at IS NULL THEN PERFORM pg_advisory_xact_lock(20261114,29801); END IF; RETURN NEW; END $$; CREATE TRIGGER retention_call_ack_gate BEFORE UPDATE OF delivered_at ON outbox_events FOR EACH ROW EXECUTE FUNCTION retention_call_ack_gate()");
+      for(const db of [reference,databases.consultation])await db.query("INSERT INTO call_sessions(call_session_seq,provider_call_id,caller_phone_number,incoming_at,started_at,ended_at) OVERRIDING SYSTEM VALUE VALUES($1,'retention-live-owner',$2,'1980-01-01Z','1980-01-01Z','1980-01-02Z')",[id,phone]);
+      for(const db of [reference,databases.order])await db.query("INSERT INTO empty_ai_order_results(request_id,call_session_seq,received_at) VALUES('20000000-0000-4000-8000-000000029801',$1,'1980-01-01Z')",[id]);
+      const claimId=randomUUID();await reference.query("UPDATE call_sessions SET purge_claim_id=$2,purge_claimed_until=clock_timestamp()+interval '5 minutes' WHERE call_session_seq=$1",[id,claimId]);
+      const {RetentionRepository}=require('./monolith-runtime/retention/retention.repository');
+      const transaction=async work=>{const client=await reference.connect();try{await client.query('BEGIN');const value=await work(client);await client.query('COMMIT');return value;}catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}};
+      assert.equal(await new RetentionRepository({transaction}).finishCall({id,phone,claimId,keys:[]}),true);
+      await guard.query("SELECT pg_advisory_unlock(hashtextextended('call-end:'||$1,0))",[phone]);
+      locked=false;
+      const deadline=Date.now()+20000;let receivedBeforeAck=false;
+      for(;;){
+        const call=(await databases.consultation.query('SELECT 1 FROM call_sessions WHERE call_session_seq=$1',[id])).rowCount,result=(await databases.order.query('SELECT 1 FROM empty_ai_order_results WHERE call_session_seq=$1',[id])).rowCount;
+        const delivered=(await databases.consultation.query("SELECT 1 FROM outbox_events WHERE event_type='ConsultationCallsPurged' AND aggregate_seq=$1 AND delivered_at IS NOT NULL",[id])).rowCount;
+        if(!call&&!result&&ackLocked){assert.equal(delivered,0);receivedBeforeAck=true;await guard.query('SELECT pg_advisory_unlock(20261114,29801)');ackLocked=false;}
+        if(!call&&!result&&delivered===1)break;
+        assert.ok(Date.now()<deadline,'production retention must erase the call and commit its delivery acknowledgement');await pause(100);
+      }
+      assert.equal(receivedBeforeAck,true,'receiver commit is deliberately visible before the sender acknowledgement');
+      const events=(await databases.consultation.query("SELECT event_id,delivered_at FROM outbox_events WHERE event_type='ConsultationCallsPurged' AND payload->'ids'=$1::jsonb",[JSON.stringify([id])])).rows;assert.equal(events.length,1);assert.ok(events[0].delivered_at);
+      assert.equal((await databases.order.query("SELECT 1 FROM inbox_events WHERE event_id=$1 AND source='consultation' AND event_type='ConsultationCallsPurged'",[events[0].event_id])).rowCount,1);
+      assert.equal((await reference.query('SELECT 1 FROM call_sessions WHERE call_session_seq=$1',[id])).rowCount,0);assert.equal((await reference.query('SELECT 1 FROM empty_ai_order_results WHERE call_session_seq=$1',[id])).rowCount,0);
+    }finally{
+      try{if(ackLocked)await guard.query('SELECT pg_advisory_unlock(20261114,29801)');await databases.consultation.query('DROP TRIGGER IF EXISTS retention_call_ack_gate ON outbox_events; DROP FUNCTION IF EXISTS retention_call_ack_gate()');for(const db of [reference,databases.order])await db.query('DELETE FROM empty_ai_order_results WHERE call_session_seq=$1',[id]);for(const db of [reference,databases.consultation])await db.query('DELETE FROM call_sessions WHERE call_session_seq=$1',[id]);}finally{if(locked)await guard.query("SELECT pg_advisory_unlock(hashtextextended('call-end:'||$1,0))",[phone]);retention.splice(retention.indexOf(guard),1);guard.release();}
+    }
+  });
+  await t.test('order retention preserves every linked call including deleted, expired and legacy calls without writes',async()=>{
+    const {requestRetainedOrders}=require('@dva/events/call-read-references.cjs');
+    const ids=[29913,29912,29911,2147483647],url='http://consultation-app:3004/internal/order-deletion-check',token=process.env.CUSTOMER_AUTH_TOKEN;
+    const guard=await databases.consultation.connect();retention.push(guard);const phone='01098889998';await guard.query("SELECT pg_advisory_lock(hashtextextended('call-end:'||$1,0))",[phone]);
+    try{
+      for(const db of [reference,databases.order])for(const id of ids.slice(0,3))await db.query("INSERT INTO orders(order_seq,creation_source,created_at,updated_at) OVERRIDING SYSTEM VALUE VALUES($1,'ADMIN','2030-01-01Z','2030-01-01Z')",[id]);
+      for(const db of [reference,databases.consultation])await db.query(`INSERT INTO call_sessions(call_session_seq,provider_call_id,caller_phone_number,order_seq,incoming_at,started_at,ended_at,deleted_at)
+        OVERRIDING SYSTEM VALUE VALUES(29901,'retention-linked-deleted',$1,29911,'1980-01-01Z','1980-01-01Z','1980-01-02Z','1980-01-03Z'),
+        (29902,'retention-linked-expired',$1,29912,'1980-01-01Z','1980-01-01Z','1980-01-02Z',NULL),
+        (29903,'retention-linked-legacy',$1,29911,NULL,'1980-01-01Z','1980-01-02Z',NULL)`,[phone]);
+      const stored=await snapshot(databases.consultation,['call_sessions','inbox_events','outbox_events']);
+      const expected=(await reference.query('SELECT DISTINCT order_seq FROM call_sessions WHERE order_seq=ANY($1::int[]) ORDER BY order_seq',[ids])).rows.map(row=>row.order_seq);assert.deepEqual(expected,[29911,29912]);
+      assert.deepEqual(await requestRetainedOrders(url,token,ids),expected);assert.deepEqual(await requestRetainedOrders(url,token,[29913]),[]);
+      const event={eventId:randomUUID(),source:'order',eventType:'OrderRetentionReferencesReadRequested',payload:{ids}};
+      const post=async(body,credential=token)=>{const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+credential},body:JSON.stringify(body),signal:AbortSignal.timeout(5000)});return{status:response.status,body:await response.json()};};
+      assert.equal((await post(event,'invalid')).status,403);assert.equal((await post({...event,source:'customer'})).status,422);assert.equal((await post({...event,payload:{ids:[29911,29911]}})).status,422);
+      assert.deepEqual((await post(event)).body,{eventId:event.eventId,status:'processed',payload:expected});
+      const ordinary=await post({...event,eventType:'OrderDeletionCheckRequested',payload:{orderSeq:29911}});assert.equal(ordinary.status,200);assert.deepEqual(ordinary.body.payload,{blocked:false});
+      assert.deepEqual(await snapshot(databases.consultation,['call_sessions','inbox_events','outbox_events']),stored);
+    }finally{
+      try{for(const db of [reference,databases.consultation])await db.query('DELETE FROM call_sessions WHERE call_session_seq BETWEEN 29901 AND 29903');for(const db of [reference,databases.order])await db.query('DELETE FROM orders WHERE order_seq BETWEEN 29911 AND 29913');}finally{await guard.query("SELECT pg_advisory_unlock(hashtextextended('call-end:'||$1,0))",[phone]);retention.splice(retention.indexOf(guard),1);guard.release();}
+    }
+  });
+  await t.test('delivery retention matches original shipment removal and prevents delayed or racing recreation',async()=>{
+    const delivery=new Pool({host:'delivery-db',user:'delivery_app'}),ids=[30011,30012,30013,30014];
+    const token=process.env.CUSTOMER_AUTH_TOKEN,url='http://delivery-app:3003/internal/order-accepted';
+    const post=async(body,credential=token)=>{const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+credential},body:JSON.stringify(body),signal:AbortSignal.timeout(20000)});return{status:response.status,body:await response.json()};};
+    const packet=orderParcelSeqs=>({eventId:randomUUID(),source:'order',eventType:'OrderParcelsPurged',payload:{orderParcelSeqs}});
+    const rows=async db=>({shipments:(await db.query('SELECT to_jsonb(s) AS row FROM shipments s WHERE order_parcel_seq=ANY($1::int[]) ORDER BY order_parcel_seq',[ids])).rows,
+      history:(await db.query('SELECT to_jsonb(h) AS row FROM shipment_status_history h WHERE shipment_seq=ANY($1::int[]) ORDER BY shipment_seq',[ids])).rows});
+    try{
+      for(const db of [reference,databases.order]){
+        const client=await db.connect();try{await client.query('BEGIN');await client.query("SET LOCAL session_replication_role='replica'");
+          await client.query(`INSERT INTO orders(order_seq,customer_seq,status,payment_method_type,creation_source,total_amount,paid_at,created_at,updated_at)
+            OVERRIDING SYSTEM VALUE VALUES(30001,1,'PAID','billing','ADMIN',8000,'2030-01-01Z','2030-01-01Z','2030-01-01Z')`);
+          for(const [index,id]of ids.entries())await client.query('INSERT INTO order_parcels(order_parcel_seq,order_seq,parcel_position,notified_price) OVERRIDING SYSTEM VALUE VALUES($1,30001,$2,2000)',[id,index+1]);
+          await client.query('COMMIT');
+        }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
+      }
+      for(const db of [reference,delivery])for(const id of ids.slice(0,3)){
+        await db.query(`INSERT INTO shipments(shipment_seq,order_parcel_seq,tracking_number,status,status_changed_at,created_at)
+          OVERRIDING SYSTEM VALUE VALUES($1,$1,$2,'paid','2030-01-01Z','2030-01-01Z')`,[id,'retention-shipment-'+id]);
+        await db.query(`INSERT INTO shipment_status_history(shipment_status_history_seq,shipment_seq,request_id,to_status,actor_type,occurred_at)
+          OVERRIDING SYSTEM VALUE VALUES($1,$1,$2,'paid','SYSTEM','2030-01-01Z')`,[id,'30000000-0000-4000-8000-'+String(id).padStart(12,'0')]);
+      }
+      const event=packet(ids.slice(0,2)),before=await rows(delivery),receipts=await snapshot(delivery,['inbox_events']);
+      assert.deepEqual(before,await rows(reference));
+      assert.equal((await post(event,'invalid')).status,401);
+      assert.equal((await post({...event,source:'customer'})).status,401);
+      for(const values of [[],[30011,30011],['30011']])assert.equal((await post({...event,payload:{orderParcelSeqs:values}})).status,422);
+      assert.deepEqual(await snapshot(delivery,['inbox_events']),receipts);
+      await delivery.query("CREATE FUNCTION retention_shipment_fault() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'controlled shipment deletion failure'; END $$; CREATE TRIGGER retention_shipment_fault BEFORE DELETE ON shipments FOR EACH ROW EXECUTE FUNCTION retention_shipment_fault()");
+      try{assert.equal((await post(event)).status,500);assert.deepEqual(await rows(delivery),before);assert.deepEqual(await snapshot(delivery,['inbox_events']),receipts);}
+      finally{await delivery.query('DROP TRIGGER retention_shipment_fault ON shipments; DROP FUNCTION retention_shipment_fault()');}
+      await reference.query('DELETE FROM shipment_status_history WHERE shipment_seq IN (SELECT shipment_seq FROM shipments WHERE order_parcel_seq=ANY($1::int[]))',[event.payload.orderParcelSeqs]);
+      await reference.query('DELETE FROM shipments WHERE order_parcel_seq=ANY($1::int[])',[event.payload.orderParcelSeqs]);
+      assert.deepEqual(await post(event),{status:200,body:{eventId:event.eventId,status:'processed'}});
+      assert.deepEqual(await rows(delivery),await rows(reference));
+      assert.deepEqual(await post(event),{status:200,body:{eventId:event.eventId,status:'duplicate'}});
+      assert.equal((await post({...event,payload:{orderParcelSeqs:[30013]}})).status,409);
+      for(let attempt=0;attempt<2;attempt++){
+        const late={...event,eventId:randomUUID(),eventType:'OrderSubmissionDeliveryRequested'};
+        assert.deepEqual(await post(late),{status:200,body:{eventId:late.eventId,status:'processed'}});
+        assert.deepEqual(await rows(delivery),await rows(reference));
+      }
+      const gate=await delivery.connect();let creating,purging;
+      try{
+        await gate.query('SELECT pg_advisory_lock(20261113,30014)');
+        await delivery.query("CREATE FUNCTION retention_shipment_gate() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.order_parcel_seq=30014 THEN PERFORM pg_advisory_xact_lock(20261113,30014); END IF; RETURN NEW; END $$; CREATE TRIGGER retention_shipment_gate BEFORE INSERT ON shipments FOR EACH ROW EXECUTE FUNCTION retention_shipment_gate()");
+        creating=post({...packet([30014]),eventType:'OrderSubmissionDeliveryRequested'});
+        for(let attempt=0;;attempt++){
+          const waiting=(await delivery.query("SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid() AND wait_event_type='Lock' AND query LIKE '%INSERT INTO shipments%' AND query NOT LIKE '%pg_stat_activity%'")).rowCount;
+          if(waiting)break;assert.ok(attempt<100,'creation reaches its controlled insert');await pause(20);
+        }
+        let finished=false;purging=post(packet([30014])).then(result=>{finished=true;return result;});
+        await pause(75);assert.equal(finished,false,'purge waits for the same parcel creation transaction');
+        await gate.query('SELECT pg_advisory_unlock(20261113,30014)');
+        assert.equal((await creating).status,200);assert.equal((await purging).status,200);
+        assert.deepEqual(await rows(delivery),await rows(reference));
+      }finally{
+        await gate.query('SELECT pg_advisory_unlock(20261113,30014)');gate.release();
+        await Promise.allSettled([creating,purging].filter(Boolean));
+        await delivery.query('DROP TRIGGER IF EXISTS retention_shipment_gate ON shipments; DROP FUNCTION IF EXISTS retention_shipment_gate()');
+      }
+    }finally{
+      try{
+        for(const db of [reference,delivery]){await db.query('DELETE FROM shipment_status_history WHERE shipment_seq IN (SELECT shipment_seq FROM shipments WHERE order_parcel_seq=ANY($1::int[]))',[ids]);await db.query('DELETE FROM shipments WHERE order_parcel_seq=ANY($1::int[])',[ids]);}
+        for(const db of [reference,databases.order]){
+          const client=await db.connect();try{await client.query('BEGIN');await client.query("SET LOCAL session_replication_role='replica'");await client.query('DELETE FROM order_parcels WHERE order_seq=30001');await client.query('DELETE FROM orders WHERE order_seq=30001');await client.query('COMMIT');}catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
+        }
+      }finally{await delivery.end();}
     }
   });
   await t.test('private queries reject forged tokens/sources and replay reads current state without writes',async()=> {
@@ -267,7 +1078,7 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
     try {
       await blocker.query('BEGIN');await blocker.query("SET LOCAL lock_timeout='2s'");
       await blocker.query('LOCK TABLE orders IN ACCESS EXCLUSIVE MODE');
-      pending=fetch(sides[1].base+'/api/orders/1001',{headers:ai(1011),signal:AbortSignal.timeout(20000)});
+      pending=fetch(sides[1].base+'/api/orders/1001',{headers:{Authorization:'Bearer '+process.env.PGPASSWORD,...ai(1011)},signal:AbortSignal.timeout(20000)});
       await blocked(databases.order,'SELECT jsonb_build_object%');
       const ended=databases.consultation.query("UPDATE call_sessions SET ended_at='2030-01-02T00:00:00Z',started_at='2030-01-01T00:00:00Z' WHERE call_session_seq=1011");
       const withdrawn=databases.customer.query("UPDATE customers SET status='WITHDRAWN' WHERE customer_seq=1");
@@ -275,10 +1086,6590 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
       await blocker.query('COMMIT');
       const response=await pending;assert.equal(response.status,200);assert.equal((await response.json()).data.orderSeq,1001);
       await Promise.all([ended,withdrawn]);
-      const denied=await fetch(sides[1].base+'/api/orders/1001',{headers:ai(1011)});assert.equal(denied.status,409);
+      const denied=await fetch(sides[1].base+'/api/orders/1001',{headers:{Authorization:'Bearer '+process.env.PGPASSWORD,...ai(1011)}});assert.equal(denied.status,409);
       await databases.consultation.query('UPDATE call_sessions SET ended_at=NULL,started_at=NULL WHERE call_session_seq=1011');
       await databases.customer.query("UPDATE customers SET status='ACTIVE' WHERE customer_seq=1");
     } finally { await blocker.query('ROLLBACK');blocker.release();await pending?.catch(()=>{}); }
   });
+  await t.test('payment notification retries and workers preserve queue, audit and delivery outcomes', async () => {
+    const id = n => '00000000-0000-4000-8000-'+String(n).padStart(12,'0');
+    const pending=id(1), paid=id(4), expired=id(3), requests=[];
+    const path=(key,completion=false)=>'/api/payments/notifications/'+key+(completion?'/completion':'')+'/retry';
+    for (const database of [reference,databases.order])
+      await database.query('UPDATE order_payment_requests SET payment_card_seq=NULL,card_payment_failed=false WHERE payment_request_id=$1', [pending]);
+    async function post(url,expected,extra={},body={}) {
+      const requestId=randomUUID();
+      requests.push(requestId);
+      const results=[];
+      for (const side of sides) {
+        const response=await fetch(side.base+url,{method:'POST',signal:AbortSignal.timeout(15000),
+          headers:{...headers,Origin:'http://localhost:5173','Content-Type':'application/json','X-Request-Id':requestId,...extra},
+          body:JSON.stringify(body)});
+        const result=await response.json();
+        assert.equal(response.status,expected,side.name+' '+url+' '+JSON.stringify(result));
+        results.push(result);
+      }
+      assert.deepEqual(results[1],results[0],url);
+      return results[0].data;
+    }
+    const docs=await Promise.all(sides.map(async side=>(await fetch(side.base+'/api/docs-json')).json()));
+    for(const route of [path('{id}'),path('{id}',true)])
+      assert.deepEqual(docs[1].paths[route].post,docs[0].paths[route].post,route);
+    assert.deepEqual(docs[1].components.schemas.EmptyPaymentDto,docs[0].components.schemas.EmptyPaymentDto);
+
+    await post(path(pending),401,{Cookie:''});
+    await post(path(pending),403,{Origin:'http://wrong.invalid'});
+    await post(path(pending),400,{}, {unexpected:true});
+    await post(path(id(999)),404);
+    await post(path(expired),409);
+    await post(path(pending,true),409);
+    for(let repeat=0;repeat<2;repeat++) {
+      assert.equal((await post(path(pending),200)).notificationStatus,'PENDING');
+      assert.equal((await post(path(paid,true),200)).completionNotificationStatus,'PENDING');
+    }
+
+    const messages=[];
+    let forcedStatus;
+    const server=require('node:http').createServer(async(req,res)=>{
+      const chunks=[];for await(const chunk of req)chunks.push(chunk);
+      const text=JSON.parse(Buffer.concat(chunks)).text;
+      messages.push(text);
+      res.writeHead(forcedStatus ?? (text.includes('/p/'+paid)?503:200));
+      res.end('ok');
+    });
+    await new Promise(resolve=>server.listen(0,'0.0.0.0',resolve));
+    const outputs=[];
+    const notificationStarted=Date.now();
+    const compareNotifications=async()=>{
+      const snapshot=async db=>{
+        const rows=(await db.query(`SELECT request_id,action,result,target_type,target_seq,actor_type,actor_seq,actor_name,target_admin_name,metadata,occurred_at
+          FROM audit_logs WHERE action ~ '^ORDER_PAYMENT_(COMPLETION_)?NOTIFICATION_(ATTEMPTED|SENT|FAILED|UNKNOWN)$'
+          ORDER BY target_seq,action,result`)).rows;
+        const ids=new Set();
+        return rows.map(({request_id,occurred_at,...row})=>{
+          assert.match(request_id,/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+          assert.ok(!ids.has(request_id)&&!requests.includes(request_id));ids.add(request_id);
+          assert.ok(occurred_at.getTime()>=notificationStarted-2000&&occurred_at.getTime()<=Date.now()+2000);
+          return row;
+        });
+      };
+      assert.deepEqual(await snapshot(databases.operations),await snapshot(reference));
+    };
+    const runWorker=async mono=>{
+      if(mono){
+        const ip=Object.values(require('node:os').networkInterfaces()).flat().find(value=>value.family==='IPv4'&&!value.internal).address;
+        const response=await fetch('http://monolith-app:8000/__payment-notifications',{
+          method:'POST',signal:AbortSignal.timeout(20000),
+          headers:{Authorization:'Bearer '+process.env.CUSTOMER_AUTH_TOKEN,'Content-Type':'application/json'},
+          body:JSON.stringify({webhook:'http://'+ip+':'+server.address().port+'/notice'}),
+        });
+        assert.equal(response.status,200);assert.deepEqual(await response.json(),{completed:true});return;
+      }
+      const config={get(key){return {
+        NODE_ENV:'test',DB_HOST:'order-db',DB_PORT:5432,DB_USER:'order_app',
+        DB_PASSWORD:process.env.PGPASSWORD,DB_NAME:process.env.PGDATABASE,
+        CUSTOMER_AUTH_TOKEN:process.env.CUSTOMER_AUTH_TOKEN,OPERATIONS_URL:'http://operations-app:3005',
+        ORDER_PAYMENTS_ENABLED:true,PAYMENT_PUBLIC_URL:'https://payments.example.test/api/payments',
+        PAYMENT_MATTERMOST_WEBHOOK_URL:'http://127.0.0.1:'+server.address().port+'/notice',
+      }[key];}};
+      const {DatabaseService}=require('../dist/database/database.service');
+      const {AuditService}=require('../dist/audit/audit.service');
+      const {PaymentsRepository}=require('../dist/payments/payments.repository');
+      const {PaymentsService}=require('../dist/payments/payments.service');
+      const {PaymentsWorker}=require('../dist/payments/payments.worker');
+      const {PaymentClient}=require('../dist/payments/payment.client');
+      const database=new DatabaseService(config),audit=new AuditService(database,config);
+      try{
+        const repository=new PaymentsRepository(database,audit);
+        // Other phases have separate approval/revocation differential cases.
+        repository.pendingCardApprovals=repository.pendingApprovals=async()=>[];
+        const service=new PaymentsService(config,repository,database,audit,new PaymentClient(config));
+        const worker=new PaymentsWorker(config,service,repository),current=worker.run();
+        assert.equal(worker.run(),current);await current;await worker.run();
+      }finally{await audit.onModuleDestroy();await database.onModuleDestroy();}
+    };
+    try {
+      for (const [db,mono] of [[reference,true],[databases.order,false]]) {
+        await db.query("UPDATE order_payment_requests SET notification_status='SENDING',notification_attempted_at=clock_timestamp()-interval '46 seconds' WHERE payment_request_id=$1",[expired]);
+        messages.length=0;
+        await runWorker(mono);
+        assert.equal(messages.length,2,'no automatic re-send of uncertain notification');
+        assert.ok(messages[0].includes('/p/'+paid)&&messages[1].includes('/p/'+pending));
+        outputs.push([...messages]);
+        const state=(await db.query(`SELECT payment_request_id AS id,notification_status AS initial,
+          completion_notification_status AS completion,notification_sent_at IS NOT NULL AS sent
+          FROM order_payment_requests WHERE payment_request_id=ANY($1::uuid[]) ORDER BY payment_request_id`,[[pending,paid,expired]])).rows;
+        assert.deepEqual(state,[
+          {id:pending,initial:'SENT',completion:'WAITING',sent:true},
+          {id:expired,initial:'UNKNOWN',completion:'WAITING',sent:false},
+          {id:paid,initial:'SENT',completion:'UNKNOWN',sent:false},
+        ]);
+      }
+      await compareNotifications();
+      const storage=[reference,databases.order],owners=[reference,databases.operations];
+      const previous=await Promise.all(storage.map(db=>db.query(`SELECT payment_request_id,notification_status,
+        notification_attempted_at::text,notification_sent_at::text,completion_notification_status,
+        completion_notification_attempted_at::text,completion_notification_sent_at::text
+        FROM order_payment_requests WHERE payment_request_id=ANY($1::uuid[])`,[[pending,paid,expired]])));
+      const resetStream=async completion=>{
+        for(const db of storage){
+          await db.query("UPDATE order_payment_requests SET notification_status='SENT',completion_notification_status='SENT' WHERE payment_request_id=ANY($1::uuid[])",[[pending,paid,expired]]);
+          const prefix=completion?'completion_':'';
+          await db.query(`UPDATE order_payment_requests SET ${prefix}notification_status='PENDING',
+            ${prefix}notification_attempted_at=NULL,${prefix}notification_sent_at=NULL WHERE payment_request_id=$1`,[completion?paid:pending]);
+        }
+      };
+      try{
+        for(const completion of [false,true]){
+          const prefix=completion?'completion_':'',target=completion?paid:pending;
+          for(const [http,status]of [[200,'SENT'],[400,'FAILED'],[503,'UNKNOWN']]){
+            forcedStatus=http;await resetStream(completion);
+            for(const [index,db]of storage.entries()){
+              messages.length=0;await runWorker(index===0);
+              assert.equal(messages.length,1,'terminal outcomes are not automatically resent');
+              const row=(await db.query(`SELECT ${prefix}notification_status AS status,
+                ${prefix}notification_sent_at IS NOT NULL AS sent FROM order_payment_requests WHERE payment_request_id=$1`,[target])).rows[0];
+              assert.deepEqual(row,{status,sent:status==='SENT'});
+            }
+            await compareNotifications();
+          }
+          forcedStatus=200;await resetStream(completion);
+          const action=`ORDER_PAYMENT_${completion?'COMPLETION_':''}NOTIFICATION_SENT`;
+          for(const db of owners)await db.query(`CREATE FUNCTION parity_notice_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+            IF NEW.action='${action}' THEN RAISE EXCEPTION 'test-only notice audit failure'; END IF;RETURN NEW;END $$;
+            CREATE TRIGGER parity_notice_failure BEFORE INSERT ON audit_logs FOR EACH ROW EXECUTE FUNCTION parity_notice_failure()`);
+          try{
+            for(const [index,db]of storage.entries()){
+              messages.length=0;await assert.rejects(runWorker(index===0));
+              assert.equal(messages.length,1,'the provider can accept before local audit failure');
+              assert.equal((await db.query(`SELECT ${prefix}notification_status AS status FROM order_payment_requests WHERE payment_request_id=$1`,[target])).rows[0].status,'SENDING');
+            }
+          }finally{for(const db of owners)await db.query('DROP TRIGGER IF EXISTS parity_notice_failure ON audit_logs;DROP FUNCTION IF EXISTS parity_notice_failure()');}
+          await compareNotifications();
+          for(const [index,db]of storage.entries()){
+            await db.query(`UPDATE order_payment_requests SET ${prefix}notification_attempted_at=clock_timestamp()-interval '46 seconds' WHERE payment_request_id=$1`,[target]);
+            messages.length=0;await runWorker(index===0);assert.equal(messages.length,0,'an uncertain delivered message is not resent');
+            assert.equal((await db.query(`SELECT ${prefix}notification_status AS status FROM order_payment_requests WHERE payment_request_id=$1`,[target])).rows[0].status,'UNKNOWN');
+          }
+          await compareNotifications();
+        }
+      }finally{
+        forcedStatus=undefined;
+        for(const [index,db]of storage.entries())for(const row of previous[index].rows)
+          await db.query(`UPDATE order_payment_requests SET notification_status=$2,notification_attempted_at=$3,
+            notification_sent_at=$4,completion_notification_status=$5,completion_notification_attempted_at=$6,
+            completion_notification_sent_at=$7 WHERE payment_request_id=$1`,[row.payment_request_id,row.notification_status,
+            row.notification_attempted_at,row.notification_sent_at,row.completion_notification_status,
+            row.completion_notification_attempted_at,row.completion_notification_sent_at]);
+      }
+    } finally { await new Promise((resolve,reject)=>server.close(error=>error?reject(error):resolve())); }
+    assert.deepEqual(outputs[1],outputs[0],'identical Mattermost message payloads');
+    const audit=async db=>(await db.query(`SELECT request_id,action,result,target_type,target_seq,actor_type,actor_seq,metadata
+      FROM audit_logs WHERE request_id=ANY($1::uuid[]) ORDER BY request_id,action`,[requests])).rows;
+    const expected=await audit(reference);
+    assert.deepEqual(await audit(databases.operations),expected);
+    assert.deepEqual(expected.filter(row=>row.result==='SUCCESS').map(row=>row.target_seq).sort(),[1002,1006]);
+    assert.equal((await post(path(paid,true),200)).completionNotificationStatus,'PENDING');
+    t.diagnostic('notification HTTP pairs: '+requests.length+'; actual worker claims, stale SENDING and exact webhook messages');
+  });
+  await t.test('order submission retry preserves the Dver request and recovers an unacknowledged shipment', async () => {
+    const path='/api/admin/orders/{id}/retry', requests=[];
+    const docs=await Promise.all(sides.map(async side=>(await fetch(side.base+'/api/docs-json')).json()));
+    assert.deepEqual(docs[1].paths[path].post,docs[0].paths[path].post);
+    assert.deepEqual(docs[1].components.schemas.SubmittedOrderDto,docs[0].components.schemas.SubmittedOrderDto);
+    async function post(id,expected,extra={}) {
+      const requestId=randomUUID(), results=[];
+      requests.push(requestId);
+      for(const side of sides) {
+        const response=await fetch(side.base+path.replace('{id}',id),{method:'POST',
+          signal:AbortSignal.timeout(15000),
+          headers:{...headers,Origin:'http://localhost:5173','X-Request-Id':requestId,...extra}});
+        const result=await response.json();
+        assert.equal(response.status,expected,side.name+' '+id+' '+JSON.stringify(result));
+        results.push(result);
+      }
+      assert.deepEqual(results[1],results[0]);
+      return results[0].data;
+    }
+    await post(1005,401,{Cookie:''});
+    await post(1005,403,{Origin:'http://wrong.invalid'});
+    await post(0,400);
+    await post(99999,404);
+    await post(1002,409);
+    await post(1007,422);
+    assert.deepEqual(await post(1004,200),{status:'SUBMITTING'});
+    assert.deepEqual(await post(1006,200),{status:'ACCEPTED'});
+    for(const db of [reference,databases.consultation])
+      await db.query('UPDATE call_sessions SET order_seq=1005,order_intake_enabled=true WHERE call_session_seq=1011');
+    await post(1005,409);
+    for(const db of [reference,databases.consultation])
+      await db.query('UPDATE call_sessions SET order_seq=NULL WHERE call_session_seq=1011');
+    for(const db of [reference,databases.order]) {
+      const client=await db.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query("SET LOCAL session_replication_role='replica'");
+        await client.query("UPDATE order_parcels SET item_price=1000 WHERE order_parcel_seq=20051");
+        await client.query("UPDATE order_parcels SET status='CANCELLED' WHERE order_parcel_seq=20052");
+        await client.query('UPDATE orders SET total_amount=3500 WHERE order_seq=1005');
+        await client.query('COMMIT');
+      } catch(error) {await client.query('ROLLBACK');throw error;}
+      finally {client.release();}
+    }
+    for(const runtime of ['./monolith-runtime','../dist']) {
+      const {DverClient}=require(runtime+'/orders/dver.client');
+      assert.throws(()=>new DverClient({get:()=>undefined}).ensureConfigured(),error=>error.getStatus()===503);
+    }
+
+    const providerRequests=[], deliveryRequests=[];
+    let dropped=false;
+    const server=require('node:http').createServer(async(req,res)=>{
+      try {
+        const chunks=[];
+        for await(const chunk of req)chunks.push(chunk);
+        const body=Buffer.concat(chunks).toString();
+        if(req.url==='/parcel') {
+          providerRequests.push({key:req.headers['x-api-key'],body:JSON.parse(body)});
+          res.writeHead(200,{'Content-Type':'application/json'});
+          res.end(JSON.stringify({ok:true,parcelNo:'RETRY001',receivedAt:'2030-03-01T00:00:00Z'}));
+          return;
+        }
+        assert.equal(req.url,'/internal/order-accepted');
+        const ack=await fetch('http://delivery-app:3003'+req.url,{method:'POST',
+          headers:{'Content-Type':'application/json',Authorization:req.headers.authorization},body});
+        const result=await ack.json();
+        deliveryRequests.push({event:JSON.parse(body),status:ack.status,result});
+        if(!dropped && ack.ok) {dropped=true;res.destroy();return;}
+        res.writeHead(ack.status,{'Content-Type':'application/json'});
+        res.end(JSON.stringify(result));
+      } catch {res.writeHead(500).end();}
+    });
+    await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+    const delivery=new Pool({host:'delivery-db',user:'delivery_app'});
+    const orderResult=async db=>(await db.query(
+      'SELECT status,parcel_no,dver_received_at,paid_at,pickup_requested_at,total_amount,version FROM orders WHERE order_seq=1005',
+    )).rows[0];
+    const shipment=async db=>(await db.query(
+      "SELECT order_parcel_seq,s.status,h.from_status,h.to_status,h.actor_type,tracking_number LIKE 'DVA-%' AS generated"+
+      ' FROM shipments s JOIN shipment_status_history h USING(shipment_seq) WHERE order_parcel_seq=ANY($1::int[])',
+      [[20051,20052]],
+    )).rows;
+    const submitId=randomUUID();
+    requests.push(submitId);
+    try {
+      for(const [runtime,owner,mono] of [['./monolith-runtime','monolith',true],['../dist','order',false]]) {
+        const local='http://127.0.0.1:'+server.address().port;
+        const config={get(key){return {
+          NODE_ENV:'test',DB_HOST:owner+'-db',DB_PORT:5432,DB_USER:owner+'_app',
+          DB_PASSWORD:process.env.PGPASSWORD,DB_NAME:process.env.PGDATABASE,
+          DVER_API_URL:local+'/parcel',DVER_API_KEY:'parity-dver-key',DELIVERY_URL:local,
+          CUSTOMER_AUTH_TOKEN:process.env.CUSTOMER_AUTH_TOKEN,OPERATIONS_URL:'http://operations-app:3005',
+          CONSULTATION_URL:'http://consultation-app:3004',
+        }[key];}};
+        const {DatabaseService}=require(runtime+'/database/database.service');
+        const {AuditService}=require(runtime+'/audit/audit.service');
+        const {OrdersRepository}=require(runtime+'/orders/orders.repository');
+        const {OrderSubmissionRepository}=require(runtime+'/orders/order-submission.repository');
+        const {OrderSubmissionService}=require(runtime+'/orders/order-submission.service');
+        const {DverClient}=require(runtime+'/orders/dver.client');
+        const database=new DatabaseService(config), repository=new OrdersRepository(), dver=new DverClient(config);
+        try {
+          if(mono) {
+            const {AuditRepository}=require(runtime+'/audit/audit.repository');
+            const {DeliveriesService}=require(runtime+'/deliveries/deliveries.service');
+            const {DeliveriesRepository}=require(runtime+'/deliveries/deliveries.repository');
+            const service=new OrderSubmissionService(database,repository,new AuditService(new AuditRepository(database)),
+              new OrderSubmissionRepository(new DeliveriesService(new DeliveriesRepository())),dver);
+            assert.deepEqual(await service.retry(1005,1,submitId),{status:'ACCEPTED'});
+          } else {
+            const {OrderDeletionCheckClient}=require(runtime+'/orders/order-deletion-check.client');
+            const {OrderSubmissionWorker}=require(runtime+'/orders/order-submission.worker');
+            const audit=new AuditService(database,config);
+            const makeService=()=>new OrderSubmissionService(database,repository,audit,
+              new OrderSubmissionRepository(),dver,new OrderDeletionCheckClient(config),config);
+            assert.deepEqual(await makeService().retry(1005,1,submitId),{status:'SUBMITTING'});
+            assert.equal((await orderResult(databases.order)).status,'SUBMITTING');
+            assert.deepEqual(await shipment(delivery),await shipment(reference),'shipment transaction survived acknowledgement loss');
+            const worker=new OrderSubmissionWorker(makeService(),config,database,repository,audit,{run:async()=>{}},{recoverPending:async()=>{}});
+            await worker.run();
+            await worker.run();
+            assert.equal((await orderResult(databases.order)).status,'ACCEPTED');
+          }
+        } finally {await database.onModuleDestroy();}
+      }
+      assert.equal(providerRequests.length,2);
+      assert.equal(providerRequests[0].body.outboundParcels.length,1);
+      assert.deepEqual(providerRequests[1],providerRequests[0]);
+      assert.deepEqual(await orderResult(databases.order),await orderResult(reference));
+      assert.equal(deliveryRequests.length,2);
+      assert.deepEqual(deliveryRequests.map(x=>[x.status,x.result.status]),[[200,'processed'],[200,'duplicate']]);
+      assert.deepEqual(deliveryRequests[1].event,deliveryRequests[0].event);
+      assert.deepEqual(await shipment(delivery),[{order_parcel_seq:20051,status:'paid',from_status:null,to_status:'paid',actor_type:'SYSTEM',generated:true}]);
+      const {rows}=await databases.order.query('SELECT delivered_at IS NOT NULL AS confirmed FROM outbox_events WHERE event_id=$1',[deliveryRequests[0].event.eventId]);
+      assert.deepEqual(rows,[{confirmed:true}]);
+    } finally {
+      await delivery.end();
+      await new Promise((resolve,reject)=>server.close(error=>error?reject(error):resolve()));
+    }
+    const audit=async db=>(await db.query('SELECT request_id,action,result,target_type,target_seq,actor_type,actor_seq,metadata'+
+      ' FROM audit_logs WHERE request_id=ANY($1::uuid[]) ORDER BY request_id,action',[requests])).rows;
+    assert.deepEqual(await audit(databases.operations),await audit(reference));
+    t.diagnostic('submission HTTP pairs: '+(requests.length-1)+'; Dver request, shipment persistence and duplicate acknowledgement');
+  });
+  await t.test('payment approval and reconciliation preserve provider calls, paid state and delivery', async () => {
+    const pending='00000000-0000-4000-8000-000000000001';
+    const second='00000000-0000-4000-8000-000000000021';
+    const requests=[];
+    const path=(id,action)=>'/api/payments/requests/'+id+'/'+action;
+    const docs=await Promise.all(sides.map(async side=>(await fetch(side.base+'/api/docs-json')).json()));
+    for(const action of ['confirm','reconcile'])
+      assert.deepEqual(docs[1].paths[path('{id}',action)].post,docs[0].paths[path('{id}',action)].post);
+    assert.deepEqual(docs[1].components.schemas.ConfirmPaymentDto,docs[0].components.schemas.ConfirmPaymentDto);
+    for(const db of [reference,databases.order]) {
+      const client=await db.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query("SET LOCAL session_replication_role='replica'");
+        await client.query('UPDATE order_payment_requests SET payment_card_seq=NULL,card_payment_failed=false WHERE payment_request_id=$1', [pending]);
+        await client.query("UPDATE order_parcels SET origin_name=COALESCE(origin_name,'발송인'),item_price=1000,notified_price=3500 WHERE order_seq=1002");
+        await client.query('INSERT INTO orders(order_seq,customer_seq,payment_method_type,status,version,created_at,updated_at,creation_source,total_amount,payment_due_at,pickup_requested_at) '+
+          'OVERRIDING SYSTEM VALUE SELECT 1051,customer_seq,payment_method_type,status,version,created_at,updated_at,creation_source,total_amount,payment_due_at,pickup_requested_at FROM orders WHERE order_seq=1002');
+        await client.query("UPDATE orders SET payment_method_type='credit',billing_organization_seq=6001,billing_organization_name='이전 기업' WHERE order_seq=1051");
+        await client.query('INSERT INTO order_parcels(order_parcel_seq,order_seq,parcel_position,origin_name,origin_phone_number,'+
+          'origin_road_address,origin_jibun_address,origin_dong_name,origin_postal_code,destination_name,destination_phone_number,'+
+          'destination_road_address,destination_jibun_address,destination_dong_name,destination_postal_code,document_count,item_price,notified_price) '+
+          'OVERRIDING SYSTEM VALUE SELECT 20511,1051,1,origin_name,origin_phone_number,origin_road_address,origin_jibun_address,origin_dong_name,origin_postal_code,'+
+          'destination_name,destination_phone_number,destination_road_address,destination_jibun_address,destination_dong_name,destination_postal_code,1,1000,7000 '+
+          'FROM order_parcels WHERE order_parcel_seq=20021');
+        await client.query("INSERT INTO order_payment_requests(payment_request_id,order_seq,amount,expires_at,notification_status) VALUES($1,1051,7000,'2094-01-01T00:00:00Z','SENT')",[second]);
+        await client.query('COMMIT');
+      } catch(error) {await client.query('ROLLBACK');throw error;}
+      finally {client.release();}
+    }
+    const origin='https://payments.example.test';
+    async function post(id,action,body,expected,extra={}) {
+      const requestId=randomUUID(), results=[];
+      requests.push(requestId);
+      for(const side of sides) {
+        const response=await fetch(side.base+path(id,action),{method:'POST',signal:AbortSignal.timeout(20000),
+          headers:{Origin:origin,Cookie:'dva_session=invalid','Content-Type':'application/json','X-Request-Id':requestId,...extra},
+          body:JSON.stringify(body)});
+        const result=await response.json();
+        assert.equal(response.status,expected,side.name+' '+action+' '+JSON.stringify(result));
+        assert.equal(response.headers.get('cache-control'),'no-store');
+        if(expected===200)assert.equal(response.headers.get('referrer-policy'),'no-referrer');
+        results.push(result);
+      }
+      assert.deepEqual(results[1],results[0],action+' '+id);
+      return results[0].data;
+    }
+    const input=(id,key)=>({orderId:id,amount:7000,paymentKey:key});
+    await post(pending,'confirm',input(pending,'unused'),403,{Origin:'http://wrong.invalid'});
+    await post(pending,'confirm',input(second,'unused'),400);
+    await post(pending,'confirm',{...input(pending,'unused'),amount:1},409);
+    await post(pending,'confirm',{...input(pending,'unused'),paymentKey:'invalid key'},400);
+    await post(pending,'reconcile',{unexpected:true},400);
+    await post(pending,'reconcile',{},409);
+    await post(pending,'confirm',input(pending,'reject-card'),422);
+    for(const db of [reference,databases.order]) {
+      const {rows}=await db.query('SELECT provider_payment_key,approval_started_at FROM order_payment_requests WHERE payment_request_id=$1',[pending]);
+      assert.deepEqual(rows,[{provider_payment_key:null,approval_started_at:null}]);
+    }
+    await post(pending,'confirm',input(pending,'approve-unknown'),502);
+    await post(pending,'confirm',input(pending,'other-key'),409);
+    for(const [db,runtime] of [[reference,'./monolith-runtime'],[databases.order,'../dist']]) {
+      const {PaymentsRepository}=require(runtime+'/payments/payments.repository');
+      const repo=new PaymentsRepository({pool:db});
+      assert.deepEqual(await repo.pendingApprovals(),[{id:pending}]);
+      assert.deepEqual(await repo.pendingApprovals(),[]);
+    }
+    const recovered=await post(pending,'reconcile',{},200);
+    try {
+      for(const db of [reference,databases.order])await db.query(
+        "CREATE FUNCTION parity_charge_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'charge storage unavailable'; END; $$; "+
+        "CREATE TRIGGER parity_charge_failure BEFORE INSERT ON order_billing_charges FOR EACH ROW WHEN(NEW.order_seq=1051) EXECUTE FUNCTION parity_charge_failure()");
+      await post(second,'confirm',input(second,'approve-legacy-credit'),500);
+      for(const db of [reference,databases.order]){
+        const row=(await db.query("SELECT o.status,o.paid_at,r.completed_at,o.billing_organization_seq,"+
+          "(SELECT count(*)::int FROM order_billing_charges b WHERE b.order_seq=o.order_seq) AS charges "+
+          "FROM orders o JOIN order_payment_requests r USING(order_seq) WHERE o.order_seq=1051")).rows[0];
+        assert.deepEqual(row,{status:'notPaid',paid_at:null,completed_at:null,billing_organization_seq:6001,charges:0});
+      }
+    } finally {
+      for(const db of [reference,databases.order])await db.query(
+        'DROP TRIGGER IF EXISTS parity_charge_failure ON order_billing_charges; DROP FUNCTION IF EXISTS parity_charge_failure()');
+    }
+    const approved=await post(second,'reconcile',{},200);
+    for(const view of [recovered,approved]) {
+      assert.equal(view.status,'PAID');
+      assert.equal(view.orderStatus,'ACCEPTED');
+      assert.equal(view.completionNotificationStatus,'PENDING');
+    }
+    assert.equal(recovered.approvedAt,'2030-03-01T09:01:00.000Z');
+    assert.equal(recovered.pickupRequestedAt,'2030-03-02T00:00:00.000Z');
+    assert.equal(approved.approvedAt,'2030-02-28T15:00:00.000Z');
+    assert.equal(approved.pickupRequestedAt,'2030-03-01T00:00:00.000Z');
+    assert.deepEqual(await post(pending,'reconcile',{},200),recovered);
+    assert.deepEqual(await post(second,'confirm',input(second,'approve-legacy-credit'),200),approved);
+    const charges=async db=>(await db.query(
+      'SELECT order_seq,organization_seq,customer_seq,billing_month::text,payment_method_type,amount::float8,occurred_at '+
+      'FROM order_billing_charges WHERE order_seq IN (1002,1051) ORDER BY order_seq',
+    )).rows;
+    const personal=await charges(reference);
+    assert.deepEqual(await charges(databases.order),personal);
+    assert.equal(personal.length,1);assert.equal(personal[0].order_seq,1051);
+    assert.equal(personal[0].organization_seq,null);assert.equal(personal[0].billing_month,'2030-03-01');
+    assert.equal(personal[0].payment_method_type,'credit');assert.equal(personal[0].amount,7000);
+    assert.equal(personal[0].occurred_at.toISOString(),approved.approvedAt);
+    const calls=await Promise.all(['monolith','order'].map(async owner=>{
+      const response=await fetch('http://'+owner+'-app:8000/__requests',{headers:{Authorization:'Bearer '+process.env.CUSTOMER_AUTH_TOKEN}});
+      assert.equal(response.status,200);
+      return response.json();
+    }));
+    assert.deepEqual(calls[1],calls[0]);
+    assert.deepEqual(calls[0].map(call=>[call.method,call.path]),[
+      ['POST','/v1/payments/confirm'],['POST','/v1/payments/confirm'],['GET','/v1/payments/approve-unknown'],
+      ['POST','/parcel'],['POST','/v1/payments/confirm'],['GET','/v1/payments/approve-legacy-credit'],['POST','/parcel'],
+    ]);
+    const stored=async db=>(await db.query(
+      'SELECT r.payment_request_id,r.provider_reference,r.provider_payment_key,r.provider_approved_at,'+
+      'r.approval_claim_id,r.approval_claimed_until,r.completed_at IS NOT NULL AS completed,'+
+      'r.completion_notification_status,o.status,o.parcel_no,o.dver_received_at,o.paid_at,o.pickup_requested_at,o.total_amount,o.version '+
+      'FROM order_payment_requests r JOIN orders o USING(order_seq) WHERE payment_request_id=ANY($1::uuid[]) ORDER BY payment_request_id',
+      [[pending,second]],
+    )).rows;
+    assert.deepEqual(await stored(databases.order),await stored(reference));
+    const audit=async db=>(await db.query('SELECT request_id,action,result,target_type,target_seq,actor_type,actor_seq,metadata'+
+      ' FROM audit_logs WHERE request_id=ANY($1::uuid[]) ORDER BY request_id,action',[requests])).rows;
+    const expected=await audit(reference);
+    assert.deepEqual(await audit(databases.operations),expected);
+    assert.equal(expected.filter(row=>row.action==='ORDER_PAYMENT_COMPLETED').length,2);
+    assert.equal(expected.filter(row=>row.action.startsWith('BILLING_')).length,0);
+    const delivery=new Pool({host:'delivery-db',user:'delivery_app'});
+    try {
+      const shipments=async db=>(await db.query(
+        'SELECT order_parcel_seq,s.status,h.to_status,h.actor_type FROM shipments s JOIN shipment_status_history h USING(shipment_seq) '+
+        'WHERE order_parcel_seq=ANY($1::int[]) ORDER BY order_parcel_seq',[[20021,20022,20511]],
+      )).rows;
+      assert.equal((await shipments(reference)).length,3);
+      assert.deepEqual(await shipments(delivery),await shipments(reference));
+    } finally {await delivery.end();}
+    t.diagnostic('approval HTTP pairs: '+requests.length+'; provider idempotency, approval recovery, paid state and shipments');
+  });
+  await t.test('parcel draft writes preserve call and customer scope, versions, reservations and committed-call recovery', async (draftWrites) => {
+    const customer=92101, other=92102, withdrawn=92103, pin=92101, oldDraft=28100;
+    const call=18101, unknown=18103, faultCall=18107, requests=[], histories=[new Map(),new Map()];
+    const ownSides=[{...sides[0],orders:reference,calls:reference,customers:reference,audit:reference},
+      {...sides[1],orders:databases.order,calls:databases.consultation,customers:databases.customer,audit:databases.operations}];
+    const at=new Date((await reference.query('SELECT clock_timestamp() AS at')).rows[0].at).getTime();
+    const oldCreated=new Date(at-7200000).toISOString(), oldRetention=new Date(at-3600000).toISOString();
+    const address=name=>({name,phoneNumber:'01011112222',roadAddress:'도로',jibunAddress:'지번',detailAddress:'',
+      dongName:'동',postalCode:'12345'});
+    const ready={origin:address('발송인'),destination:address('수령인'),originPin:{scope:'PERSONAL',pinSeq:pin},
+      documentCount:1,smallBoxCount:0,mediumBoxCount:0,bigBoxCount:0,otherItemDescription:'',clientComment:'',
+      itemPrice:1000,notifiedPrice:5000};
+    for(const side of ownSides) {
+      for(const [id,phone,status] of [[customer,'01011112222','ACTIVE'],[other,'01011112223','ACTIVE'],[withdrawn,'01011112224','WITHDRAWN']])
+        await side.customers.query("INSERT INTO customers(customer_seq,name,phone_number,status) OVERRIDING SYSTEM VALUE VALUES($1,'초안 고객',$2,$3)",[id,phone,status]);
+      await side.customers.query('INSERT INTO personal_pins(personal_pin_seq,customer_seq,address_data,version) OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,1)',
+        [pin,customer,ready.origin]);
+      for(const [id,phone,enabled,incoming,deleted] of [
+        [18100,'01011112222',true,oldCreated,null],[call,'01011112222',true,new Date(at).toISOString(),null],
+        [18102,'01011112223',true,new Date(at).toISOString(),null],[unknown,'01011112226',true,new Date(at).toISOString(),null],
+        [18104,'01011112222',false,new Date(at).toISOString(),null],[18105,'01011112222',true,'2000-01-01T00:00:00Z',null],
+        [18106,'01011112222',true,new Date(at).toISOString(),oldRetention],[faultCall,'01011112222',true,new Date(at).toISOString(),null],
+      ]) await side.calls.query(
+        'INSERT INTO call_sessions(call_session_seq,provider_call_id,caller_phone_number,incoming_at,registered_at,order_intake_enabled,deleted_at) '+
+        "OVERRIDING SYSTEM VALUE VALUES($1,'write-call-'||$1::int::text,$2,$3,$3,$4,$5)",
+        [id,phone,incoming,enabled,deleted]);
+      const guard=await side.calls.connect();
+      draftWrites.after(async()=>{
+        try {
+          // Clean up the expired fixture before later snapshots and trigger DDL.
+          await guard.query('DELETE FROM call_sessions WHERE call_session_seq=18105');
+          await guard.query('COMMIT');
+        } catch(error) { await guard.query('ROLLBACK');throw error; }
+        finally { guard.release(); }
+      });
+      await guard.query('BEGIN');
+      await guard.query('SELECT 1 FROM call_sessions WHERE call_session_seq=18105 FOR KEY SHARE');
+      await side.orders.query(
+        'INSERT INTO order_parcel_drafts(draft_seq,reserved_order_seq,call_session_seq,customer_seq,caller_phone_number,'+
+        'client_parcel_id,creation_payload,parcel_data,status,version,created_at,updated_at,retention_started_at) '+
+        "OVERRIDING SYSTEM VALUE VALUES($1,38000,18100,$2,'01011112222',$3,'{}',$4,'INCOMPLETE',1,$5,$5,$6)",
+        [oldDraft,customer,'00000000-0000-4000-8000-000000028100',
+          {...ready,originPin:{scope:'COMPANY',pinSeq:99013}},oldCreated,oldRetention]);
+      await side.orders.query("SELECT setval('order_parcel_drafts_draft_seq_seq',28101,false),setval('orders_order_seq_seq',38001,false)");
+    }
+    for(const history of histories) history.set(oldDraft,{createdAt:oldCreated,updatedAt:oldCreated,retentionStartedAt:oldRetention,
+      retentionTag:'retention:'+oldDraft,version:1});
+    const windows=new Map();
+    function bounded(value,start,end,label) {
+      const time=Date.parse(value);
+      assert.ok(Number.isFinite(time)&&time>=start-1000&&time<=end+1000,label+' '+value);
+    }
+    function normalize(data,side,start,end) {
+      const old=histories[side].get(data.draftSeq), source=histories[side].get(data.sourceDraftSeq);
+      if(old) {
+        assert.equal(data.createdAt,old.createdAt,'created snapshot');
+        assert.equal(data.retentionStartedAt,old.retentionStartedAt,'retention snapshot');
+        if(data.version===old.version)assert.equal(data.updatedAt,old.updatedAt,'idempotent update timestamp');
+        else {
+          const range=windows.get(data.draftSeq)??{start,end};
+          bounded(data.updatedAt,range.start,range.end,'updated timestamp');
+        }
+      } else {
+        bounded(data.createdAt,start,end,'created timestamp');
+        bounded(data.updatedAt,start,end,'initial updated timestamp');
+        if(source)assert.equal(data.retentionStartedAt,source.retentionStartedAt,'resumed retention');
+        else bounded(data.retentionStartedAt,start,end,'initial retention');
+      }
+      const retentionTag=old?.retentionTag??source?.retentionTag??('retention:'+data.draftSeq);
+      histories[side].set(data.draftSeq,{createdAt:data.createdAt,updatedAt:data.updatedAt,retentionStartedAt:data.retentionStartedAt,
+        retentionTag,version:data.version});
+      return {...data,createdAt:'created:'+data.draftSeq,updatedAt:'updated:'+data.draftSeq+':'+data.version,retentionStartedAt:retentionTag};
+    }
+    let writes=0;
+    async function send(side,method,path,input,expected,requestId,options={}) {
+      const response=await fetch(side.base+path,{method,signal:AbortSignal.timeout(25000),headers:{
+        'X-Request-Id':requestId,...(input===undefined?{}:{'Content-Type':'application/json'}),
+        ...(options.admin===undefined?{Authorization:'Bearer '+process.env.PGPASSWORD,
+          ...(options.noCall?{}:{call_session_seq:String(options.call??call)})}:
+          {Cookie:'dva_session='+tokens[options.admin-1],Origin:'http://localhost:5173'}),
+        ...options.headers,
+      },...(input===undefined?{}:{body:JSON.stringify(input)})});
+      const body=await response.json();
+      assert.equal(response.status,expected,side.name+' '+method+' '+path+' '+JSON.stringify(body));
+      assert.equal(response.headers.get('cache-control'),'no-store');
+      assert.equal(response.headers.get('x-request-id'),requestId);
+      return body;
+    }
+    async function pair(method,path,input,expected,options={}) {
+      const requestId=randomUUID(),start=Date.now(),bodies=[];
+      requests.push(requestId);
+      for(const side of ownSides)bodies.push(await send(side,method,path,input,expected,requestId,options));
+      const end=Date.now();
+      if(input?.sourceDraftSeq)windows.set(input.sourceDraftSeq,{start,end});
+      const normalized=bodies.map((body,index)=>expected<300?{...body,data:normalize(body.data,index,start,end)}:body);
+      assert.deepEqual(normalized[1],normalized[0],method+' '+path);writes++;
+      return bodies[0].data;
+    }
+    const create=input=>pair('POST','/api/parcel-drafts',input,201);
+    const edit=(id,input,status=200)=>pair('PATCH','/api/parcel-drafts/'+id,input,status);
+    const draftInput={clientParcelId:randomUUID(),status:'EDITING',parcel:{origin:{name:'초안 발송인'},documentCount:1}};
+    await pair('POST','/api/parcel-drafts',draftInput,401,{headers:{Authorization:''}});
+    await pair('POST','/api/parcel-drafts',draftInput,400,{noCall:true});
+    await pair('POST','/api/parcel-drafts',{clientParcelId:randomUUID(),status:'EDITING'},400,{noCall:true});
+    await pair('POST','/api/parcel-drafts',{...draftInput,unexpected:1},400);
+    for(const [id,status] of [[999999,404],[18104,409],[18105,404],[18106,404]])
+      await pair('POST','/api/parcel-drafts',draftInput,status,{call:id});
+    await pair('POST','/api/parcel-drafts',{...draftInput,customerSeq:other},403);
+    const first=await create(draftInput);
+    assert.equal(first.customerSeq,customer);assert.equal(first.intakeVersion,2);
+    assert.deepEqual(await create(draftInput),first);
+    await pair('POST','/api/parcel-drafts',{...draftInput,parcel:{documentCount:2}},409);
+    await edit(first.draftSeq,{expectedVersion:1,action:'SAVE',status:'READY',parcel:{...ready,originPin:{scope:'PERSONAL',pinSeq:2}}},403);
+    await edit(first.draftSeq,{expectedVersion:1,action:'SAVE',status:'READY'},422);
+    const saved=await edit(first.draftSeq,{expectedVersion:1,action:'SAVE',status:'READY',parcel:ready});
+    assert.equal(saved.version,2);assert.equal(saved.intakeVersion,3);
+    await edit(first.draftSeq,{expectedVersion:1,action:'SAVE',status:'READY',parcel:ready},409);
+    const cleared=await edit(first.draftSeq,{expectedVersion:2,action:'START_EDIT',clearFields:['origin','items','itemPrice']});
+    assert.equal(cleared.version,3);assert.equal(cleared.intakeVersion,4);
+    assert.ok(Object.values(cleared.parcel.origin).every(value=>value===null));
+    assert.equal(cleared.parcel.originPin,null);assert.equal(cleared.parcel.notifiedPrice,null);
+    assert.equal(cleared.parcel.documentCount,0);assert.equal(cleared.parcel.itemPrice,null);
+    await edit(first.draftSeq,{expectedVersion:3,action:'SAVE',status:'READY',parcel:ready});
+    const cancelled=await edit(first.draftSeq,{expectedVersion:4,action:'CANCEL'});
+    assert.equal(cancelled.status,'CANCELLED');assert.equal(cancelled.intakeVersion,6);
+    await edit(first.draftSeq,{expectedVersion:5,action:'CANCEL'},409);
+    await pair('POST','/api/parcel-drafts',{...draftInput,clientParcelId:randomUUID(),status:'READY',parcel:ready},403,{call:unknown});
+    const anonymous=await pair('POST','/api/parcel-drafts',{...draftInput,clientParcelId:randomUUID()},201,{call:unknown});
+    assert.equal(anonymous.customerSeq,null);assert.equal(anonymous.intakeVersion,2);
+    const standalone={clientParcelId:randomUUID(),customerSeq:customer,status:'READY',parcel:ready};
+    const manual=await pair('POST','/api/parcel-drafts',standalone,201,{admin:1});
+    assert.equal(manual.intakeVersion,null);assert.equal(manual.callSessionSeq,null);
+    await pair('POST','/api/parcel-drafts',standalone,403,{admin:2});
+    await pair('POST','/api/parcel-drafts',{...standalone,clientParcelId:randomUUID(),customerSeq:withdrawn},404,{admin:1});
+    await pair('PATCH','/api/parcel-drafts/'+first.draftSeq,{expectedVersion:5,action:'CANCEL'},409,{admin:1});
+    await pair('GET','/api/parcel-drafts/'+oldDraft,undefined,200);
+    const resumed=await create({clientParcelId:randomUUID(),sourceDraftSeq:oldDraft,status:'READY'});
+    assert.equal(resumed.reservedOrderSeq,38000);
+    assert.equal(resumed.parcel.originPin.scope,'COMPANY');
+    assert.equal((await pair('GET','/api/parcel-drafts/'+oldDraft,undefined,200)).status,'RESUMED');
+
+    const {createServer}=require('node:http'),{networkInterfaces}=require('node:os');
+    const addressIp=Object.values(networkInterfaces()).flat().find(row=>row.family==='IPv4'&&!row.internal)?.address;
+    assert.ok(addressIp);
+    let committed;
+    const proxy=createServer(async(req,res)=>{
+      try {
+        assert.equal(req.url,'/internal/parcel-draft-write');
+        const chunks=[];for await(const chunk of req)chunks.push(chunk);
+        const response=await fetch('http://order-app:3002'+req.url,{method:'POST',
+          headers:{Authorization:req.headers.authorization,'Content-Type':'application/json'},body:Buffer.concat(chunks)});
+        committed=await response.json();
+        assert.equal(response.status,200,JSON.stringify(committed));
+        res.destroy();
+      } catch(error) {res.writeHead(500).end(String(error));}
+    });
+    await new Promise(resolve=>proxy.listen(3002,'0.0.0.0',resolve));
+    const faultInput={clientParcelId:randomUUID(),status:'EDITING',parcel:{origin:{name:'응답 유실 초안'}}};
+    const requestId=randomUUID(),start=Date.now();requests.push(requestId);
+    try {
+      const expected=await send(ownSides[0],'POST','/api/parcel-drafts',faultInput,201,requestId,{call:faultCall});
+      const packet={eventId:randomUUID(),source:'order',eventType:'ParcelDraftWriteRequested',payload:{
+        orderAddress:addressIp,command:{operation:'ParcelDraftCreated',id:null,adminId:null,callSessionSeq:faultCall,input:faultInput,requestId}}};
+      const response=await fetch('http://consultation-app:3004/internal/parcel-draft-write',{method:'POST',signal:AbortSignal.timeout(25000),
+        headers:{Authorization:'Bearer '+process.env.CUSTOMER_AUTH_TOKEN,'Content-Type':'application/json'},body:JSON.stringify(packet)});
+      assert.equal(response.status,503,JSON.stringify(await response.json()));
+      assert.ok(committed?.payload?.receipt,'the order committed a durable call mutation');
+      const end=Date.now();
+      assert.deepEqual(normalize(committed.payload.data,1,start,end),normalize(expected.data,0,start,end));
+      const incomplete=(await databases.consultation.query('SELECT customer_seq,order_intake_version FROM call_sessions WHERE call_session_seq=$1',[faultCall])).rows[0];
+      assert.deepEqual(incomplete,{customer_seq:null,order_intake_version:1});
+      await pair('POST','/api/parcel-drafts',faultInput,201,{call:faultCall});
+      const {ParcelDraftWriteWorker}=require('../dist/orders/parcel-draft-write.worker');
+      const {DatabaseService}=require('../dist/database/database.service');
+      const config={get:key=>({NODE_ENV:'test',DB_HOST:'order-db',DB_PORT:5432,DB_USER:'order_app',DB_PASSWORD:process.env.PGPASSWORD,
+        DB_NAME:process.env.PGDATABASE,CUSTOMER_URL:'http://customer-app:3001',CONSULTATION_URL:'http://consultation-app:3004',CUSTOMER_AUTH_TOKEN:process.env.CUSTOMER_AUTH_TOKEN})[key]};
+      const db=new DatabaseService(config),worker=new ParcelDraftWriteWorker(db,config);
+      try {
+        const current=worker.run();assert.equal(worker.run(),current);await current;
+        for(let count=0;count<30;count++){if(!(await worker.run()))break;assert.ok(count<29,'draft relay did not drain');}
+        await worker.onModuleDestroy();
+      } finally{await db.onModuleDestroy();}
+      const marker=await databases.order.query('SELECT delivered_at IS NOT NULL AS delivered FROM outbox_events WHERE event_id=$1',[committed.payload.receipt.eventId]);
+      assert.deepEqual(marker.rows,[{delivered:true}]);
+    } finally{proxy.closeAllConnections();await new Promise(resolve=>proxy.close(resolve));}
+    const callRows=async db=>(await db.query(
+      'SELECT call_session_seq,customer_seq,order_intake_version FROM call_sessions WHERE call_session_seq IN (18101,18103,18107) ORDER BY call_session_seq',
+    )).rows;
+    assert.deepEqual(await callRows(databases.consultation),await callRows(reference));
+    const auditRows=async db=>(await db.query(
+      'SELECT request_id,action,result,target_type,target_seq,actor_type,actor_seq,metadata FROM audit_logs '+
+      'WHERE request_id=ANY($1::uuid[]) ORDER BY request_id,audit_log_seq',[requests],
+    )).rows;
+    assert.deepEqual(await auditRows(databases.operations),await auditRows(reference));
+    const docs=await Promise.all(sides.map(async side=>(await fetch(side.base+'/api/docs-json')).json()));
+    for(const [path,method] of [['/api/parcel-drafts','post'],['/api/parcel-drafts/{id}','patch']]) {
+      assert.deepEqual(docs[1].paths[path][method],docs[0].paths[path][method]);
+      const visit=(value,seen=new Set())=>{
+        for(const match of JSON.stringify(value).matchAll(/"\$ref":"#\/components\/schemas\/([^"]+)"/g)) {
+          const name=match[1];if(seen.has(name))continue;seen.add(name);
+          assert.deepEqual(docs[1].components.schemas[name],docs[0].components.schemas[name],name);
+          visit(docs[0].components.schemas[name],seen);
+        }
+      };
+      visit(docs[0].paths[path][method]);
+    }
+    t.diagnostic('draft write HTTP pairs: '+writes+'; call/customer/PIN locks, stored versions and order-commit response loss recovered');
+  });
+  await t.test('metrics preserve the plain scrape contract and bounded database failures', async () => {
+    for(const client of retention.splice(0)){await client.query('ROLLBACK');client.release();}
+    const samples=text=>Object.fromEntries(text.split('\n').filter(line=>line&&!line.startsWith('#')).map(line=>{
+      const at=line.lastIndexOf(' ');return [line.slice(0,at),Number(line.slice(at+1))];
+    }));
+    const scrape=async side=>{
+      const response=await fetch(side.base+'/internal/metrics',{headers:{Cookie:'dva_session=invalid',Authorization:'invalid'}});
+      assert.equal(response.status,200);assert.equal(response.headers.get('cache-control'),'no-store');
+      const text=await response.text();
+      assert.match(response.headers.get('content-type'),/^text\/plain;.*version=0\.0\.4/);
+      assert.ok(text.endsWith('\n'));assert.ok(!text.includes('"meta"'));
+      const values=samples(text);
+      for(const [name,value] of Object.entries(values))assert.ok(Number.isFinite(value)&&value>=0,name);
+      return {text,values};
+    };
+    const healthy=await Promise.all(sides.map(scrape));
+    const attention=values=>Object.fromEntries(Object.entries(values).filter(([key])=>
+      key.startsWith('dva_orders_attention{')||key==='dva_orders_stale_submitting'));
+    assert.deepEqual(attention(healthy[1].values),attention(healthy[0].values));
+    for(const result of healthy){
+      assert.equal(result.values.dva_database_up,1);assert.equal(result.values.dva_order_metrics_success,1);
+      assert.equal(Object.keys(attention(result.values)).length,6);
+    }
+    const locks=[];
+    try {
+      for(const db of [reference,databases.order]){
+        const client=await db.connect();locks.push(client);await client.query('BEGIN');
+        await client.query("SET LOCAL lock_timeout='1s'");
+        await client.query('LOCK TABLE orders IN ACCESS EXCLUSIVE MODE');
+      }
+      const start=Date.now(),blocked=await Promise.all(sides.map(scrape));
+      assert.ok(Date.now()-start<5000,'metrics statement timeout did not bound the scrape');
+      for(const result of blocked){
+        assert.equal(result.values.dva_database_up,1);assert.equal(result.values.dva_order_metrics_success,0);
+        assert.deepEqual(attention(result.values),{});
+        assert.ok(!result.text.includes('SELECT status'));
+      }
+    } finally{for(const client of locks){await client.query('ROLLBACK');client.release();}}
+    for(const result of await Promise.all(sides.map(scrape)))assert.equal(result.values.dva_order_metrics_success,1);
+    t.diagnostic('metrics HTTP pairs: 3; plain text, attention counts, real database timeout and recovery');
+  });
+  await t.test('dashboard home preserves previews, current-day counts, performance and read-only owner snapshots', async () => {
+    const homeSides=[sides[0],{...sides[1],base:'http://consultation-app:3004'}];
+    let pairs=0;
+    const home=async(extra={},expected=200)=>{
+      const requestId=randomUUID(),start=Date.now();
+      const results=await Promise.all(homeSides.map(async side=>{
+        const response=await fetch(side.base+'/api/dashboard/home',{headers:{...headers,'X-Request-Id':requestId,...extra}});
+        const body=await response.json();assert.equal(response.status,expected,side.name+' '+JSON.stringify(body));
+        if(expected===200){
+          assert.ok(Date.parse(body.data.observedAt)>=start-2000&&Date.parse(body.data.observedAt)<=Date.now()+2000);
+          body.data.observedAt='<snapshot>';
+        }
+        return body;
+      }));
+      assert.deepEqual(results[1],results[0]);pairs++;return results[1].data;
+    };
+    await home({Cookie:''},401);await home({Cookie:'dva_session=invalid'},401);
+    await home({Cookie:'',Authorization:'Bearer '+process.env.AI_BUSINESS_TOKEN},401);
+    const initial=await home();
+    const now=new Date((await reference.query('SELECT clock_timestamp() AS at')).rows[0].at);
+    const day=new Date(now.getTime()+9*3600000).toISOString().slice(0,10);
+    const first=Date.parse(day+'T00:00:00+09:00'),next=first+86400000;
+    const times=[first-1,first,next-1,next,first,first];
+    for(const db of [reference,databases.customer])
+      await db.query("INSERT INTO customers(customer_seq,name,phone_number,status) OVERRIDING SYSTEM VALUE "+
+        "VALUES(92150,'홈 고객','01092150000','ACTIVE')");
+    for(let i=0;i<times.length;i++)for(const db of [reference,databases.order])
+      await db.query("INSERT INTO orders(order_seq,customer_seq,status,created_at,updated_at,deleted_at) "+
+        "OVERRIDING SYSTEM VALUE VALUES($1,1,'COLLECTING',$2,$2,$3)",
+        [46000+i,new Date(times[i]),i===4?now:null]);
+    for(let i=0;i<15;i++){
+      const id=18500+i,uuid=randomUUID(),at=new Date(now.getTime()-60000-i*1000),end=new Date(at.getTime()+500);
+      for(const db of [reference,databases.consultation]){
+        await db.query("INSERT INTO call_sessions(call_session_seq,provider_call_id,customer_seq,caller_phone_number,incoming_at,started_at,ended_at,registered_at) "+
+          "OVERRIDING SYSTEM VALUE VALUES($1,'home-'||$1::int::text,92150,'01092150000',$2,$2,$3,$2)",[id,at,end]);
+        const complaints=i<4?[{type:['UNSUPPORTED_ANSWER','DISSATISFACTION_EXPRESSION','INFORMATION_RECOGNITION_ERROR','DISSATISFACTION_EXPRESSION'][i],
+          target:i===1?'price_policy':i===3?'ai_service':null,level:i===1||i===3?'mild':null,offsetSeconds:0,evidenceText:'홈 품질 기준'}]:[];
+        await db.query("INSERT INTO call_analyses(call_session_seq,ai_started_at,ai_ended_at,has_complaint,complaints,payload_hash,is_new_customer,registered_parcel_count) "+
+          "VALUES($1,$2,$3,$4,$5,repeat('a',64),$6,$7)",[id,at,end,complaints.length>0,JSON.stringify(complaints),i%2===0,i%3]);
+        await db.query("INSERT INTO unanswered_questions(unanswered_question_seq,event_id,call_session_seq,question_text,occurred_at,payload_hash) "+
+          "OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,'홈 미답변 '||$3::int::text,$4,repeat('b',64))",[28500+i,uuid,id,at]);
+      }
+      const key=randomUUID();
+      for(const db of [reference,databases.order])
+        await db.query("INSERT INTO order_parcel_drafts(draft_seq,customer_seq,created_by_admin_user_seq,client_parcel_id,creation_payload,parcel_data,status,reserved_order_seq,created_at,updated_at,retention_started_at,legacy_order_seq) "+
+          "OVERRIDING SYSTEM VALUE VALUES($1,92150,1,$2,'{}','{}','INCOMPLETE',$3,$4,$4,$6,$5)",
+          [28500+i,key,47000+i,at,i===0?46005:null,now]);
+    }
+    const stored=await Promise.all(Object.entries(owners).map(([owner,tables])=>snapshot(databases[owner],tables)));
+    const original=await snapshot(reference,[...orderTables,'call_sessions','call_analyses','unanswered_questions']);
+    const populated=await home();
+    assert.equal(populated.todayOrderCount,initial.todayOrderCount+2);
+    assert.equal(populated.todayCallCount,initial.todayCallCount+15);
+    assert.equal(populated.pendingWork.incomplete,initial.pendingWork.incomplete+15);
+    assert.equal(populated.pendingWork.unansweredQuestions,15);
+    for(const key of ['recentCalls','incompleteDrafts','unansweredQuestions'])assert.equal(populated[key].length,11);
+    assert.ok(populated.unansweredQuestions.every(row=>row.customerName==='홈 고객'));
+    for(const cookie of tokens.slice(1).map(token=>'dva_session='+token))await home({Cookie:cookie});
+    assert.deepEqual(await Promise.all(Object.entries(owners).map(([owner,tables])=>snapshot(databases[owner],tables))),stored);
+    assert.deepEqual(await snapshot(reference,[...orderTables,'call_sessions','call_analyses','unanswered_questions']),original);
+    const docs=await Promise.all(homeSides.map(async side=>(await fetch(side.base+'/api/docs-json')).json()));
+    const operation=docs[0].paths['/api/dashboard/home'].get;
+    assert.deepEqual(docs[1].paths['/api/dashboard/home'].get,operation);
+    const visit=(value,seen=new Set())=>{
+      for(const match of JSON.stringify(value).matchAll(/"\$ref":"#\/components\/schemas\/([^"]+)"/g)){
+        const name=match[1];if(seen.has(name))continue;seen.add(name);
+        assert.deepEqual(docs[1].components.schemas[name],docs[0].components.schemas[name],name);
+        visit(docs[0].components.schemas[name],seen);
+      }
+    };
+    visit(operation);
+    const event={eventId:randomUUID(),source:'consultation',eventType:'HomeOrdersReadRequested',
+      payload:{observedAt:now.toISOString(),consultationAddress:null}};
+    const internal=async(token,body,scope)=>fetch('http://order-app:3002/internal/home-orders',{
+      method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token,
+        ...(scope?{'X-Msa-Read-Scope':scope}:{})},body:JSON.stringify(body),
+    });
+    assert.equal((await internal('invalid',event,randomUUID())).status,403);
+    assert.equal((await internal(process.env.CUSTOMER_AUTH_TOKEN,event)).status,422);
+    assert.equal((await internal(process.env.CUSTOMER_AUTH_TOKEN,{...event,source:'order'},randomUUID())).status,422);
+    t.diagnostic('home HTTP pairs: '+pairs+'; KST boundaries, 11-item previews, three roles, owner immutability and schemas');
+  });
+  await t.test(
+    'maintenance expires bounded unpaid batches while preserving held and approving orders',
+    async () => {
+      const now = new Date(),
+        created = new Date(now.getTime() - 7200000),
+        due = new Date(now.getTime() - 1000);
+      const future = new Date(now.getTime() + 60000),
+        approval = new Date(now.getTime() - 300000),
+        past = new Date(now.getTime() - 500);
+      const ids = Array.from({ length: 121 }, (_, i) => ({
+        order_seq: 50000 + i,
+        id: randomUUID(),
+      }));
+      for (const db of [reference, databases.order]) {
+        const client = await db.connect();
+        try {
+          await client.query('BEGIN');
+          // Seed persisted payment states before exercising the normal trigger-protected worker.
+          await client.query("SET LOCAL session_replication_role='replica'");
+          await client.query(
+            'INSERT INTO orders(order_seq,customer_seq,payment_method_type,status,creation_source,total_amount,payment_due_at,created_at,updated_at,deleted_at,paid_at) ' +
+              "OVERRIDING SYSTEM VALUE SELECT 50000+n,1,'billing',CASE WHEN n=120 THEN 'PAID' ELSE 'notPaid' END,'AI',1000," +
+              'CASE WHEN n=118 THEN $3::timestamptz ELSE $2::timestamptz END,$1,$1,CASE WHEN n=119 THEN $4::timestamptz END,' +
+              'CASE WHEN n=120 THEN $4::timestamptz END FROM generate_series(0,120)n',
+            [created, due, future, now],
+          );
+          await client.query(
+            'INSERT INTO order_parcels(order_parcel_seq,order_seq,parcel_position,status,document_count,notified_price) ' +
+              "OVERRIDING SYSTEM VALUE SELECT 60000+n,50000+n,1,'ACTIVE',1,1000 FROM generate_series(0,120)n",
+          );
+          await client.query(
+            'INSERT INTO order_payment_requests(payment_request_id,order_seq,amount,expires_at,created_at,notification_status,' +
+              'approval_started_at,provider_payment_key,invalidated_at,completed_at,provider_reference,provider_approved_at) ' +
+              "SELECT id,order_seq,1000,CASE WHEN order_seq=50118 THEN $4::timestamptz ELSE $3::timestamptz END,$2,'SENT'," +
+              'CASE WHEN order_seq IN(50002,50003,50004,50120) THEN $5::timestamptz END,' +
+              "CASE WHEN order_seq IN(50002,50003,50004,50120) THEN 'fixture-key-'||order_seq::text END," +
+              'CASE WHEN order_seq=50003 THEN $6::timestamptz END,' +
+              'CASE WHEN order_seq IN(50004,50120) THEN $6::timestamptz END,' +
+              "CASE WHEN order_seq IN(50004,50120) THEN 'fixture-completed-'||order_seq::text END," +
+              'CASE WHEN order_seq IN(50004,50120) THEN $6::timestamptz END ' +
+              'FROM jsonb_to_recordset($1::jsonb)r(order_seq int,id uuid) WHERE order_seq<>50005',
+            [JSON.stringify(ids), created, due, future, approval, past],
+          );
+          await client.query('COMMIT');
+        } catch (error) {
+          await client.query('ROLLBACK');
+          throw error;
+        } finally {
+          client.release();
+        }
+      }
+      const clients = [],
+        workers = [];
+      const hold = async (db, sql) => {
+        const client = await db.connect();
+        clients.push(client);
+        await client.query('BEGIN');
+        await client.query(sql);
+        return client;
+      };
+      const release = async (client) => {
+        await client.query('ROLLBACK');
+        client.release();
+        clients.splice(clients.indexOf(client), 1);
+      };
+      const cancelled = async (db) =>
+        Number(
+          (
+            await db.query(
+              "SELECT count(*) FROM orders WHERE order_seq BETWEEN 50000 AND 50120 AND status='CANCELLED'",
+            )
+          ).rows[0].count,
+        );
+      const started = Date.now();
+      try {
+        for (const [owner, runtime] of [
+          ['monolith', './monolith-runtime'],
+          ['order', '../dist'],
+        ]) {
+          const { DatabaseService } = require(
+            runtime + '/database/database.service',
+          );
+          const { AuditService } = require(runtime + '/audit/audit.service');
+          const { OrdersRepository } = require(
+            runtime + '/orders/orders.repository',
+          );
+          const config = {
+            get: (key) =>
+              ({
+                NODE_ENV: 'test',
+                DB_HOST: owner + '-db',
+                DB_PORT: 5432,
+                DB_USER: owner + '_app',
+                DB_PASSWORD: process.env.PGPASSWORD,
+                DB_NAME: process.env.PGDATABASE,
+                OPERATIONS_URL: 'http://operations-app:3005',
+                CUSTOMER_AUTH_TOKEN: process.env.CUSTOMER_AUTH_TOKEN,
+              })[key],
+          };
+          const database = new DatabaseService(config);
+          let audit;
+          if (owner === 'monolith') {
+            const { AuditRepository } = require(
+              runtime + '/audit/audit.repository',
+            );
+            audit = new AuditService(new AuditRepository(database));
+          } else {
+            audit = new AuditService(database, config);
+          }
+          const repository = new OrdersRepository(database);
+          const jobs = [];
+          const transaction = database.transaction.bind(database);
+          database.transaction = (work) => {
+            jobs.push('expiry');
+            return transaction(work);
+          };
+          const recover = {
+            recoverPending: async () => jobs.push('pending'),
+            recoverPaid: async () => jobs.push('paid'),
+            submitPaidOrder: async () => jobs.push('paid'),
+          };
+          let worker;
+          if (owner === 'monolith') {
+            // Intake recovery is injected below; its constructor metadata also imports S3 playback.
+            const intakePath = require.resolve(
+              runtime + '/orders/order-intake.service',
+            );
+            const cachedIntake = require.cache[intakePath];
+            require.cache[intakePath] = {
+              loaded: true,
+              exports: { OrderIntakeService: class {} },
+            };
+            let OrderMaintenanceWorker;
+            try {
+              ({ OrderMaintenanceWorker } = require(
+                runtime + '/orders/order-maintenance.worker',
+              ));
+            } finally {
+              if (cachedIntake) require.cache[intakePath] = cachedIntake;
+              else delete require.cache[intakePath];
+            }
+            const { OrderPaymentsRepository } = require(
+              runtime + '/orders/order-payments.repository',
+            );
+            worker = new OrderMaintenanceWorker(
+              database,
+              audit,
+              { rollover: async () => jobs.push('billing') },
+              recover,
+              repository,
+              new OrderPaymentsRepository(undefined, database),
+              config,
+              { recoverPending: async () => jobs.push('intake') },
+            );
+          } else {
+            const { OrderSubmissionWorker } = require(
+              runtime + '/orders/order-submission.worker',
+            );
+            worker = new OrderSubmissionWorker(
+              recover,
+              config,
+              database,
+              repository,
+              audit,
+              { run: async () => jobs.push('billing') },
+              {recoverPending:async()=>jobs.push('intake')},
+            );
+          }
+          worker.onApplicationBootstrap();
+          assert.deepEqual(jobs, []);
+          workers.push({ owner, database, audit, worker, jobs });
+        }
+        const run = async (expectedBatches) => {
+          for (const item of workers) {
+            item.jobs.length = 0;
+            const first = item.worker.run(now);
+            assert.equal(item.worker.run(now), first);
+            await first;
+            assert.equal(
+              item.jobs.filter((job) => job === 'expiry').length,
+              expectedBatches,
+            );
+            assert.deepEqual(
+              item.jobs.slice(0,3),
+              ['intake','pending','billing'],
+            );
+            assert.ok(
+              item.jobs.lastIndexOf('paid') > item.jobs.lastIndexOf('billing'),
+            );
+          }
+        };
+        const gates = [];
+        for (const db of [reference, databases.order])
+          gates.push(
+            await hold(db, 'SELECT pg_advisory_xact_lock(20261030,140)'),
+          );
+        await run(1);
+        for (const db of [reference, databases.order])
+          assert.equal(await cancelled(db), 0);
+        for (const gate of gates) await release(gate);
+        const rows = [];
+        for (const db of [reference, databases.order])
+          rows.push(
+            await hold(
+              db,
+              'SELECT 1 FROM orders WHERE order_seq=50000 FOR UPDATE',
+            ),
+          );
+        await run(10);
+        for (const db of [reference, databases.order]) {
+          assert.equal(await cancelled(db), 100);
+          assert.deepEqual(
+            (
+              await db.query(
+                'SELECT order_seq,status FROM orders WHERE order_seq IN(50000,50002) ORDER BY order_seq',
+              )
+            ).rows,
+            [
+              { order_seq: 50000, status: 'notPaid' },
+              { order_seq: 50002, status: 'notPaid' },
+            ],
+          );
+        }
+        for (const row of rows) await release(row);
+        await run(2);
+        for (const db of [reference, databases.order]) {
+          assert.equal(await cancelled(db), 117);
+          await db.query(
+            'UPDATE order_payment_requests SET approval_started_at=NULL,provider_payment_key=NULL WHERE order_seq=50002',
+          );
+        }
+        await run(1);
+        for (const db of [reference, databases.order])
+          assert.equal(await cancelled(db), 118);
+        const normalizeTime = (value) => {
+          if (value === null) return null;
+          assert.ok(
+            value.getTime() >= started - 2000 &&
+              value.getTime() <= Date.now() + 2000,
+          );
+          return '<changed>';
+        };
+        const state = async (db) => {
+          const orders = (
+            await db.query(
+              'SELECT order_seq,status,total_amount,version,created_at,updated_at,closed_at,deleted_at,payment_due_at ' +
+                'FROM orders WHERE order_seq BETWEEN 50000 AND 50120 ORDER BY order_seq',
+            )
+          ).rows.map((row) =>
+            row.status === 'CANCELLED'
+              ? {
+                  ...row,
+                  updated_at: normalizeTime(row.updated_at),
+                  closed_at: normalizeTime(row.closed_at),
+                }
+              : row,
+          );
+          const parcels = (
+            await db.query(
+              'SELECT order_seq,order_parcel_seq,status FROM order_parcels WHERE order_seq BETWEEN 50000 AND 50120 ORDER BY order_seq',
+            )
+          ).rows;
+          const requests = (
+            await db.query(
+              'SELECT payment_request_id,order_seq,amount,expires_at,approval_started_at,provider_payment_key,completed_at,invalidated_at ' +
+                'FROM order_payment_requests WHERE order_seq BETWEEN 50000 AND 50120 ORDER BY order_seq',
+            )
+          ).rows.map((row) =>
+            row.invalidated_at !== null && row.order_seq !== 50003
+              ? { ...row, invalidated_at: normalizeTime(row.invalidated_at) }
+              : row,
+          );
+          return { orders, parcels, requests };
+        };
+        assert.deepEqual(await state(databases.order), await state(reference));
+        const audits = async (db) =>
+          (
+            await db.query(
+              'SELECT actor_type,actor_seq,action,result,target_type,target_seq,metadata FROM audit_logs ' +
+                "WHERE action='ORDER_CANCELLED' AND target_seq BETWEEN 50000 AND 50120 ORDER BY target_seq",
+            )
+          ).rows;
+        const expected = await audits(reference);
+        assert.equal(expected.length, 118);
+        assert.ok(
+          expected.every(
+            (row) =>
+              row.actor_type === 'SYSTEM' &&
+              row.actor_seq === null &&
+              row.metadata.reason === 'PAYMENT_EXPIRED',
+          ),
+        );
+        assert.deepEqual(await audits(databases.operations), expected);
+        await run(1);
+        assert.deepEqual(await audits(databases.operations), expected);
+        const packet = {
+          eventId: randomUUID(),
+          source: 'order',
+          eventType: 'AuditPrepared',
+          payload: {
+            transactionId: randomUUID(),
+            occurredAt: now.toISOString(),
+            result: 'SUCCESS',
+            audit: {
+              actorId: null,
+              actorType: 'SYSTEM',
+              action: 'ORDER_CANCELLED',
+              targetType: 'ORDER',
+              targetId: 50000,
+              requestId: randomUUID(),
+              metadata: {
+                amountBefore: 1000,
+                amountAfter: 0,
+                reason: 'PAYMENT_EXPIRED',
+              },
+            },
+          },
+        };
+        for (const mutate of [
+          (event) => (event.payload.audit.metadata.reason = 'user_request'),
+          (event) => (event.payload.audit.metadata.amountAfter = 1),
+          (event) => (event.payload.audit.actorName = 'forged'),
+        ]) {
+          const event = structuredClone(packet);
+          event.eventId = randomUUID();
+          mutate(event);
+          const response = await fetch(
+            'http://operations-app:3005/internal/events',
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN,
+              },
+              body: JSON.stringify(event),
+            },
+          );
+          assert.equal(response.status, 422);
+        }
+        t.diagnostic(
+          'expiry 118 orders; 100-per-tick limit, advisory/row locks, approval protection, stored cancellation and exact system audits',
+        );
+      } finally {
+        for (const client of [...clients]) await release(client);
+        for (const item of workers) {
+          await item.worker.onModuleDestroy();
+          if (item.audit.onModuleDestroy) await item.audit.onModuleDestroy();
+          await item.database.onModuleDestroy();
+        }
+      }
+    },
+  );
+  await t.test(
+    'billing charges preserve personal and organization principal, month totals and transactional audits',
+    async () => {
+      const requestId = randomUUID();
+      for (const db of [reference, databases.customer])
+        await db.query(
+          "INSERT INTO organizations(organization_seq,name,status) OVERRIDING SYSTEM VALUE VALUES(6200,'청구 검증 기업','ACTIVE')",
+        );
+      for (const db of [reference, databases.order]) {
+        const client = await db.connect();
+        try {
+          await client.query('BEGIN');
+          await client.query("SET LOCAL session_replication_role='replica'");
+          await client.query(
+            'INSERT INTO orders(order_seq,customer_seq,payment_method_type,status,creation_source,total_amount,paid_at,billing_organization_seq,billing_organization_name) ' +
+              'OVERRIDING SYSTEM VALUE SELECT 52000+n,CASE WHEN n=5 THEN NULL ELSE 1 END, ' +
+              "CASE WHEN n IN(2,6) THEN 'groupBilling' WHEN n=3 THEN 'billing' ELSE 'credit' END, " +
+              "CASE WHEN n=4 THEN 'COLLECTING' ELSE 'PAID' END,'AI',7000+n*1000, " +
+              "CASE WHEN n<>4 THEN '2036-02-29T15:00:00Z'::timestamptz END, " +
+              "CASE WHEN n IN(1,2) THEN 6200 END,CASE WHEN n IN(1,2) THEN '청구 검증 기업' END FROM generate_series(0,6)n",
+          );
+          await client.query(
+            'INSERT INTO organization_billing_months(organization_seq,billing_month,organization_name,monthly_amount,group_billing_amount) ' +
+              "VALUES(6200,'2036-02-01','이전 기업명',12345,678)",
+          );
+          await client.query('COMMIT');
+        } catch (error) {
+          await client.query('ROLLBACK');
+          throw error;
+        } finally {
+          client.release();
+        }
+      }
+      const services = [];
+      try {
+        for (const [owner, runtime] of [
+          ['monolith', './monolith-runtime'],
+          ['order', '../dist'],
+        ]) {
+          const { DatabaseService } = require(
+            runtime + '/database/database.service',
+          );
+          const { AuditService } = require(runtime + '/audit/audit.service');
+          const config = {
+            get: (key) =>
+              ({
+                NODE_ENV: 'test',
+                DB_HOST: owner + '-db',
+                DB_PORT: 5432,
+                DB_USER: owner + '_app',
+                DB_PASSWORD: process.env.PGPASSWORD,
+                DB_NAME: process.env.PGDATABASE,
+                OPERATIONS_URL: 'http://operations-app:3005',
+                CUSTOMER_AUTH_TOKEN: process.env.CUSTOMER_AUTH_TOKEN,
+              })[key],
+          };
+          const database = new DatabaseService(config);
+          let audit, service;
+          if (owner === 'monolith') {
+            const { AuditRepository } = require(
+              runtime + '/audit/audit.repository',
+            );
+            const { OrganizationBillingService } = require(
+              runtime + '/organizations/organization-billing.service',
+            );
+            const { OrganizationBillingRepository } = require(
+              runtime + '/organizations/organization-billing.repository',
+            );
+            audit = new AuditService(new AuditRepository(database));
+            service = new OrganizationBillingService(
+              database,
+              new OrganizationBillingRepository(database),
+              audit,
+            );
+          } else {
+            const { BillingService } = require(
+              runtime + '/billing/billing.service',
+            );
+            audit = new AuditService(database, config);
+            service = new BillingService(database, audit, config);
+          }
+          services.push({ database, audit, service });
+        }
+        const snapshot = async (db) => ({
+          charges: (
+            await db.query(
+              'SELECT order_seq,organization_seq,customer_seq,billing_month::text,payment_method_type,amount,occurred_at::text ' +
+                'FROM order_billing_charges WHERE order_seq BETWEEN 52000 AND 52006 ORDER BY order_seq',
+            )
+          ).rows,
+          months: (
+            await db.query(
+              'SELECT organization_seq,billing_month::text,organization_name,monthly_amount::text,group_billing_amount::text ' +
+                'FROM organization_billing_months WHERE organization_seq=6200 ORDER BY billing_month',
+            )
+          ).rows,
+        });
+        for (const db of [reference, databases.order]) {
+          await db.query(
+            "CREATE FUNCTION charge_fixture_failure() RETURNS trigger LANGUAGE plpgsql AS $fixture$ BEGIN RAISE EXCEPTION 'test-only month failure'; END $fixture$",
+          );
+          await db.query(
+            'CREATE TRIGGER charge_fixture_failure BEFORE INSERT ON organization_billing_months FOR EACH ROW EXECUTE FUNCTION charge_fixture_failure()',
+          );
+        }
+        try {
+          for (const { database, service } of services)
+            await assert.rejects(
+              database.transaction((client) =>
+                service.recordCharge(client, 52001, requestId),
+              ),
+            );
+          for (const db of [reference, databases.order])
+            assert.equal((await snapshot(db)).charges.length, 0);
+        } finally {
+          for (const db of [reference, databases.order]) {
+            await db.query(
+              'DROP TRIGGER charge_fixture_failure ON organization_billing_months',
+            );
+            await db.query('DROP FUNCTION charge_fixture_failure()');
+          }
+        }
+        for (const { database, service } of services) {
+          // The same order lock used by approval/submission serializes concurrent retries.
+          const record = (id) =>
+            database.transaction(async (client) => {
+              await client.query(
+                'SELECT 1 FROM orders WHERE order_seq=$1 FOR UPDATE',
+                [id],
+              );
+              await service.recordCharge(client, id, requestId);
+            });
+          for (let id = 52000; id <= 52006; id++) await record(id);
+          await Promise.all([record(52001), record(52001), record(52002)]);
+        }
+        const stored = await snapshot(reference);
+        assert.deepEqual(await snapshot(databases.order), stored);
+        assert.deepEqual(
+          stored.charges.map((row) => [
+            row.order_seq,
+            row.organization_seq,
+            row.customer_seq,
+            row.billing_month,
+            row.amount,
+          ]),
+          [
+            [52000, null, 1, '2036-03-01', 7000],
+            [52001, 6200, null, '2036-03-01', 8000],
+            [52002, 6200, null, '2036-03-01', 9000],
+          ],
+        );
+        assert.deepEqual(stored.months[1], {
+          organization_seq: 6200,
+          billing_month: '2036-03-01',
+          organization_name: '청구 검증 기업',
+          monthly_amount: '8000',
+          group_billing_amount: '9000',
+        });
+        const logs = async (db) =>
+          (
+            await db.query(
+              'SELECT action,result,target_type,target_seq,actor_type,actor_seq,metadata FROM audit_logs WHERE request_id=$1 ORDER BY audit_log_seq',
+              [requestId],
+            )
+          ).rows;
+        const original = await logs(reference);
+        for (let n = 0; n < 100; n++) {
+          if ((await logs(databases.operations)).length === original.length)
+            break;
+          await pause(25);
+        }
+        assert.deepEqual(await logs(databases.operations), original);
+        assert.deepEqual(
+          original.map((row) => [
+            row.action,
+            row.metadata.paymentMethodType,
+            row.metadata.amountBefore,
+            row.metadata.amountAfter,
+          ]),
+          [
+            ['BILLING_MONTH_INITIALIZED', 'credit', 12345, 0],
+            ['BILLING_MONTH_INITIALIZED', 'groupBilling', 678, 0],
+            ['BILLING_AMOUNT_INCREASED', 'credit', 0, 8000],
+            ['BILLING_AMOUNT_INCREASED', 'groupBilling', 0, 9000],
+          ],
+        );
+        const packet = {
+          eventId: randomUUID(),
+          source: 'order',
+          eventType: 'AuditPrepared',
+          payload: {
+            transactionId: randomUUID(),
+            occurredAt: new Date().toISOString(),
+            result: 'SUCCESS',
+            audit: {
+              actorId: null,
+              actorType: 'SYSTEM',
+              action: 'BILLING_AMOUNT_INCREASED',
+              targetType: 'ORGANIZATION',
+              targetId: 6200,
+              requestId,
+              metadata: {
+                billingMonth: '2036-03',
+                paymentMethodType: 'credit',
+                amountBefore: 0,
+                amountAfter: 8000,
+              },
+            },
+          },
+        };
+        for (const mutate of [
+          (e) => (e.payload.audit.actorType = 'AI'),
+          (e) => (e.payload.audit.targetType = 'ORDER'),
+          (e) => (e.payload.audit.metadata.amountAfter = -1),
+          (e) => (e.payload.audit.metadata.amountAfter = 2147483648),
+          (e) => (e.payload.audit.metadata.paymentMethodType = 'billing'),
+          (e) => (e.payload.audit.actorName = 'forged'),
+        ]) {
+          const event = structuredClone(packet);
+          event.eventId = randomUUID();
+          mutate(event);
+          const response = await fetch(
+            'http://operations-app:3005/internal/events',
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN,
+              },
+              body: JSON.stringify(event),
+            },
+          );
+          assert.equal(response.status, 422);
+        }
+        t.diagnostic(
+          'billing principal 7 states; source rollback, concurrent replay, KST month boundary and four exact audits',
+        );
+      } finally {
+        for (const { database, audit } of services) {
+          if (audit.onModuleDestroy) await audit.onModuleDestroy();
+          await database.onModuleDestroy();
+        }
+        for (const db of [reference, databases.order]) {
+          await db.query(
+            'DELETE FROM order_billing_charges WHERE order_seq BETWEEN 52000 AND 52006',
+          );
+          await db.query(
+            'DELETE FROM orders WHERE order_seq BETWEEN 52000 AND 52006',
+          );
+          await db.query(
+            'DELETE FROM organization_billing_months WHERE organization_seq=6200',
+          );
+        }
+        for (const db of [reference, databases.customer])
+          await db.query(
+            'DELETE FROM organizations WHERE organization_seq=6200',
+          );
+      }
+    },
+  );
+  await t.test(
+    'intake completion preserves sealing, PBX waits, conversion, payment policy and retries',
+    async () => {
+      const started = Date.now(),
+        requests = [],
+        uuidMaps = [new Map(), new Map()];
+      let pairs = 0;
+      const intakeSides = [
+        {
+          ...sides[0],
+          calls: reference,
+          orders: reference,
+          customers: reference,
+          audit: reference,
+        },
+        {
+          ...sides[1],
+          base: 'http://consultation-app:3004',
+          calls: databases.consultation,
+          orders: databases.order,
+          customers: databases.customer,
+          audit: databases.operations,
+        },
+      ];
+      const sourceSpec=await(await fetch(sides[0].base+'/api/docs-json')).json();
+      const candidateSpec=await(await fetch('http://consultation-app:3004/consultation/docs-json')).json();
+      const {schema}=require('./final-parity.cjs');
+      const completePath='/api/calls/{id}/order-intake/complete';
+      assert.deepEqual(schema(candidateSpec.paths[completePath].post,candidateSpec),schema(sourceSpec.paths[completePath].post,sourceSpec));
+      const at = new Date().toISOString();
+      for (const side of intakeSides) {
+        for (let n = 0; n < 10; n++)
+          await side.calls.query(
+            'INSERT INTO call_sessions(call_session_seq,provider_call_id,caller_phone_number,customer_seq,incoming_at,registered_at,order_intake_enabled,ended_at,started_at) ' +
+              "OVERRIDING SYSTEM VALUE VALUES($1,'intake-current-'||$1::int::text,'01000000006',6,$2,$2,$3,$4,$4)",
+            [53000 + n, at, n !== 6, [1, 3, 4, 7, 8].includes(n) ? at : null],
+          );
+        await side.orders.query(
+          "SELECT setval('order_parcel_drafts_draft_seq_seq',54000,false),setval('orders_order_seq_seq',55000,false),setval('order_parcels_order_parcel_seq_seq',56000,false)",
+        );
+      }
+      const ready = {
+        origin: {
+          name: '발송인',
+          phoneNumber: '01000000006',
+          roadAddress: '서울 도로',
+          jibunAddress: '서울 지번',
+          detailAddress: '1층',
+          dongName: '동',
+          postalCode: '12345',
+        },
+        destination: {
+          name: '수령인',
+          phoneNumber: '01011112222',
+          roadAddress: '부산 도로',
+          jibunAddress: '부산 지번',
+          detailAddress: '2층',
+          dongName: '동',
+          postalCode: '45678',
+        },
+        documentCount: 1,
+        smallBoxCount: 0,
+        mediumBoxCount: 0,
+        bigBoxCount: 0,
+        otherItemDescription: '',
+        clientComment: '',
+        itemPrice: 1000,
+        notifiedPrice: 5000,
+      };
+      const normalize = (value, side, key = '') => {
+        if (value === null) return null;
+        if (value instanceof Date) value = value.toISOString();
+        const cardValue = cardPaymentValue(value, key, uuidMaps[side], started);
+        if (cardValue !== undefined) return cardValue;
+        if (
+          [
+            'paymentRequestId',
+            'payment_request_id',
+            'creation_request_id',
+          ].includes(key)
+        ) {
+          assert.match(value, /^[0-9a-f-]{36}$/i);
+          const map = uuidMaps[side];
+          if (!map.has(value)) map.set(value, 'generated-uuid-' + map.size);
+          return map.get(value);
+        }
+        if (
+          [
+            'paymentDueAt',
+            'expiresAt',
+            'payment_due_at',
+            'expires_at',
+          ].includes(key)
+        ) {
+          assert.ok(
+            Date.parse(value) >= started + 86400000 - 2000 &&
+              Date.parse(value) <= Date.now() + 86400000 + 2000,
+          );
+          return '<new deadline>';
+        }
+        if (
+          [
+            'createdAt',
+            'updatedAt',
+            'retentionStartedAt',
+            'completionReceivedAt',
+            'finalizedAt',
+            'created_at',
+            'updated_at',
+            'paid_at',
+            'order_completion_received_at',
+            'order_finalized_at',
+            'order_finalization_attempted_at',
+            'submission_first_attempt_at','submission_last_attempt_at','closed_at',
+          ].includes(key)
+        ) {
+          const time = Date.parse(value);
+          assert.ok(
+            time >= started - 1000 && time <= Date.now() + 1000,
+            key + ' ' + value,
+          );
+          return '<generated ' + key + '>';
+        }
+        if(value&&typeof value==='object'&&value.paid_at&&value.pickup_requested_at&&Date.parse(value.pickup_requested_at)<started+259200000) {
+        const paid=Date.parse(value.paid_at),local=new Date(paid+32400000);
+        const day=Date.UTC(local.getUTCFullYear(),local.getUTCMonth(),local.getUTCDate())-32400000;
+        const expected=paid+3600000>day+17*3600000?day+33*3600000:Math.max(paid+3600000,day+9*3600000);
+        assert.equal(Date.parse(value.pickup_requested_at),expected,'source paid pickup policy');
+        value={...value,pickup_requested_at:'<validated paid pickup>'};
+      }
+      if (Array.isArray(value))
+          return value.map((item) => normalize(item, side));
+        if (typeof value === 'object')
+          return Object.fromEntries(
+            Object.entries(value).map(([key, item]) => [
+              key,
+              normalize(item, side, key),
+            ]),
+          );
+        return value;
+      };
+      async function pair(method, path, input, status, options = {}) {
+        const requestId = randomUUID(),
+          bodies = [];
+        requests.push(requestId);
+        for (const [index, side] of intakeSides.entries()) {
+          const base =
+            index === 1 && !path.startsWith('/api/calls')
+              ? 'http://order-app:3002'
+              : side.base;
+          const response = await fetch(base + path, {
+            method,
+            signal: AbortSignal.timeout(30000),
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Request-Id': requestId,
+              Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN,
+              ...options.headers,
+            },
+            ...(input === undefined ? {} : { body: JSON.stringify(input) }),
+          });
+          const body = await response.json();
+          assert.equal(
+            response.status,
+            status,
+            index + ' ' + method + ' ' + path + ' ' + JSON.stringify(body),
+          );
+          assert.equal(response.headers.get('cache-control'), 'no-store');
+          bodies.push(require('./final-parity.cjs').envelope(body, requestId));
+        }
+        assert.deepEqual(
+          normalize(bodies[1], 1),
+          normalize(bodies[0], 0),
+          method + ' ' + path,
+        );
+        pairs++;
+        return bodies[0].data;
+      }
+      const complete = (id, input, status = 200, options) =>
+        pair(
+          'POST',
+          '/api/calls/' + id + '/order-intake/complete',
+          input,
+          status,
+          options,
+        );
+      const detail = (id) =>
+        pair('GET', '/api/calls/' + id + '/order-intake', undefined, 200);
+      const draft = (id, status = 'READY', parcel = ready) =>
+        pair(
+          'POST',
+          '/api/parcel-drafts',
+          { clientParcelId: randomUUID(), customerSeq: 6, status, parcel },
+          201,
+          { headers: { call_session_seq: String(id) } },
+        );
+      const end = async (id) => {
+        for (const side of intakeSides)
+          await side.calls.query(
+            'UPDATE call_sessions SET ended_at=$2,started_at=$2 WHERE call_session_seq=$1',
+            [id, at],
+          );
+      };
+      await complete(53000, { expectedIntakeVersion: 1 }, 401, {
+        headers: { Authorization: '', ...headers },
+      });
+      for (const input of [
+        {},
+        { expectedIntakeVersion: 0 },
+        { expectedIntakeVersion: '1' },
+        { expectedIntakeVersion: 1, paymentMethodType: null },
+        { expectedIntakeVersion: 1, pickupRequestedAt: '2026-02-30T12:00:00Z' },
+        { expectedIntakeVersion: 1, actorId: 1 },
+      ])
+        await complete(53000, input, 400);
+      await complete(999999, { expectedIntakeVersion: 1 }, 404);
+      await complete(53006, { expectedIntakeVersion: 1 }, 409);
+      assert.equal(
+        (await complete(53000, { expectedIntakeVersion: 1 })).status,
+        'WAITING_PBX',
+      );
+      await end(53000);
+      assert.equal(
+        (await complete(53000, { expectedIntakeVersion: 1 })).status,
+        'NO_ORDER',
+      );
+      await complete(53000, { expectedIntakeVersion: 2 }, 409);
+      const editing = await draft(53001, 'EDITING', {
+        origin: { name: '입력 중' },
+        documentCount: 1,
+      });
+      assert.equal(
+        (
+          await complete(53001, {
+            expectedIntakeVersion: editing.intakeVersion,
+          })
+        ).status,
+        'NO_ORDER',
+      );
+      const first = await draft(53002);
+      await complete(
+        53002,
+        { expectedIntakeVersion: 1, paymentMethodType: 'billing' },
+        409,
+      );
+      await complete(
+        53002,
+        { expectedIntakeVersion: first.intakeVersion },
+        422,
+      );
+      await complete(
+        53002,
+        {
+          expectedIntakeVersion: first.intakeVersion,
+          paymentMethodType: 'credit',
+        },
+        403,
+      );
+      const billing = {
+        expectedIntakeVersion: first.intakeVersion,
+        paymentMethodType: 'billing',
+        pickupRequestedAt: '2030-02-01T10:00:00+09:00',
+      };
+      assert.equal(
+        (
+          await complete(53002, billing, 200, {
+            headers: { call_session_seq: 'invalid' },
+          })
+        ).status,
+        'WAITING_PBX',
+      );
+      await pair(
+        'PATCH',
+        '/api/parcel-drafts/' + first.draftSeq,
+        { expectedVersion: first.version, action:'CANCEL' },
+        409,
+        { headers: { call_session_seq: '53002' } },
+      );
+      await end(53002);
+      const bill = await complete(53002, billing);
+      assert.equal(bill.status, 'FINALIZED');
+      assert.equal(bill.order.status, 'notPaid');
+      assert.equal(bill.order.totalAmount, 5000);
+      assert.equal(bill.parcelMappings.length, 1);
+      const before = [];
+      for (const side of intakeSides)
+        before.push(
+          (
+            await side.calls.query(
+              'SELECT to_jsonb(c) AS data FROM call_sessions c WHERE call_session_seq=53002',
+            )
+          ).rows[0].data,
+        );
+      await complete(53002, {
+        ...billing,
+        pickupRequestedAt: '2030-02-01T01:00:00Z',
+      });
+      for (const [index, side] of intakeSides.entries())
+        assert.deepEqual(
+          (
+            await side.calls.query(
+              'SELECT to_jsonb(c) AS data FROM call_sessions c WHERE call_session_seq=53002',
+            )
+          ).rows[0].data,
+          before[index],
+        );
+      const multi1 = await draft(53003),
+        multi2 = await draft(53003, 'READY', { ...ready, notifiedPrice: 7000 }),
+        multi3 = await draft(53003, 'EDITING', { documentCount: 1 });
+      const multi = await complete(53003, {
+        expectedIntakeVersion: multi3.intakeVersion,
+        paymentMethodType: 'billing',
+      });
+      assert.deepEqual(
+        multi.parcelMappings.map((row) => row.draftSeq),
+        [multi1.draftSeq, multi2.draftSeq],
+      );
+      assert.equal(multi.order.totalAmount, 12000);
+      for (const side of intakeSides)
+        await side.customers.query(
+          'UPDATE customers SET monthly_billing_enabled=true WHERE customer_seq=6',
+        );
+      const personal = await draft(53007, 'READY', {
+        ...ready,
+        clientComment: 'intake-delayed-dver',
+      });
+      const submissionStarted=Date.now();
+      const paid = await complete(53007, {
+        expectedIntakeVersion: personal.intakeVersion,
+        paymentMethodType: 'credit',
+      });
+      assert.equal(paid.order.status, 'ACCEPTED');
+      assert.ok(Date.now()-submissionStarted>=11000,'both servers await the six-second Dver response');
+      for (const side of intakeSides) {
+        await side.customers.query(
+          "INSERT INTO organizations(organization_seq,name,status,monthly_billing_enabled) OVERRIDING SYSTEM VALUE VALUES(6500,'접수 기업','ACTIVE',true)",
+        );
+        await side.customers.query(
+          "INSERT INTO departments(department_seq,organization_seq,name,group_billing_enabled) OVERRIDING SYSTEM VALUE VALUES(6500,6500,'접수 부서',true)",
+        );
+        await side.customers.query(
+          "INSERT INTO memberships(membership_seq,customer_seq,organization_seq,department_seq,employee_no,status,monthly_billing_enabled,group_billing_enabled) OVERRIDING SYSTEM VALUE VALUES(6500,6,6500,6500,'intake','ACTIVE',true,true)",
+        );
+        await companyCardFixture(side.customers, 6500);
+      }
+      const group = await draft(53008);
+      const grouped = await complete(53008, {
+        expectedIntakeVersion: group.intakeVersion,
+        paymentMethodType: 'groupBilling',
+      });
+      assert.equal(grouped.order.status, 'ACCEPTED');
+      const late = await draft(53009);
+      const lateInput = {
+        expectedIntakeVersion: late.intakeVersion,
+        paymentMethodType: 'credit',
+      };
+      assert.equal((await complete(53009, lateInput)).status, 'WAITING_PBX');
+      for (const side of intakeSides)
+        await side.customers.query(
+          "UPDATE memberships SET status='INACTIVE' WHERE membership_seq=6500",
+        );
+      await end(53009);
+      const failed = await complete(53009, lateInput);
+      assert.equal(failed.status, 'FAILED');
+      assert.equal(failed.errorCode, 'FORBIDDEN');
+      assert.equal(failed.orderSeq, null);
+      for (const side of intakeSides)
+        await side.customers.query(
+          "UPDATE memberships SET status='ACTIVE' WHERE membership_seq=6500",
+        );
+      const recovered = await complete(53009, lateInput);
+      assert.equal(recovered.order.status, 'ACCEPTED');
+      await detail(53009);
+      const stored = async (side) => ({
+        calls: (
+          await side.calls.query(
+            'SELECT call_session_seq,customer_seq,order_seq,order_intake_version,order_completion_received_at,order_completion_payload,order_finalized_at,order_finalization_result,order_finalization_error_code,order_finalization_attempted_at ' +
+              'FROM call_sessions WHERE call_session_seq BETWEEN 53000 AND 53009 ORDER BY call_session_seq',
+          )
+        ).rows,
+        orders: (
+          await side.orders.query(
+            'SELECT to_jsonb(o) AS data FROM orders o WHERE order_seq BETWEEN 55000 AND 55020 ORDER BY order_seq',
+          )
+        ).rows,
+        parcels: (
+          await side.orders.query(
+            'SELECT to_jsonb(p) AS data FROM order_parcels p WHERE order_seq BETWEEN 55000 AND 55020 ORDER BY order_parcel_seq',
+          )
+        ).rows,
+        drafts: (
+          await side.orders.query(
+            'SELECT draft_seq,status,version,order_seq,order_parcel_seq FROM order_parcel_drafts WHERE draft_seq>=54000 ORDER BY draft_seq',
+          )
+        ).rows,
+        charges: (
+          await side.orders.query(
+            'SELECT order_seq,organization_seq,customer_seq,billing_month::text,payment_method_type,amount FROM order_billing_charges WHERE order_seq BETWEEN 55000 AND 55020 ORDER BY order_seq',
+          )
+        ).rows,
+        months: (
+          await side.orders.query(
+            'SELECT organization_seq,billing_month::text,organization_name,monthly_amount::text,group_billing_amount::text FROM organization_billing_months WHERE organization_seq=6500',
+          )
+        ).rows,
+      });
+      const source = await stored(intakeSides[0]),
+        candidate = await stored(intakeSides[1]);
+      assert.deepEqual(normalize(candidate, 1), normalize(source, 0));
+      const logs = async (db) =>
+        (
+          await db.query(
+            'SELECT request_id,action,result,target_type,target_seq,actor_type,actor_seq,metadata FROM audit_logs WHERE request_id=ANY($1::uuid[]) ORDER BY audit_log_seq',
+            [requests],
+          )
+        ).rows;
+      const expected = await logs(reference);
+      for (let n = 0; n < 100; n++) {
+        if ((await logs(databases.operations)).length === expected.length)
+          break;
+        await pause(25);
+      }
+      assert.deepEqual(await logs(databases.operations), expected);
+  await complete(53005, { expectedIntakeVersion: 1 });
+  await end(53005);
+  for (const side of intakeSides)
+    await side.calls.query(
+      'UPDATE call_sessions SET order_finalization_attempted_at=clock_timestamp() WHERE call_session_seq=53005',
+    );
+  const {
+    OrderIntakeRepository,
+  } = require('./monolith-runtime/orders/order-intake.repository');
+  const originalCandidates = new OrderIntakeRepository({ pool: reference });
+  assert.ok(!(await originalCandidates.candidates()).includes(53005));
+  const recoverEvent = () => ({
+    eventId: randomUUID(),
+    source: 'order',
+    eventType: 'OrderIntakeRecoveryRequested',
+    payload: {},
+  });
+  const recover = async () => {
+    const response = await fetch(
+      'http://consultation-app:3004/internal/parcel-draft-write/recover',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN,
+        },
+        body: JSON.stringify(recoverEvent()),
+      },
+    );
+    assert.equal(response.status, 200, await response.text());
+  };
+  await recover();
+  assert.equal((await detail(53005)).status, 'FINALIZING');
+  for (const side of intakeSides)
+    await side.calls.query(
+      "UPDATE call_sessions SET order_finalization_attempted_at=clock_timestamp()-interval '61 seconds' WHERE call_session_seq=53005",
+    );
+  assert.ok((await originalCandidates.candidates()).includes(53005));
+  const sourceRecovery = await fetch(
+    sides[0].base + '/api/calls/53005/order-intake/complete',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN,
+      },
+      body: JSON.stringify({ expectedIntakeVersion: 1 }),
+    },
+  );
+  assert.equal(sourceRecovery.status, 200);
+  await recover();
+  assert.equal((await detail(53005)).status, 'NO_ORDER');
+  await databases.consultation.query(
+    "INSERT INTO call_sessions(call_session_seq,provider_call_id,caller_phone_number,customer_seq,incoming_at,registered_at,order_intake_enabled,started_at,ended_at) OVERRIDING SYSTEM VALUE VALUES(53010,'intake-recovery','01000000006',6,$1,$1,true,$1,$1)",
+    [at],
+  );
+  const aiHeaders = {
+    'Content-Type': 'application/json',
+    Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN,
+  };
+  const createdResponse = await fetch(
+    'http://order-app:3002/api/parcel-drafts',
+    {
+      method: 'POST',
+      headers: { ...aiHeaders, call_session_seq: '53010' },
+      body: JSON.stringify({
+        clientParcelId: randomUUID(),
+        customerSeq: 6,
+        status: 'READY',
+        parcel: ready,
+      }),
+    },
+  );
+  assert.equal(createdResponse.status, 201);
+  const createdDraft = (await createdResponse.json()).data;
+  const faultInput = {
+      expectedIntakeVersion: createdDraft.intakeVersion,
+      paymentMethodType: 'billing',
+    },
+    faultRequest = randomUUID();
+  await databases.consultation.query(
+    "CREATE FUNCTION intake_owner_fixture_failure() RETURNS trigger LANGUAGE plpgsql AS $fixture$ BEGIN IF NEW.call_session_seq=53010 AND NEW.order_finalized_at IS DISTINCT FROM OLD.order_finalized_at THEN RAISE EXCEPTION 'test-only owner finalization failure'; END IF; RETURN NEW; END $fixture$",
+  );
+  await databases.consultation.query(
+    'CREATE TRIGGER intake_owner_fixture_failure BEFORE UPDATE ON call_sessions FOR EACH ROW EXECUTE FUNCTION intake_owner_fixture_failure()',
+  );
+  let committed;
+  try {
+    const response = await fetch(
+      'http://consultation-app:3004/api/calls/53010/order-intake/complete',
+      {
+        method: 'POST',
+        headers: { ...aiHeaders, 'X-Request-Id': faultRequest },
+        body: JSON.stringify(faultInput),
+      },
+    );
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).data.status, 'FAILED');
+    const { finalizationId } = require('@dva/events/order-intake-write.cjs');
+    committed = (
+      await databases.order.query(
+        "SELECT payload->'result'->'data'->'finalization' AS data FROM inbox_events WHERE event_id=$1",
+        [finalizationId(53010)],
+      )
+    ).rows[0].data;
+    assert.equal(committed.requestId, faultRequest);
+    assert.equal(committed.parcelMappings.length, 1);
+    assert.equal(
+      (
+        await databases.order.query(
+          'SELECT status FROM order_parcel_drafts WHERE draft_seq=$1',
+          [createdDraft.draftSeq],
+        )
+      ).rows[0].status,
+      'CONVERTED',
+    );
+    assert.equal(
+      (
+        await databases.consultation.query(
+          'SELECT order_finalized_at FROM call_sessions WHERE call_session_seq=53010',
+        )
+      ).rows[0].order_finalized_at,
+      null,
+    );
+  } finally {
+    await databases.consultation.query(
+      'DROP TRIGGER intake_owner_fixture_failure ON call_sessions',
+    );
+    await databases.consultation.query(
+      'DROP FUNCTION intake_owner_fixture_failure()',
+    );
+  }
+  const retry = await fetch(
+    'http://consultation-app:3004/api/calls/53010/order-intake/complete',
+    { method: 'POST', headers: aiHeaders, body: JSON.stringify(faultInput) },
+  );
+  assert.equal(retry.status, 200);
+  const repaired = (await retry.json()).data;
+  assert.equal(repaired.status, 'FINALIZED');
+  assert.equal(repaired.orderSeq, committed.orderSeq);
+  assert.deepEqual(repaired.parcelMappings, committed.parcelMappings);
+  const receipt = {
+    eventId: committed.eventId,
+    source: 'order',
+    eventType: 'OrderIntakeFinalized',
+    payload: { callSessionSeq: 53010 },
+  };
+  const duplicate = await fetch(
+    'http://consultation-app:3004/internal/parcel-draft-write/events',
+    { method: 'POST', headers: aiHeaders, body: JSON.stringify(receipt) },
+  );
+  assert.equal(duplicate.status, 200);
+  assert.equal((await duplicate.json()).status, 'duplicate');
+  const finalized = (
+    await databases.operations.query(
+      "SELECT request_id FROM audit_logs WHERE action='ORDER_INTAKE_FINALIZED' AND target_seq=53010",
+    )
+  ).rows;
+  assert.deepEqual(finalized, [{ request_id: faultRequest }]);
+  t.diagnostic(
+    'intake recovery preserves committed order and mapping after a real owner rollback; duplicate receipt has one original-request audit',
+  );
+
+  const batchParcel = { ...multi1.parcel, clientComment: '' };
+  for (const side of intakeSides) {
+    await side.calls.query(
+      'INSERT INTO call_sessions(call_session_seq,provider_call_id,caller_phone_number,customer_seq,incoming_at,registered_at,order_intake_enabled,order_intake_version,started_at,ended_at) ' +
+        "OVERRIDING SYSTEM VALUE SELECT 53100+n,'intake-batch-'||n::text,'01000000006',6,$1,$1,true,2,$1,$1 FROM generate_series(0,19)n",
+      [at],
+    );
+    await side.orders.query(
+      'INSERT INTO order_parcel_drafts(draft_seq,reserved_order_seq,call_session_seq,customer_seq,caller_phone_number,client_parcel_id,creation_payload,parcel_data,status) ' +
+        "OVERRIDING SYSTEM VALUE SELECT 57000+n,58000+n,53100+n,6,'01000000006',gen_random_uuid(),'{}'::jsonb,$1::jsonb,'READY' FROM generate_series(0,19)n",
+      [batchParcel],
+    );
+  }
+  const batchRequests = Array.from({ length: 20 }, () => randomUUID());
+  const batchResults = [];
+  for (const side of intakeSides) {
+    const results = await Promise.all(
+      batchRequests.map(async (requestId, n) => {
+        const response = await fetch(
+          side.base + '/api/calls/' + (53100 + n) + '/order-intake/complete',
+          {
+            method: 'POST',
+            signal: AbortSignal.timeout(60000),
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN,
+              'X-Request-Id': requestId,
+            },
+            body: JSON.stringify({
+              expectedIntakeVersion: 2,
+              paymentMethodType: 'credit',
+            }),
+          },
+        );
+        const body = await response.json();
+        return {
+          id: 53100 + n,
+          httpStatus: response.status,
+          status: body.data?.status,
+          orderSeq: body.data?.orderSeq,
+          orderStatus: body.data?.order?.status,
+          error: body.error?.code,
+        };
+      }),
+    );
+    batchResults.push(results);
+  }
+  for (const results of batchResults)
+    assert.deepEqual(
+      results.map(
+        ({ id, httpStatus, status, orderSeq, orderStatus, error }) => ({
+          id,
+          httpStatus,
+          status,
+          orderSeq,
+          orderStatus,
+          error,
+        }),
+      ),
+      Array.from({ length: 20 }, (_, n) => ({
+        id: 53100 + n,
+        httpStatus: 200,
+        status: 'FINALIZED',
+        orderSeq: 58000 + n,
+        orderStatus: 'ACCEPTED',
+        error: undefined,
+      })),
+    );
+  t.diagnostic(
+    'twenty concurrent completions preserve initial FINALIZED/ACCEPTED responses and distinct reserved orders',
+  );
+      t.diagnostic(
+        'intake completion HTTP pairs: ' +
+          pairs +
+          '; READY conversion, immutable sealing, PBX wait, all payment methods and policy repair',
+      );
+    },
+  );
+  await t.test(
+    'order updates preserve legacy caller bounds, all administrator states, pins, totals and payment requests',
+    async () => {
+      const original = sides[0].base,
+        candidate = sides[1].base,
+        started = Date.now(),
+        at = new Date().toISOString(),
+        due = new Date(Date.now() + 3600000).toISOString();
+      const owners = [
+        {
+          ...sides[0],
+          calls: reference,
+          orders: reference,
+          customers: reference,
+          audit: reference,
+        },
+        {
+          ...sides[1],
+          calls: databases.consultation,
+          orders: databases.order,
+          customers: databases.customer,
+          audit: databases.operations,
+        },
+      ];
+      const address = (name) => ({
+        name,
+        phoneNumber: '01070707070',
+        roadAddress: '수정 도로',
+        jibunAddress: '수정 지번',
+        detailAddress: '101호',
+        dongName: '동',
+        postalCode: '12345',
+      });
+      const origin = address('발송인'),
+        destination = address('수령인');
+      const methods = [
+        'COLLECTING',
+        'notPaid',
+        'PAID',
+        'SUBMITTING',
+        'SUBMITTING_FAILED',
+        'ACCEPTED',
+        'SUBMISSION_FAILED',
+        'CANCELLED',
+      ];
+      const keys = [randomUUID(), randomUUID()];
+      for (const side of owners) {
+        for (const [id, status, deleted] of [
+          [97001, 'ACTIVE', null],
+          [97002, 'ACTIVE', null],
+          [97003, 'WITHDRAWN', null],
+          [97004, 'ACTIVE', at],
+        ])
+          await side.customers.query(
+            'INSERT INTO customers(customer_seq,name,phone_number,status,deleted_at) OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,$4,$5)',
+            [
+              id,
+              '수정 고객 ' + id,
+              '0107070707' + (id - 97001),
+              status,
+              deleted,
+            ],
+          );
+        for (const [id, customer] of [
+          [97001, 97001],
+          [97002, 97002],
+        ])
+          await side.customers.query(
+            'INSERT INTO personal_pins(personal_pin_seq,customer_seq,address_data) OVERRIDING SYSTEM VALUE VALUES($1,$2,$3)',
+            [id, customer, origin],
+          );
+        for (let n = 1; n <= 11; n++)
+          await side.calls.query(
+            'INSERT INTO call_sessions(call_session_seq,provider_call_id,caller_phone_number,customer_seq,order_seq,incoming_at,registered_at,order_intake_enabled,deleted_at,started_at,ended_at) ' +
+              "OVERRIDING SYSTEM VALUE VALUES($1,'update-call-'||$1::int::text,$2,$3,$4,$5,$5,$6,$7,$8,$8)",
+            [
+              97000 + n,
+              n === 8 ? null : n === 7 ? '01070707071' : '01070707070',
+              n === 1 ? null : 97001,
+              null,
+              [1, 10].includes(n)
+                ? null
+                : [5, 9].includes(n)
+                  ? '2000-01-01T00:00:00Z'
+                  : at,
+              n === 5,
+              [5, 6].includes(n) ? at : null,
+              [3, 4].includes(n) ? at : null,
+            ],
+          );
+        const held = await side.calls.connect();
+        await held.query('BEGIN');
+        await held.query(
+          'SELECT 1 FROM call_sessions WHERE call_session_seq IN(97005,97006,97009) FOR KEY SHARE',
+        );
+        retention.push(held);
+        const client = await side.orders.connect();
+        try {
+          await client.query('BEGIN');
+          await client.query("SET LOCAL session_replication_role='replica'");
+          for (let n = 0; n < 16; n++) {
+            const status =
+              n < 8 ? methods[n] : n === 12 ? 'notPaid' : 'COLLECTING';
+            await client.query(
+              'INSERT INTO orders(order_seq,customer_seq,payment_method_type,status,total_amount,creation_source,version,created_at,updated_at,payment_due_at,paid_at,pickup_requested_at,parcel_no,dver_received_at,closed_at,deleted_at) ' +
+                "OVERRIDING SYSTEM VALUE VALUES($1,$2,'billing',$3,$4,'ADMIN',1,$5,$5,$6,$7,'2030-02-01T00:00:00Z',$8,$9,$10,$11)",
+              [
+                61000 + n,
+                n === 8 ? 97003 : n === 9 ? null : n === 15 ? 97004 : 97001,
+                status,
+                n === 7 ? 0 : 5000,
+                at,
+                [1, 12].includes(n) ? due : null,
+                [
+                  'PAID',
+                  'SUBMITTING',
+                  'SUBMITTING_FAILED',
+                  'ACCEPTED',
+                  'SUBMISSION_FAILED',
+                ].includes(status)
+                  ? at
+                  : null,
+                n === 5 ? 'EDIT0052' : null,
+                n === 5 ? at : null,
+                [5, 7].includes(n) ? at : null,
+                n === 11 ? at : null,
+              ],
+            );
+            const columns = Object.fromEntries(
+              ['origin', 'destination'].flatMap((side) =>
+                Object.entries(side === 'origin' ? origin : destination).map(
+                  ([name, value]) => [
+                    side +
+                      '_' +
+                      name.replace(
+                        /[A-Z]/g,
+                        (letter) => '_' + letter.toLowerCase(),
+                      ),
+                    value,
+                  ],
+                ),
+              ),
+            );
+            const parcel = {
+              ...columns,
+              order_parcel_seq: 72000 + n,
+              order_seq: 61000 + n,
+              parcel_position: 1,
+              status: n === 7 ? 'CANCELLED' : 'ACTIVE',
+              document_count: 1,
+              small_box_count: 0,
+              medium_box_count: 0,
+              big_box_count: 0,
+              other_item_description: '',
+              client_comment: '기존 메모',
+              item_price: 1000,
+              notified_price: 5000,
+              origin_pin_scope: n === 13 ? 'COMPANY' : null,
+              origin_pin_seq: n === 13 ? 99913 : null,
+              created_at: at,
+              updated_at: at,
+            };
+            await client.query(
+              'INSERT INTO order_parcels OVERRIDING SYSTEM VALUE SELECT * FROM jsonb_populate_record(NULL::order_parcels,$1::jsonb)',
+              [parcel],
+            );
+          }
+          await client.query(
+            'INSERT INTO order_parcels OVERRIDING SYSTEM VALUE SELECT (jsonb_populate_record(NULL::order_parcels,to_jsonb(p)||$1::jsonb)).* FROM order_parcels p WHERE order_parcel_seq=72000',
+            [
+              {
+                order_parcel_seq: 72016,
+                parcel_position: 2,
+                status: 'CANCELLED',
+              },
+            ],
+          );
+          for (const [n, index] of [
+            [1, 0],
+            [12, 1],
+          ])
+            await client.query(
+              'INSERT INTO order_payment_requests(payment_request_id,order_seq,amount,expires_at,created_at,approval_started_at,provider_payment_key) VALUES($1,$2,5000,$3,$4,$5,$6)',
+              [
+                keys[index],
+                61000 + n,
+                due,
+                at,
+                n === 12 ? at : null,
+                n === 12 ? 'update-approval-key' : null,
+              ],
+            );
+          await client.query('COMMIT');
+        } catch (error) {
+          await client.query('ROLLBACK');
+          throw error;
+        } finally {
+          client.release();
+        }
+        await side.calls.query(
+          'UPDATE call_sessions SET order_seq=CASE WHEN call_session_seq IN(97002,97011) THEN 61001 ELSE 61000 END WHERE call_session_seq IN(97002,97003,97011)',
+        );
+        await side.orders.query(
+          "SELECT setval('order_parcels_order_parcel_seq_seq',73000,false)",
+        );
+        await side.orders.query(
+          'INSERT INTO order_parcel_drafts(draft_seq,reserved_order_seq,customer_seq,client_parcel_id,creation_payload,parcel_data,status,legacy_order_seq,legacy_order_parcel_seq) ' +
+            "OVERRIDING SYSTEM VALUE VALUES(58000,99000,97001,$1,'{}',$2,'INCOMPLETE',61010,72010)",
+          [
+            randomUUID(),
+            {
+              ...origin,
+              origin,
+              destination,
+              originPin: null,
+              documentCount: 1,
+            },
+          ],
+        );
+      }
+      const sourceSpec = await (
+          await fetch(original + '/api/docs-json')
+        ).json(),
+        targetSpec = await (await fetch(candidate + '/order/docs-json')).json();
+      const {
+        schema,
+        envelope,
+        generatedTimes,
+      } = require('./final-parity.cjs');
+      assert.deepEqual(
+        schema(targetSpec.paths['/api/orders/{id}'].patch, targetSpec),
+        schema(sourceSpec.paths['/api/orders/{id}'].patch, sourceSpec),
+      );
+      let pairs = 0;
+      const requestIds = [];
+      const version = async (id) =>
+        (
+          await reference.query(
+            'SELECT version FROM orders WHERE order_seq=$1',
+            [id],
+          )
+        ).rows[0].version;
+      async function pair(id, input, status = 200, options = {}) {
+        const requestId = randomUUID(),
+          bodies = [];
+        requestIds.push(requestId);
+        const authorization = options.ai
+          ? {
+              Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN,
+              call_session_seq: String(options.call ?? 97001),
+            }
+          : {
+              Cookie: 'dva_session=' + tokens[(options.admin ?? 1) - 1],
+              Origin: 'http://localhost:5173',
+            };
+        for (const side of owners) {
+          const response = await fetch(side.base + '/api/orders/' + id, {
+            method: 'PATCH',
+            signal: AbortSignal.timeout(30000),
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Request-Id': requestId,
+              ...authorization,
+              ...options.headers,
+            },
+            body: JSON.stringify(input),
+          });
+          const body = await response.json();
+          assert.equal(
+            response.status,
+            status,
+            side.name + ' PATCH ' + id + ' ' + JSON.stringify(body),
+          );
+          assert.equal(response.headers.get('cache-control'), 'no-store');
+          bodies.push(envelope(body, requestId));
+          if (status === 200)
+            assert.equal(
+              body.data.version,
+              (
+                await side.orders.query(
+                  'SELECT version FROM orders WHERE order_seq=$1',
+                  [id],
+                )
+              ).rows[0].version,
+            );
+        }
+        assert.deepEqual(bodies[1], bodies[0], 'PATCH ' + id);
+        pairs++;
+        return bodies[0].data;
+      }
+      await pair(61000, { expectedVersion: 1, pickupRequestedAt: null }, 401, {
+        ai: true,
+        headers: { Authorization: '' },
+      });
+      for (const input of [
+        {},
+        { expectedVersion: 1 },
+        { expectedVersion: '1', totalAmount: 5 },
+        { expectedVersion: 1, customerSeq: 97001 },
+        { expectedVersion: 1, pickupRequestedAt: '2026-02-30T00:00:00Z' },
+        { expectedVersion: 1, parcels: [{ orderParcelSeq: 72000 }] },
+        {
+          expectedVersion: 1,
+          parcels: [
+            { orderParcelSeq: 72000, clientComment: 'a' },
+            { orderParcelSeq: 72000, clientComment: 'b' },
+          ],
+        },
+        {
+          expectedVersion: 1,
+          removeParcelSeqs: [72000],
+          parcels: [{ orderParcelSeq: 72000, clientComment: 'a' }],
+        },
+      ])
+        await pair(61000, input, 400);
+      await pair(
+        61000,
+        { expectedVersion: 1, removeParcelSeqs: [72000] },
+        403,
+        { ai: true, headers: { call_session_seq: 'invalid' } },
+      );
+      await pair(61000, { expectedVersion: 1, pickupRequestedAt: null }, 400, {
+        ai: true,
+        headers: { call_session_seq: 'invalid' },
+      });
+      for (const [call, status] of [
+        [97002, 409],
+        [97004, 409],
+        [97005, 409],
+        [97006, 404],
+        [97007, 403],
+        [97008, 403],
+        [97009, 404],
+        [999999, 404],
+      ])
+        await pair(
+          61000,
+          { expectedVersion: 1, pickupRequestedAt: null },
+          status,
+          { ai: true, call },
+        );
+      await pair(61008, { expectedVersion: 1, pickupRequestedAt: null }, 403);
+      await pair(61009, { expectedVersion: 1, pickupRequestedAt: null }, 403);
+      await pair(61010, { expectedVersion: 1, pickupRequestedAt: null }, 409);
+      await pair(61011, { expectedVersion: 1, pickupRequestedAt: null }, 404);
+      await pair(61015, { expectedVersion: 1, pickupRequestedAt: null }, 404);
+      await pair(999999, { expectedVersion: 1, pickupRequestedAt: null }, 404);
+      await pair(61000, { expectedVersion: 2, pickupRequestedAt: null }, 409);
+      await pair(
+        61000,
+        {
+          expectedVersion: 1,
+          parcels: [{ orderParcelSeq: 72016, destination: { name: '금지' } }],
+        },
+        409,
+        { ai: true },
+      );
+      await pair(
+        61000,
+        {
+          expectedVersion: 1,
+          parcels: [
+            {
+              orderParcelSeq: 72000,
+              originPin: { scope: 'PERSONAL', pinSeq: 97002 },
+            },
+          ],
+        },
+        403,
+        { ai: true },
+      );
+      await pair(
+        61000,
+        {
+          expectedVersion: 1,
+          parcels: [
+            {
+              orderParcelSeq: 72000,
+              originPin: { scope: 'PERSONAL', pinSeq: 97001 },
+              destination: { detailAddress: null },
+              clientComment: 'AI 수정',
+            },
+          ],
+          pickupRequestedAt: null,
+        },
+        200,
+        { ai: true },
+      );
+      await pair(61000, { expectedVersion: 1, pickupRequestedAt: null }, 409, {
+        ai: true,
+      });
+      await pair(61001, { expectedVersion: 1, pickupRequestedAt: null }, 409, {
+        ai: true,
+        call: 97011,
+      });
+      await pair(
+        61000,
+        { expectedVersion: await version(61000), removeParcelSeqs: [72001] },
+        404,
+      );
+      await pair(
+        61000,
+        {
+          expectedVersion: await version(61000),
+          parcels: [
+            {
+              originPin: { scope: 'COMPANY', pinSeq: 99913 },
+              documentCount: 1,
+            },
+          ],
+        },
+        400,
+      );
+      await pair(
+        61013,
+        {
+          expectedVersion: 1,
+          parcels: [
+            { orderParcelSeq: 72013, origin: { detailAddress: '금지 변경' } },
+          ],
+        },
+        400,
+      );
+      await pair(61013, {
+        expectedVersion: 1,
+        parcels: [
+          { orderParcelSeq: 72013, destination: { name: '기업 기록 유지' } },
+        ],
+      });
+      await pair(61013, {
+        expectedVersion: await version(61013),
+        parcels: [{ orderParcelSeq: 72013, originPin: null }],
+      });
+      for (const [header, status] of [
+        ['ignored', 400],
+        ['97002', 409],
+        ['97005', 404],
+        ['97007', 403],
+      ])
+        await pair(
+          61000,
+          { expectedVersion: await version(61000), pickupRequestedAt: null },
+          status,
+          {
+            headers: { call_session_seq: header },
+          },
+        );
+      await pair(
+        61000,
+        { expectedVersion: await version(61000), pickupRequestedAt: null },
+        200,
+        {
+          headers: { call_session_seq: '97003' },
+        },
+      );
+      for (let n = 0; n < 8; n++)
+        await pair(
+          61000 + n,
+          {
+            expectedVersion: await version(61000 + n),
+            parcels: [
+              {
+                orderParcelSeq: 72000 + n,
+                destination: { detailAddress: '관리자 ' + n },
+              },
+            ],
+          },
+          200,
+          { admin: (n % 3) + 1 },
+        );
+      await pair(
+        61002,
+        { expectedVersion: await version(61002), paymentMethodType: 'credit' },
+        409,
+      );
+      await pair(
+        61012,
+        {
+          expectedVersion: 1,
+          parcels: [{ orderParcelSeq: 72012, clientComment: '진행 중' }],
+        },
+        409,
+      );
+      await pair(61001, {
+        expectedVersion: await version(61001),
+        parcels: [{ orderParcelSeq: 72001, notifiedPrice: 6000 }],
+      });
+      await pair(
+        61001,
+        { expectedVersion: await version(61001), totalAmount: 6001 },
+        422,
+      );
+      await pair(61000, {
+        expectedVersion: await version(61000),
+        parcels: [{ documentCount: 2, notifiedPrice: 7000, itemPrice: 1000 }],
+        paymentMethodType: 'credit',
+      });
+      await pair(61000, {
+        expectedVersion: await version(61000),
+        removeParcelSeqs: [72000],
+      });
+      const uuidMaps = [new Map(), new Map()];
+      const normalize = (value, index, key = '') => {
+        if (value === null) return null;
+        if (value instanceof Date) value = value.toISOString();
+        const cardValue = cardPaymentValue(value, key, uuidMaps[index], started);
+        if (cardValue !== undefined) return cardValue;
+        if (key === 'payment_request_id') {
+          assert.match(value, /^[0-9a-f-]{36}$/i);
+          const map = uuidMaps[index];
+          if (!map.has(value)) map.set(value, 'payment-' + map.size);
+          return map.get(value);
+        }
+        if (key === 'invalidated_at') {
+          assert.ok(
+            Date.parse(value) >= started - 1000 &&
+              Date.parse(value) <= Date.now() + 1000,
+          );
+          return '<new invalidation>';
+        }
+        if (Array.isArray(value))
+          return value.map((item) => normalize(item, index));
+        if (typeof value === 'object')
+          return Object.fromEntries(
+            Object.entries(value).map(([key, item]) => [
+              key,
+              normalize(item, index, key),
+            ]),
+          );
+        return value;
+      };
+      const stored = async (side) => ({
+        orders: (
+          await side.orders.query(
+            'SELECT to_jsonb(o) AS data FROM orders o WHERE order_seq BETWEEN 61000 AND 61015 ORDER BY order_seq',
+          )
+        ).rows,
+        parcels: (
+          await side.orders.query(
+            'SELECT to_jsonb(p) AS data FROM order_parcels p WHERE order_seq BETWEEN 61000 AND 61015 ORDER BY order_seq,parcel_position',
+          )
+        ).rows,
+        calls: (
+          await side.calls.query(
+            'SELECT call_session_seq,order_seq,customer_seq,order_intake_version FROM call_sessions WHERE call_session_seq BETWEEN 97001 AND 97011 ORDER BY call_session_seq',
+          )
+        ).rows,
+        payments: (
+          await side.orders.query(
+            'SELECT to_jsonb(p) AS data FROM order_payment_requests p WHERE order_seq BETWEEN 61000 AND 61015 ORDER BY order_seq,created_at,payment_request_id',
+          )
+        ).rows,
+        charges: (
+          await side.orders.query(
+            'SELECT * FROM order_billing_charges WHERE order_seq BETWEEN 61000 AND 61015',
+          )
+        ).rows,
+      });
+      const before = await stored(owners[0]),
+        after = await stored(owners[1]);
+      assert.deepEqual(
+        normalize(generatedTimes(after, started - 1000, Date.now() + 1000), 1),
+        normalize(generatedTimes(before, started - 1000, Date.now() + 1000), 0),
+      );
+      assert.equal(after.charges.length, 0);
+      const paymentRows = after.payments
+        .map((row) => row.data)
+        .filter((row) => row.order_seq === 61001);
+      assert.equal(paymentRows.length, 2);
+      assert.equal(
+        paymentRows.filter((row) => row.invalidated_at === null)[0].amount,
+        6000,
+      );
+      assert.ok(paymentRows.some((row) => row.invalidated_at !== null));
+      assert.equal(after.calls[0].order_seq, 61000);
+      assert.equal(after.calls[0].customer_seq, 97001);
+      assert.equal(after.calls[0].order_intake_version, 1);
+      const logs = async (db) =>
+        (
+          await db.query(
+            'SELECT request_id,action,result,target_type,target_seq,actor_type,actor_seq,metadata FROM audit_logs WHERE request_id=ANY($1::uuid[]) ORDER BY audit_log_seq',
+            [requestIds],
+          )
+        ).rows;
+      const audits = await logs(reference);
+      for (let n = 0; n < 100; n++) {
+        if ((await logs(databases.operations)).length === audits.length) break;
+        await pause(25);
+      }
+      assert.deepEqual(await logs(databases.operations), audits);
+      const aiHeaders = {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN,
+        call_session_seq: '97010',
+      };
+      const faultInput = {
+        expectedVersion: 1,
+        parcels: [{ orderParcelSeq: 72014, clientComment: '커밋된 수정' }],
+      };
+      await databases.consultation.query(
+        "CREATE FUNCTION order_link_fixture_failure() RETURNS trigger LANGUAGE plpgsql AS $fixture$ BEGIN IF NEW.event_type='OrderCallLinked' AND (NEW.payload->>'callSessionSeq')::int=97010 THEN RAISE EXCEPTION 'test-only call link acknowledgement failure'; END IF; RETURN NEW; END $fixture$",
+      );
+      await databases.consultation.query(
+        'CREATE TRIGGER order_link_fixture_failure BEFORE INSERT ON inbox_events FOR EACH ROW EXECUTE FUNCTION order_link_fixture_failure()',
+      );
+      let receipt, committedVersion;
+      try {
+        const response = await fetch(candidate + '/api/orders/61014', {
+          method: 'PATCH',
+          headers: aiHeaders,
+          body: JSON.stringify(faultInput),
+        });
+        assert.equal(response.status, 500);
+        await response.body.cancel();
+        committedVersion = (
+          await databases.order.query(
+            'SELECT version FROM orders WHERE order_seq=61014',
+          )
+        ).rows[0].version;
+        assert.ok(committedVersion > 1);
+        assert.equal(
+          (
+            await databases.order.query(
+              'SELECT client_comment FROM order_parcels WHERE order_parcel_seq=72014',
+            )
+          ).rows[0].client_comment,
+          '커밋된 수정',
+        );
+        assert.equal(
+          (
+            await databases.consultation.query(
+              'SELECT order_seq FROM call_sessions WHERE call_session_seq=97010',
+            )
+          ).rows[0].order_seq,
+          null,
+        );
+        receipt = (
+          await databases.order.query(
+            "SELECT event_id,payload FROM outbox_events WHERE destination='consultation' AND event_type='OrderCallLinked' AND aggregate_seq=97010 ORDER BY outbox_seq",
+          )
+        ).rows[0];
+        assert.equal(receipt.payload.orderSeq, 61014);
+      } finally {
+        await databases.consultation.query(
+          'DROP TRIGGER order_link_fixture_failure ON inbox_events',
+        );
+        await databases.consultation.query(
+          'DROP FUNCTION order_link_fixture_failure()',
+        );
+      }
+      const event = {
+        eventId: receipt.event_id,
+        source: 'order',
+        eventType: 'OrderCallLinked',
+        payload: receipt.payload,
+      };
+      for (let n = 0; n < 2; n++) {
+        const response = await fetch(
+          'http://consultation-app:3004/internal/parcel-draft-write/events',
+          { method: 'POST', headers: aiHeaders, body: JSON.stringify(event) },
+        );
+        assert.equal(response.status, 200);
+        assert.ok(
+          ['processed', 'duplicate'].includes((await response.json()).status),
+        );
+      }
+      assert.deepEqual(
+        (
+          await databases.consultation.query(
+            'SELECT order_seq,customer_seq,order_intake_version FROM call_sessions WHERE call_session_seq=97010',
+          )
+        ).rows,
+        [{ order_seq: 61014, customer_seq: 97001, order_intake_version: 1 }],
+      );
+      const retry = await fetch(candidate + '/api/orders/61014', {
+        method: 'PATCH',
+        headers: aiHeaders,
+        body: JSON.stringify(faultInput),
+      });
+      assert.equal(retry.status, 409);
+      assert.equal((await retry.json()).error.code, 'VERSION_CONFLICT');
+      assert.equal(
+        (
+          await databases.order.query(
+            'SELECT version FROM orders WHERE order_seq=61014',
+          )
+        ).rows[0].version,
+        committedVersion,
+      );
+      assert.equal(
+        (
+          await databases.consultation.query(
+            'SELECT count(*)::int AS n FROM inbox_events WHERE event_id=$1',
+            [receipt.event_id],
+          )
+        ).rows[0].n,
+        1,
+      );
+      t.diagnostic(
+        'committed order edit restores its legacy call after a real owner acknowledgement rollback and duplicate event replay',
+      );
+      t.diagnostic(
+        'order update HTTP pairs: ' +
+          pairs +
+          '; legacy/new calls, all administrator states, personal/company pins, retained cancellation, totals and payment replacement',
+      );
+    },
+  );
+
+  await t.test(
+    'order submission preserves caller scope, all states, recipient pins and payment preparation',
+    async () => {
+      const started = Date.now(),
+        at = new Date().toISOString(),
+        stale = new Date(started - 120000).toISOString();
+      const delivery = new Pool({ host: 'delivery-db', user: 'delivery_app' });
+      t.after(() => delivery.end());
+      const owners = [
+        {
+          ...sides[0],
+          orders: reference,
+          calls: reference,
+          customers: reference,
+          shipments: reference,
+          audit: reference,
+        },
+        {
+          ...sides[1],
+          orders: databases.order,
+          calls: databases.consultation,
+          customers: databases.customer,
+          shipments: delivery,
+          audit: databases.operations,
+        },
+      ];
+      const address = (name) => ({
+        name,
+        phoneNumber: '01080808080',
+        roadAddress: '접수 도로',
+        jibunAddress: '접수 지번',
+        detailAddress: '101호',
+        dongName: '동',
+        postalCode: '12345',
+      });
+      const states = new Map([
+        [7, 'notPaid'],
+        [8, 'PAID'],
+        [9, 'SUBMITTING'],
+        [10, 'SUBMITTING'],
+        [11, 'SUBMISSION_FAILED'],
+        [12, 'CANCELLED'],
+      ]);
+      for (const side of owners) {
+        await side.customers.query(
+          "INSERT INTO customers(customer_seq,name,phone_number,status,monthly_billing_enabled,deleted_at) OVERRIDING SYSTEM VALUE VALUES(98001,'접수 개인','01080808080','ACTIVE',true,NULL),(98002,'탈퇴','01080808081','WITHDRAWN',false,NULL),(98003,'삭제','01080808082','ACTIVE',false,$1),(98004,'소속','01080808083','ACTIVE',false,NULL),(98005,'일반','01080808084','ACTIVE',false,NULL)",
+          [at],
+        );
+        await side.customers.query(
+          "INSERT INTO organizations(organization_seq,name,status,monthly_billing_enabled) OVERRIDING SYSTEM VALUE VALUES(9800,'일반 접수 기업','ACTIVE',true)",
+        );
+        await side.customers.query(
+          "INSERT INTO departments(department_seq,organization_seq,name,group_billing_enabled) OVERRIDING SYSTEM VALUE VALUES(9800,9800,'접수 부서',true)",
+        );
+        await side.customers.query(
+          "INSERT INTO memberships(membership_seq,customer_seq,organization_seq,department_seq,employee_no,status,monthly_billing_enabled,group_billing_enabled) OVERRIDING SYSTEM VALUE VALUES(9800,98004,9800,9800,'submit','ACTIVE',true,true)",
+        );
+        await companyCardFixture(side.customers, 9800);
+        await side.customers.query(
+          "SELECT setval(pg_get_serial_sequence('personal_pins','personal_pin_seq'),200000,true)",
+        );
+        const client = await side.orders.connect();
+        try {
+          await client.query('BEGIN');
+          await client.query("SET LOCAL session_replication_role='replica'");
+          for (let n = 0; n <= 24; n++) {
+            const status = states.get(n) ?? 'COLLECTING',
+              customer =
+                n === 4
+                  ? 98002
+                  : n === 5
+                    ? 98003
+                    : n === 6
+                      ? null
+                      : n === 3
+                        ? 98004
+                        : n === 17
+                          ? 98005
+                          : 98001;
+            await client.query(
+              "INSERT INTO orders(order_seq,customer_seq,payment_method_type,status,total_amount,creation_source,version,created_at,updated_at,payment_due_at,paid_at,pickup_requested_at,submission_first_attempt_at,submission_last_attempt_at,closed_at) OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,$4,$5,$6,1,$7,$7,$8,$9,'2030-02-01T00:00:00Z',$10,$11,$12)",
+              [
+                62000 + n,
+                customer,
+                [2, 17].includes(n)
+                  ? 'credit'
+                  : n === 3
+                    ? 'groupBilling'
+                    : 'billing',
+                status,
+                n === 12 ? 0 : n === 24 ? 180 * 5000 : n === 1 ? 10000 : 5000,
+                n === 0 ? 'AI' : 'ADMIN',
+                at,
+                n === 7 ? new Date(started + 3600000).toISOString() : null,
+                ['PAID', 'SUBMITTING', 'SUBMISSION_FAILED'].includes(status)
+                  ? at
+                  : null,
+                [9, 10].includes(n) ? stale : null,
+                n === 9
+                  ? new Date(started + 300000).toISOString()
+                  : n === 10
+                    ? stale
+                    : null,
+                n === 12 ? at : null,
+              ],
+            );
+            const origin = address('발송인'),
+              destination = address('수령인 ' + n),
+              columns = Object.fromEntries(
+                ['origin', 'destination'].flatMap((prefix) =>
+                  Object.entries(
+                    prefix === 'origin' ? origin : destination,
+                  ).map(([key, value]) => [
+                    prefix +
+                      '_' +
+                      key.replace(/[A-Z]/g, (c) => '_' + c.toLowerCase()),
+                    value,
+                  ]),
+                ),
+              );
+            const parcel = {
+              ...columns,
+              order_parcel_seq: 76000 + n,
+              order_seq: 62000 + n,
+              parcel_position: 1,
+              status: n === 12 ? 'CANCELLED' : 'ACTIVE',
+              document_count: 1,
+              small_box_count: 0,
+              medium_box_count: 0,
+              big_box_count: 0,
+              other_item_description: '',
+              client_comment: '접수 검증',
+              item_price: 1000,
+              notified_price: n === 14 ? 4000 : 5000,
+              origin_pin_scope: n === 16 ? 'PERSONAL' : null,
+              origin_pin_seq: n === 16 ? 97002 : null,
+              created_at: at,
+              updated_at: at,
+            };
+            await client.query(
+              'INSERT INTO order_parcels OVERRIDING SYSTEM VALUE SELECT * FROM jsonb_populate_record(NULL::order_parcels,$1::jsonb)',
+              [parcel],
+            );
+          }
+          await client.query(
+            'INSERT INTO order_parcels OVERRIDING SYSTEM VALUE SELECT (jsonb_populate_record(NULL::order_parcels,to_jsonb(p)||$1::jsonb)).* FROM order_parcels p WHERE order_parcel_seq=76001',
+            [{ order_parcel_seq: 76100, parcel_position: 2 }],
+          );
+          await client.query(
+            "UPDATE order_parcels SET destination_detail_address=repeat('대',2000) WHERE order_seq=62024",
+          );
+          await client.query(
+            "INSERT INTO order_parcels OVERRIDING SYSTEM VALUE SELECT (jsonb_populate_record(NULL::order_parcels,to_jsonb(p)||jsonb_build_object('order_parcel_seq',77000+n,'parcel_position',n+1))).* FROM order_parcels p CROSS JOIN generate_series(1,179) n WHERE p.order_parcel_seq=76024",
+          );
+          await client.query(
+            "INSERT INTO order_parcel_drafts(draft_seq,reserved_order_seq,customer_seq,client_parcel_id,creation_payload,parcel_data,status,legacy_order_seq,legacy_order_parcel_seq) OVERRIDING SYSTEM VALUE SELECT 59000,9900000,98001,'00000000-0000-4000-8000-000000059000','{}',parcel_data,'INCOMPLETE',62013,76013 FROM order_parcel_drafts WHERE draft_seq=58000",
+          );
+          await client.query(
+            "SELECT setval(pg_get_serial_sequence('order_parcels','order_parcel_seq'),78000,true)",
+          );
+          await client.query('COMMIT');
+        } catch (error) {
+          await client.query('ROLLBACK');
+          throw error;
+        } finally {
+          client.release();
+        }
+        for (let n = 1; n <= 9; n++)
+          await side.calls.query(
+            'INSERT INTO call_sessions(call_session_seq,provider_call_id,caller_phone_number,customer_seq,order_seq,incoming_at,registered_at,order_intake_enabled,deleted_at,started_at,ended_at) OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,NULL,$4,$5,$6,$7,$8,$9,$9)',
+            [
+              98000 + n,
+              'order-submit-' + n,
+              n === 4
+                ? '01080808084'
+                : n === 7
+                  ? '010-8080-8080'
+                  : '01080808080',
+              n === 2 || n === 9 ? 62007 : n === 8 ? 62002 : null,
+              n === 1 ? null : [5, 6].includes(n) ? '2000-01-01T00:00:00Z' : at,
+              at,
+              n === 5,
+              [5, 6].includes(n) ? at : null,
+              [2, 3, 9].includes(n) ? at : null,
+            ],
+          );
+        const guard = await side.calls.connect();
+        await guard.query('BEGIN');
+        await guard.query(
+          'SELECT 1 FROM call_sessions WHERE call_session_seq IN(98005,98006) FOR KEY SHARE',
+        );
+        retention.push(guard);
+        await side.shipments.query(
+          "INSERT INTO shipments(order_parcel_seq,tracking_number,status) VALUES(76015,'submit-already-exists','received')",
+        );
+      }
+      const schemas = [];
+      for (const side of owners) {
+        const response = await fetch(
+          side.base +
+            (side.name === 'monolith' ? '/api' : '/order') +
+            '/docs-json',
+        );
+        schemas.push(await response.json());
+      }
+      const { envelope, schema } = require('./final-parity.cjs');
+      assert.deepEqual(
+        schema(schemas[1].paths['/api/orders/{id}/submit'].post, schemas[1]),
+        schema(schemas[0].paths['/api/orders/{id}/submit'].post, schemas[0]),
+      );
+      const requestIds = [];
+      let pairs = 0;
+      async function pair(
+        id,
+        input = { expectedVersion: 1 },
+        status = 200,
+        options = {},
+      ) {
+        const requestId = randomUUID(),
+          bodies = [];
+        requestIds.push(requestId);
+        const auth = options.ai
+          ? {
+              Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN,
+              call_session_seq: String(options.call ?? 98001),
+            }
+          : {
+              Cookie: 'dva_session=' + tokens[(options.admin ?? 1) - 1],
+              Origin: 'http://localhost:5173',
+            };
+        for (const side of owners) {
+          const response = await fetch(
+              side.base + '/api/orders/' + id + '/submit',
+              {
+                method: 'POST',
+                signal: AbortSignal.timeout(30000),
+                headers: {
+                  'Content-Type': 'application/json',
+                  'X-Request-Id': requestId,
+                  ...auth,
+                  ...options.headers,
+                },
+                body: JSON.stringify(input),
+              },
+            ),
+            body = await response.json();
+          assert.equal(
+            response.status,
+            status,
+            side.name + ' submit ' + id + ' ' + JSON.stringify(body),
+          );
+          assert.equal(response.headers.get('cache-control'), 'no-store');
+          assert.equal(
+            response.headers.get('location'),
+            status === 202 ? '/api/orders/' + id : null,
+          );
+          if (status < 300)
+            assert.deepEqual(Object.keys(body.data), ['status']);
+          bodies.push(envelope(body, requestId));
+        }
+        assert.deepEqual(bodies[1], bodies[0], 'submit ' + id);
+        pairs++;
+        return bodies[0].data;
+      }
+      await pair(62000, {}, 400);
+      await pair(62000, { expectedVersion: '1' }, 400);
+      await pair(62000, { expectedVersion: 1, extra: true }, 400);
+      await pair(62000, { expectedVersion: 1 }, 401, {
+        ai: true,
+        headers: { Authorization: '' },
+      });
+      await pair(62000, { expectedVersion: 1 }, 403, {
+        headers: { Origin: 'http://invalid.example' },
+      });
+      await pair(62000, { expectedVersion: 1 }, 400, {
+        headers: { call_session_seq: 'ignored' },
+      });
+      for (const [call, status] of [
+        [98003, 409],
+        [98004, 404],
+        [98005, 409],
+        [98006, 404],
+        [98007, 403],
+        [98008, 409],
+        [9999999, 404],
+      ])
+        await pair(62000, { expectedVersion: 1 }, status, { ai: true, call });
+      for (const [id, status] of [
+        [62004, 403],
+        [62005, 404],
+        [62006, 403],
+        [62012, 409],
+        [62013, 409],
+        [62014, 422],
+        [62015, 409],
+        [62016, 403],
+        [62017, 403],
+        [9999999, 404],
+      ])
+        await pair(id, { expectedVersion: 1 }, status);
+      await pair(62000, { expectedVersion: 2 }, 409);
+      assert.deepEqual(
+        await pair(62000, { expectedVersion: 1 }, 200, { ai: true }),
+        { status: 'notPaid' },
+      );
+      assert.deepEqual(
+        await pair(62000, { expectedVersion: 1 }, 200, { ai: true }),
+        { status: 'notPaid' },
+      );
+      assert.deepEqual(
+        await pair(62007, { expectedVersion: 999 }, 200, {
+          ai: true,
+          call: 98002,
+        }),
+        { status: 'notPaid' },
+      );
+      await pair(62009, { expectedVersion: 999 }, 202);
+      assert.deepEqual(await pair(62010), { status: 'SUBMITTING_FAILED' });
+      assert.deepEqual(await pair(62011, { expectedVersion: 999 }), {
+        status: 'SUBMISSION_FAILED',
+      });
+      assert.deepEqual(await pair(62001), { status: 'notPaid' });
+      await pair(62001, { expectedVersion: 999 });
+      assert.deepEqual(await pair(62002), { status: 'ACCEPTED' });
+      assert.deepEqual(
+        await pair(62003, { expectedVersion: 1 }, 200, { admin: 2 }),
+        { status: 'ACCEPTED' },
+      );
+      assert.deepEqual(
+        await pair(62008, { expectedVersion: 999 }, 200, { admin: 3 }),
+        { status: 'ACCEPTED' },
+      );
+      assert.deepEqual(
+        await pair(62020, { expectedVersion: 1 }, 200, {
+          headers: { call_session_seq: '9999999' },
+        }),
+        { status: 'notPaid' },
+      );
+      assert.deepEqual(
+        await pair(62021, { expectedVersion: 1 }, 200, {
+          headers: { call_session_seq: '98007' },
+        }),
+        { status: 'notPaid' },
+      );
+      assert.deepEqual(await pair(62024), { status: 'notPaid' });
+      const uuidMaps = [new Map(), new Map()];
+      function normalize(value, index, key = '') {
+        if (value === null) return null;
+        if (value instanceof Date) value = value.toISOString();
+        const cardValue = cardPaymentValue(value, key, uuidMaps[index], started);
+        if (cardValue !== undefined) return cardValue;
+        if (key === 'payment_request_id') {
+          assert.match(value, /^[0-9a-f-]{36}$/i);
+          const map = uuidMaps[index];
+          if (!map.has(value)) map.set(value, 'uuid-' + map.size);
+          return map.get(value);
+        }
+        if (
+          ['payment_due_at', 'expires_at'].includes(key) &&
+          Date.parse(value) > started + 23 * 3600000
+        ) {
+          assert.ok(
+            Date.parse(value) >= started + 86400000 - 1000 &&
+              Date.parse(value) <= Date.now() + 86400000 + 1000,
+          );
+          return '<24-hour deadline>';
+        }
+        if (
+          typeof value === 'string' &&
+          [
+            'created_at',
+            'updated_at',
+            'paid_at',
+            'occurred_at',
+            'status_changed_at',
+            'submission_first_attempt_at',
+            'submission_last_attempt_at',
+            'closed_at',
+          ].includes(key) &&
+          Date.parse(value) >= started - 1000 &&
+          Date.parse(value) <= Date.now() + 1000
+        )
+          return '<generated ' + key + '>';
+        if (Array.isArray(value))
+          return value.map((item) => normalize(item, index));
+        if (typeof value === 'object')
+          return Object.fromEntries(
+            Object.entries(value).map(([k, item]) => [
+              k,
+              normalize(item, index, k),
+            ]),
+          );
+        return value;
+      }
+      const stored = async (side) => ({
+        orders: (
+          await side.orders.query(
+            'SELECT to_jsonb(o) data FROM orders o WHERE order_seq BETWEEN 62000 AND 62024 ORDER BY order_seq',
+          )
+        ).rows,
+        parcels: (
+          await side.orders.query(
+            'SELECT to_jsonb(p) data FROM order_parcels p WHERE order_seq BETWEEN 62000 AND 62024 ORDER BY order_seq,parcel_position',
+          )
+        ).rows,
+        calls: (
+          await side.calls.query(
+            'SELECT call_session_seq,order_seq,customer_seq,order_intake_version FROM call_sessions WHERE call_session_seq BETWEEN 98001 AND 98009 ORDER BY call_session_seq',
+          )
+        ).rows,
+        payments: (
+          await side.orders.query(
+            'SELECT to_jsonb(p) data FROM order_payment_requests p WHERE order_seq BETWEEN 62000 AND 62024 ORDER BY order_seq',
+          )
+        ).rows,
+        charges: (
+          await side.orders.query(
+            'SELECT order_seq,organization_seq,customer_seq,billing_month::text,payment_method_type,amount,occurred_at FROM order_billing_charges WHERE order_seq BETWEEN 62000 AND 62024 ORDER BY order_seq',
+          )
+        ).rows,
+        pins: (
+          await side.customers.query(
+            'SELECT personal_pin_seq,customer_seq,label,address_data,version FROM personal_pins WHERE personal_pin_seq>200000 ORDER BY personal_pin_seq',
+          )
+        ).rows,
+      });
+      const before = await stored(owners[0]),
+        after = await stored(owners[1]);
+      assert.deepEqual(normalize(after, 1), normalize(before, 0));
+      assert.equal(
+        after.pins.filter((pin) => pin.label === '수령인 1').length,
+        1,
+      );
+      assert.equal(
+        after.pins.filter((pin) => pin.label === '수령인 0').length,
+        0,
+      );
+      assert.equal(
+        after.pins.filter((pin) => pin.label === '수령인 24').length,
+        1,
+      );
+      assert.equal(after.charges.length, 2);
+      const logs = async (db) =>
+        (
+          await db.query(
+            'SELECT actor_type,actor_seq,actor_name,action,result,target_type,target_seq,metadata,request_id FROM audit_logs WHERE request_id=ANY($1::uuid[]) ORDER BY request_id,audit_log_seq',
+            [requestIds],
+          )
+        ).rows;
+      const originalAudits = await logs(reference);
+      for (let n = 0; n < 100; n++) {
+        if ((await logs(databases.operations)).length === originalAudits.length)
+          break;
+        await pause(25);
+      }
+      assert.deepEqual(await logs(databases.operations), originalAudits);
+      const faultRequestId = randomUUID(),
+        faultHeaders = {
+          Cookie: 'dva_session=' + tokens[0],
+          Origin: 'http://localhost:5173',
+          'Content-Type': 'application/json',
+          'X-Request-Id': faultRequestId,
+        };
+      await databases.customer.query(
+        "CREATE FUNCTION recipient_fixture_failure() RETURNS trigger LANGUAGE plpgsql AS $fixture$ BEGIN IF NEW.event_type='OrderRecipientPinsWritten' AND (NEW.payload->>'orderSeq')::int=62018 THEN RAISE EXCEPTION 'test-only recipient acknowledgement failure'; END IF; RETURN NEW; END $fixture$",
+      );
+      await databases.customer.query(
+        'CREATE TRIGGER recipient_fixture_failure BEFORE INSERT ON inbox_events FOR EACH ROW EXECUTE FUNCTION recipient_fixture_failure()',
+      );
+      let event;
+      try {
+        const response = await fetch(
+          owners[1].base + '/api/orders/62018/submit',
+          {
+            method: 'POST',
+            headers: faultHeaders,
+            body: JSON.stringify({ expectedVersion: 1 }),
+          },
+        );
+        assert.equal(response.status, 500);
+        await response.body.cancel();
+        assert.equal(
+          (
+            await databases.order.query(
+              'SELECT status FROM orders WHERE order_seq=62018',
+            )
+          ).rows[0].status,
+          'notPaid',
+        );
+        assert.equal(
+          (
+            await databases.customer.query(
+              "SELECT 1 FROM personal_pins WHERE customer_seq=98001 AND label='수령인 18'",
+            )
+          ).rowCount,
+          0,
+        );
+        const row = (
+          await databases.order.query(
+            "SELECT event_id,payload FROM outbox_events WHERE destination='customer' AND event_type='OrderRecipientPinsWritten' AND aggregate_seq=62018",
+          )
+        ).rows[0];
+        event = {
+          eventId: row.event_id,
+          source: 'order',
+          eventType: 'OrderRecipientPinsWritten',
+          payload: row.payload,
+        };
+      } finally {
+        await databases.customer.query(
+          'DROP TRIGGER recipient_fixture_failure ON inbox_events',
+        );
+        await databases.customer.query(
+          'DROP FUNCTION recipient_fixture_failure()',
+        );
+      }
+      const forged = await fetch(
+        'http://customer-app:3001/internal/call-read-references/parcel-draft-write/events',
+        {
+          method: 'POST',
+          headers: {
+            Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            ...event,
+            payload: { ...event.payload, writeEventId: randomUUID() },
+          }),
+        },
+      );
+      assert.equal(forged.status, 409);
+      await forged.body.cancel();
+      for (let n = 0; n < 2; n++) {
+        const response = await fetch(
+          'http://customer-app:3001/internal/call-read-references/parcel-draft-write/events',
+          {
+            method: 'POST',
+            headers: {
+              Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(event),
+          },
+        );
+        assert.equal(response.status, 200);
+        assert.ok(
+          ['processed', 'duplicate'].includes((await response.json()).status),
+        );
+      }
+      const pins = await databases.customer.query(
+        "SELECT personal_pin_seq FROM personal_pins WHERE customer_seq=98001 AND label='수령인 18'",
+      );
+      assert.equal(pins.rowCount, 1);
+      for (let n = 0; n < 100; n++) {
+        if (
+          (
+            await databases.operations.query(
+              "SELECT 1 FROM audit_logs WHERE request_id=$1 AND action='PERSONAL_PIN_CREATED'",
+              [faultRequestId],
+            )
+          ).rowCount === 1
+        )
+          break;
+        await pause(25);
+      }
+      assert.equal(
+        (
+          await databases.operations.query(
+            "SELECT 1 FROM audit_logs WHERE request_id=$1 AND action='PERSONAL_PIN_CREATED' AND target_seq=$2",
+            [faultRequestId, pins.rows[0].personal_pin_seq],
+          )
+        ).rowCount,
+        1,
+      );
+      t.diagnostic(
+        'order submit HTTP pairs: ' +
+          pairs +
+          '; all states, caller permissions, card/month/group, recipient deduplication, stored addresses over 256KiB and real customer rollback recovery',
+      );
+    },
+  );
+
+  await t.test(
+    'administrator draft submission preserves standalone conversion, payment policy and replay',
+    async () => {
+      const started = Date.now(),
+        at = new Date().toISOString(),
+        owners = [
+          {
+            ...sides[0],
+            orders: reference,
+            calls: reference,
+            customers: reference,
+            audit: reference,
+          },
+          {
+            ...sides[1],
+            orders: databases.order,
+            calls: databases.consultation,
+            customers: databases.customer,
+            audit: databases.operations,
+          },
+        ];
+      for (const side of owners) {
+        for (const [table, column, value] of [
+          ['orders', 'order_seq', 70000],
+          ['order_parcel_drafts', 'draft_seq', 60000],
+          ['order_parcels', 'order_parcel_seq', 90000],
+        ])
+          await side.orders.query(
+            'SELECT setval(pg_get_serial_sequence($1,$2),$3,true)',
+            [table, column, value],
+          );
+        await side.customers.query(
+          "SELECT setval(pg_get_serial_sequence('personal_pins','personal_pin_seq'),300000,true)",
+        );
+        await side.calls.query(
+          "INSERT INTO call_sessions(call_session_seq,provider_call_id,caller_phone_number,customer_seq,incoming_at,registered_at,order_intake_enabled) OVERRIDING SYSTEM VALUE VALUES(99001,'admin-submit-call','01080808080',98001,$1,$1,true)",
+          [at],
+        );
+      }
+      const maps = [new Map(), new Map()],
+        requests = [];
+      let pairs = 0;
+      function normalize(value, index, key = '') {
+        if (value === null) return null;
+        if (value instanceof Date) value = value.toISOString();
+        const cardValue = cardPaymentValue(value, key, maps[index], started);
+        if (cardValue !== undefined) return cardValue;
+        if (
+          [
+            'paymentRequestId',
+            'payment_request_id',
+            'creation_request_id',
+          ].includes(key)
+        ) {
+          assert.match(value, /^[0-9a-f-]{36}$/i);
+          const map = maps[index];
+          if (!map.has(value)) map.set(value, 'uuid-' + map.size);
+          return map.get(value);
+        }
+        if (
+          [
+            'expiresAt',
+            'paymentDueAt',
+            'expires_at',
+            'payment_due_at',
+          ].includes(key)
+        ) {
+          assert.ok(
+            Date.parse(value) >= started + 86400000 - 1000 &&
+              Date.parse(value) <= Date.now() + 86400000 + 1000,
+          );
+          return '<24-hour deadline>';
+        }
+        if (
+          [
+            'createdAt',
+            'updatedAt',
+            'retentionStartedAt',
+            'created_at',
+            'updated_at',
+            'retention_started_at',
+            'paid_at',
+            'closed_at',
+            'submission_first_attempt_at',
+            'submission_last_attempt_at',
+            'deleted_at',
+            'occurred_at',
+          ].includes(key)
+        ) {
+          assert.ok(
+            Date.parse(value) >= started - 1000 &&
+              Date.parse(value) <= Date.now() + 1000,
+            key + ' ' + value,
+          );
+          return '<generated ' + key + '>';
+        }
+        if (Array.isArray(value))
+          return value.map((item) => normalize(item, index));
+        if (typeof value === 'object')
+          return Object.fromEntries(
+            Object.entries(value).map(([name, item]) => [
+              name,
+              normalize(item, index, name),
+            ]),
+          );
+        return value;
+      }
+      const { envelope, schema } = require('./final-parity.cjs');
+      const specs = [];
+      for (const side of owners)
+        specs.push(
+          await (
+            await fetch(
+              side.base +
+                (side.name === 'monolith' ? '/api' : '/order') +
+                '/docs-json',
+            )
+          ).json(),
+        );
+      const submitPath = '/api/admin/parcel-drafts/{id}/submit';
+      assert.deepEqual(
+        schema(specs[1].paths[submitPath].post, specs[1]),
+        schema(specs[0].paths[submitPath].post, specs[0]),
+      );
+      async function pair(method, path, input, status = 200, options = {}) {
+        const requestId = randomUUID(),
+          bodies = [];
+        requests.push(requestId);
+        for (const [index, side] of owners.entries()) {
+          const response = await fetch(side.base + path, {
+            method,
+            signal: AbortSignal.timeout(30000),
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Request-Id': requestId,
+              ...(options.ai
+                ? {
+                    Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN,
+                    call_session_seq: '99001',
+                  }
+                : {
+                    Cookie: 'dva_session=' + tokens[(options.admin ?? 1) - 1],
+                    Origin: 'http://localhost:5173',
+                  }),
+              ...options.headers,
+            },
+            ...(input === undefined ? {} : { body: JSON.stringify(input) }),
+          });
+          const body = status === 204 ? null : await response.json();
+          assert.equal(
+            response.status,
+            status,
+            side.name + ' ' + method + ' ' + path + ' ' + JSON.stringify(body),
+          );
+          assert.equal(response.headers.get('cache-control'), 'no-store');
+          bodies.push(normalize(envelope(body, requestId), index));
+        }
+        assert.deepEqual(bodies[1], bodies[0], method + ' ' + path);
+        pairs++;
+        return bodies[0]?.data;
+      }
+      const address = (name) => ({
+        name,
+        phoneNumber: '01080808080',
+        roadAddress: '관리자 접수 도로',
+        jibunAddress: '관리자 접수 지번',
+        detailAddress: '101호',
+        dongName: '동',
+        postalCode: '12345',
+      });
+      const create = (
+        label,
+        customerSeq = 98001,
+        status = 'READY',
+        options = {},
+      ) =>
+        pair(
+          'POST',
+          '/api/parcel-drafts',
+          {
+            clientParcelId: randomUUID(),
+            customerSeq,
+            status,
+            parcel: {
+              origin: address('발송인'),
+              destination: address(label),
+              documentCount: 1,
+              itemPrice: 1000,
+              notifiedPrice: 5000,
+            },
+          },
+          201,
+          options,
+        );
+      const submit = (
+        id,
+        input = { expectedVersion: 1, paymentMethodType: 'billing' },
+        status = 200,
+        options = {},
+      ) =>
+        pair(
+          'POST',
+          '/api/admin/parcel-drafts/' + id + '/submit',
+          input,
+          status,
+          options,
+        );
+      await submit(9999999, {}, 400);
+      await submit(9999999, { expectedVersion: 1 }, 404);
+      await submit(0, { expectedVersion: 1 }, 400);
+      await submit(9999999, { expectedVersion: 1 }, 401, {
+        ai: true,
+        headers: { Origin: 'http://localhost:5173' },
+      });
+      await submit(9999999, { expectedVersion: 1 }, 403, {
+        headers: { Origin: 'http://invalid.example' },
+      });
+      const editing = await create('미완료 관리자', 98001, 'EDITING');
+      await submit(editing.draftSeq, undefined, 409);
+      const linked = await create('통화 배송', 98001, 'READY', { ai: true });
+      await submit(linked.draftSeq, undefined, 409);
+      const ordinary = await create('카드 수령인');
+      await submit(
+        ordinary.draftSeq,
+        { expectedVersion: 1, unknown: true },
+        400,
+      );
+      await submit(
+        ordinary.draftSeq,
+        { expectedVersion: 2, paymentMethodType: 'billing' },
+        409,
+      );
+      await submit(ordinary.draftSeq, { expectedVersion: 1 }, 422);
+      await submit(
+        ordinary.draftSeq,
+        { expectedVersion: 1, paymentMethodType: 'cash' },
+        400,
+      );
+      await submit(
+        ordinary.draftSeq,
+        {
+          expectedVersion: 1,
+          paymentMethodType: 'billing',
+          pickupRequestedAt: '2026-02-30T00:00:00Z',
+        },
+        400,
+      );
+      const billed = await submit(ordinary.draftSeq);
+      assert.equal(billed.status, 'notPaid');
+      assert.equal(billed.orderSeq, ordinary.reservedOrderSeq);
+      assert.equal(billed.callSessionSeq, null);
+      assert.deepEqual(
+        await submit(ordinary.draftSeq, {
+          expectedVersion: 999,
+          paymentMethodType: 'credit',
+        }),
+        billed,
+      );
+      const credit = await create('월결제 수령인');
+      const paid = await submit(
+        credit.draftSeq,
+        {
+          expectedVersion: 1,
+          paymentMethodType: 'credit',
+          pickupRequestedAt: '2035-02-01T00:00:00Z',
+        },
+        200,
+        { admin: 2 },
+      );
+      assert.equal(paid.status, 'ACCEPTED');
+      assert.deepEqual(
+        await submit(credit.draftSeq, { expectedVersion: 999 }, 200, {
+          admin: 3,
+        }),
+        paid,
+      );
+      const group = await create('그룹 수령인', 98004);
+      const grouped = await submit(group.draftSeq, {
+        expectedVersion: 1,
+        paymentMethodType: 'groupBilling',
+        pickupRequestedAt: '2035-02-01T00:00:00Z',
+      });
+      assert.equal(grouped.status, 'notPaid');
+      const paymentRequestId = randomUUID();
+      requests.push(paymentRequestId);
+      for (const side of owners) {
+        const payment = (await side.orders.query('SELECT payment_request_id,payment_card_seq FROM order_payment_requests WHERE order_seq=$1 AND invalidated_at IS NULL', [grouped.orderSeq])).rows[0];
+        assert.equal(payment.payment_card_seq, 9800);
+        assert.equal((await side.orders.query('SELECT 1 FROM order_billing_charges WHERE order_seq=$1', [grouped.orderSeq])).rowCount, 0);
+        const response = await fetch(side.base + '/api/payments/requests/' + payment.payment_request_id + '/reconcile', {
+          method:'POST',signal:AbortSignal.timeout(30000),
+          headers:{Origin:'https://payments.example.test','Content-Type':'application/json','X-Request-Id':paymentRequestId},body:'{}',
+        });
+        const result = await response.json();
+        assert.equal(response.status,200,side.name+' deferred company card '+JSON.stringify(result));
+        assert.equal(result.data.status,'PAID');
+        assert.equal(result.data.orderStatus,'ACCEPTED');
+      }
+      pairs++;
+      const ineligible = await create('일반 수령인', 98005);
+      await submit(
+        ineligible.draftSeq,
+        { expectedVersion: 1, paymentMethodType: 'credit' },
+        403,
+      );
+      const withdrawn = await create('접수 전 탈퇴');
+      for (const side of owners)
+        await side.customers.query(
+          "UPDATE customers SET status='WITHDRAWN' WHERE customer_seq=98001",
+        );
+      try {
+        await submit(withdrawn.draftSeq, undefined, 404);
+      } finally {
+        for (const side of owners)
+          await side.customers.query(
+            "UPDATE customers SET status='ACTIVE' WHERE customer_seq=98001",
+          );
+      }
+      const deleted = await create('삭제 초안');
+      await pair(
+        'DELETE',
+        '/api/parcel-drafts',
+        { draftSeqs: [deleted.draftSeq] },
+        204,
+      );
+      await submit(deleted.draftSeq, undefined, 404);
+      for (const side of owners) {
+        const client = await side.orders.connect();
+        try {
+          await client.query('BEGIN');
+          await client.query("SET LOCAL session_replication_role='replica'");
+          await client.query(
+            'UPDATE orders SET deleted_at=$2 WHERE order_seq=$1',
+            [billed.orderSeq, at],
+          );
+          await client.query('COMMIT');
+        } catch (error) {
+          await client.query('ROLLBACK');
+          throw error;
+        } finally {
+          client.release();
+        }
+      }
+      await submit(ordinary.draftSeq, undefined, 409);
+      const stored = async (side) => ({
+        drafts: (
+          await side.orders.query(
+            'SELECT to_jsonb(d) data FROM order_parcel_drafts d WHERE draft_seq>60000 AND draft_seq<60100 ORDER BY draft_seq',
+          )
+        ).rows,
+        orders: (
+          await side.orders.query(
+            'SELECT to_jsonb(o) data FROM orders o WHERE order_seq>70000 AND order_seq<70100 ORDER BY order_seq',
+          )
+        ).rows,
+        parcels: (
+          await side.orders.query(
+            'SELECT to_jsonb(p) data FROM order_parcels p WHERE order_seq>70000 AND order_seq<70100 ORDER BY order_seq,parcel_position',
+          )
+        ).rows,
+        payments: (
+          await side.orders.query(
+            'SELECT to_jsonb(p) data FROM order_payment_requests p WHERE order_seq>70000 AND order_seq<70100 ORDER BY order_seq',
+          )
+        ).rows,
+        charges: (
+          await side.orders.query(
+            'SELECT order_seq,organization_seq,customer_seq,billing_month::text,payment_method_type,amount,occurred_at FROM order_billing_charges WHERE order_seq>70000 AND order_seq<70100 ORDER BY order_seq',
+          )
+        ).rows,
+        pins: (
+          await side.customers.query(
+            'SELECT personal_pin_seq,customer_seq,label,address_data,version FROM personal_pins WHERE personal_pin_seq>300000 ORDER BY personal_pin_seq',
+          )
+        ).rows,
+        calls: (
+          await side.calls.query(
+            'SELECT call_session_seq,order_seq,customer_seq,order_intake_version FROM call_sessions WHERE call_session_seq=99001',
+          )
+        ).rows,
+      });
+      const original = await stored(owners[0]),
+        candidate = await stored(owners[1]);
+      assert.deepEqual(normalize(candidate, 1), normalize(original, 0));
+      assert.equal(candidate.orders.length, 3);
+      assert.equal(candidate.pins.length, 3);
+      assert.equal(candidate.charges.length, 2);
+      const logs = async (db) =>
+        (
+          await db.query(
+            'SELECT request_id,action,result,target_type,target_seq,actor_type,actor_seq,metadata FROM audit_logs WHERE request_id=ANY($1::uuid[]) ORDER BY request_id,audit_log_seq',
+            [requests],
+          )
+        ).rows;
+      const sourceLogs = await logs(reference);
+      for (let n = 0; n < 100; n++) {
+        if ((await logs(databases.operations)).length === sourceLogs.length)
+          break;
+        await pause(25);
+      }
+      assert.deepEqual(await logs(databases.operations), sourceLogs);
+      t.diagnostic(
+        'administrator draft HTTP pairs: ' +
+          pairs +
+          '; standalone/call scope, expected version, all three payment methods, current-order replay, deleted orders and exact pins/audits',
+      );
+    },
+  );
+
+  await t.test(
+    'order customer preparation preserves identities across owner rollback, pending work and concurrent public writes',
+    async (case48) => {
+      const {
+        DatabaseService: CustomerDatabase,
+      } = require('./customer-runtime/database/database.service');
+      const {
+        AuditService: CustomerAudit,
+      } = require('./customer-runtime/audit/audit.service');
+      const {
+        OrderRecipientPinsService,
+      } = require('./customer-runtime/customers/order-recipient-pins.service');
+      const {
+        OrderCustomerWritesService,
+      } = require('./customer-runtime/customers/order-customer-writes.service');
+      const {
+        CustomersRepository: OriginalCustomers,
+      } = require('./monolith-runtime/customers/customers.repository');
+      const {
+        AuditService: OriginalAudit,
+      } = require('./monolith-runtime/audit/audit.service');
+      const {
+        AuditRepository: OriginalAuditRepository,
+      } = require('./monolith-runtime/audit/audit.repository');
+      const {
+        ORDER_CREATION_LOCK,
+        customerPreparationId,
+      } = require('@dva/events/order-customer-write.cjs');
+      const config = {
+        get: (key) =>
+          ({
+            NODE_ENV: 'test',
+            DB_HOST: 'customer-db',
+            DB_PORT: 5432,
+            DB_USER: 'customer_app',
+            DB_PASSWORD: process.env.PGPASSWORD,
+            DB_NAME: process.env.PGDATABASE,
+            ORDER_URL: 'http://order-app:3002',
+            OPERATIONS_URL: 'http://operations-app:3005',
+            CUSTOMER_AUTH_TOKEN: process.env.CUSTOMER_AUTH_TOKEN,
+          })[key],
+      };
+      const database = new CustomerDatabase(config),
+        audit = new CustomerAudit(database, config),
+        pins = new OrderRecipientPinsService(audit),
+        preparations = new OrderCustomerWritesService(
+          database,
+          config,
+          audit,
+          pins,
+        );
+      const originalRepository = new OriginalCustomers({ pool: reference }),
+        originalAudit = new OriginalAudit(
+          new OriginalAuditRepository({ pool: reference }),
+        );
+      const leases=new Set();
+      async function lease(pool){const client=await pool.connect();leases.add(client);return client;}
+      function release(client){assert.ok(leases.delete(client),'fixture lease must be tracked');client.release();}
+      case48.after(async () => {
+        for(const client of leases){try{await client.query('ROLLBACK');}finally{client.release();}}
+        leases.clear();
+        await preparations.onModuleDestroy();
+        await audit.onModuleDestroy();
+        await database.onModuleDestroy();
+      });
+      for (const db of [reference, databases.customer])
+        await db.query(
+          "SELECT setval(pg_get_serial_sequence('customers','customer_seq'),400000,true)",
+        );
+      const requestIds = [],
+        headers = {
+          'Content-Type': 'application/json',
+          Cookie: 'dva_session=' + tokens[0],
+          Origin: 'http://localhost:5173',
+        };
+      const address = {
+        roadAddress: '고객 도로',
+        jibunAddress: '고객 지번',
+        detailAddress: '101호',
+        dongName: '동',
+        postalCode: '12345',
+      };
+      async function originalInsert(input, requestId, commit = true) {
+        const client = await reference.connect();
+        try {
+          await client.query('BEGIN');
+          const row = await originalRepository.insertForOrder(client, input);
+          assert.ok(row);
+          await originalAudit.recordSuccess(
+            {
+              actorId: 1,
+              actorType: 'ADMIN',
+              action: 'CUSTOMER_CREATED',
+              targetType: 'CUSTOMER',
+              targetId: row.customerSeq,
+              requestId,
+            },
+            client,
+          );
+          await client.query(commit ? 'COMMIT' : 'ROLLBACK');
+          return row;
+        } catch (error) {
+          await client.query('ROLLBACK');
+          throw error;
+        } finally {
+          client.release();
+        }
+      }
+      async function rolledBackPreparation(input, requestId, writeEventId) {
+        let result;
+        const lost = new Error('test-only lost customer owner acknowledgement');
+        await assert.rejects(
+          database.transaction(async (client) => {
+            result = await preparations.prepare(
+              client,
+              { customer: input },
+              1,
+              requestId,
+              writeEventId,
+            );
+            throw lost;
+          }),
+          (error) => error === lost,
+        );
+        assert.ok(result.created);
+        return result.created;
+      }
+      async function ownerStart() {
+        const client = await lease(databases.order),
+          writeEventId = randomUUID();
+        await client.query('BEGIN');
+        await client.query('SELECT pg_advisory_xact_lock($1,hashtext($2))', [
+          ORDER_CREATION_LOCK,
+          writeEventId,
+        ]);
+        return { client, writeEventId };
+      }
+      const receipt = (customer, writeEventId, requestId) => ({
+        eventId: randomUUID(),
+        payload: { writeEventId, customer, adminId: 1, requestId },
+      });
+      async function commitOwner(owner, customerCreationReceipt) {
+        await owner.client.query(
+          "INSERT INTO inbox_events(event_id,source,event_type,payload) VALUES($1,'customer','ParcelDraftWriteRequested',$2)",
+          [
+            owner.writeEventId,
+            { result: { customerCreationReceipt, customerReceipt: null } },
+          ],
+        );
+        await owner.client.query('COMMIT');
+        release(owner.client);
+      }
+      async function duplicate(input, requestId, status) {
+        requestIds.push(requestId);
+        const responses = [];
+        for (const base of [
+          'http://monolith-app:3000',
+          'http://customer-app:3001',
+        ]) {
+          const response = await fetch(base + '/api/customers', {
+              method: 'POST',
+              headers: { ...headers, 'X-Request-Id': requestId },
+              body: JSON.stringify({ ...input, address }),
+            }),
+            body = await response.json();
+          assert.equal(
+            response.status,
+            status,
+            base + ' ' + JSON.stringify(body),
+          );
+          responses.push(
+            require('./final-parity.cjs').envelope(body, requestId),
+          );
+        }
+        assert.deepEqual(responses[1], responses[0]);
+        return responses[0].data;
+      }
+      const first = { name: '확정 준비 고객', phoneNumber: '01090909001' },
+        firstRequest = randomUUID();
+      requestIds.push(firstRequest);
+      const firstSource = await originalInsert(first, firstRequest),
+        firstOwner = await ownerStart(),
+        firstCreated = await rolledBackPreparation(
+          first,
+          firstRequest,
+          firstOwner.writeEventId,
+        );
+      assert.equal(firstCreated.customerSeq, firstSource.customerSeq);
+      assert.equal(
+        (
+          await databases.customer.query(
+            'SELECT 1 FROM customers WHERE customer_seq=$1',
+            [firstCreated.customerSeq],
+          )
+        ).rowCount,
+        0,
+      );
+      const firstReceipt = receipt(
+        firstCreated,
+        firstOwner.writeEventId,
+        firstRequest,
+      );
+      await commitOwner(firstOwner, firstReceipt);
+      const event = {
+        eventId: firstReceipt.eventId,
+        source: 'order',
+        eventType: 'OrderCustomerCreated',
+        payload: {
+          writeEventId: firstOwner.writeEventId,
+          customerSeq: firstCreated.customerSeq,
+        },
+      };
+      const eventUrl =
+        'http://customer-app:3001/internal/call-read-references/parcel-draft-write/events';
+      const forged = await fetch(eventUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN,
+        },
+        body: JSON.stringify({
+          ...event,
+          payload: {
+            ...event.payload,
+            customerSeq: firstCreated.customerSeq + 1,
+          },
+        }),
+      });
+      assert.equal(forged.status, 409);
+      await forged.body.cancel();
+      for (let n = 0; n < 2; n++) {
+        const response = await fetch(eventUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN,
+          },
+          body: JSON.stringify(event),
+        });
+        assert.equal(response.status, 200);
+        assert.ok(
+          ['processed', 'duplicate'].includes((await response.json()).status),
+        );
+      }
+      await duplicate(first, randomUUID(), 409);
+      assert.equal(
+        (
+          await databases.customer.query(
+            "SELECT 1 FROM outbox_events WHERE event_id=$1 AND event_type='OrderCustomerPreparationRequested'",
+            [customerPreparationId(first.phoneNumber)],
+          )
+        ).rowCount,
+        0,
+      );
+      const aborted = { name: '취소 준비 고객', phoneNumber: '01090909002' },
+        abortedRequest = randomUUID();
+      requestIds.push(abortedRequest);
+      const abortedSource = await originalInsert(
+          aborted,
+          abortedRequest,
+          false,
+        ),
+        abortedOwner = await ownerStart(),
+        abortedCreated = await rolledBackPreparation(
+          aborted,
+          abortedRequest,
+          abortedOwner.writeEventId,
+        );
+      assert.equal(abortedCreated.customerSeq, abortedSource.customerSeq);
+      await abortedOwner.client.query('ROLLBACK');
+      release(abortedOwner.client);
+      const running = preparations.run();
+      assert.equal(preparations.run(), running);
+      await running;
+      const replacement = await duplicate(aborted, randomUUID(), 201);
+      assert.ok(replacement.customerSeq > abortedCreated.customerSeq);
+      const pending = { name: '대기 준비 고객', phoneNumber: '01090909003' },
+        pendingRequest = randomUUID();
+      requestIds.push(pendingRequest);
+      const sourceClient = await lease(reference);
+      await sourceClient.query('BEGIN');
+      const sourcePending = await originalRepository.insertForOrder(
+        sourceClient,
+        pending,
+      );
+      await originalAudit.recordSuccess(
+        {
+          actorId: 1,
+          actorType: 'ADMIN',
+          action: 'CUSTOMER_CREATED',
+          targetType: 'CUSTOMER',
+          targetId: sourcePending.customerSeq,
+          requestId: pendingRequest,
+        },
+        sourceClient,
+      );
+      const pendingOwner = await ownerStart(),
+        pendingCreated = await rolledBackPreparation(
+          pending,
+          pendingRequest,
+          pendingOwner.writeEventId,
+        );
+      assert.equal(pendingCreated.customerSeq, sourcePending.customerSeq);
+      const concurrentRequest = randomUUID();
+      requestIds.push(concurrentRequest);
+      const responses = [
+        'http://monolith-app:3000',
+        'http://customer-app:3001',
+      ].map((base) =>
+        fetch(base + '/api/customers', {
+          method: 'POST',
+          headers: { ...headers, 'X-Request-Id': concurrentRequest },
+          body: JSON.stringify({ ...pending, address }),
+        }),
+      );
+      let settled = false;
+      void Promise.all(responses).then(() => {
+        settled = true;
+      });
+      await pause(150);
+      assert.equal(
+        settled,
+        false,
+        'a pending owner must not lose its phone identity',
+      );
+      await sourceClient.query('COMMIT');
+      release(sourceClient);
+      const pendingReceipt = receipt(
+        pendingCreated,
+        pendingOwner.writeEventId,
+        pendingRequest,
+      );
+      await commitOwner(pendingOwner, pendingReceipt);
+      const bodies = [];
+      for (const responsePromise of responses) {
+        const response = await responsePromise;
+        assert.equal(response.status, 409);
+        bodies.push(
+          require('./final-parity.cjs').envelope(
+            await response.json(),
+            concurrentRequest,
+          ),
+        );
+      }
+      assert.deepEqual(bodies[1], bodies[0]);
+      await preparations.run();
+      for (let n = 0; n < 80; n++) {
+        if (
+          (
+            await databases.customer.query(
+              'SELECT 1 FROM customers WHERE customer_seq=$1',
+              [pendingCreated.customerSeq],
+            )
+          ).rowCount
+        )
+          break;
+        await pause(25);
+      }
+      const snapshot = async (db) =>
+        (
+          await db.query(
+            'SELECT to_jsonb(c) data FROM customers c WHERE customer_seq>400000 ORDER BY customer_seq',
+          )
+        ).rows;
+      assert.deepEqual(
+        await snapshot(databases.customer),
+        await snapshot(reference),
+      );
+      assert.equal((await snapshot(reference)).length, 3);
+      const logs = async (db) =>
+        (
+          await db.query(
+            'SELECT request_id,action,result,target_type,target_seq,actor_type,actor_seq,metadata FROM audit_logs WHERE request_id=ANY($1::uuid[]) ORDER BY request_id,audit_log_seq',
+            [requestIds],
+          )
+        ).rows;
+      const sourceLogs = await logs(reference);
+      for (let n = 0; n < 100; n++) {
+        if ((await logs(databases.operations)).length === sourceLogs.length)
+          break;
+        await pause(25);
+      }
+      assert.deepEqual(await logs(databases.operations), sourceLogs);
+      const tableLock = await lease(databases.order),
+        blocked = [];
+      try {
+        await tableLock.query('BEGIN');
+        await tableLock.query(
+          'LOCK TABLE orders IN ACCESS EXCLUSIVE MODE',
+        );
+        for (let n = 0; n < 5; n++)
+          blocked.push(
+            fetch(
+              'http://order-app:3002/api/orders/2140000000',
+              { headers },
+            ),
+          );
+        for (let n = 0; n < 60; n++) {
+          const count = (
+            await databases.order.query(
+              "SELECT count(*)::int n FROM pg_stat_activity a WHERE datname=current_database() AND usename='order_app' AND wait_event_type='Lock' AND EXISTS(SELECT 1 FROM pg_locks l WHERE l.pid=a.pid AND l.relation='orders'::regclass AND l.mode='AccessShareLock' AND NOT l.granted)",
+            )
+          ).rows[0].n;
+          if (count === 5) break;
+          assert.ok(n < 59, 'five main-pool operations must block; observed '+count);
+          await pause(20);
+        }
+        const start = Date.now(),
+          response = await fetch(
+            'http://order-app:3002/internal/parcel-draft-write/reference',
+            {
+              method: 'POST',
+              signal: AbortSignal.timeout(1800),
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN,
+              },
+              body: JSON.stringify({
+                eventId: randomUUID(),
+                source: 'customer',
+                eventType: 'ParcelDraftWriteReferenceRequested',
+                payload: {
+                  operation: 'CustomerPreparationOutcomeRead',
+                  input: { writeEventId: randomUUID() },
+                },
+              }),
+            },
+          );
+        assert.equal(response.status, 200);
+        assert.deepEqual((await response.json()).payload, {
+          status: 'ABORTED',
+        });
+        assert.ok(Date.now() - start < 1800);
+        for (const [source, operation, input, status, expected] of [
+          ['consultation', 'PendingCallWritesRead', { id: 2140000000 }, 200, []],
+          ['consultation', 'IntakeFinalizationRead', { id: 2140000000 }, 200, null],
+          ['customer', 'RecipientReceiptRead', { eventId: randomUUID() }, 404, undefined],
+        ]) {
+          const response = await fetch(
+            'http://order-app:3002/internal/parcel-draft-write/reference',
+            {
+              method: 'POST',
+              signal: AbortSignal.timeout(1800),
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN,
+              },
+              body: JSON.stringify({
+                eventId: randomUUID(), source,
+                eventType: 'ParcelDraftWriteReferenceRequested',
+                payload: { operation, input },
+              }),
+            },
+          );
+          assert.equal(response.status, status, operation);
+          const body = await response.json();
+          if (status === 200) assert.deepEqual(body.payload, expected);
+          else assert.equal(body.error.code, 'NOT_FOUND');
+        }
+      } finally {
+        await tableLock.query('ROLLBACK');
+        release(tableLock);
+        for (const response of await Promise.all(blocked)) {
+          assert.equal(response.status, 404);
+          await response.body.cancel();
+        }
+      }
+      t.diagnostic(
+        'customer preparation preserves source rows and audits through committed/aborted/pending owner outcomes, duplicate events, competing public creation and five saturated order connections',
+      );
+    },
+  );
+
+  await t.test(
+    'order creation preserves original request keys, customers and legacy outcomes',
+    async (creation) => {
+      const started = Date.now(),
+        at = new Date(started).toISOString();
+      const owners = [
+        {
+          ...sides[0],
+          orders: reference,
+          calls: reference,
+          customers: reference,
+          audit: reference,
+        },
+        {
+          ...sides[1],
+          orders: databases.order,
+          calls: databases.consultation,
+          customers: databases.customer,
+          audit: databases.operations,
+        },
+      ];
+      const origin = {
+        name: '발송인',
+        phoneNumber: '01011112222',
+        roadAddress: '출발 도로',
+        jibunAddress: '출발 지번',
+        detailAddress: '',
+        dongName: '출발동',
+        postalCode: '00123',
+      };
+      const destination = {
+        ...origin,
+        name: '주문 생성 수령인',
+        phoneNumber: '0212345678',
+        roadAddress: '수령 도로',
+      };
+      const parcel = {
+        origin,
+        destination,
+        documentCount: 1,
+        itemPrice: 1000,
+        notifiedPrice: 5000,
+      };
+      const complete = {
+        customerSeq: 110001,
+        paymentMethodType: 'billing',
+        totalAmount: 5000,
+        pickupRequestedAt: new Date(started + 3 * 86400000).toISOString(),
+        parcels: [parcel],
+      };
+      const identities = new Map();
+      for (let n = 1; n <= 36; n++)
+        identities.set(110000 + n, {
+          providerCallId: 'creation-call-' + n,
+          callerPhoneNumber:
+            n === 11
+              ? '01092929292'
+              : n === 14
+                ? '01056565656'
+                : n === 15
+                  ? '01057575757'
+                  : n === 22
+                    ? '01061616161'
+                    : '01051515151',
+          incomingAt:
+            n === 4
+              ? '2000-01-01T00:00:00Z'
+              : new Date(started + n * 1000).toISOString(),
+        });
+      for (const side of owners) {
+        for (let n = 1; n <= 4; n++)
+          await side.customers.query(
+            'INSERT INTO customers(customer_seq,name,phone_number,status,monthly_billing_enabled,deleted_at) OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,$4,$5,$6)',
+            [
+              110000 + n,
+              '주문 고객 ' + n,
+              '0105151515' + n,
+              n === 2 ? 'WITHDRAWN' : 'ACTIVE',
+              n === 4,
+              n === 3 ? at : null,
+            ],
+          );
+        await side.customers.query(
+          'INSERT INTO personal_pins(personal_pin_seq,customer_seq,label,address_data) OVERRIDING SYSTEM VALUE VALUES(110501,110001,$1,$2)',
+          ['원본 출발지', origin],
+        );
+        await side.customers.query(
+          "SELECT setval('customers_customer_seq_seq',500000,true)",
+        );
+        await side.customers.query(
+          "SELECT setval('personal_pins_personal_pin_seq_seq',501000,true)",
+        );
+        await side.orders.query(
+          "SELECT setval('orders_order_seq_seq',80000,true)",
+        );
+        await side.orders.query(
+          "SELECT setval('order_parcels_order_parcel_seq_seq',100000,true)",
+        );
+        for (const [id, call] of identities)
+          await side.calls.query(
+            'INSERT INTO call_sessions(call_session_seq,provider_call_id,caller_phone_number,incoming_at,registered_at,order_intake_enabled,ended_at,started_at,customer_seq) OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,$4,$5,$6,$7,$7,$8)',
+            [
+              id,
+              call.providerCallId,
+              id === 110005 ? null : call.callerPhoneNumber,
+              id === 110003 ? null : call.incomingAt,
+              at,
+              id === 110002,
+              id === 110006 ? at : null,
+              id === 110013 ? 7 : null,
+            ],
+          );
+        await side.calls.query(
+          "SELECT setval('call_sessions_call_session_seq_seq',110100,true)",
+        );
+      }
+      // Later read-only checks also compare the complete event history while production GC runs.
+      for (const side of owners) {
+        const client = await side.calls.connect();
+        await client.query('BEGIN');
+        await client.query(
+          'SELECT 1 FROM call_sessions WHERE call_session_seq=110004 FOR KEY SHARE',
+        );
+        retention.push(client);
+      }
+      const { schema, envelope } = require('./final-parity.cjs');
+      const specs = [];
+      for (const side of owners)
+        specs.push(
+          await (
+            await fetch(
+              side.base +
+                (side.name === 'monolith' ? '/api' : '/order') +
+                '/docs-json',
+            )
+          ).json(),
+        );
+      assert.deepEqual(
+        schema(specs[1].paths['/api/orders'].post, specs[1]),
+        schema(specs[0].paths['/api/orders'].post, specs[0]),
+      );
+      const uuidMaps = [new Map(), new Map()],
+        requests = [];
+      let pairs = 0;
+      let manualPairs = 0;
+      function normalize(value, index, key = '') {
+        if (value === null) return null;
+        if (value instanceof Date) value = value.toISOString();
+        const cardValue = cardPaymentValue(value, key, uuidMaps[index], started);
+        if (cardValue !== undefined) return cardValue;
+        if (['paymentRequestId', 'payment_request_id'].includes(key)) {
+          assert.match(value, /^[0-9a-f-]{36}$/i);
+          const map = uuidMaps[index];
+          if (!map.has(value)) map.set(value, 'payment-' + map.size);
+          return map.get(value);
+        }
+        if (
+          [
+            'paymentDueAt',
+            'payment_due_at',
+            'expiresAt',
+            'expires_at',
+          ].includes(key)
+        ) {
+          assert.ok(
+            Date.parse(value) >= started + 86400000 - 1000 &&
+              Date.parse(value) <= Date.now() + 86400000 + 1000,
+          );
+          return '<24-hour deadline>';
+        }
+        if (
+          [
+            'created_at',
+            'updated_at',
+            'occurred_at',
+            'paid_at',
+            'closed_at',
+            'submission_first_attempt_at',
+            'submission_last_attempt_at',
+            'status_changed_at',
+          ].includes(key) &&
+          typeof value === 'string' &&
+          Date.parse(value) >= started - 1000 &&
+          Date.parse(value) <= Date.now() + 1000
+        )
+          return '<generated ' + key + '>';
+        if (Array.isArray(value))
+          return value.map((item) => normalize(item, index));
+        if (typeof value === 'object')
+          return Object.fromEntries(
+            Object.entries(value).map(([name, item]) => [
+              name,
+              normalize(item, index, name),
+            ]),
+          );
+        return value;
+      }
+      async function send(side, input, status, key, requestId, options = {}) {
+        const response = await fetch(
+          side.base + (options.path ?? '/api/orders'),
+          {
+            method: 'POST',
+            signal: AbortSignal.timeout(30000),
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Request-Id': requestId,
+              'Idempotency-Key': key,
+              ...(options.ai
+                ? { Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN }
+                : {
+                    Cookie: 'dva_session=' + tokens[(options.admin ?? 1) - 1],
+                    Origin: 'http://localhost:5173',
+                  }),
+              ...options.headers,
+            },
+            body: JSON.stringify(input),
+          },
+        );
+        const body = await response.json();
+        assert.equal(
+          response.status,
+          status,
+          side.name + ' POST orders ' + JSON.stringify(body),
+        );
+        assert.equal(response.headers.get('cache-control'), 'no-store');
+        if (options.path === '/api/admin/orders' && [201, 202].includes(status))
+          assert.equal(
+            response.headers.get('location'),
+            '/api/orders/' + body.data.orderSeq,
+          );
+        return envelope(body, requestId);
+      }
+      async function pair(input, status = 201, options = {}) {
+        const key = options.key ?? randomUUID(),
+          requestId = randomUUID(),
+          bodies = [];
+        requests.push(requestId);
+        for (const [index, side] of owners.entries())
+          bodies.push(
+            normalize(
+              await send(side, input, status, key, requestId, options),
+              index,
+            ),
+          );
+        assert.deepEqual(bodies[1], bodies[0], 'POST orders ' + pairs);
+        pairs++;
+        if (options.path === '/api/admin/orders') manualPairs++;
+        return { key, data: bodies[0].data };
+      }
+      const legacy = (n) => identities.get(110000 + n);
+      await pair({ customerSeq: 110001 }, 401, {
+        ai: true,
+        headers: { Authorization: '', Origin: 'http://localhost:5173' },
+      });
+      await pair({ customerSeq: 110001 }, 403, { headers: { Origin: '' } });
+      await pair({ customerSeq: 110001 }, 400, { key: 'bad-key' });
+      for (const input of [
+        {},
+        {
+          customerSeq: 110001,
+          customer: { name: '중복', phoneNumber: '01051515151' },
+        },
+        { customer: { name: ' ', phoneNumber: '01051515151' } },
+        {
+          customer: {
+            name: '추가',
+            phoneNumber: '01051515151',
+            monthlyBillingEnabled: true,
+          },
+        },
+        { customerSeq: '110001' },
+        { customerSeq: 110001, call: legacy(1) },
+        { customerSeq: 110001, outcome: 'INCOMPLETE' },
+        { customerSeq: 110001, parcels: null },
+      ])
+        await pair(input, 400);
+      await pair({ customerSeq: 110001 }, 400, { ai: true });
+      await pair({ customerSeq: 110002 }, 403);
+      await pair({ customerSeq: 110003 }, 404);
+      await pair({ customerSeq: 2147483647 }, 404);
+      const initial = await pair({
+        customerSeq: 110001,
+        parcels: [{ clientComment: '부분 저장' }],
+      });
+      assert.ok(initial.data.orderSeq > 80000);
+      assert.deepEqual(
+        (await pair({ customerSeq: 110002 }, 201, { key: initial.key })).data,
+        initial.data,
+      );
+      await pair({ customerSeq: 110001 }, 403, { key: initial.key, admin: 2 });
+      await pair({ customerSeq: 110001 }, 201, {
+        key: '00000000-0000-0000-0000-000000000000',
+      });
+      await pair({
+        customer: { phoneNumber: '01052525252', name: '  신규 고객  ' },
+        parcels: [{}],
+      });
+      await pair({
+        customer: { name: '다른 이름', phoneNumber: '01051515151' },
+      });
+      await pair(
+        {
+          customerSeq: 110001,
+          parcels: [{ originPin: { scope: 'COMPANY', pinSeq: 1 } }],
+        },
+        400,
+      );
+      await pair(
+        {
+          customerSeq: 110001,
+          parcels: [{ originPin: { scope: 'PERSONAL', pinSeq: 2147483647 } }],
+        },
+        403,
+      );
+      await pair({
+        customerSeq: 110001,
+        parcels: [{ originPin: { scope: 'PERSONAL', pinSeq: 110501 } }],
+      });
+      await pair({ customerSeq: 110001 }, 400, {
+        headers: { call_session_seq: 'bad' },
+      });
+      await pair({ customerSeq: 110001 }, 404, {
+        headers: { call_session_seq: '2147483647' },
+      });
+      await pair({ customerSeq: 110001 }, 409, {
+        ai: true,
+        headers: { call_session_seq: '110002' },
+      });
+      await pair({ customerSeq: 110001 }, 404, {
+        headers: { call_session_seq: '110004' },
+      });
+      await pair({ customerSeq: 110001 }, 409, {
+        headers: { call_session_seq: '110006' },
+      });
+      await pair({ customerSeq: 110001 }, 403, {
+        headers: { call_session_seq: '110011' },
+      });
+      const headerOrder = await pair({ customerSeq: 110001 }, 201, {
+        ai: true,
+        headers: { call_session_seq: '110001' },
+      });
+      assert.deepEqual(
+        (
+          await pair({ customerSeq: 110001 }, 201, {
+            key: headerOrder.key,
+            ai: true,
+            headers: { call_session_seq: '110001' },
+          })
+        ).data,
+        headerOrder.data,
+      );
+      await pair({ customerSeq: 110001 }, 409, {
+        ai: true,
+        headers: { call_session_seq: '110001' },
+      });
+      await pair({ customerSeq: 110001 }, 201, {
+        ai: true,
+        headers: { call_session_seq: '110003' },
+      });
+      await pair({ customerSeq: 110001 }, 201, {
+        ai: true,
+        headers: { call_session_seq: '110005' },
+      });
+      await pair(
+        { call: legacy(7), outcome: 'INCOMPLETE', customerSeq: 110001 },
+        409,
+        { ai: true, headers: { call_session_seq: '110008' } },
+      );
+      const empty = await pair(
+        { call: legacy(7), outcome: 'INCOMPLETE' },
+        201,
+        { ai: true },
+      );
+      assert.equal(empty.data.status, 'NO_ORDER');
+      assert.deepEqual(
+        (
+          await pair({ call: legacy(7), outcome: 'CANCELLED' }, 201, {
+            ai: true,
+            key: empty.key,
+          })
+        ).data,
+        empty.data,
+      );
+      await pair({ call: legacy(7), outcome: 'INCOMPLETE' }, 409, { ai: true });
+      await pair({ call: legacy(7), outcome: 'INCOMPLETE' }, 403, {
+        key: empty.key,
+      });
+      await pair(
+        { call: legacy(8), outcome: 'CANCELLED', parcels: [{}] },
+        201,
+        { ai: true },
+      );
+      await pair(
+        {
+          call: legacy(14),
+          outcome: 'INCOMPLETE',
+          customer: { name: '주문 없는 신규 고객', phoneNumber: '01056565656' },
+        },
+        201,
+        { ai: true },
+      );
+      assert.equal(
+        (
+          await pair(
+            {
+              call: legacy(9),
+              outcome: 'INCOMPLETE',
+              parcels: [{ clientComment: '확인 중' }],
+            },
+            201,
+            { ai: true },
+          )
+        ).data.status,
+        'COLLECTING',
+      );
+      const cancelled = await pair(
+        {
+          call: legacy(10),
+          outcome: 'CANCELLED',
+          totalAmount: 6000,
+          parcels: [{ notifiedPrice: 6000 }],
+        },
+        201,
+        { ai: true },
+      );
+      assert.equal(cancelled.data.status, 'CANCELLED');
+      assert.equal(cancelled.data.totalAmount, 0);
+      await pair(
+        {
+          call: legacy(11),
+          outcome: 'INCOMPLETE',
+          parcels: [{ documentCount: 1 }],
+        },
+        201,
+        { ai: true },
+      );
+      const done = await pair(
+        { ...complete, call: legacy(12), outcome: 'COMPLETE' },
+        201,
+        { ai: true },
+      );
+      assert.equal(done.data.status, 'notPaid');
+      await pair(
+        { ...complete, call: legacy(12), outcome: 'INCOMPLETE' },
+        201,
+        { ai: true, key: done.key },
+      );
+      await pair(
+        {
+          ...complete,
+          call: { ...legacy(16), callerPhoneNumber: '+8251515151' },
+          outcome: 'COMPLETE',
+        },
+        409,
+        { ai: true },
+      );
+      await pair(
+        {
+          ...complete,
+          call: { ...legacy(16), callerPhoneNumber: '+821051515151' },
+          outcome: 'COMPLETE',
+        },
+        201,
+        { ai: true },
+      );
+      await pair(
+        { call: legacy(17), outcome: 'COMPLETE', customerSeq: 110001 },
+        422,
+        { ai: true },
+      );
+      await pair(
+        {
+          ...complete,
+          totalAmount: 6000,
+          call: legacy(18),
+          outcome: 'COMPLETE',
+        },
+        422,
+        { ai: true },
+      );
+      await pair(
+        {
+          ...complete,
+          paymentMethodType: 'credit',
+          call: legacy(19),
+          outcome: 'COMPLETE',
+        },
+        403,
+        { ai: true },
+      );
+      for (const [n, phone, customerSeq, method] of [
+        [20, '01051515154', 110004, 'credit'],
+        [21, '01080808083', 98004, 'groupBilling'],
+      ]) {
+        for (const side of owners)
+          await side.calls.query(
+            'UPDATE call_sessions SET caller_phone_number=$2 WHERE call_session_seq=$1',
+            [110000 + n, phone],
+          );
+        identities.set(110000 + n, { ...legacy(n), callerPhoneNumber: phone });
+        assert.equal(
+          (
+            await pair(
+              {
+                ...complete,
+                customerSeq,
+                paymentMethodType: method,
+                call: legacy(n),
+                outcome: 'COMPLETE',
+              },
+              201,
+              { ai: true },
+            )
+          ).data.status,
+          'ACCEPTED',
+        );
+      }
+      await pair(
+        {
+          ...complete,
+          customerSeq: undefined,
+          customer: { phoneNumber: '01057575757', name: '신규 완료' },
+          call: legacy(15),
+          outcome: 'COMPLETE',
+        },
+        201,
+        { ai: true },
+      );
+      const lockKey = randomUUID(),
+        hash = createHash('sha256')
+          .update('orders.create:' + lockKey)
+          .digest(),
+        leases = [];
+      try {
+        for (const side of owners) {
+          const client = await side.orders.connect();
+          leases.push(client);
+          await client.query('BEGIN');
+          await client.query('SELECT pg_advisory_xact_lock($1::int,$2::int)', [
+            hash.readInt32BE(0),
+            hash.readInt32BE(4),
+          ]);
+        }
+        await pair({ customerSeq: 110001 }, 409, { key: lockKey });
+      } finally {
+        for (const client of leases) {
+          await client.query('ROLLBACK');
+          client.release();
+        }
+      }
+      const pending = {
+        recordingId: 'creation-pbx',
+        callFrom: legacy(22).callerPhoneNumber,
+        callTo: '0211112222',
+        startedAt: legacy(22).incomingAt,
+        endedAt: new Date(
+          Date.parse(legacy(22).incomingAt) + 60000,
+        ).toISOString(),
+        durationSeconds: 60,
+        recordingUrl: 'https://recordings.example.test/creation.mp3',
+      };
+      for (const side of owners) {
+        await side.calls.query(
+          'UPDATE call_sessions SET caller_phone_number=$2,incoming_at=$3 WHERE call_session_seq=$1',
+          [
+            110023,
+            pending.callFrom,
+            new Date(Date.parse(pending.startedAt) + 1000).toISOString(),
+          ],
+        );
+        await side.calls.query(
+          'INSERT INTO pbx_webhooks.call_ended_events(recording_id,payload) VALUES($1,$2)',
+          [pending.recordingId, pending],
+        );
+      }
+      await pair(
+        {
+          call: legacy(22),
+          outcome: 'INCOMPLETE',
+          parcels: [{ clientComment: '종료 매칭' }],
+        },
+        201,
+        { ai: true },
+      );
+      for (const side of owners)
+        assert.equal(
+          (
+            await side.calls.query(
+              'SELECT call_session_seq FROM pbx_webhooks.call_ended_events WHERE recording_id=$1',
+              [pending.recordingId],
+            )
+          ).rows[0].call_session_seq,
+          110022,
+        );
+      const stored = async (side) => ({
+        orders: (
+          await side.orders.query(
+            'SELECT to_jsonb(o) AS data FROM orders o WHERE order_seq>80000 ORDER BY order_seq',
+          )
+        ).rows,
+        parcels: (
+          await side.orders.query(
+            'SELECT to_jsonb(p) AS data FROM order_parcels p WHERE order_seq>80000 ORDER BY order_seq,parcel_position',
+          )
+        ).rows,
+        payments: (
+          await side.orders.query(
+            'SELECT to_jsonb(p) AS data FROM order_payment_requests p WHERE order_seq>80000 ORDER BY order_seq',
+          )
+        ).rows,
+        charges: (
+          await side.orders.query(
+            'SELECT order_seq,organization_seq,customer_seq,billing_month::text,payment_method_type,amount,occurred_at FROM order_billing_charges WHERE order_seq>80000 ORDER BY order_seq',
+          )
+        ).rows,
+        empty: (
+          await side.orders.query(
+            'SELECT request_id,call_session_seq,actor_admin_user_seq FROM empty_ai_order_results WHERE call_session_seq BETWEEN 110001 AND 110036 ORDER BY call_session_seq',
+          )
+        ).rows,
+        customers: (
+          await side.customers.query(
+            'SELECT to_jsonb(c) AS data FROM customers c WHERE customer_seq>500000 ORDER BY customer_seq',
+          )
+        ).rows,
+        calls: (
+          await side.calls.query(
+            'SELECT ' +
+              [
+                ...callFields,
+                'order_intake_enabled',
+                'order_intake_version',
+              ].join(',') +
+              ' FROM call_sessions WHERE call_session_seq BETWEEN 110001 AND 110036 ORDER BY call_session_seq',
+          )
+        ).rows,
+      });
+      assert.deepEqual(
+        normalize(await stored(owners[1]), 1),
+        normalize(await stored(owners[0]), 0),
+      );
+      for (const [table, column, owner] of [
+        ['orders', 'order_seq', 'orders'],
+        ['order_parcels', 'order_parcel_seq', 'orders'],
+        ['customers', 'customer_seq', 'customers'],
+        ['call_sessions', 'call_session_seq', 'calls'],
+      ]) {
+        const values = [];
+        for (const side of owners)
+          values.push(
+            (
+              await side[owner].query(
+                'SELECT last_value FROM ' + table + '_' + column + '_seq',
+              )
+            ).rows[0].last_value,
+          );
+        assert.equal(values[1], values[0], table + ' sequence');
+      }
+      const logs = async (db) =>
+        (
+          await db.query(
+            'SELECT actor_type,actor_seq,actor_name,action,result,target_type,target_seq,metadata,request_id FROM audit_logs WHERE request_id=ANY($1::uuid[]) ORDER BY request_id,audit_log_seq',
+            [requests],
+          )
+        ).rows;
+      const original = await logs(reference);
+      for (let n = 0; n < 100; n++) {
+        if ((await logs(databases.operations)).length === original.length)
+          break;
+        await pause(25);
+      }
+      assert.deepEqual(await logs(databases.operations), original);
+
+      const faultKey = randomUUID(),
+        faultRequest = randomUUID();
+      const faultCall = { ...legacy(25), callerPhoneNumber: '01062626262' };
+      const faultInput = {
+        call: faultCall,
+        outcome: 'INCOMPLETE',
+        customer: {
+          name: '주문 없는 고객 복구',
+          phoneNumber: faultCall.callerPhoneNumber,
+        },
+      };
+      for (const side of owners)
+        await side.calls.query(
+          'UPDATE call_sessions SET caller_phone_number=$1 WHERE call_session_seq=110025',
+          [faultCall.callerPhoneNumber],
+        );
+      const originalFault = await send(
+        owners[0],
+        faultInput,
+        201,
+        faultKey,
+        faultRequest,
+        { ai: true },
+      );
+      await databases.customer.query(
+        "CREATE FUNCTION creation_customer_failure() RETURNS trigger LANGUAGE plpgsql AS $creation$ BEGIN IF NEW.event_type='OrderCustomerCreated' AND NEW.payload->'customer'->>'phoneNumber'='01062626262' THEN RAISE EXCEPTION 'test-only customer acknowledgement failure'; END IF; RETURN NEW; END $creation$",
+      );
+      await databases.customer.query(
+        'CREATE TRIGGER creation_customer_failure BEFORE INSERT ON inbox_events FOR EACH ROW EXECUTE FUNCTION creation_customer_failure()',
+      );
+      try {
+        await send(owners[1], faultInput, 500, faultKey, faultRequest, {
+          ai: true,
+        });
+        assert.equal(
+          (
+            await databases.customer.query(
+              "SELECT 1 FROM customers WHERE phone_number='01062626262'",
+            )
+          ).rowCount,
+          0,
+        );
+        assert.equal(
+          (
+            await databases.order.query(
+              'SELECT 1 FROM empty_ai_order_results WHERE request_id=$1',
+              [faultKey],
+            )
+          ).rowCount,
+          1,
+        );
+      } finally {
+        await databases.customer.query(
+          'DROP TRIGGER creation_customer_failure ON inbox_events',
+        );
+        await databases.customer.query(
+          'DROP FUNCTION creation_customer_failure()',
+        );
+      }
+      assert.deepEqual(
+        (await pair(faultInput, 201, { key: faultKey, ai: true })).data,
+        originalFault.data,
+      );
+      const customerEvent = (
+        await databases.order.query(
+          "SELECT o.event_id,o.payload FROM outbox_events o JOIN inbox_events i ON i.event_id=(o.payload->>'writeEventId')::uuid WHERE o.destination='customer' AND o.event_type='OrderCustomerCreated' AND i.payload->>'creationKey'=$1",
+          [faultKey],
+        )
+      ).rows[0];
+      for (let n = 0; n < 2; n++) {
+        const response = await fetch(
+          'http://customer-app:3001/internal/call-read-references/parcel-draft-write/events',
+          {
+            method: 'POST',
+            headers: {
+              Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              eventId: customerEvent.event_id,
+              source: 'order',
+              eventType: 'OrderCustomerCreated',
+              payload: customerEvent.payload,
+            }),
+          },
+        );
+        assert.equal(response.status, 200);
+        assert.equal((await response.json()).status, 'duplicate');
+      }
+      const callKey = randomUUID(),
+        callRequest = randomUUID();
+      const callInput = {
+        call: legacy(24),
+        outcome: 'INCOMPLETE',
+        customerSeq: 110001,
+        parcels: [{ clientComment: '상담 소유자 복구' }],
+      };
+      const recoverPending = {
+        ...pending,
+        recordingId: 'creation-pbx-recovery',
+        callFrom: callInput.call.callerPhoneNumber,
+        startedAt: callInput.call.incomingAt,
+        endedAt: new Date(
+          Date.parse(callInput.call.incomingAt) + 60000,
+        ).toISOString(),
+      };
+      for (const side of owners)
+        await side.calls.query(
+          'INSERT INTO pbx_webhooks.call_ended_events(recording_id,payload) VALUES($1,$2)',
+          [recoverPending.recordingId, recoverPending],
+        );
+      const originalCall = await send(
+        owners[0],
+        callInput,
+        201,
+        callKey,
+        callRequest,
+        { ai: true },
+      );
+      await databases.consultation.query(
+        "CREATE FUNCTION creation_call_failure() RETURNS trigger LANGUAGE plpgsql AS $creation$ BEGIN IF NEW.event_type='LegacyOrderCallWritten' AND (NEW.payload->>'callSessionSeq')::int=110024 THEN RAISE EXCEPTION 'test-only call acknowledgement failure'; END IF; RETURN NEW; END $creation$",
+      );
+      await databases.consultation.query(
+        'CREATE TRIGGER creation_call_failure BEFORE INSERT ON inbox_events FOR EACH ROW EXECUTE FUNCTION creation_call_failure()',
+      );
+      try {
+        await send(owners[1], callInput, 500, callKey, callRequest, {
+          ai: true,
+        });
+        assert.equal(
+          (
+            await databases.consultation.query(
+              'SELECT order_seq FROM call_sessions WHERE call_session_seq=110024',
+            )
+          ).rows[0].order_seq,
+          null,
+        );
+        assert.equal(
+          (
+            await databases.consultation.query(
+              'SELECT call_session_seq FROM pbx_webhooks.call_ended_events WHERE recording_id=$1',
+              [recoverPending.recordingId],
+            )
+          ).rows[0].call_session_seq,
+          null,
+        );
+      } finally {
+        await databases.consultation.query(
+          'DROP TRIGGER creation_call_failure ON inbox_events',
+        );
+        await databases.consultation.query(
+          'DROP FUNCTION creation_call_failure()',
+        );
+      }
+      assert.deepEqual(
+        (await pair(callInput, 201, { key: callKey, ai: true })).data,
+        originalCall.data,
+      );
+      const callEvent = (
+        await databases.order.query(
+          "SELECT event_id,payload FROM outbox_events WHERE event_type='LegacyOrderCallWritten' AND aggregate_seq=110024",
+        )
+      ).rows[0];
+      for (let n = 0; n < 2; n++) {
+        const response = await fetch(
+          'http://consultation-app:3004/internal/parcel-draft-write/events',
+          {
+            method: 'POST',
+            headers: {
+              Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              eventId: callEvent.event_id,
+              source: 'order',
+              eventType: 'LegacyOrderCallWritten',
+              payload: callEvent.payload,
+            }),
+          },
+        );
+        assert.equal(response.status, 200);
+        assert.equal((await response.json()).status, 'duplicate');
+      }
+      assert.deepEqual(
+        normalize(await stored(owners[1]), 1),
+        normalize(await stored(owners[0]), 0),
+      );
+      for (const side of owners)
+        assert.equal(
+          (
+            await side.calls.query(
+              'SELECT call_session_seq FROM pbx_webhooks.call_ended_events WHERE recording_id=$1',
+              [recoverPending.recordingId],
+            )
+          ).rows[0].call_session_seq,
+          110024,
+        );
+      const sequences = [];
+      for (const side of owners)
+        sequences.push(
+          (
+            await side.calls.query(
+              'SELECT last_value FROM call_sessions_call_session_seq_seq',
+            )
+          ).rows[0].last_value,
+        );
+      assert.equal(
+        sequences[1],
+        sequences[0],
+        'recovery preserves original call sequence allocation',
+      );
+      for (const requestId of [faultRequest, callRequest]) {
+        const expected = (
+          await reference.query(
+            "SELECT action,target_seq FROM audit_logs WHERE request_id=$1 AND result='SUCCESS' ORDER BY audit_log_seq",
+            [requestId],
+          )
+        ).rows;
+        let actual;
+        for (let n = 0; n < 100; n++) {
+          actual = (
+            await databases.operations.query(
+              "SELECT action,target_seq FROM audit_logs WHERE request_id=$1 AND result='SUCCESS' ORDER BY audit_log_seq",
+              [requestId],
+            )
+          ).rows;
+          if (actual.length === expected.length) break;
+          await pause(25);
+        }
+        assert.deepEqual(
+          actual,
+          expected,
+          'original successful audit is recovered once',
+        );
+      }
+
+      await pair(
+        { customer: { name: ' \ud800 ', phoneNumber: '01065656565' } },
+        201,
+      );
+      await creation.test(
+        'manual orders preserve administrator access, current replay, all payments and customer-pin recovery',
+        async () => {
+          const path = '/api/admin/orders',
+            begin = manualPairs;
+          assert.deepEqual(
+            schema(specs[1].paths[path].post, specs[1]),
+            schema(specs[0].paths[path].post, specs[0]),
+          );
+          await pair(complete, 401, {
+            path,
+            ai: true,
+            headers: { Origin: 'http://localhost:5173' },
+          });
+          await pair(complete, 403, { path, headers: { Origin: '' } });
+          await pair(complete, 400, { path, key: 'bad-key' });
+          await pair(complete, 400, {
+            path,
+            headers: { call_session_seq: '1' },
+          });
+          for (const input of [
+            {},
+            { ...complete, parcels: [] },
+            { ...complete, call: legacy(1) },
+            { ...complete, outcome: 'COMPLETE' },
+            {
+              ...complete,
+              customer: { name: '중복', phoneNumber: '01051515151' },
+            },
+            { ...complete, customerSeq: undefined },
+            { ...complete, parcels: [{ ...parcel, itemPrice: 0 }] },
+            { ...complete, parcels: [{ ...parcel, origin: { ...origin, phoneNumber: '0212345678' } }] },
+            { ...complete, parcels: [{ ...parcel, destination: { ...destination, phoneNumber: '01512345678' } }] },
+          ])
+            await pair(input, 400, { path });
+          await pair({ ...complete, customerSeq: 110002 }, 403, { path });
+          await pair({ ...complete, customerSeq: 110003 }, 404, { path });
+          await pair({ ...complete, paymentMethodType: undefined }, 422, {
+            path,
+          });
+          await pair({ ...complete, totalAmount: 6000 }, 422, { path });
+          await pair({ ...complete, paymentMethodType: 'credit' }, 403, {
+            path,
+          });
+          await pair(
+            {
+              ...complete,
+              parcels: [
+                { ...parcel, originPin: { scope: 'COMPANY', pinSeq: 1 } },
+              ],
+            },
+            400,
+            { path },
+          );
+          await pair(
+            {
+              ...complete,
+              parcels: [
+                {
+                  ...parcel,
+                  originPin: { scope: 'PERSONAL', pinSeq: 2147483647 },
+                },
+              ],
+            },
+            403,
+            { path },
+          );
+          const card = await pair(complete, 201, {
+            path,
+            key: randomUUID().toUpperCase(),
+          });
+          assert.equal(card.data.creationSource, 'ADMIN');
+          assert.equal(card.data.status, 'notPaid');
+          assert.ok(!Object.hasOwn(card.data, 'callSessionSeq'));
+          assert.deepEqual(
+            (
+              await pair({ ...complete, customerSeq: 110002 }, 201, {
+                path,
+                key: card.key,
+              })
+            ).data,
+            card.data,
+          );
+          await pair(complete, 403, { path, key: card.key, admin: 2 });
+          await pair(complete, 403, { path, key: done.key });
+          const adminAi = await pair(complete, 201, {
+            headers: { call_session_seq: '110027' },
+          });
+          await pair(complete, 409, { path, key: adminAi.key });
+          const current = await pair(complete, 201, { path, key: initial.key });
+          assert.equal(current.data.status, 'COLLECTING');
+          assert.equal(current.data.orderSeq, initial.data.orderSeq);
+          await pair(
+            {
+              ...complete,
+              parcels: [
+                { ...parcel, originPin: { scope: 'PERSONAL', pinSeq: 110501 } },
+              ],
+            },
+            201,
+            { path },
+          );
+          const credit = await pair(
+            {
+              ...complete,
+              customerSeq: 110004,
+              paymentMethodType: 'credit',
+              parcels: [
+                {
+                  ...parcel,
+                  destination: { ...destination, name: '수기 월결제' },
+                },
+              ],
+            },
+            201,
+            { path },
+          );
+          assert.equal(credit.data.status, 'ACCEPTED');
+          assert.equal(
+            (
+              await pair(
+                {
+                  ...complete,
+                  customerSeq: 98004,
+                  paymentMethodType: 'groupBilling',
+                  parcels: [
+                    {
+                      ...parcel,
+                      destination: { ...destination, name: '수기 그룹결제' },
+                    },
+                  ],
+                },
+                201,
+                { path },
+              )
+            ).data.status,
+            'ACCEPTED',
+          );
+          await pair(
+            {
+              ...complete,
+              customerSeq: undefined,
+              customer: {
+                phoneNumber: '01063636363',
+                name: '  수기 신규 고객  ',
+              },
+              parcels: [
+                {
+                  ...parcel,
+                  destination: { ...destination, name: '수기 신규 수령인' },
+                },
+              ],
+            },
+            201,
+            { path },
+          );
+          await pair(
+            { ...complete, totalAmount: 10000, parcels: [parcel, parcel] },
+            201,
+            { path },
+          );
+          const submissionReceipts = [];
+          for (const side of owners) {
+            submissionReceipts.push(
+              (
+                await side.orders.query(
+                  'SELECT parcel_no,dver_received_at FROM orders WHERE order_seq=$1',
+                  [credit.data.orderSeq],
+                )
+              ).rows[0],
+            );
+            await side.orders.query(
+              "UPDATE orders SET status='SUBMITTING',parcel_no=NULL,dver_received_at=NULL,submission_first_attempt_at=clock_timestamp(),submission_last_attempt_at=clock_timestamp() WHERE order_seq=$1",
+              [credit.data.orderSeq],
+            );
+          }
+          assert.equal(
+            (await pair(complete, 202, { path, key: credit.key })).data.status,
+            'SUBMITTING',
+          );
+          for (const [index, side] of owners.entries())
+            await side.orders.query(
+              "UPDATE orders SET status='ACCEPTED',parcel_no=$2,dver_received_at=$3 WHERE order_seq=$1",
+              [
+                credit.data.orderSeq,
+                submissionReceipts[index].parcel_no,
+                submissionReceipts[index].dver_received_at,
+              ],
+            );
+          const removed = await pair(
+            {
+              ...complete,
+              parcels: [
+                { ...parcel, destination: { ...destination, name: '삭제 키' } },
+              ],
+            },
+            201,
+            { path },
+          );
+          for (const side of owners)
+            await side.orders.query(
+              'UPDATE orders SET deleted_at=$2 WHERE order_seq=$1',
+              [removed.data.orderSeq, at],
+            );
+          await pair(complete, 409, { path, key: removed.key });
+          assert.deepEqual(
+            normalize(await stored(owners[1]), 1),
+            normalize(await stored(owners[0]), 0),
+          );
+          const pins = async (db) =>
+            (
+              await db.query(
+                'SELECT personal_pin_seq,customer_seq,label,address_data,version,deleted_at FROM personal_pins WHERE personal_pin_seq>501000 ORDER BY personal_pin_seq',
+              )
+            ).rows;
+          assert.deepEqual(
+            await pins(databases.customer),
+            await pins(reference),
+          );
+          const allOriginal = await logs(reference);
+          for (let n = 0; n < 100; n++) {
+            if (
+              (await logs(databases.operations)).length === allOriginal.length
+            )
+              break;
+            await pause(25);
+          }
+          assert.deepEqual(await logs(databases.operations), allOriginal);
+          const bundleKey = randomUUID(),
+            bundleRequest = randomUUID();
+          const bundleInput = {
+            ...complete,
+            customerSeq: undefined,
+            customer: {
+              name: '수기 준비 묶음 복구',
+              phoneNumber: '01064646464',
+            },
+            parcels: [
+              {
+                ...parcel,
+                destination: { ...destination, name: '복구 수기 수령인' },
+              },
+            ],
+          };
+          const first = normalize(
+            await send(owners[0], bundleInput, 201, bundleKey, bundleRequest, {
+              path,
+            }),
+            0,
+          );
+          await databases.customer.query(
+            "CREATE FUNCTION manual_customer_failure() RETURNS trigger LANGUAGE plpgsql AS $manual$ BEGIN IF NEW.event_type='OrderCustomerCreated' AND NEW.payload->'customer'->>'phoneNumber'='01064646464' THEN RAISE EXCEPTION 'test-only manual customer acknowledgement failure'; END IF; RETURN NEW; END $manual$",
+          );
+          await databases.customer.query(
+            'CREATE TRIGGER manual_customer_failure BEFORE INSERT ON inbox_events FOR EACH ROW EXECUTE FUNCTION manual_customer_failure()',
+          );
+          try {
+            await send(owners[1], bundleInput, 500, bundleKey, bundleRequest, {
+              path,
+            });
+            assert.equal(
+              (
+                await databases.customer.query(
+                  "SELECT 1 FROM customers WHERE phone_number='01064646464'",
+                )
+              ).rowCount,
+              0,
+            );
+            assert.equal(
+              (
+                await databases.customer.query(
+                  "SELECT 1 FROM personal_pins WHERE label='복구 수기 수령인'",
+                )
+              ).rowCount,
+              0,
+            );
+            assert.equal(
+              (
+                await databases.order.query(
+                  'SELECT 1 FROM orders WHERE creation_request_id=$1',
+                  [bundleKey],
+                )
+              ).rowCount,
+              1,
+            );
+          } finally {
+            await databases.customer.query(
+              'DROP TRIGGER manual_customer_failure ON inbox_events',
+            );
+            await databases.customer.query(
+              'DROP FUNCTION manual_customer_failure()',
+            );
+          }
+          assert.deepEqual(
+            (await pair(bundleInput, 201, { path, key: bundleKey })).data,
+            first.data,
+          );
+          assert.deepEqual(
+            normalize(await stored(owners[1]), 1),
+            normalize(await stored(owners[0]), 0),
+          );
+          assert.deepEqual(
+            await pins(databases.customer),
+            await pins(reference),
+          );
+          const audits = async (db) =>
+            (
+              await db.query(
+                "SELECT actor_type,actor_seq,action,target_type,target_seq,metadata FROM audit_logs WHERE request_id=$1 AND result='SUCCESS' ORDER BY action,target_seq",
+                [bundleRequest],
+              )
+            ).rows;
+          const expected = await audits(reference);
+          let actual;
+          for (let n = 0; n < 100; n++) {
+            actual = await audits(databases.operations);
+            if (actual.length === expected.length) break;
+            await pause(25);
+          }
+          assert.deepEqual(actual, expected);
+          assert.equal(
+            expected.filter((row) => row.action === 'CUSTOMER_CREATED').length,
+            1,
+          );
+          assert.equal(
+            expected.filter((row) => row.action === 'PERSONAL_PIN_CREATED')
+              .length,
+            1,
+          );
+          for (const [table, column, owner] of [
+            ['orders', 'order_seq', 'orders'],
+            ['order_parcels', 'order_parcel_seq', 'orders'],
+            ['customers', 'customer_seq', 'customers'],
+            ['personal_pins', 'personal_pin_seq', 'customers'],
+          ]) {
+            const values = [];
+            for (const side of owners)
+              values.push(
+                (
+                  await side[owner].query(
+                    'SELECT last_value FROM ' + table + '_' + column + '_seq',
+                  )
+                ).rows[0].last_value,
+              );
+            assert.equal(
+              values[1],
+              values[0],
+              table + ' sequence after manual recovery',
+            );
+          }
+          t.diagnostic(
+            'manual creation HTTP pairs: ' +
+              (manualPairs - begin) +
+              '; administrator-only validation, Location and 202, key replay/current state, payment branches, exact recipient pins and real customer/PIN rollback recovery',
+          );
+        },
+      );
+
+      t.diagnostic(
+        'order creation HTTP pairs: ' +
+          pairs +
+          '; request keys, customer identities, partial/empty/cancelled/complete calls, three payment methods, exact PBX matching and real customer/call owner rollback recovery',
+      );
+    },
+  );
+  await t.test('company monthly defaults preserve submission results, group card waits and validation rollback', async () => {
+    const { envelope } = require('./final-parity.cjs');
+    const customerId = 700301, companyId = 700302, membershipId = 700303, cardId = 700304, departmentId = 700305;
+    const started = Date.now();
+    const cases = [
+      { name: 'eligible company default', status: 200, result: 'ACCEPTED' },
+      { name: 'explicit billing retained', method: 'billing', status: 200, result: 'notPaid' },
+      { name: 'company monthly disabled', companyMonthly: false, status: 422 },
+      { name: 'member monthly disabled', memberMonthly: false, status: 422 },
+      { name: 'inactive membership', memberStatus: 'INACTIVE', status: 422 },
+      { name: 'personal monthly alone', membership: false, status: 422 },
+      { name: 'invalid parcel rolls default back', invalidParcel: true, status: 422 },
+      { name: 'explicit credit denied', method: 'credit', memberMonthly: false, status: 403 },
+      { name: 'company card waits without a department', method: 'groupBilling', groupEnabled: true, status: 200, result: 'notPaid' },
+      { name: 'company card snapshots the department', method: 'groupBilling', groupEnabled: true, department: true, status: 200, result: 'notPaid' },
+      { name: 'group card independent of monthly billing', method: 'groupBilling', companyMonthly: false, memberMonthly: false, groupEnabled: true, status: 200, result: 'notPaid' },
+      { name: 'member group billing disabled', method: 'groupBilling', status: 403 },
+      { name: 'expired company card denied', method: 'groupBilling', groupEnabled: true, cardExpired: true, status: 403 },
+      { name: 'deleted company card denied', method: 'groupBilling', groupEnabled: true, cardDeleted: true, status: 403 },
+    ];
+    const owners = [
+      { ...sides[0], customers: reference, orders: reference, audit: reference },
+      { ...sides[1], customers: databases.customer, orders: databases.order, audit: databases.operations },
+    ];
+    for (const side of owners) {
+      await side.customers.query("INSERT INTO customers(customer_seq,name,phone_number,status,monthly_billing_enabled) OVERRIDING SYSTEM VALUE VALUES($1,'기본 월결제','01070000301','ACTIVE',true)", [customerId]);
+      await side.customers.query("INSERT INTO organizations(organization_seq,name,status,monthly_billing_enabled) OVERRIDING SYSTEM VALUE VALUES($1,'기본 월결제 기업','ACTIVE',true)", [companyId]);
+      await side.customers.query("INSERT INTO departments(department_seq,organization_seq,name,group_billing_enabled) OVERRIDING SYSTEM VALUE VALUES($1,$2,'접수 기업 부서',false)", [departmentId, companyId]);
+      await side.customers.query("INSERT INTO memberships(membership_seq,customer_seq,organization_seq,employee_no,status,monthly_billing_enabled) OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,'monthly-default','ACTIVE',true)", [membershipId, customerId, companyId]);
+      await side.customers.query(`INSERT INTO payment_cards(payment_card_seq,organization_seq,registration_key,request_hash,provider_customer_key,provider_environment,
+        encrypted_billing_key,expiration_year,expiration_month,masked_number,status)
+        OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,'group-wait-fixture',$4,'test','encrypted-group-wait-value',2099,12,'1234********5678','ACTIVE')`,
+      [cardId, companyId, randomUUID(), randomUUID()]);
+    }
+    for (const [index, entry] of cases.entries()) {
+      const state = { companyMonthly: true, memberMonthly: true, memberStatus: 'ACTIVE', membership: true, method: null,
+        groupEnabled: false, department: false, cardExpired: false, cardDeleted: false, ...entry };
+      const id = 700310 + index, requestId = randomUUID(), results = [], stored = [];
+      for (const side of owners) {
+        await side.customers.query('UPDATE organizations SET monthly_billing_enabled=$2 WHERE organization_seq=$1', [companyId, state.companyMonthly]);
+        await side.customers.query('UPDATE memberships SET monthly_billing_enabled=$2,status=$3,deleted_at=$4,group_billing_enabled=$5,department_seq=$6 WHERE membership_seq=$1', [membershipId, state.memberMonthly, state.memberStatus, state.membership ? null : '2025-01-01Z', state.groupEnabled, state.department ? departmentId : null]);
+        await side.customers.query('UPDATE payment_cards SET expiration_year=$2,deleted_at=$3 WHERE payment_card_seq=$1', [cardId, state.cardExpired ? 2000 : 2099, state.cardDeleted ? '2025-01-01Z' : null]);
+        await side.orders.query("INSERT INTO orders(order_seq,customer_seq,payment_method_type,status,total_amount,creation_source,version,pickup_requested_at) OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,'COLLECTING',7000,'AI',1,'2030-02-01Z')", [id, customerId, state.method]);
+        await side.orders.query(`INSERT INTO order_parcels OVERRIDING SYSTEM VALUE
+          SELECT (jsonb_populate_record(NULL::order_parcels,to_jsonb(p)||$1::jsonb)).*
+          FROM order_parcels p WHERE order_parcel_seq=20021`, [{
+          order_parcel_seq: id, order_seq: id, parcel_position: 1, origin_pin_scope: null, origin_pin_seq: null,
+          document_count: 1, small_box_count: 0, medium_box_count: 0, big_box_count: 0,
+          item_price: state.invalidParcel ? 0 : 1000, notified_price: 7000,
+        }]);
+        const version = (await side.orders.query('SELECT version FROM orders WHERE order_seq=$1', [id])).rows[0].version;
+        const response = await fetch(side.base + '/api/orders/' + id + '/submit', {
+          method: 'POST', signal: AbortSignal.timeout(30000),
+          headers: { ...headers, Origin: 'http://localhost:5173', 'Content-Type': 'application/json', 'X-Request-Id': requestId },
+          body: JSON.stringify({ expectedVersion: version }),
+        });
+        const body = await response.json();
+        assert.equal(response.status, state.status, side.name + ' ' + state.name + ' ' + JSON.stringify(body));
+        assert.equal(response.headers.get('cache-control'), 'no-store');
+        results.push(envelope(body, requestId));
+        const row = (await side.orders.query(`SELECT payment_method_type,status,total_amount,paid_at,payment_due_at,
+          billing_organization_seq,billing_department_seq,billing_organization_name,billing_department_name
+          FROM orders WHERE order_seq=$1`, [id])).rows[0];
+        assert.equal(row.payment_method_type, state.status === 200 && state.method === null ? 'credit' : state.method);
+        assert.equal(row.status, state.result ?? 'COLLECTING');
+        if (state.result === 'ACCEPTED') {
+          assert.ok(row.paid_at.getTime() >= started && row.paid_at.getTime() <= Date.now());
+          row.paid_at = '<generated payment time>';
+        }
+        if (state.result === 'notPaid') {
+          assert.ok(row.payment_due_at.getTime() >= started + 86400000 - 1000 && row.payment_due_at.getTime() <= Date.now() + 86400000 + 1000);
+          row.payment_due_at = '<24-hour deadline>';
+        }
+        stored.push({ order: row,
+          payments: (await side.orders.query('SELECT amount,payment_card_seq,card_payment_failed FROM order_payment_requests WHERE order_seq=$1', [id])).rows,
+          charges: (await side.orders.query('SELECT organization_seq,customer_seq,payment_method_type,amount FROM order_billing_charges WHERE order_seq=$1', [id])).rows,
+          audits: (await side.audit.query('SELECT actor_type,actor_seq,action,target_type,target_seq,result,metadata FROM audit_logs WHERE request_id=$1 ORDER BY audit_log_seq', [requestId])).rows,
+        });
+      }
+      assert.deepEqual(results[1], results[0], state.name + ' HTTP');
+      assert.deepEqual(stored[1], stored[0], state.name + ' stored payment, billing and audit');
+    }
+    t.diagnostic('company monthly/group submissions match ' + cases.length + ' HTTP pairs and persisted payment/billing/audit states');
+  });
+  await t.test('payment request replacements select the same current personal and company cards', async () => {
+    const { envelope } = require('./final-parity.cjs');
+    const { OrderPaymentsRepository } = require('./monolith-runtime/orders/order-payments.repository');
+    const { ParcelDraftWriteScope } = require('../dist/orders/parcel-draft-write-scope.service');
+    const customerId = 700401, companyId = 700402, cardId = 700403;
+    const config = { get: key => ({ CUSTOMER_URL: 'http://customer-app:3001', CUSTOMER_AUTH_TOKEN: process.env.CUSTOMER_AUTH_TOKEN })[key] };
+    const repositories = [new OrderPaymentsRepository(null, null, null),
+      new OrdersRepository(new ParcelDraftWriteScope(null, config, null))];
+    const cases = [
+      { name: 'personal card', method: 'billing' },
+      { name: 'company card', method: 'groupBilling', companyCard: true },
+      { name: 'other owner company card', method: 'billing', companyCard: true },
+      { name: 'other owner personal card', method: 'groupBilling' },
+      { name: 'failed personal card', method: 'billing', cardStatus: 'FAILED' },
+      { name: 'registering company card', method: 'groupBilling', companyCard: true, cardStatus: 'REGISTERING' },
+      { name: 'deleted personal card', method: 'billing', deleted: true },
+      { name: 'deleted company card', method: 'groupBilling', companyCard: true, deleted: true },
+      { name: 'expired personal card', method: 'billing', expired: true },
+      { name: 'expired company card', method: 'groupBilling', companyCard: true, expired: true },
+      { name: 'current Korean month personal card', method: 'billing', currentMonth: true },
+      { name: 'current Korean month company card', method: 'groupBilling', companyCard: true, currentMonth: true },
+      { name: 'missing company snapshot', method: 'groupBilling', companyCard: true, organization: null },
+      { name: 'legacy credit request', method: 'credit' },
+      { name: 'zero amount request', method: 'billing', amount: 0 },
+      { name: 'cancelled request', method: 'billing', status: 'CANCELLED' },
+    ];
+    for (const db of [reference, databases.customer]) {
+      await db.query("INSERT INTO customers(customer_seq,name,phone_number,status) OVERRIDING SYSTEM VALUE VALUES($1,'카드 연결','01070000401','ACTIVE')", [customerId]);
+      await db.query("INSERT INTO organizations(organization_seq,name,status) OVERRIDING SYSTEM VALUE VALUES($1,'카드 연결 기업','ACTIVE')", [companyId]);
+      await db.query(`INSERT INTO payment_cards(payment_card_seq,customer_seq,registration_key,request_hash,provider_customer_key,provider_environment,
+        encrypted_billing_key,expiration_year,expiration_month,masked_number,status)
+        OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,'selection-fixture',$4,'test','encrypted-owner-value',2099,12,'1234********5678','ACTIVE')`,
+      [cardId, customerId, randomUUID(), randomUUID()]);
+    }
+    const customerMessages = await snapshot(databases.customer, ['outbox_events', 'inbox_events']);
+    const providerHistory = async () => Promise.all(['monolith', 'order'].map(async side => {
+      const response = await fetch('http://' + side + '-app:8000/__requests', {
+        headers: { Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN },
+        signal: AbortSignal.timeout(10000),
+      });
+      assert.equal(response.status, 200);
+      return response.json();
+    }));
+    const beforeProvider = await providerHistory();
+    let guarded = 0;
+    for (const [index, entry] of cases.entries()) {
+      const state = { cardStatus: 'ACTIVE', companyCard: false, deleted: false, expired: false,
+        currentMonth: false, organization: companyId, amount: 7000, status: 'notPaid', ...entry };
+      const id = 700410 + index, requestId = randomUUID(), values = [], confirmations = [];
+      for (const [side, db] of [reference, databases.order].entries()) {
+        const customer = side === 0 ? reference : databases.customer;
+        const month = (await customer.query("SELECT extract(year FROM clock_timestamp() AT TIME ZONE 'Asia/Seoul')::int AS year_value,extract(month FROM clock_timestamp() AT TIME ZONE 'Asia/Seoul')::int AS month_value")).rows[0];
+        await customer.query(`UPDATE payment_cards SET customer_seq=$2,organization_seq=$3,status=$4,deleted_at=$5,
+          expiration_year=$6,expiration_month=$7 WHERE payment_card_seq=$1`,
+        [cardId, state.companyCard ? null : customerId, state.companyCard ? companyId : null, state.cardStatus,
+          state.deleted ? '2025-01-01Z' : null, state.expired ? 2000 : state.currentMonth ? month.year_value : 2099, state.currentMonth ? month.month_value : 12]);
+        await db.query("INSERT INTO orders(order_seq,customer_seq,payment_method_type,status,total_amount,payment_due_at,billing_organization_seq) OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,$4,$5,'2094-01-01Z',$6)",
+          [id, customerId, state.method, state.status, state.amount, state.organization]);
+        await db.query("INSERT INTO order_payment_requests(order_seq,amount,expires_at) VALUES($1,7000,'2094-01-01Z')", [id]);
+        const before = (await customer.query('SELECT to_jsonb(c) AS card FROM payment_cards c WHERE payment_card_seq=$1', [cardId])).rows;
+        await repositories[side].replaceRequest(db, id);
+        assert.deepEqual((await customer.query('SELECT to_jsonb(c) AS card FROM payment_cards c WHERE payment_card_seq=$1', [cardId])).rows, before, state.name + ' card unchanged');
+        const current = (await db.query('SELECT * FROM order_payment_requests WHERE order_seq=$1 AND invalidated_at IS NULL', [id])).rows[0];
+        if (current && current.payment_card_seq !== null) {
+          const response = await fetch(sides[side].base + '/api/payments/requests/' + current.payment_request_id + '/confirm', {
+            method: 'POST', headers: { Origin: 'https://payments.example.test', 'Content-Type': 'application/json', 'X-Request-Id': requestId },
+            body: JSON.stringify({ orderId: current.payment_request_id, amount: 7000, paymentKey: 'hosted-guard-key' }),
+          });
+          const body = await response.json();
+          assert.equal(response.status, 409, sides[side].name + ' card-bound hosted confirmation ' + JSON.stringify(body));
+          assert.equal(body.error.message, '등록 카드 결제는 기존 거래 결과를 확인해 주세요.');
+          confirmations.push(envelope(body, requestId));
+          assert.deepEqual((await db.query('SELECT * FROM order_payment_requests WHERE payment_request_id=$1', [current.payment_request_id])).rows[0], current);
+        }
+        values.push((await db.query(`SELECT amount,payment_card_seq,card_payment_failed,expires_at,
+          invalidated_at IS NOT NULL AS invalidated FROM order_payment_requests WHERE order_seq=$1
+          ORDER BY invalidated_at NULLS LAST`, [id])).rows);
+      }
+      assert.deepEqual(values[1], values[0], state.name);
+      assert.equal(values[1].length, state.amount > 0 && state.status === 'notPaid' ? 2 : 1);
+      assert.equal(values[1][0].invalidated, true);
+      if (confirmations.length) {
+        assert.equal(confirmations.length, 2);
+        assert.deepEqual(confirmations[1], confirmations[0]);
+        guarded++;
+      }
+    }
+    assert.deepEqual(await snapshot(databases.customer, ['outbox_events', 'inbox_events']), customerMessages);
+    assert.deepEqual(await providerHistory(), beforeProvider, 'card-bound hosted confirmations do not contact PG');
+    const blocker = await databases.customer.connect();
+    const pending = [];
+    try {
+      await blocker.query('BEGIN');
+      await blocker.query('LOCK TABLE customers IN ACCESS EXCLUSIVE MODE');
+      for (let index = 0; index < 5; index++)
+        pending.push(fetch('http://customer-app:3001/api/customers/1', {
+          headers, signal: AbortSignal.timeout(15000),
+        }));
+      for (let attempt = 0; ; attempt++) {
+        const waits = (await databases.customer.query("SELECT count(*)::int AS count FROM pg_locks WHERE relation='customers'::regclass AND mode='AccessShareLock' AND NOT granted")).rows[0].count;
+        if (waits === 5) break;
+        assert.ok(attempt < 100, 'five customer business reads reach the table lock');
+        await pause(20);
+      }
+      const eventId = randomUUID();
+      const response = await fetch('http://customer-app:3001/internal/call-read-references/parcel-draft-write/reference', {
+        method: 'POST', signal: AbortSignal.timeout(4000),
+        headers: { Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eventId, source: 'order', eventType: 'ParcelDraftWriteReferenceRequested',
+          payload: { operation: 'CustomerPaymentCardRead', input: { customerSeq: customerId, organizationSeq: null } } }),
+      });
+      assert.equal(response.status, 200, 'independent card selection finishes while all business connections are occupied');
+      assert.deepEqual(await response.json(), { eventId, status: 'processed', payload: cardId });
+    } finally {
+      await blocker.query('ROLLBACK');
+      blocker.release();
+      const responses = await Promise.all(pending);
+      for (const response of responses) assert.equal(response.status, 200, 'blocked business reads finish after release');
+    }
+    t.diagnostic('payment request card selection matches ' + cases.length + ' replacements and ' + guarded + ' hosted confirmation pairs without customer/event/PG mutations');
+  });
+  await t.test('card approval preparation preserves owner locks, durable claims and source recovery states', async caseTest => {
+    const { createServer } = require('node:http');
+    const { networkInterfaces } = require('node:os');
+    const { createCipheriv, randomBytes } = require('node:crypto');
+    const { PaymentsService } = require('../dist/payments/payments.service');
+    const { PaymentsRepository } = require('../dist/payments/payments.repository');
+    const { DatabaseService } = require('../dist/database/database.service');
+    const { ParcelDraftWriteScope } = require('../dist/orders/parcel-draft-write-scope.service');
+    const { CardPaymentScopeController } = require('../dist/payments/card-payment-scope.controller');
+    const customerId = 710001, companyId = 710002, departmentId = 710003, memberId = 710004;
+    const encryption = '11'.repeat(32), billingKey = 'native-card-claim-key';
+    const personal = 710005, company = 710006, nextPersonal = 710007, nextCompany = 710008;
+    const ip = Object.values(networkInterfaces()).flat().find(entry => entry.family === 'IPv4' && !entry.internal).address;
+    const acknowledgements = [];
+    let callback, heldRequestId, committed, releaseAcknowledgement;
+    const server = createServer(async (request, response) => {
+      if (request.method !== 'POST' || request.url !== '/internal/card-payment-scope' ||
+          request.headers.authorization !== 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN)
+        return response.writeHead(401).end();
+      try {
+        const parts = [];
+        for await (const part of request) parts.push(part);
+        const event = JSON.parse(Buffer.concat(parts).toString());
+        const result = await callback.execute(event);
+        acknowledgements.push(result);
+        if (event.payload.paymentRequestId === heldRequestId) {
+          committed();
+          await new Promise(resolve => { releaseAcknowledgement = resolve; });
+        }
+        response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(result));
+      } catch (error) {
+        const status = error.getStatus?.() ?? 500;
+        const body = error.getResponse?.() ?? { code: 'INTERNAL_ERROR', message: 'native callback failed', details: [] };
+        response.writeHead(status, { 'Content-Type': 'application/json' }).end(JSON.stringify({ error: body }));
+      }
+    });
+    await new Promise(resolve => server.listen(3002, '0.0.0.0', resolve));
+    const configurations = ['monolith', 'order'].map(side => ({
+      DB_HOST: side + '-db', DB_PORT: 5432, DB_USER: side + '_app', DB_PASSWORD: process.env.PGPASSWORD,
+      DB_NAME: 'dva_webhook_test', CUSTOMER_URL: 'http://customer-app:3001',
+      CUSTOMER_AUTH_TOKEN: process.env.CUSTOMER_AUTH_TOKEN, MSA_INSTANCE_IP: ip,
+      TOSS_BILLING_SECRET_KEY: 'test_sk_native_claim', PAYMENT_CARD_ENCRYPTION_KEY: encryption,
+    }));
+    const configs = configurations.map(values => ({ get: key => values[key] }));
+    const serviceDatabase = new DatabaseService(configs[1]);
+    const ownerScope = new ParcelDraftWriteScope(serviceDatabase, configs[1], null);
+    const services = [
+      { claimCardApproval: async id => {
+        const response = await fetch('http://monolith-app:8000/__card-claim', {
+          method: 'POST', signal: AbortSignal.timeout(30000),
+          headers: { Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id, config: {
+            TOSS_BILLING_SECRET_KEY: configurations[0].TOSS_BILLING_SECRET_KEY,
+            PAYMENT_CARD_ENCRYPTION_KEY: configurations[0].PAYMENT_CARD_ENCRYPTION_KEY,
+          } }),
+        });
+        const result = await response.json();
+        if (response.status !== 200) {
+          const error = new Error('Source card claim failed');
+          error.getStatus = () => response.status;
+          error.getResponse = () => result.error;
+          throw error;
+        }
+        return result.claim;
+      } },
+      new PaymentsService(configs[1], new PaymentsRepository(serviceDatabase), serviceDatabase, null, null,
+        new OrdersRepository(ownerScope), null, null, ownerScope),
+    ];
+    callback = new CardPaymentScopeController(services[1]);
+    caseTest.after(async () => {
+      releaseAcknowledgement?.();
+      await serviceDatabase.onModuleDestroy();
+      await new Promise(resolve => { server.closeAllConnections(); server.close(resolve); });
+    });
+    const cards = [personal, company, nextPersonal, nextCompany].map(id => {
+      const nonce = randomBytes(12), cipher = createCipheriv('aes-256-gcm', Buffer.from(encryption, 'hex'), nonce);
+      cipher.setAAD(Buffer.from(String(id)));
+      return { id, registration: randomUUID(), provider: randomUUID(), encrypted:
+        Buffer.concat([nonce, cipher.update(billingKey, 'utf8'), cipher.final(), cipher.getAuthTag()]).toString('base64') };
+    });
+    for (const db of [reference, databases.customer]) {
+      await db.query("INSERT INTO customers(customer_seq,name,phone_number,status) OVERRIDING SYSTEM VALUE VALUES($1,'승인 준비','01071000001','ACTIVE')", [customerId]);
+      await db.query("INSERT INTO organizations(organization_seq,name,status,monthly_billing_enabled) OVERRIDING SYSTEM VALUE VALUES($1,'승인 기업','ACTIVE',true)", [companyId]);
+      await db.query("INSERT INTO organizations(organization_seq,name,status) OVERRIDING SYSTEM VALUE VALUES($1,'이전 청구 기업','ACTIVE')", [companyId + 8]);
+      await db.query("INSERT INTO departments(department_seq,organization_seq,name) OVERRIDING SYSTEM VALUE VALUES($1,$2,'승인 부서')", [departmentId, companyId]);
+      await db.query("INSERT INTO memberships(membership_seq,customer_seq,organization_seq,department_seq,employee_no,status,monthly_billing_enabled,group_billing_enabled) OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,$4,'card-claim','ACTIVE',true,true)", [memberId, customerId, companyId, departmentId]);
+      for (const card of cards)
+        await db.query(`INSERT INTO payment_cards(payment_card_seq,customer_seq,organization_seq,registration_key,request_hash,provider_customer_key,provider_environment,
+          encrypted_billing_key,expiration_year,expiration_month,masked_number,status) OVERRIDING SYSTEM VALUE
+          VALUES($1,$2,$3,$4,'native-claim-fixture',$5,'test',$6,2099,12,'1234********5678',$7)`,
+        [card.id, [personal, nextPersonal].includes(card.id) ? customerId : null,
+          [company, nextCompany].includes(card.id) ? companyId : null, card.registration, card.provider,
+          card.encrypted, [personal, company].includes(card.id) ? 'ACTIVE' : 'FAILED']);
+    }
+    const cases = [
+      { name: 'personal card and owner commit boundary' },
+      { name: 'company card', group: true },
+      { name: 'company card without department', group: true, noDepartment: true },
+      { name: 'completed request', completed: true },
+      { name: 'lookup without customer availability', lookup: true, expired: true, withdrawn: true, cardDeleted: true, customerUnavailable: true },
+      { name: 'missing request', missing: true, status: 404 },
+      { name: 'expired retention', retention: true, status: 404 },
+      { name: 'invalidated request', invalidated: true, status: 409 },
+      { name: 'expired fresh request', expired: true, status: 409 },
+      { name: 'request without a card', noCard: true, status: 409 },
+      { name: 'cancelled order', cancelled: true, status: 409 },
+      { name: 'amount mismatch', wrongAmount: true, status: 409 },
+      { name: 'live claim', busy: true, status: 409 },
+      { name: 'expired claim', staleClaim: true },
+      { name: 'withdrawn customer', withdrawn: true, status: 403 },
+      { name: 'deleted customer', customerDeleted: true, status: 403 },
+      { name: 'missing customer', noCustomer: true, status: 403 },
+      { name: 'member group billing disabled', group: true, groupDisabled: true, status: 403 },
+      { name: 'different billing company', group: true, wrongCompany: true, status: 403 },
+      { name: 'inactive company', group: true, inactiveCompany: true, status: 403 },
+      { name: 'expired personal card', cardExpired: true, status: 409 },
+      { name: 'expired company card', group: true, cardExpired: true, status: 403 },
+      { name: 'same declined card', failed: true, status: 409 },
+      { name: 'changed personal card', failed: true, changedCard: true },
+      { name: 'changed company card', group: true, failed: true, changedCard: true },
+      { name: 'invalid item price', badPrice: true, status: 422 },
+      { name: 'changed card rolls back on invalid price', failed: true, changedCard: true, badPrice: true, status: 422 },
+      { name: 'different provider environment', liveEnvironment: true, status: 409 },
+      { name: 'missing encryption key', missingKey: true, status: 503 },
+      { name: 'invalid ciphertext key', badKey: true, status: 503 },
+      { name: 'missing billing configuration', missingSecret: true, status: 503 },
+    ];
+    const fixed = '2030-01-01T00:00:00Z', old = '2000-01-01T00:00:00Z';
+    const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    const claimedIds = [new Set(), new Set()];
+    const probe = { eventId: randomUUID(), source: 'customer', eventType: 'OrderCardApprovalRequested',
+      payload: { paymentRequestId: randomUUID(), orderAddress: null, customerAddress: null } };
+    for (const [url, input, authenticated, status] of [
+      ['http://order-app:3002/internal/card-payment-scope', probe, false, 403],
+      ['http://order-app:3002/internal/card-payment-scope', probe, true, 503],
+      ['http://order-app:3002/internal/card-payment-scope', { ...probe, source: 'order' }, true, 422],
+      ['http://customer-app:3001/internal/call-read-references/parcel-draft-write/card-approval', probe, false, 403],
+      ['http://customer-app:3001/internal/call-read-references/parcel-draft-write/card-approval', probe, true, 422],
+    ]) {
+      const response = await fetch(url, { method: 'POST', signal: AbortSignal.timeout(5000),
+        headers: { 'Content-Type': 'application/json', ...(authenticated ? { Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN } : {}) },
+        body: JSON.stringify(input) });
+      assert.equal(response.status, status, 'normal internal route, authentication and scope boundary ' + url);
+      assert.ok((await response.json()).error);
+    }
+    const eventHistory = async () => ({
+      order: await snapshot(databases.order, ['outbox_events', 'inbox_events']),
+      customer: await snapshot(databases.customer, ['outbox_events', 'inbox_events']),
+      operations: await snapshot(databases.operations, ['outbox_events', 'inbox_events', 'audit_logs']),
+    });
+    const beforeEvents = await eventHistory();
+    async function seedClaim(state, index) {
+      const id = 710100 + index, requestId = randomUUID(), transactionId = randomUUID();
+      const priorClaim = state.busy || state.staleClaim ? randomUUID() : null;
+      const busyUntil = new Date(Date.now() + 60000).toISOString();
+      for (const [side, db] of [reference, databases.order].entries()) {
+        const customer = side === 0 ? reference : databases.customer;
+        await customer.query('UPDATE customers SET status=$2,deleted_at=$3 WHERE customer_seq=$1',
+          [customerId, state.withdrawn ? 'WITHDRAWN' : 'ACTIVE', state.customerDeleted ? fixed : null]);
+        await customer.query('UPDATE organizations SET status=$2 WHERE organization_seq=$1',
+          [companyId, state.inactiveCompany ? 'INACTIVE' : 'ACTIVE']);
+        await customer.query('UPDATE memberships SET group_billing_enabled=$2,department_seq=$3,organization_seq=$4 WHERE membership_seq=$1',
+          [memberId, !state.groupDisabled, state.noDepartment ? null : departmentId, companyId]);
+        await customer.query("UPDATE payment_cards SET status='FAILED' WHERE payment_card_seq=ANY($1::int[])", [[personal, company, nextPersonal, nextCompany]]);
+        for (const card of cards) {
+          const previous = card.id === personal || card.id === company;
+          const selectedOwner = state.group ? [company, nextCompany] : [personal, nextPersonal];
+          const selected = selectedOwner.includes(card.id);
+          const active = selected && state.changedCard ? !previous : previous;
+          await customer.query('UPDATE payment_cards SET status=$2,deleted_at=$3,expiration_year=$4 WHERE payment_card_seq=$1',
+            [card.id, active ? 'ACTIVE' : 'FAILED', selected && (state.cardDeleted || state.changedCard && previous) ? fixed : null,
+              selected && state.cardExpired ? 2000 : 2099]);
+        }
+        const client = await db.connect();
+        try {
+          await client.query('BEGIN');
+          await client.query("SET LOCAL session_replication_role='replica'");
+          await client.query(`INSERT INTO orders OVERRIDING SYSTEM VALUE
+            SELECT (jsonb_populate_record(NULL::orders,to_jsonb(o)||$1::jsonb)).* FROM orders o WHERE order_seq=1002`, [{
+            order_seq: id, customer_seq: state.noCustomer ? null : customerId,
+            payment_method_type: state.group ? 'groupBilling' : 'billing',
+            status: state.cancelled ? 'CANCELLED' : state.completed ? 'PAID' : 'notPaid',
+            total_amount: 7000, creation_request_id: null, creation_source: 'AI', created_by_admin_user_seq: null,
+            version: 1, created_at: state.retention ? old : fixed, updated_at: fixed, deleted_at: null,
+            paid_at: state.completed ? fixed : null, payment_due_at: '2099-01-01T00:00:00Z',
+            closed_at: state.retention ? old : state.cancelled ? fixed : null,
+            parcel_no: null, dver_received_at: null, submission_first_attempt_at: null, submission_last_attempt_at: null,
+            billing_organization_seq: state.group ? companyId + (state.wrongCompany ? 8 : 0) : null,
+            billing_department_seq: state.group && !state.noDepartment ? departmentId : null,
+            billing_organization_name: state.group ? '접수 시 기업' : null,
+            billing_department_name: state.group && !state.noDepartment ? '접수 시 부서' : null,
+          }]);
+          await client.query(`INSERT INTO order_parcels OVERRIDING SYSTEM VALUE
+            SELECT (jsonb_populate_record(NULL::order_parcels,to_jsonb(p)||$1::jsonb)).* FROM order_parcels p WHERE order_parcel_seq=20021`, [{
+            order_parcel_seq: id, order_seq: id, parcel_position: 1, status: state.cancelled ? 'CANCELLED' : 'ACTIVE',
+            origin_pin_scope: null, origin_pin_seq: null, document_count: 1, small_box_count: 0,
+            medium_box_count: 0, big_box_count: 0, item_price: state.badPrice ? 0 : 1000, notified_price: 7000,
+            created_at: fixed, updated_at: fixed,
+          }]);
+          if (!state.missing)
+            await client.query(`INSERT INTO order_payment_requests(payment_request_id,order_seq,payment_card_seq,card_payment_order_id,card_payment_failed,
+              amount,expires_at,created_at,approval_started_at,approval_claim_id,approval_claimed_until,invalidated_at,completed_at,
+              provider_payment_key,provider_approved_at,provider_reference)
+              VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+            [requestId, id, state.noCard ? null : state.group ? company : personal, transactionId, !!state.failed,
+              state.wrongAmount ? 6000 : 7000, state.expired ? old : '2099-01-01T00:00:00Z', fixed,
+              state.lookup || state.completed ? fixed : null, priorClaim,
+              state.busy ? busyUntil : state.staleClaim ? old : null,
+              state.invalidated ? fixed : null, state.completed ? fixed : null,
+              state.completed ? 'completed-' + id : state.changedCard ? 'prior-' + id : null,
+              state.completed || state.changedCard ? fixed : null, state.completed ? 'completed-' + id : null]);
+          await client.query('COMMIT');
+        } catch (error) {
+          await client.query('ROLLBACK');
+          throw error;
+        } finally { client.release(); }
+      }
+      return { id, requestId, transactionId, priorClaim };
+    }
+    const requestsFor = async (db, id) => (await db.query('SELECT to_jsonb(r) AS data FROM order_payment_requests r WHERE payment_request_id=$1', [id])).rows;
+    const orderFor = async (db, id) => (await db.query('SELECT to_jsonb(o) AS data FROM orders o WHERE order_seq=$1', [id])).rows;
+    function generatedTime(value, start, offset) {
+      const time = Date.parse(value);
+      assert.ok(time >= start + offset - 1000 && time <= Date.now() + offset + 1000, 'claim timestamp ' + value);
+    }
+    for (const [index, state] of cases.entries()) {
+      const fixture = await seedClaim(state, index), results = [], stored = [], start = Date.now();
+      for (const [side, db] of [reference, databases.order].entries()) {
+        Object.assign(configurations[side], {
+          CUSTOMER_URL: state.customerUnavailable ? 'http://127.0.0.1:1' : 'http://customer-app:3001',
+          TOSS_BILLING_SECRET_KEY: state.missingSecret ? undefined : state.liveEnvironment ? 'live_sk_native_claim' : 'test_sk_native_claim',
+          PAYMENT_CARD_ENCRYPTION_KEY: state.missingKey ? undefined : state.badKey ? '22'.repeat(32) : encryption,
+        });
+        const before = await requestsFor(db, fixture.requestId), beforeOrder = await orderFor(db, fixture.id);
+        const customer = side === 0 ? reference : databases.customer;
+        const beforeCards = (await customer.query('SELECT to_jsonb(c) AS data FROM payment_cards c WHERE payment_card_seq=ANY($1::int[]) ORDER BY payment_card_seq', [[personal, company, nextPersonal, nextCompany]])).rows;
+        let claim, failure;
+        try {
+          if (index === 0 && side === 1) {
+            heldRequestId = fixture.requestId;
+            const gate = new Promise(resolve => { committed = resolve; });
+            const pending = services[side].claimCardApproval(fixture.requestId);
+            try {
+              await Promise.race([gate, pending.then(() => assert.fail('owner acknowledgement must follow local commit'))]);
+              assert.ok((await db.query('SELECT approval_started_at FROM order_payment_requests WHERE payment_request_id=$1', [fixture.requestId])).rows[0].approval_started_at);
+              const probe = await databases.customer.connect();
+              try {
+                await probe.query('BEGIN');
+                await assert.rejects(probe.query('SELECT 1 FROM payment_cards WHERE payment_card_seq=$1 FOR UPDATE NOWAIT', [personal]),
+                  error => error.code === '55P03');
+              } finally { await probe.query('ROLLBACK'); probe.release(); }
+            } finally { releaseAcknowledgement?.(); heldRequestId = null; }
+            claim = await pending;
+            assert.equal((await databases.customer.query('SELECT 1 FROM payment_cards WHERE payment_card_seq=$1 FOR UPDATE NOWAIT', [personal])).rowCount, 1);
+          } else claim = await services[side].claimCardApproval(fixture.requestId);
+          if (!claim.done) claim = { card: undefined, billingKey: undefined, ...claim };
+        } catch (error) {
+          failure = { status: error.getStatus?.() ?? 500, response: error.getResponse?.() ?? String(error) };
+        }
+        assert.equal(failure?.status ?? 200, state.status ?? 200, sides[side].name + ' ' + state.name + ' ' + JSON.stringify(failure));
+        const after = await requestsFor(db, fixture.requestId);
+        assert.deepEqual(await orderFor(db, fixture.id), beforeOrder, state.name + ' order immutable');
+        assert.deepEqual((await customer.query('SELECT to_jsonb(c) AS data FROM payment_cards c WHERE payment_card_seq=ANY($1::int[]) ORDER BY payment_card_seq', [[personal, company, nextPersonal, nextCompany]])).rows, beforeCards, state.name + ' card immutable');
+        if (failure || claim.done) assert.deepEqual(after, before, state.name + ' read or rejected claim leaves the request intact');
+        else {
+          const row = after[0].data;
+          assert.match(claim.claimId, uuidPattern);
+          assert.notEqual(claim.claimId, fixture.priorClaim);
+          assert.equal(claimedIds[side].has(claim.claimId), false);
+          claimedIds[side].add(claim.claimId);
+          assert.equal(row.approval_claim_id, claim.claimId);
+          generatedTime(row.approval_claimed_until, start, 90000);
+          generatedTime(row.approval_next_check_at, start, 60000);
+          row.approval_claim_id = '<new claim>';
+          row.approval_claimed_until = '<90-second lease>';
+          row.approval_next_check_at = '<one-minute check>';
+          if (!state.lookup) { generatedTime(row.approval_started_at, start, 0); row.approval_started_at = '<approval started>'; }
+          assert.equal(claim.lookupOnly, !!state.lookup);
+          assert.equal(claim.billingKey, state.lookup ? undefined : billingKey);
+          assert.equal(claim.card?.paymentCardSeq, state.lookup ? undefined : state.group ? state.changedCard ? nextCompany : company : state.changedCard ? nextPersonal : personal);
+          assert.equal(claim.orderId, row.card_payment_order_id);
+          if (state.changedCard) {
+            assert.match(claim.orderId, uuidPattern);
+            assert.notEqual(claim.orderId, fixture.transactionId);
+            row.card_payment_order_id = '<new card transaction>';
+            assert.equal(row.provider_payment_key, null);
+            assert.equal(row.provider_approved_at, null);
+          }
+          claim = { ...claim, claimId: '<new claim>', orderId: state.changedCard ? '<new card transaction>' : claim.orderId };
+        }
+        results.push(failure ? { failure } : { claim });
+        stored.push(after);
+      }
+      assert.deepEqual(results[1], results[0], state.name + ' claim/result');
+      assert.deepEqual(stored[1], stored[0], state.name + ' full stored request');
+    }
+    assert.deepEqual(await eventHistory(), beforeEvents, 'claim references do not journal card credentials or audits');
+    for (const acknowledgement of acknowledgements)
+      assert.deepEqual(acknowledgement, { eventId: acknowledgement.eventId, status: 'processed', payload: true });
+    assert.equal(JSON.stringify(acknowledgements).includes(billingKey), false);
+    t.diagnostic('card approval preparation matches ' + cases.length + ' source states, owner locks through local commit, encrypted AAD and customer-independent recovery');
+    await caseTest.test('public card reconciliation preserves PG history, payment, company charges and Dver completion', async () => {
+      const { envelope } = require('./final-parity.cjs');
+      const delivery = new Pool({ host: 'delivery-db', user: 'delivery_app' });
+      caseTest.after(() => delivery.end());
+      const owners = [
+        { ...sides[0], orders: reference, customers: reference, audit: reference, delivery: reference },
+        { ...sides[1], orders: databases.order, customers: databases.customer, audit: databases.operations, delivery },
+      ];
+      const paymentCases = [
+        { name: 'personal approval', key: 'card-success' },
+        { name: 'company approval', key: 'card-success', group: true },
+        { name: 'company snapshot changes while PG is pending', key: 'card-hold', group: true, hold: true },
+        { name: 'order submission approves its registered card', key: 'card-success', submit: true },
+        { name: 'unknown approval and lookup', key: 'card-unknown', first: 502 },
+        { name: 'lost approval acknowledgement', key: 'card-lost-ack', first: 502 },
+        { name: 'wrong result order', key: 'card-bad-order', first: 502 },
+        { name: 'wrong result amount', key: 'card-bad-amount', first: 502 },
+        { name: 'wrong result currency', key: 'card-bad-currency', first: 502 },
+        { name: 'wrong result date', key: 'card-bad-date', first: 502 },
+        { name: 'declined card and replacement', key: 'card-decline', first: 422, replace: true },
+      ];
+      function encrypt(id, value) {
+        const nonce = randomBytes(12), cipher = createCipheriv('aes-256-gcm', Buffer.from(encryption, 'hex'), nonce);
+        cipher.setAAD(Buffer.from(String(id)));
+        return Buffer.concat([nonce, cipher.update(value, 'utf8'), cipher.final(), cipher.getAuthTag()]).toString('base64');
+      }
+      const histories = async () => Promise.all(['monolith', 'order'].map(async side => {
+        const response = await fetch('http://' + side + '-app:8000/__requests', {
+          headers: { Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN }, signal: AbortSignal.timeout(5000),
+        });
+        assert.equal(response.status, 200);
+        return response.json();
+      }));
+      async function reconcile(fixture, status, label, options = {}) {
+        const requestId = randomUUID(), result = [];
+        for (const [sideIndex, side] of owners.entries()) {
+          const path = options.submit ? '/api/orders/' + fixture.id + '/submit'
+            : '/api/payments/requests/' + fixture.requestId + '/reconcile';
+          const pending = fetch(side.base + path, {
+            method: 'POST', signal: AbortSignal.timeout(30000),
+            headers: { Origin: 'https://payments.example.test', 'Content-Type': 'application/json', 'X-Request-Id': requestId,
+              ...(options.submit ? headers : {}) },
+            body: JSON.stringify(options.submit ? { expectedVersion: 1 } : {}),
+          });
+          if (options.hold) {
+            try {
+              for (let attempt = 0;; attempt++) {
+                const history = (await histories())[sideIndex];
+                if (history.some(value => value.path === '/v1/billing/card-hold' && value.body.orderId === fixture.transactionId)) break;
+                assert.ok(attempt < 100, side.name + ' approval reaches PG');
+                await pause(20);
+              }
+              for (const [database, table, field, value] of [
+                [side.orders, 'orders', 'order_seq', fixture.id],
+                [side.customers, 'payment_cards', 'payment_card_seq', company],
+              ]) {
+                const client = await database.connect();
+                try {
+                  await client.query('BEGIN');
+                  await client.query('SELECT 1 FROM ' + table + ' WHERE ' + field + '=$1 FOR UPDATE NOWAIT', [value]);
+                } finally { await client.query('ROLLBACK'); client.release(); }
+              }
+              await side.customers.query("UPDATE organizations SET name='승인 대기 중 변경 기업' WHERE organization_seq=$1", [companyId]);
+              await side.customers.query("UPDATE departments SET name='승인 대기 중 변경 부서' WHERE department_seq=$1", [departmentId]);
+              await side.customers.query('UPDATE memberships SET organization_seq=$2,department_seq=NULL WHERE membership_seq=$1', [memberId, companyId + 8]);
+            } finally {
+              const release = await fetch('http://' + (sideIndex === 0 ? 'monolith' : 'order') + '-app:8000/__card-release', {
+                method: 'POST', headers: { Authorization: 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ key: fixture.transactionId }), signal: AbortSignal.timeout(5000),
+              });
+              assert.equal(release.status, 200);
+            }
+          }
+          const response = await pending;
+          const body = await response.json();
+          assert.equal(response.status, status, side.name + ' ' + label + ' ' + JSON.stringify(body));
+          result.push(envelope(body, requestId));
+        }
+        assert.deepEqual(result[1], result[0], label + ' public response');
+        return { requestId, data: result[0].data };
+      }
+      let pairs = 0;
+      for (const [index, state] of paymentCases.entries()) {
+        const fixture = await seedClaim(state, 100 + index), selected = state.group ? company : personal;
+        for (const side of owners)
+          await side.customers.query('UPDATE payment_cards SET encrypted_billing_key=$2 WHERE payment_card_seq=$1', [selected, encrypt(selected, state.key)]);
+        const beforeHistory = await histories(), started = Date.now();
+        const first = await reconcile(fixture, state.first ?? 200, state.name, state);
+        pairs++;
+        let completed = first;
+        if (state.submit) {
+          assert.equal(first.data.status, 'ACCEPTED');
+          completed = await reconcile(fixture, 200, state.name + ' payment view');
+          pairs++;
+        }
+        if (state.first) {
+          for (const side of owners) {
+            const request = (await side.orders.query('SELECT * FROM order_payment_requests WHERE payment_request_id=$1', [fixture.requestId])).rows[0];
+            assert.equal(request.completed_at, null);
+            assert.equal(request.card_payment_failed, !!state.replace);
+            assert.equal(request.approval_started_at !== null, !state.replace);
+            assert.equal(request.approval_claim_id, null);
+            assert.equal((await side.orders.query('SELECT 1 FROM order_billing_charges WHERE order_seq=$1', [fixture.id])).rowCount, 0);
+          }
+          if (state.replace) {
+            await reconcile(fixture, 409, 'same declined card is not charged again');
+            pairs++;
+            for (const side of owners) {
+              await side.customers.query("UPDATE payment_cards SET status='FAILED',deleted_at=$2 WHERE payment_card_seq=$1", [personal, fixed]);
+              await side.customers.query("UPDATE payment_cards SET status='ACTIVE',encrypted_billing_key=$2 WHERE payment_card_seq=$1", [nextPersonal, encrypt(nextPersonal, 'card-success')]);
+            }
+          }
+          completed = await reconcile(fixture, 200, state.name + ' recovered');
+          pairs++;
+        }
+        assert.equal(completed.data.status, 'PAID');
+        assert.equal(completed.data.orderStatus, 'ACCEPTED');
+        assert.equal(completed.data.autoCharge, true);
+        assert.equal(completed.data.cardPaymentFailed, false);
+        await reconcile(fixture, 200, state.name + ' completed replay');
+        pairs++;
+        const stored = [];
+        for (const [sideIndex, side] of owners.entries()) {
+          const order = (await side.orders.query('SELECT to_jsonb(o) AS data FROM orders o WHERE order_seq=$1', [fixture.id])).rows[0].data;
+          const request = (await requestsFor(side.orders, fixture.requestId))[0].data;
+          if (state.hold) {
+            assert.equal(order.billing_organization_seq, companyId);
+            assert.equal(order.billing_department_seq, departmentId);
+            assert.equal(order.billing_organization_name, '승인 대기 중 변경 기업');
+            assert.equal(order.billing_department_name, '승인 대기 중 변경 부서');
+          }
+          const transaction = request.card_payment_order_id;
+          assert.match(transaction, uuidPattern);
+          assert.equal(request.provider_reference, 'card-payment-' + transaction);
+          assert.equal(request.provider_payment_key, request.provider_reference);
+          assert.equal(request.approval_claim_id, null);
+          assert.equal(request.approval_claimed_until, null);
+          assert.equal(request.card_payment_failed, false);
+          assert.equal(request.provider_approved_at, '2030-03-02T00:01:00+00:00');
+          for (const field of ['updated_at', 'closed_at', 'submission_first_attempt_at', 'submission_last_attempt_at']) {
+            if (order[field] !== null) { generatedTime(order[field], started, 0); order[field] = '<generated ' + field + '>'; }
+          }
+          for (const field of ['completed_at', 'approval_started_at']) {
+            generatedTime(request[field], started, 0); request[field] = '<generated ' + field + '>';
+          }
+          generatedTime(request.approval_next_check_at, started, 60000);
+          request.approval_next_check_at = '<one-minute check>';
+          if (state.replace) {
+            assert.notEqual(transaction, fixture.transactionId);
+            request.card_payment_order_id = '<replacement transaction>';
+            request.provider_payment_key = '<replacement provider key>';
+            request.provider_reference = '<replacement provider key>';
+          }
+          const charges = (await side.orders.query('SELECT organization_seq,customer_seq,billing_month::text,payment_method_type,amount FROM order_billing_charges WHERE order_seq=$1', [fixture.id])).rows;
+          assert.equal(charges.length, state.group ? 1 : 0);
+          if (state.group) assert.deepEqual(charges[0], { organization_seq: companyId, customer_seq: null, billing_month: '2030-03-01', payment_method_type: 'groupBilling', amount: 7000 });
+          const shipments = (await side.delivery.query('SELECT order_parcel_seq,tracking_number,status FROM shipments WHERE order_parcel_seq=$1', [fixture.id])).rows;
+          assert.equal(shipments.length, 1);
+          assert.match(shipments[0].tracking_number, /^DVA-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+          assert.equal(shipments[0].order_parcel_seq, fixture.id);
+          assert.equal(shipments[0].status, 'paid');
+          shipments[0].tracking_number = '<generated DVA UUID>';
+          const audits = (await side.audit.query("SELECT action,actor_type,actor_seq,result,target_type,target_seq,metadata FROM audit_logs WHERE request_id=$1 AND target_type IN ('ORDER','COMPANY','ORDER_PARCEL') ORDER BY audit_log_seq", [completed.requestId])).rows;
+          stored.push({ order, request, charges, shipments, audits });
+          const requests = (await histories())[sideIndex].slice(beforeHistory[sideIndex].length);
+          const approvals = requests.filter(value => value.method === 'POST' && value.path.startsWith('/v1/billing/'));
+          assert.equal(approvals.length, state.replace ? 2 : 1);
+          assert.ok(approvals.every(value => value.body.amount === 7000 && value.body.orderName === 'DVA 택배 결제'));
+          assert.equal(requests.filter(value => value.path === '/parcel').length, 1);
+        }
+        assert.deepEqual(stored[1], stored[0], state.name + ' order/request/charge/shipment/audit');
+      }
+      t.diagnostic('registered card PG reconciliation matches ' + pairs + ' HTTP pairs, durable money and replay-safe Dver completion');
+    });
+    await caseTest.test('deleted card revocation preserves pending approvals, leases, PG results and audited keys', async () => {
+      const {DatabaseService:CustomerDatabase}=require('./customer-runtime/database/database.service');
+      const {PaymentCardsRepository}=require('./customer-runtime/payments/payment-cards.repository');
+      const {PaymentCardsService}=require('./customer-runtime/payments/payment-cards.service');
+      const {CardProviderClient}=require('./customer-runtime/payments/card-provider.client');
+      const {AuditService}=require('./customer-runtime/audit/audit.service');
+      const values={DB_HOST:'customer-db',DB_PORT:5432,DB_USER:'customer_app',DB_PASSWORD:process.env.PGPASSWORD,
+        DB_NAME:'dva_webhook_test',ORDER_URL:'http://order-app:3002',OPERATIONS_URL:'http://operations-app:3005',
+        CUSTOMER_AUTH_TOKEN:process.env.CUSTOMER_AUTH_TOKEN,TOSS_BILLING_SECRET_KEY:'test_sk_parity',
+        PAYMENT_CARD_ENCRYPTION_KEY:encryption,PAYMENT_TOSS_BASE_URL:'http://order-app:8000'};
+      const config={get:key=>values[key]}, database=new CustomerDatabase(config);
+      const audit=new AuditService(database,config);
+      const revocations=new PaymentCardsService(new PaymentCardsRepository(database),null,audit,database,new CardProviderClient(config),config);
+      caseTest.after(async()=>{await audit.onModuleDestroy();await database.onModuleDestroy();});
+      const owners=[{cards:reference,orders:reference,audit:reference,peer:'monolith'},
+        {cards:databases.customer,orders:databases.order,audit:databases.operations,peer:'order'}];
+      const cases=[
+        {name:'confirmed removal'}, {name:'already removed',pgStatus:404},
+        {name:'temporary PG failure',pgStatus:503}, {name:'provider refuses',pgStatus:400},
+        {name:'provider unauthorized',pgStatus:401}, {name:'provider forbidden',pgStatus:403},
+        {name:'unacknowledged PG removal',lost:true,error:502},
+        {name:'invalid PG response',badJson:true,error:502},
+        {name:'incorrect card AAD',badAad:true,error:503},
+        {name:'undeleted card',active:true}, {name:'key already cleared',empty:true},
+        {name:'live card lease',busy:true}, {name:'expired card lease',stale:true},
+        {name:'different provider environment',wrongEnvironment:true},
+        {name:'pending approval',pending:true,blocked:true},
+        {name:'invalidated approval remains protected',pending:true,invalidated:true,blocked:true},
+        {name:'expired approving request remains protected',pending:true,expired:true,blocked:true},
+        {name:'completed approval permits removal',pending:true,completed:true},
+        {name:'failed approval permits removal',pending:true,failed:true},
+        {name:'unstarted card request permits removal'},
+        {name:'missing billing secret',missingSecret:true}, {name:'missing encryption key',missingEncryption:true},
+      ];
+      const history=async side=>{
+        const response=await fetch('http://'+side.peer+'-app:8000/__requests',{
+          headers:{Authorization:'Bearer '+process.env.CUSTOMER_AUTH_TOKEN},signal:AbortSignal.timeout(5000)});
+        assert.equal(response.status,200);return response.json();
+      };
+      async function revoke(side,requestId) {
+        try {
+          if(side===owners[0]) {
+            const response=await fetch('http://monolith-app:8000/__card-revocation',{
+              method:'POST',signal:AbortSignal.timeout(30000),headers:{Authorization:'Bearer '+process.env.CUSTOMER_AUTH_TOKEN,'Content-Type':'application/json'},
+              body:JSON.stringify({requestId,config:{TOSS_BILLING_SECRET_KEY:values.TOSS_BILLING_SECRET_KEY,
+                PAYMENT_CARD_ENCRYPTION_KEY:values.PAYMENT_CARD_ENCRYPTION_KEY}})});
+            const body=await response.json();
+            return {status:response.status,code:body.error?.code};
+          }
+          await revocations.revokeDeleted(requestId);return {status:200,code:undefined};
+        } catch(error) {return {status:error.getStatus?.()??500,code:error.getResponse?.().code};}
+      }
+      function encrypted(id,key,badAad) {
+        const nonce=randomBytes(12),cipher=createCipheriv('aes-256-gcm',Buffer.from(encryption,'hex'),nonce);
+        cipher.setAAD(Buffer.from(String(badAad?id+1:id)));
+        return Buffer.concat([nonce,cipher.update(key,'utf8'),cipher.final(),cipher.getAuthTag()]).toString('base64');
+      }
+      async function seedRevocation(state,index,retain=false) {
+        const id=720000+index,requestId=randomUUID(),registration=randomUUID(),provider=randomUUID();
+        const key=state.pgStatus?'revoke-status-'+state.pgStatus+'-'+id:state.lost?'revoke-lost-ack-'+id:
+          state.badJson?'revoke-bad-json-'+id:state.hold?'revoke-hold-'+id:'revoke-success-'+id;
+        const ciphertext=state.empty?null:encrypted(id,key,state.badAad);
+        for(const side of owners) {
+          await side.cards.query("UPDATE payment_cards SET status='FAILED'");
+          for(const card of cards)
+            await side.cards.query('UPDATE payment_cards SET encrypted_billing_key=$2 WHERE payment_card_seq=$1',[card.id,card.encrypted]);
+        }
+        const fixture=await seedClaim({lookup:state.pending,completed:state.completed,failed:state.failed,
+          expired:state.expired,invalidated:state.invalidated},200+index);
+        for(const side of owners) {
+          await side.cards.query("UPDATE payment_cards SET encrypted_billing_key=NULL,status='FAILED' WHERE NOT $1::boolean OR payment_card_seq=ANY($2::int[])",
+            [retain,[personal,company,nextPersonal,nextCompany]]);
+          await side.cards.query(`INSERT INTO payment_cards(payment_card_seq,customer_seq,registration_key,request_hash,provider_customer_key,
+            provider_environment,encrypted_billing_key,expiration_year,expiration_month,masked_number,status,deleted_at,claimed_until,created_at,updated_at)
+            OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,'revocation-fixture',$4,$5,$6,2099,12,'1234********5678','ACTIVE',$7,$8,$9,$9)`,
+            [id,customerId,registration,provider,state.wrongEnvironment?'live':'test',ciphertext,state.active?null:fixed,
+              state.busy?'2099-01-01T00:00:00Z':state.stale?'2000-01-01T00:00:00Z':null,fixed]);
+          await side.orders.query('UPDATE order_payment_requests SET payment_card_seq=$2 WHERE payment_request_id=$1',[fixture.requestId,id]);
+        }
+        return {id,requestId,key,ciphertext};
+      }
+      for(const [index,state] of cases.entries()) {
+        const {id,requestId,key,ciphertext}=await seedRevocation(state,index);
+        values.TOSS_BILLING_SECRET_KEY=state.missingSecret?undefined:'test_sk_parity';
+        values.PAYMENT_CARD_ENCRYPTION_KEY=state.missingEncryption?undefined:encryption;
+        const eligible=!(state.active||state.empty||state.busy||state.wrongEnvironment||state.blocked||state.missingSecret||state.missingEncryption);
+        const requested=eligible&&!state.badAad;
+        const confirmed=requested&&!state.lost&&!state.badJson&&[200,404].includes(state.pgStatus??200);
+        const results=[],stored=[];
+        for(const side of owners) {
+          const before=await history(side),started=Date.now();
+          const result=await revoke(side,requestId);results.push(result);
+          assert.equal(result.status,state.error??200,state.name+' '+side.peer+' '+JSON.stringify(result));
+          const row=(await side.cards.query('SELECT to_jsonb(c) AS data FROM payment_cards c WHERE payment_card_seq=$1',[id])).rows[0].data;
+          assert.equal(row.encrypted_billing_key,confirmed?null:ciphertext,state.name+' stored key');
+          if(eligible&&!confirmed) {generatedTime(row.claimed_until,started,90000);row.claimed_until='<90-second card lease>';}
+          else assert.equal(row.claimed_until,state.busy?'2099-01-01T00:00:00+00:00':null);
+          const logs=(await side.audit.query("SELECT actor_type,actor_seq,action,result,target_type,target_seq,metadata FROM audit_logs WHERE request_id=$1 ORDER BY audit_log_seq",[requestId])).rows;
+          assert.equal(logs.length,confirmed?1:0);
+          if(confirmed) assert.deepEqual(logs[0],{actor_type:'SYSTEM',actor_seq:null,action:'PAYMENT_CARD_REVOKED',result:'SUCCESS',target_type:'PAYMENT_CARD',target_seq:id,metadata:{}});
+          const requests=(await history(side)).slice(before.length).filter(value=>value.method==='DELETE');
+          assert.equal(requests.length,requested?1:0,state.name+' PG request count');
+          if(requested) assert.deepEqual(requests[0],{method:'DELETE',path:'/v1/billing/'+encodeURIComponent(key),body:null});
+          stored.push({card:row,audits:logs});
+        }
+        assert.deepEqual(results[1],results[0],state.name+' result');
+        assert.deepEqual(stored[1],stored[0],state.name+' persisted card/audit');
+      }
+      values.TOSS_BILLING_SECRET_KEY='test_sk_parity';values.PAYMENT_CARD_ENCRYPTION_KEY=encryption;
+      const blocked=await seedRevocation({pending:true},100);
+      const held=await seedRevocation({hold:true},101,true);
+      for(const side of owners) {
+        const started=Date.now(),pending=revoke(side,held.requestId);
+        try {
+          for(let attempt=0;;attempt++) {
+            if((await history(side)).some(value=>value.method==='DELETE'&&value.path==='/v1/billing/'+held.key)) break;
+            assert.ok(attempt<100,side.peer+' revocation reaches PG');await pause(20);
+          }
+          const leased=(await side.cards.query('SELECT claimed_until FROM payment_cards WHERE payment_card_seq=$1',[held.id])).rows[0];
+          generatedTime(leased.claimed_until,started,90000);
+          assert.equal((await side.cards.query('SELECT claimed_until FROM payment_cards WHERE payment_card_seq=$1',[blocked.id])).rows[0].claimed_until,null);
+          const client=await side.cards.connect();
+          try {
+            await client.query('BEGIN');
+            assert.equal((await client.query('SELECT 1 FROM payment_cards WHERE payment_card_seq=ANY($1::int[]) FOR UPDATE NOWAIT',[[blocked.id,held.id]])).rowCount,2);
+          } finally {await client.query('ROLLBACK');client.release();}
+        } finally {
+          const response=await fetch('http://'+side.peer+'-app:8000/__card-release',{
+            method:'POST',signal:AbortSignal.timeout(5000),headers:{Authorization:'Bearer '+process.env.CUSTOMER_AUTH_TOKEN,'Content-Type':'application/json'},
+            body:JSON.stringify({key:held.key})});
+          assert.equal(response.status,200);
+        }
+        assert.equal((await pending).status,200);
+        assert.equal((await side.cards.query('SELECT encrypted_billing_key FROM payment_cards WHERE payment_card_seq=$1',[blocked.id])).rows[0].encrypted_billing_key,blocked.ciphertext);
+        assert.equal((await side.cards.query('SELECT encrypted_billing_key FROM payment_cards WHERE payment_card_seq=$1',[held.id])).rows[0].encrypted_billing_key,null);
+      }
+      const rollback=await seedRevocation({},102);
+      for(const side of owners) {
+        await side.audit.query("CREATE FUNCTION revocation_audit_fault() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.action='PAYMENT_CARD_REVOKED' THEN RAISE EXCEPTION 'test-only revocation audit failure'; END IF; RETURN NEW; END $$");
+        await side.audit.query('CREATE TRIGGER revocation_audit_fault BEFORE INSERT ON audit_logs FOR EACH ROW EXECUTE FUNCTION revocation_audit_fault()');
+        const started=Date.now();
+        try {
+          assert.ok((await revoke(side,rollback.requestId)).status>=500);
+          const row=(await side.cards.query('SELECT encrypted_billing_key,claimed_until FROM payment_cards WHERE payment_card_seq=$1',[rollback.id])).rows[0];
+          assert.equal(row.encrypted_billing_key,rollback.ciphertext);
+          generatedTime(row.claimed_until,started,90000);
+          assert.equal((await side.audit.query('SELECT 1 FROM audit_logs WHERE request_id=$1',[rollback.requestId])).rowCount,0);
+        } finally {
+          await side.audit.query('DROP TRIGGER revocation_audit_fault ON audit_logs');
+          await side.audit.query('DROP FUNCTION revocation_audit_fault()');
+        }
+        await side.cards.query("UPDATE payment_cards SET claimed_until=clock_timestamp()-interval '1 second' WHERE payment_card_seq=$1",[rollback.id]);
+        assert.equal((await revoke(side,rollback.requestId)).status,200);
+        const row=(await side.cards.query('SELECT encrypted_billing_key,claimed_until FROM payment_cards WHERE payment_card_seq=$1',[rollback.id])).rows[0];
+        assert.deepEqual(row,{encrypted_billing_key:null,claimed_until:null});
+        assert.equal((await side.audit.query('SELECT 1 FROM audit_logs WHERE request_id=$1',[rollback.requestId])).rowCount,1);
+        assert.equal((await history(side)).filter(value=>value.method==='DELETE'&&value.path==='/v1/billing/'+rollback.key).length,2);
+      }
+      const blocker=await databases.order.connect(),reads=[];
+      try {
+        await blocker.query('BEGIN');await blocker.query("SET LOCAL lock_timeout='2s'");
+        await blocker.query('LOCK TABLE order_parcels IN ACCESS EXCLUSIVE MODE');
+        for(let index=0;index<5;index++) reads.push(fetch('http://order-app:3002/api/orders/1002',{
+          headers,signal:AbortSignal.timeout(7000)}));
+        for(let attempt=0;;attempt++) {
+          // Long detail queries can exceed pg_stat_activity's query text limit.
+          const waiting=await databases.order.query("SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid() AND wait_event='relation'");
+          if(waiting.rows[0].n===5) break;
+          assert.ok(attempt<100,'five order business reads reach the fixture lock: '+waiting.rows[0].n);await pause(20);
+        }
+        const eventId=randomUUID(),response=await fetch('http://order-app:3002/internal/parcel-draft-write/reference',{
+          method:'POST',signal:AbortSignal.timeout(3000),headers:{Authorization:'Bearer '+process.env.CUSTOMER_AUTH_TOKEN,'Content-Type':'application/json'},
+          body:JSON.stringify({eventId,source:'customer',eventType:'ParcelDraftWriteReferenceRequested',
+            payload:{operation:'OrderPendingCardApprovalRead',input:{id:blocked.id}}})});
+        assert.equal(response.status,200);
+        assert.deepEqual(await response.json(),{eventId,status:'processed',payload:true});
+      } finally {
+        await blocker.query('ROLLBACK');blocker.release();
+        for(const response of await Promise.all(reads)) assert.equal(response.status,200);
+      }
+      t.diagnostic('revocation releases blocked candidate locks before PG, restores keys on audit failure, retries confirmed DELETE with 404 and reads through five occupied order connections');
+      t.diagnostic('card revocation matches '+cases.length+' source states, pending transaction protection, 90-second leases and confirmed key erasure');
+    });
+  });
+  await t.test('order retention matches source root expiry, payment leases, invoice totals and all call references',async()=>{
+    const {RetentionRepository:SourceRetention}=require('./monolith-runtime/retention/retention.repository');
+    const {OrderRetentionRepository}=require('../dist/orders/order-retention.repository');
+    const {createRelay,enqueue}=require('@dva/events');
+    const delivery=new Pool({host:'delivery-db',user:'delivery_app'}),phone='01098887766';
+    const ids=Array.from({length:28},(_,n)=>910000+n),protectedIds=Array.from({length:1050},(_,n)=>920000+n),free=921050;
+    const all=[...ids,...protectedIds,free],token=process.env.CUSTOMER_AUTH_TOKEN;
+    const config={get:key=>({CONSULTATION_URL:'http://consultation-app:3004',CUSTOMER_AUTH_TOKEN:token})[key]};
+    const local=pool=>({transaction:async work=>{const client=await pool.connect();try{await client.query('BEGIN');const result=await work(client);await client.query('COMMIT');return result;}catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}}});
+    const source=new SourceRetention(local(reference)),repository=new OrderRetentionRepository(local(databases.order),config);
+    const roots=async db=>(await db.query('SELECT order_seq FROM orders WHERE order_seq=ANY($1::int[]) ORDER BY order_seq',[all])).rows.map(row=>row.order_seq);
+    const stored=async db=>{
+      const result={};for(const table of ['orders','order_parcels','order_payment_requests','order_billing_charges'])result[table]=(await db.query(`SELECT to_jsonb(r) AS row FROM ${table} r WHERE order_seq=ANY($1::int[]) ORDER BY to_jsonb(r)::text`,[all])).rows;
+      result.months=(await db.query('SELECT to_jsonb(r) AS row FROM organization_billing_months r WHERE organization_seq BETWEEN 930001 AND 930003 ORDER BY organization_seq,billing_month')).rows;return result;
+    };
+    const shipmentRows=async db=>(await db.query('SELECT order_parcel_seq,tracking_number,status FROM shipments WHERE order_parcel_seq=ANY($1::int[]) ORDER BY order_parcel_seq',[ids])).rows;
+    const guard=await databases.consultation.connect(),locked=[],outside=[],createdRoots=[[],[]];let originalFetch;
+    await guard.query("SELECT pg_advisory_lock(hashtextextended('call-end:'||$1,0))",[phone]);retention.push(guard);
+    try{
+      for(const db of [reference,databases.order])await local(db).transaction(async client=>{
+        await client.query("SET LOCAL session_replication_role='replica'");
+        for(const [n,id]of ids.entries()){
+          const status=n===16?'ACCEPTED':n===17?'SUBMITTING':n>=18?'SUBMISSION_FAILED':['COLLECTING','notPaid','PAID','SUBMITTING','SUBMITTING_FAILED','SUBMISSION_FAILED','ACCEPTED','CANCELLED'][n%8];
+          const created=n>=8&&n<16?'2094-01-01Z':'2010-01-01Z',paid=['PAID','SUBMITTING','SUBMITTING_FAILED','SUBMISSION_FAILED','ACCEPTED'].includes(status);
+          await client.query(`INSERT INTO orders(order_seq,status,payment_method_type,total_amount,creation_source,created_at,updated_at,paid_at,pickup_requested_at,closed_at,parcel_no,dver_received_at,submission_last_attempt_at)
+            OVERRIDING SYSTEM VALUE VALUES($1,$2,'credit',3500,'ADMIN',$3,$4,$5,$5,$6,$7,$8,$9)`,
+          [id,status,created,n===17?'2094-01-01Z':created,paid?created:null,['ACCEPTED','CANCELLED'].includes(status)?n===16?'2094-01-01Z':created:null,status==='ACCEPTED'?'RET'+String(n).padStart(5,'0'):null,status==='ACCEPTED'?created:null,n===17?'2094-01-01Z':null]);
+          await client.query('INSERT INTO order_parcels(order_parcel_seq,order_seq,parcel_position,origin_name) OVERRIDING SYSTEM VALUE VALUES($1,$1,1,$2)',[id,'보관 만료 주소 '+id]);
+          if(n>=18&&n<=23){
+            const kind=n%3,live=n<21,complete=kind===2;
+            await client.query(`INSERT INTO order_payment_requests(payment_request_id,order_seq,amount,created_at,expires_at,card_payment_order_id,approval_started_at,provider_payment_key,completed_at,provider_reference,
+              approval_claim_id,approval_claimed_until,notification_status,notification_attempted_at,completion_notification_status,completion_notification_attempted_at)
+              VALUES($1,$2,3500,'2009-01-01Z','2010-01-01Z',$1,$3,$4,$5,$6,$7,$8,$9,$10,$11,$10)`,
+            ['91000000-0000-4000-8000-'+String(id).padStart(12,'0'),id,kind===0?'2010-01-01Z':null,kind===0?'retention-payment-'+id:null,complete?'2010-01-01Z':null,complete?'retention-reference-'+id:null,
+              kind===0?'91000000-0000-4000-8000-'+String(id).padStart(12,'0'):null,kind===0?live?'2094-01-01Z':'2010-01-01Z':null,kind===1?'SENDING':'SENT',live?'2094-01-01Z':'2010-01-01Z',complete?'SENDING':'WAITING']);
+          }
+        }
+        await client.query(`INSERT INTO orders(order_seq,status,created_at,updated_at) OVERRIDING SYSTEM VALUE
+          SELECT n,'COLLECTING','1980-01-01Z'::timestamptz,'1980-01-01Z'::timestamptz FROM generate_series(920000,921049) n
+          UNION ALL SELECT 921050,'COLLECTING','1990-01-01Z'::timestamptz,'1990-01-01Z'::timestamptz`);
+        await client.query("INSERT INTO order_billing_charges(order_seq,organization_seq,billing_month,payment_method_type,amount,occurred_at) VALUES(910000,930001,'2020-01-01','credit',3500,'2010-01-01Z'),(910018,930003,'2020-01-01','credit',3500,'2010-01-01Z')");
+        await client.query("INSERT INTO organization_billing_months(organization_seq,billing_month,organization_name,monthly_amount) VALUES(930001,'2094-01-01','보존할 합계',7777),(930002,'2000-01-01','만료한 청구',1234),(930003,'2020-01-01','참조 중 청구',5678)");
+      });
+      for(const db of [reference,databases.consultation]){
+        await db.query(`INSERT INTO call_sessions(call_session_seq,provider_call_id,caller_phone_number,order_seq,incoming_at,deleted_at) OVERRIDING SYSTEM VALUE
+          SELECT n,'retention-order-'||n,$1,n,'2010-01-01Z','2010-01-02Z' FROM generate_series(920000,921049) n`,[phone]);
+        await db.query("INSERT INTO call_sessions(call_session_seq,provider_call_id,caller_phone_number,order_seq,incoming_at,deleted_at) OVERRIDING SYSTEM VALUE VALUES(910024,'retention-order-expired',$1,910024,'2010-01-01Z','2010-01-02Z'),(910025,'retention-order-legacy',$1,910025,NULL,NULL)",[phone]);
+      }
+      for(const db of [reference,delivery])for(const id of ids)await db.query("INSERT INTO shipments(order_parcel_seq,tracking_number,status) VALUES($1,$2,'paid')",[id,'retention-root-'+id]);
+      await local(databases.order).transaction(async client=>{for(const id of [910000,910018])await enqueue(client,{destination:'delivery',eventType:'OrderSubmissionDeliveryRequested',aggregateSeq:id,payload:{orderParcelSeqs:[id]}});});
+      for(const db of [reference,databases.order]){
+        const client=await db.connect();outside.push(client);await client.query('BEGIN');
+        await client.query("SELECT 1 FROM orders WHERE COALESCE(closed_at,created_at)<=statement_timestamp()-interval '5 years' AND NOT(order_seq=ANY($1::int[])) FOR KEY SHARE",[all]);
+      }
+      for(const db of [reference,databases.order]){const client=await db.connect();locked.push(client);await client.query('BEGIN');await client.query('SELECT 1 FROM orders WHERE order_seq=910026 FOR KEY SHARE');}
+      const initial=await stored(databases.order),messages=await snapshot(databases.order,['outbox_events']);
+      for(const db of [reference,databases.order])await db.query("CREATE FUNCTION retention_order_fault() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF OLD.order_seq=910000 THEN RAISE EXCEPTION 'controlled late order deletion failure'; END IF; RETURN OLD; END $$; CREATE TRIGGER retention_order_fault BEFORE DELETE ON order_billing_charges FOR EACH ROW EXECUTE FUNCTION retention_order_fault()");
+      try{await assert.rejects(source.purgeDatabase());await assert.rejects(repository.purgeDatabase());assert.deepEqual(await stored(databases.order),initial);assert.deepEqual(await stored(reference),initial);assert.deepEqual(await snapshot(databases.order,['outbox_events']),messages);}
+      finally{for(const db of [reference,databases.order])await db.query('DROP TRIGGER retention_order_fault ON order_billing_charges; DROP FUNCTION retention_order_fault()');}
+      originalFetch=global.fetch;global.fetch=async(url,...args)=>String(url).endsWith('/internal/order-deletion-check')?Response.json({error:'controlled owner outage'},{status:503}):originalFetch(url,...args);
+      try{await assert.rejects(repository.purgeDatabase());assert.deepEqual(await stored(databases.order),initial);assert.deepEqual(await snapshot(databases.order,['outbox_events']),messages);}finally{global.fetch=originalFetch;originalFetch=undefined;}
+      const relay=createRelay({pool:databases.order,source:'order',eventTypes:['OrderParcelsPurged'],destinations:{delivery:{url:'http://delivery-app:3003/internal/order-accepted',token}}});
+      for(let batch=0;batch<2;batch++){
+        const before=await roots(reference);await source.purgeDatabase();assert.equal(await repository.purgeDatabase(),true);
+        assert.deepEqual(await stored(databases.order),await stored(reference));
+        const remaining=await roots(reference),removed=before.filter(id=>!remaining.includes(id));assert.equal(removed.length,batch===0?10:3);
+        assert.ok(remaining.includes(910018)&&remaining.includes(910019)&&remaining.includes(910020),'active payment work survives');
+        assert.ok(remaining.includes(910024)&&remaining.includes(910025),'expired/deleted and legacy calls retain roots');
+        assert.ok(remaining.includes(910026)&&remaining.includes(910016)&&remaining.includes(910017),'locked and recently closed/submitting roots survive');
+        assert.equal(remaining.includes(free),false,'more than 1000 referenced earlier roots do not starve an unreferenced root');
+        for(let attempt=0;attempt<20&&await relay();attempt++);
+        assert.deepEqual(await shipmentRows(delivery),await shipmentRows(reference));
+      }
+      assert.equal((await databases.order.query('SELECT monthly_amount::text AS amount FROM organization_billing_months WHERE organization_seq=930001')).rows[0].amount,'7777');
+      assert.equal((await databases.order.query('SELECT 1 FROM organization_billing_months WHERE organization_seq=930002')).rowCount,0);
+      assert.equal((await databases.order.query('SELECT 1 FROM organization_billing_months WHERE organization_seq=930003')).rowCount,1);
+      assert.deepEqual((await databases.order.query("SELECT aggregate_seq FROM outbox_events WHERE aggregate_seq=ANY($1::int[]) AND event_type='OrderSubmissionDeliveryRequested' ORDER BY aggregate_seq",[[910000,910018]])).rows,[{aggregate_seq:910018}]);
+      for(const client of locked){await client.query('ROLLBACK');client.release();}locked.length=0;
+      await source.purgeDatabase();await repository.purgeDatabase();assert.deepEqual(await stored(databases.order),await stored(reference));
+      assert.equal((await roots(reference)).includes(910026),false);
+      for(const db of [reference,databases.order])await db.query("UPDATE order_payment_requests SET approval_claimed_until='2010-01-01Z' WHERE order_seq=910018");
+      const recheck=pool=>({transaction:work=>local(pool).transaction(client=>work({query:async(sql,...params)=>{
+        const result=await client.query(sql,...params);
+        if(sql.startsWith('SELECT o.order_seq AS id')&&result.rows.some(row=>row.id===910018))await client.query("UPDATE order_payment_requests SET approval_claimed_until='2094-01-01Z' WHERE order_seq=910018");
+        return result;
+      }}))});
+      await new SourceRetention(recheck(reference)).purgeDatabase();await new OrderRetentionRepository(recheck(databases.order),config).purgeDatabase();
+      assert.ok((await roots(reference)).includes(910018),'a newly active lease is rechecked after root selection');assert.deepEqual(await stored(databases.order),await stored(reference));
+      for(const db of [reference,databases.order])await db.query("UPDATE order_payment_requests SET approval_claim_id=NULL,approval_claimed_until=NULL,notification_status='SENT',completion_notification_status=CASE WHEN completed_at IS NULL THEN 'WAITING' ELSE 'SENT' END WHERE order_seq BETWEEN 910018 AND 910020");
+      await source.purgeDatabase();await repository.purgeDatabase();assert.deepEqual(await stored(databases.order),await stored(reference));
+      for(const id of [910018,910019,910020])assert.equal((await roots(reference)).includes(id),false);
+      for(let attempt=0;attempt<20&&await relay();attempt++);
+      assert.deepEqual(await shipmentRows(delivery),await shipmentRows(reference));
+      const customerId=941001,key=randomUUID();
+      for(const db of [reference,databases.customer])await db.query("INSERT INTO customers(customer_seq,name,phone_number,status) OVERRIDING SYSTEM VALUE VALUES($1,'보관 키 재사용 고객','01094110000','ACTIVE')",[customerId]);
+      const address={name:'보관 키 수령인',phoneNumber:'01094112222',roadAddress:'보관 검증 도로',jibunAddress:'보관 검증 지번',detailAddress:'',dongName:'검증동',postalCode:'00123'};
+      const input={customerSeq:customerId,paymentMethodType:'billing',totalAmount:5000,pickupRequestedAt:new Date(Date.now()+3*86400000).toISOString(),parcels:[{origin:address,destination:address,documentCount:1,itemPrice:1000,notifiedPrice:5000}]};
+      async function create(status){
+        const requestId=randomUUID(),result=[];
+        for(const side of sides){const response=await fetch(side.base+'/api/admin/orders',{method:'POST',headers:{...headers,Origin:'http://localhost:5173','Content-Type':'application/json','Idempotency-Key':key,'X-Request-Id':requestId},body:JSON.stringify(input),signal:AbortSignal.timeout(30000)});const body=await response.json();assert.equal(response.status,status,side.name+' creation key '+JSON.stringify(body));result.push(body.data??body.error);}
+        if(status===201)assert.deepEqual(result.map(data=>({orderSeq:data.orderSeq,status:data.status,version:data.version}))[1],result.map(data=>({orderSeq:data.orderSeq,status:data.status,version:data.version}))[0]);
+        else assert.deepEqual(result[1],result[0]);
+        compared++;return result;
+      }
+      const first=await create(201),initialParcels=[];
+      for(const [side,db]of [reference,databases.order].entries()){
+        createdRoots[side].push(first[side].orderSeq);
+        initialParcels.push((await db.query('SELECT order_parcel_seq FROM order_parcels WHERE order_seq=$1 ORDER BY order_parcel_seq',[first[side].orderSeq])).rows.map(row=>row.order_parcel_seq));
+      }
+      const repeated=await create(201);for(const side of [0,1])assert.equal(repeated[side].orderSeq,first[side].orderSeq);
+      for(const [side,db]of [reference,databases.order].entries())await local(db).transaction(async client=>{
+        await client.query("SET LOCAL session_replication_role='replica'");
+        await client.query("UPDATE orders SET created_at='2010-01-01Z',updated_at='2010-01-01Z',closed_at=CASE WHEN status IN ('ACCEPTED','CANCELLED') THEN '2010-01-01Z'::timestamptz ELSE NULL END WHERE order_seq=$1",[first[side].orderSeq]);
+      });
+      await create(409);await source.purgeDatabase();await repository.purgeDatabase();
+      for(const [side,db]of [reference,databases.order].entries())assert.equal((await db.query('SELECT 1 FROM orders WHERE order_seq=$1',[first[side].orderSeq])).rowCount,0);
+      const events=(await databases.order.query("SELECT event_id,payload FROM outbox_events WHERE event_type='OrderParcelsPurged' AND aggregate_seq=$1",[first[1].orderSeq])).rows;
+      assert.equal(events.length,1);assert.deepEqual(events[0].payload,{orderParcelSeqs:initialParcels[1]});
+      const {OrderRetentionWorker}=require('../dist/orders/order-retention.worker');
+      const {createServer}=require('node:http');
+      const failed=createServer((request,response)=>{request.resume();response.writeHead(503,{'Content-Type':'application/json'}).end('{"error":"controlled delivery outage"}');});
+      await new Promise(resolve=>failed.listen(0,'127.0.0.1',resolve));
+      const failedConfig={get:name=>({NODE_ENV:'test',DELIVERY_URL:'http://127.0.0.1:'+failed.address().port,CUSTOMER_AUTH_TOKEN:token})[name]};
+      const interrupted=new OrderRetentionWorker(repository,{pool:databases.order},failedConfig);
+      try{await interrupted.run();const waiting=(await databases.order.query('SELECT delivered_at,attempt_count FROM outbox_events WHERE event_id=$1',[events[0].event_id])).rows[0];assert.equal(waiting.delivered_at,null);assert.equal(waiting.attempt_count,1);assert.equal((await delivery.query('SELECT 1 FROM inbox_events WHERE event_id=$1',[events[0].event_id])).rowCount,0);}
+      finally{await interrupted.onModuleDestroy();await new Promise((resolve,reject)=>failed.close(error=>error?reject(error):resolve()));}
+      await databases.order.query("UPDATE outbox_events SET next_attempt_at=clock_timestamp()-interval '1 second' WHERE event_id=$1",[events[0].event_id]);
+      const resumed=new OrderRetentionWorker(repository,{pool:databases.order},{get:name=>({NODE_ENV:'test',DELIVERY_URL:'http://delivery-app:3003',CUSTOMER_AUTH_TOKEN:token})[name]});
+      try{await resumed.run();assert.ok((await databases.order.query('SELECT delivered_at FROM outbox_events WHERE event_id=$1',[events[0].event_id])).rows[0].delivered_at);assert.equal((await delivery.query('SELECT 1 FROM inbox_events WHERE event_id=$1',[events[0].event_id])).rowCount,1);}finally{await resumed.onModuleDestroy();}
+      await assert.rejects(reference.query("INSERT INTO shipments(order_parcel_seq,tracking_number,status) VALUES($1,'late-retired-order','paid')",[initialParcels[0][0]]),error=>error.code==='23503');
+      const late={eventId:randomUUID(),source:'order',eventType:'OrderSubmissionDeliveryRequested',payload:{orderParcelSeqs:initialParcels[1]}};
+      const lateResponse=await fetch('http://delivery-app:3003/internal/order-accepted',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(late),signal:AbortSignal.timeout(5000)});
+      assert.equal(lateResponse.status,200);assert.deepEqual(await lateResponse.json(),{eventId:late.eventId,status:'processed'});assert.equal((await delivery.query('SELECT 1 FROM shipments WHERE order_parcel_seq=ANY($1::int[])',[initialParcels[1]])).rowCount,0);
+      const fresh=await create(201);for(const side of [0,1]){createdRoots[side].push(fresh[side].orderSeq);assert.notEqual(fresh[side].orderSeq,first[side].orderSeq,'physical expiry releases the original creation key');}
+      const freshRepeat=await create(201);for(const side of [0,1])assert.equal(freshRepeat[side].orderSeq,fresh[side].orderSeq);
+    }finally{
+      if(originalFetch)global.fetch=originalFetch;
+      for(const client of [...locked,...outside]){await client.query('ROLLBACK');client.release();}
+      try{
+        for(const db of [reference,databases.consultation])await db.query("DELETE FROM call_sessions WHERE provider_call_id LIKE 'retention-order-%'");
+        for(const db of [reference,delivery]){await db.query('DELETE FROM shipment_status_history WHERE shipment_seq IN (SELECT shipment_seq FROM shipments WHERE order_parcel_seq=ANY($1::int[]))',[ids]);await db.query('DELETE FROM shipments WHERE order_parcel_seq=ANY($1::int[])',[ids]);}
+        for(const db of [reference,databases.order])await local(db).transaction(async client=>{await client.query("SET LOCAL session_replication_role='replica'");for(const table of ['order_parcels','order_payment_requests','order_billing_charges','orders'])await client.query('DELETE FROM '+table+' WHERE order_seq=ANY($1::int[])',[all]);await client.query('DELETE FROM organization_billing_months WHERE organization_seq BETWEEN 930001 AND 930003');});
+        await databases.order.query("DELETE FROM outbox_events WHERE aggregate_seq=ANY($1::int[]) AND event_type IN ('OrderSubmissionDeliveryRequested','OrderParcelsPurged')",[all]);
+        for(const [side,db]of [reference,databases.order].entries())await local(db).transaction(async client=>{await client.query("SET LOCAL session_replication_role='replica'");for(const table of ['order_parcels','order_payment_requests','order_billing_charges','orders'])await client.query('DELETE FROM '+table+' WHERE order_seq=ANY($1::int[])',[createdRoots[side]]);});
+        for(const db of [reference,databases.customer]){await db.query('DELETE FROM personal_pins WHERE customer_seq=941001');await db.query('DELETE FROM customers WHERE customer_seq=941001');}
+      }finally{await guard.query("SELECT pg_advisory_unlock(hashtextextended('call-end:'||$1,0))",[phone]);retention.splice(retention.indexOf(guard),1);guard.release();await delivery.end();}
+    }
+  });
   console.log('Compared HTTP requests: '+compared);
+});
+
+test('production order retention timers expire roots and deliver shipment cleanup while retaining live work',async()=>{
+  assert.equal(process.env.PGDATABASE,'dva_webhook_test');
+  const pools=Object.fromEntries(['monolith','order','delivery'].map(name=>[name,new Pool({host:name+'-db',user:name+'_app'})]));
+  const guards=[],ids=[935001,935002,935003];
+  const transaction=async(pool,work)=>{const client=await pool.connect();try{await client.query('BEGIN');await client.query("SET LOCAL session_replication_role='replica'");const result=await work(client);await client.query('COMMIT');return result;}catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}};
+  try{
+    for(const db of [pools.monolith,pools.order]){const guard=await db.connect();await guard.query('SELECT pg_advisory_lock(20261103,157)');guards.push(guard);}
+    for(const db of [pools.monolith,pools.order])await transaction(db,async client=>{
+      for(const id of ids)await client.query(`INSERT INTO orders(order_seq,status,payment_method_type,total_amount,created_at,updated_at,paid_at,pickup_requested_at)
+        OVERRIDING SYSTEM VALUE VALUES($1,'SUBMISSION_FAILED','credit',3500,$2,$2,$2,$2)`,[id,id===935002?'2094-01-01Z':'2010-01-01Z']);
+      await client.query("INSERT INTO order_parcels(order_parcel_seq,order_seq,parcel_position,origin_name) OVERRIDING SYSTEM VALUE VALUES(935001,935001,1,'타이머 만료 배송')");
+      await client.query(`INSERT INTO order_payment_requests(payment_request_id,order_seq,amount,created_at,expires_at,card_payment_order_id,approval_started_at,provider_payment_key,approval_claim_id,approval_claimed_until,notification_status)
+        VALUES('93500000-0000-4000-8000-000000000003',935003,3500,'2009-01-01Z','2010-01-01Z','93500000-0000-4000-8000-000000000003','2010-01-01Z','live-retention-claim','93500000-0000-4000-8000-000000000003','2094-01-01Z','SENT')`);
+    });
+    for(const db of [pools.monolith,pools.delivery]){
+      await db.query("INSERT INTO shipments(shipment_seq,order_parcel_seq,tracking_number,status) OVERRIDING SYSTEM VALUE VALUES(935001,935001,'production-retention-shipment','paid')");
+      await db.query("INSERT INTO shipment_status_history(shipment_status_history_seq,shipment_seq,request_id,to_status,actor_type) OVERRIDING SYSTEM VALUE VALUES(935001,935001,'93500000-0000-4000-8000-000000000001','paid','SYSTEM')");
+    }
+    const retained=async db=>(await db.query('SELECT to_jsonb(o) AS row FROM orders o WHERE order_seq IN (935002,935003) ORDER BY order_seq')).rows;
+    const before=await retained(pools.monolith);assert.deepEqual(await retained(pools.order),before);
+    for(const guard of guards){await guard.query('SELECT pg_advisory_unlock(20261103,157)');guard.release();}guards.length=0;
+    for(let attempt=0;;attempt++){
+      const roots=await Promise.all([pools.monolith,pools.order].map(async db=>(await db.query('SELECT 1 FROM orders WHERE order_seq=935001')).rowCount));
+      const shipments=await Promise.all([pools.monolith,pools.delivery].map(async db=>(await db.query('SELECT 1 FROM shipments WHERE order_parcel_seq=935001')).rowCount));
+      const acknowledged=(await pools.order.query("SELECT 1 FROM outbox_events WHERE event_type='OrderParcelsPurged' AND aggregate_seq=935001 AND delivered_at IS NOT NULL")).rowCount;
+      if([...roots,...shipments].every(count=>count===0)&&acknowledged===1)break;
+      assert.ok(attempt<200,'real production timers expire the root and deliver its cleanup');await pause(100);
+    }
+    for(const db of [pools.monolith,pools.order]){
+      assert.deepEqual(await retained(db),before);
+      assert.equal((await db.query('SELECT 1 FROM order_parcels WHERE order_seq=935001')).rowCount,0);
+    }
+    for(const db of [pools.monolith,pools.delivery])assert.equal((await db.query('SELECT 1 FROM shipment_status_history WHERE shipment_seq=935001')).rowCount,0);
+    const receipt=(await pools.order.query("SELECT event_id,delivered_at,payload FROM outbox_events WHERE event_type='OrderParcelsPurged' AND aggregate_seq=935001")).rows;
+    assert.equal(receipt.length,1);assert.ok(receipt[0].delivered_at);assert.deepEqual(receipt[0].payload,{orderParcelSeqs:[935001]});
+    assert.equal((await pools.delivery.query('SELECT 1 FROM inbox_events WHERE event_id=$1',[receipt[0].event_id])).rowCount,1);
+  }finally{
+    for(const guard of guards){await guard.query('SELECT pg_advisory_unlock(20261103,157)');guard.release();}
+    try{
+      for(const db of [pools.monolith,pools.delivery]){await db.query('DELETE FROM shipment_status_history WHERE shipment_seq=935001');await db.query('DELETE FROM shipments WHERE order_parcel_seq=935001');}
+      for(const db of [pools.monolith,pools.order])await transaction(db,async client=>{await client.query('DELETE FROM order_parcels WHERE order_seq=ANY($1::int[])',[ids]);await client.query('DELETE FROM order_payment_requests WHERE order_seq=ANY($1::int[])',[ids]);await client.query('DELETE FROM orders WHERE order_seq=ANY($1::int[])',[ids]);});
+    }finally{await Promise.all(Object.values(pools).map(db=>db.end()));}
+  }
 });

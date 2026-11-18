@@ -292,19 +292,43 @@ test('company rename, deactivation, address removal and membership unlinking aff
   assert.deepEqual((await result(await search({ q: renamed }))).data, []);
 });
 
-test('administrator cookies cannot replace the directory service credential', async () => {
+test('administrator sessions and AI Bearer return the same directory while invalid sessions cannot fall back', async () => {
   const c = await company();
   await recipient(c);
   const authenticated = await result(await search({ q: c.name }));
   await error(await search({ q: c.name }, {}), 401, 'UNAUTHORIZED');
   await error(await search({ q: c.name }, { Authorization: 'Bearer wrong' }), 401, 'UNAUTHORIZED');
-  for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN']) {
+  for (const role of ['OPERATOR', 'SYSTEM_ADMIN']) {
     const headers = await account(role);
-    await error(await search({ q: c.name }, headers), 401, 'UNAUTHORIZED');
+    assert.deepEqual(await result(await search({ q: c.name }, headers)), authenticated);
     assert.deepEqual(
       await result(await search({ q: c.name }, { ...headers, ...businessHeaders() })),
       authenticated,
     );
+    assert.deepEqual(
+      await result(await search({ q: c.name }, { ...headers, Authorization: 'Bearer wrong' })),
+      authenticated,
+    );
+  }
+  for (const Cookie of [
+    'dva_session=bad',
+    'dva_session=' + 'f'.repeat(64),
+    `${adminHeaders.Cookie}; ${adminHeaders.Cookie}`,
+  ])
+    await error(await search({ q: c.name }, { Cookie, ...businessHeaders() }), 401, 'UNAUTHORIZED');
+  const { ConfigService } = require('@nestjs/config');
+  const config = app.get(ConfigService);
+  const token = config.get('AI_BUSINESS_TOKEN');
+  try {
+    config.set('AI_BUSINESS_TOKEN', '');
+    assert.deepEqual(await result(await search({ q: c.name }, adminHeaders)), authenticated);
+    await error(
+      await search({ q: c.name }, { Authorization: 'Bearer ' + token }),
+      503,
+      'DEPENDENCY_UNAVAILABLE',
+    );
+  } finally {
+    config.set('AI_BUSINESS_TOKEN', token);
   }
 });
 
@@ -464,7 +488,7 @@ test('administrator search keeps session roles, stable pagination, literal match
     c = await company();
   const first = await recipient(c, { name: term }),
     second = await recipient(c, { name: term });
-  for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN']) {
+  for (const role of ['OPERATOR', 'SYSTEM_ADMIN']) {
     const body = await result(await memberSearch({ q: term }, await account(role)));
     assert.deepEqual(
       body.data.map((row) => row.membershipSeq),

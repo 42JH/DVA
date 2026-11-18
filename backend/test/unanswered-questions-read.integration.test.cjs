@@ -172,7 +172,7 @@ test('list requires an active administrator session, accepts all three roles and
     { Cookie: cookie + '; ' + cookie },
   ])
     await error(await get({}, headers), 401, 'UNAUTHORIZED');
-  for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN']) {
+  for (const role of ['OPERATOR', 'SYSTEM_ADMIN']) {
     const actor = await administrator(role);
     await list({ unansweredQuestionSeq: '2147483647' }, { Cookie: actor.cookie });
   }
@@ -412,7 +412,7 @@ test('actual persona version arrives with analysis and never falls back to the c
   );
 });
 
-test('reason counts combine status, time, call and search filters while excluding deleted or expired history', async () => {
+test('reason counts combine status, time, call and search filters while excluding deleted history', async () => {
   const q = scope();
   const call = await createCall({ startedAt: '2026-10-31T01:00:00Z' });
   const faq = (
@@ -449,6 +449,9 @@ test('reason counts combine status, time, call and search filters while excludin
     "INSERT INTO unanswered_questions(event_id,call_session_seq,question_text,occurred_at,reason,payload_hash) VALUES($1,$2,$3,'2020-01-01T00:00:01Z','KB_NO_ANSWER',repeat('a',64))",
     [randomUUID(), expired.id, q],
   );
+  await pool.query('UPDATE call_sessions SET deleted_at=now() WHERE call_session_seq=$1', [
+    expired.id,
+  ]);
   assert.deepEqual(
     ids(await list({ q })),
     groups.map((group) => group.open),

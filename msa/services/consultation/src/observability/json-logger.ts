@@ -28,6 +28,19 @@ const events = new Set([
   'payment_reconcile_deferred',
   'retention_cleanup_failed',
   'retention_recording_deferred',
+  'call_complaint_claim_deferred',
+  'call_complaint_failed',
+  'call_complaint_recording_unavailable',
+  'call_complaint_input_too_long',
+  'call_complaint_model_unavailable',
+  'call_complaint_judged',
+  'active_call_count_unavailable',
+  'card_payment_deferred',
+  'order_intake_finalization_deferred',
+  'order_intake_submission_deferred',
+  'order_intake_recovery_failed',
+  'card_revocation_deferred',
+  'call_end_matching_deferred',
 ]);
 const outcomes = new Set([
   'ACCEPTED',
@@ -66,6 +79,16 @@ export function logRecord(
         : 'application_message',
   };
   const requestId = value.requestId ?? logContext.getStore()?.requestId;
+  if (record.event === 'call_complaint_judged') {
+    if (typeof value.hasComplaint === 'boolean')
+      record.hasComplaint = value.hasComplaint;
+    if (
+      Number.isInteger(value.complaintCount) &&
+      Number(value.complaintCount) >= 0 &&
+      Number(value.complaintCount) <= 2147483647
+    )
+      record.complaintCount = value.complaintCount;
+  }
   if (Array.isArray(value.invalidFields))
     record.invalidFields = value.invalidFields
       .filter(

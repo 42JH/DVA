@@ -91,23 +91,13 @@ test('order item values are limited to one won through one hundred million acros
   }
 });
 
-test('business phone inputs require exactly eleven ASCII digits without normalization', async () => {
+test('customer, caller, employee and sender phones require eleven ASCII digits without normalization', async () => {
   const {
     CreateCustomerDto,
     ListCustomersQueryDto,
   } = require('../dist/customers/dto/customer-request.dto');
   const { CallerContextRequestDto } = require('../dist/customers/dto/caller-context.dto');
   const { InlineMemberDto } = require('../dist/members/dto/member-request.dto');
-  const { CreatePinDto, UpdatePinDto } = require('../dist/pins/dto/pin-request.dto');
-  const { CreateManualOrderDto } = require('../dist/orders/dto/manual-order.dto');
-  const address = (phoneNumber) => ({
-    name: '수령인',
-    phoneNumber,
-    roadAddress: '검증로 1',
-    jibunAddress: '검증동 1',
-    dongName: '검증동',
-    postalCode: '00001',
-  });
   for (const [metatype, body] of [
     [
       CreateCustomerDto,
@@ -115,18 +105,8 @@ test('business phone inputs require exactly eleven ASCII digits without normaliz
     ],
     [CallerContextRequestDto, (phoneNumber) => ({ phoneNumber })],
     [InlineMemberDto, (phoneNumber) => ({ employeeNo: '001', name: '직원', phoneNumber })],
-    [CreatePinDto, (phoneNumber) => ({ addressData: address(phoneNumber) })],
-    [UpdatePinDto, (phoneNumber) => ({ addressData: address(phoneNumber) })],
     [CreateOrderDto, (phoneNumber) => ({ customer: { name: '고객', phoneNumber } })],
     [CreateOrderDto, (phoneNumber) => ({ customerSeq: 1, parcels: [{ origin: { phoneNumber } }] })],
-    [
-      UpdateOrderDto,
-      (phoneNumber) => ({ expectedVersion: 1, parcels: [{ destination: { phoneNumber } }] }),
-    ],
-    [
-      CreateManualOrderDto,
-      (phoneNumber) => ({ customerSeq: 1, parcels: [{ destination: address(phoneNumber) }] }),
-    ],
   ]) {
     const transform = (phoneNumber) =>
       pipe.transform(body(phoneNumber), { type: 'body', metatype });
@@ -153,6 +133,105 @@ test('business phone inputs require exactly eleven ASCII digits without normaliz
         metatype.name + ': ' + JSON.stringify(phoneNumber),
       );
   }
+});
+
+test('recipient and PIN phones accept landlines across AI drafts, manual orders and updates while sender phones stay mobile', async () => {
+  const { CreatePinDto, UpdatePinDto } = require('../dist/pins/dto/pin-request.dto');
+  const { CreateManualOrderDto } = require('../dist/orders/dto/manual-order.dto');
+  const {
+    CreateParcelDraftDto,
+    PatchParcelDraftDto,
+  } = require('../dist/orders/dto/parcel-draft.dto');
+  const address = (phoneNumber) => ({ name: '수령인', phoneNumber, ...customerAddress() });
+  const forms = [
+    [
+      CreateOrderDto,
+      (phoneNumber) => ({ customerSeq: 1, parcels: [{ destination: { phoneNumber } }] }),
+    ],
+    [
+      UpdateOrderDto,
+      (phoneNumber) => ({ expectedVersion: 1, parcels: [{ destination: { phoneNumber } }] }),
+    ],
+    [
+      CreateManualOrderDto,
+      (phoneNumber) => ({ customerSeq: 1, parcels: [{ destination: address(phoneNumber) }] }),
+    ],
+    [
+      CreateParcelDraftDto,
+      (phoneNumber) => ({
+        clientParcelId: '00000000-0000-4000-8000-000000000001',
+        status: 'EDITING',
+        parcel: { destination: { phoneNumber } },
+      }),
+    ],
+    [
+      PatchParcelDraftDto,
+      (phoneNumber) => ({
+        expectedVersion: 1,
+        action: 'SAVE',
+        status: 'EDITING',
+        parcel: { destination: { phoneNumber } },
+      }),
+    ],
+    [CreatePinDto, (phoneNumber) => ({ addressData: address(phoneNumber) })],
+    [UpdatePinDto, (phoneNumber) => ({ addressData: address(phoneNumber) })],
+  ];
+  for (const [metatype, body] of forms) {
+    const transform = (phone) => pipe.transform(body(phone), { type: 'body', metatype });
+    for (const phone of [
+      '01012345678',
+      '021234567',
+      '0212345678',
+      '0321234567',
+      '03212345678',
+      '07012345678',
+      ...[
+        '031',
+        '033',
+        '041',
+        '042',
+        '043',
+        '044',
+        '051',
+        '052',
+        '053',
+        '054',
+        '055',
+        '061',
+        '062',
+        '063',
+        '064',
+      ].map((prefix) => prefix + '1234567'),
+    ])
+      await transform(phone);
+    for (const phone of [
+      '02',
+      '02123456',
+      '02123456789',
+      '032123456',
+      '0391234567',
+      '0101234567',
+      '00000000000',
+      '02-1234-5678',
+      '+82212345678',
+      ' 0212345678',
+      '0212345678\n',
+      '０２１２３４５６７８',
+      212345678,
+      null,
+    ])
+      if (phone !== null || [CreatePinDto, UpdatePinDto].includes(metatype))
+        await assert.rejects(
+          () => transform(phone),
+          (error) => error.getStatus() === 400,
+          metatype.name + ': ' + phone,
+        );
+  }
+  for (const phoneNumber of ['0212345678', '03212345678', '07012345678', '00000000000'])
+    await assert.rejects(
+      () => validate({ customerSeq: 1, parcels: [{ origin: { phoneNumber } }] }),
+      (error) => error.getStatus() === 400,
+    );
 });
 
 test('collecting an order still permits omitted or cleared phones and partial searches', async () => {
@@ -567,21 +646,27 @@ test('admin order screen validates only bounded screen filters and preserves str
   assert.equal(result.q, '한글');
   assert.equal(result.limit, 1);
   assert.equal(result.offset, 2);
-  assert.equal(
-    (
-      await pipe.transform(
-        { statusGroup: 'SUBMISSION_FAILED' },
-        { type: 'query', metatype: AdminOrderListQueryDto },
-      )
-    ).statusGroup,
+  for (const statusGroup of [
+    'COLLECTING',
+    'notPaid',
+    'PAID',
+    'ACCEPTED',
     'SUBMISSION_FAILED',
-  );
+    'CANCELLED',
+  ])
+    assert.equal(
+      (await pipe.transform({ statusGroup }, { type: 'query', metatype: AdminOrderListQueryDto }))
+        .statusGroup,
+      statusGroup,
+    );
   for (const patch of [
     { q: ['a'] },
     { q: 'x\0' },
     { q: 'x'.repeat(201) },
     { statusGroup: ['PAID'] },
     { statusGroup: 'SUBMITTING' },
+    { statusGroup: 'SUBMITTING_FAILED' },
+    { statusGroup: 'SUMBITTING' },
     { status: 'PAID' },
     { limit: '1.0' },
     { offset: '-1' },

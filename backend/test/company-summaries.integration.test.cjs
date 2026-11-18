@@ -131,7 +131,7 @@ describe('administrator company and department summaries', () => {
       (await request(`/companies/${id}/departments`)).body.data.map((r) => r.memberCount),
       [0, 0],
     );
-    assert.equal((await request(`/members/${employee}`, 'DELETE')).status, 204);
+    assert.equal((await request('/members', 'DELETE', { membershipSeqs: [employee] })).status, 204);
     const final = (await request(`/companies/${id}`)).body.data;
     assert.equal(final.memberCount, 0);
     assert.equal(final.createdAt, original);

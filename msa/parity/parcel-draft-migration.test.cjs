@@ -6,7 +6,8 @@ const { fork } = require('node:child_process');
 const { once } = require('node:events');
 const { Pool } = require('pg');
 const { readFileSync } = require('node:fs');
-const { ParcelDraftRetentionWorker } = require('../dist/orders/parcel-draft-retention.worker');
+const { OrderRetentionWorker } = require('../dist/orders/order-retention.worker');
+const { OrderRetentionRepository } = require('../dist/orders/order-retention.repository');
 const { restoreLegacyDraftBindings, requestParcelDraftCommand } = require('@dva/events/parcel-drafts.cjs');
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const token = process.env.CUSTOMER_AUTH_TOKEN;
@@ -149,7 +150,8 @@ test('055 owner startup restores every historical snapshot, preserves source row
         const c = await pools[owner].connect(); held.push(c); await c.query('BEGIN');
         await c.query('SELECT 1 FROM order_parcel_drafts WHERE legacy_order_seq=700001 FOR KEY SHARE');
       }
-      const worker = new ParcelDraftRetentionWorker(database, { get: () => 'test' });
+      const config={get:key=>({NODE_ENV:'test',CONSULTATION_URL:url,DELIVERY_URL:'http://delivery-app:3003',CUSTOMER_AUTH_TOKEN:token})[key]};
+      const worker = new OrderRetentionWorker(new OrderRetentionRepository(database,config),database,config);
       const ids = async p => (await query(p, 'SELECT legacy_order_seq FROM order_parcel_drafts ORDER BY legacy_order_seq')).map(r => r.legacy_order_seq);
       for (let i = 0; i < 3; i++) {
         const before = (await ids(pools.order)).length;

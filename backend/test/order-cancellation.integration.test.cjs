@@ -2,7 +2,12 @@ require('reflect-metadata');
 const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
-const { createTestSession, createTestPool, startTestApp } = require('./helpers/application.cjs');
+const {
+  createTestSession,
+  createTestPool,
+  startTestApp,
+  businessHeaders,
+} = require('./helpers/application.cjs');
 
 const { AuditService } = require('../dist/audit/audit.service');
 
@@ -14,7 +19,7 @@ const origin = 'http://localhost:5173';
 process.env.CORS_ORIGINS = origin;
 const pool = createTestPool();
 const apps = [];
-let app, base, customerId, otherId, callId;
+let app, base, customerId, otherId, callId, newCallId;
 const cookies = [],
   adminIds = [];
 const phone = '01064000001';
@@ -22,7 +27,7 @@ const phone = '01064000001';
 before(async () => {
   app = await startTestApp(apps);
   base = (await app.getUrl()) + '/api';
-  for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN']) {
+  for (const role of ['OPERATOR', 'SYSTEM_ADMIN']) {
     const loginId = 'cancel' + role.replaceAll('_', '');
     const admin = await pool.query(
       "INSERT INTO admin_users(login_id,name,password_hash,role,status) VALUES($1,'취소 검증',$2,$3,'ACTIVE') RETURNING admin_user_seq",
@@ -45,6 +50,12 @@ before(async () => {
   callId = (
     await pool.query(
       'INSERT INTO call_sessions(provider_call_id,caller_phone_number,order_intake_enabled) VALUES($1,$2,false) RETURNING call_session_seq',
+      [randomUUID(), phone],
+    )
+  ).rows[0].call_session_seq;
+  newCallId = (
+    await pool.query(
+      'INSERT INTO call_sessions(provider_call_id,caller_phone_number) VALUES($1,$2) RETURNING call_session_seq',
       [randomUUID(), phone],
     )
   ).rows[0].call_session_seq;
@@ -111,7 +122,7 @@ function cancel(id, { cookie = cookies[0], call, requestId = randomUUID(), parce
       Origin: origin,
       'X-Request-Id': requestId,
       'Content-Type': 'application/json',
-      ...(cookie ? { Cookie: cookie } : {}),
+      ...(cookie ? { Cookie: cookie } : businessHeaders()),
       ...(call === undefined ? {} : { call_session_seq: String(call) }),
     },
     body: parcels === undefined ? undefined : JSON.stringify({ orderParcelSeqs: parcels }),
@@ -240,6 +251,58 @@ test('AI uses the same caller/customer scope as order detail and cannot spoof an
   const withdrawn = await fixture();
   assert.equal((await cancel(withdrawn.id, { cookie: null, call: callId })).status, 403);
   await pool.query("UPDATE customers SET status='ACTIVE' WHERE customer_seq=$1", [customerId]);
+});
+
+test('a new AI call can partially and fully cancel an existing unpaid order', async () => {
+  const { id, parcels } = await fixture({ status: 'notPaid' });
+  const ai = { cookie: null, call: newCallId };
+  const original = await state(id);
+  const response = await cancel(id, { ...ai, parcels: [parcels[0]] });
+  assert.equal(response.status, 204, await response.text());
+  const partial = await state(id);
+  assert.equal(partial.order.status, 'notPaid');
+  assert.equal(partial.order.total_amount, 3500);
+  assert.deepEqual(
+    partial.parcels.map((parcel) => parcel.status),
+    ['CANCELLED', 'ACTIVE'],
+  );
+  assert.ok(
+    partial.requests.find((r) => r.payment_request_id === original.requests[0].payment_request_id)
+      .invalidated_at,
+  );
+  assert.equal(partial.requests.find((r) => !r.invalidated_at).amount, 3500);
+  assert.equal(partial.order.payment_due_at, original.order.payment_due_at);
+
+  const full = await cancel(id, ai);
+  assert.equal(full.status, 204, await full.text());
+  const cancelled = await state(id);
+  assert.equal(cancelled.order.status, 'CANCELLED');
+  assert.equal(cancelled.order.total_amount, 0);
+  assert.ok(cancelled.requests.every((request) => request.invalidated_at));
+});
+
+test('a new AI call cannot cancel another customer’s order or an ineligible order', async () => {
+  const ai = { cookie: null, call: newCallId };
+  const foreign = await fixture({ status: 'notPaid', customer: otherId });
+  const unpaid = await fixture({ status: 'notPaid' });
+  await pool.query(
+    'UPDATE order_payment_requests SET approval_started_at=clock_timestamp() WHERE order_seq=$1',
+    [unpaid.id],
+  );
+  for (const [order, status, code] of [
+    [foreign, 404, 'NOT_FOUND'],
+    [await fixture({ status: 'PAID' }), 409, 'INVALID_STATE'],
+    [await fixture(), 409, 'INVALID_STATE'],
+    [unpaid, 409, 'REQUEST_IN_PROGRESS'],
+  ]) {
+    const previous = await state(order.id);
+    for (const parcels of [undefined, [order.parcels[0]]]) {
+      const response = await cancel(order.id, { ...ai, parcels });
+      assert.equal(response.status, status);
+      assert.equal((await response.json()).error.code, code);
+    }
+    assert.deepEqual(await state(order.id), previous);
+  }
 });
 
 test('duplicate concurrent whole requests change state/history once', async () => {

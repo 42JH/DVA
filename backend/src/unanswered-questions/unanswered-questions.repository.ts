@@ -1,3 +1,4 @@
+import { preparedQuery } from '../database/prepared-query';
 import { readPage, PageRows } from '../common/pagination-query';
 import { Injectable } from '@nestjs/common';
 import { PoolClient } from 'pg';
@@ -20,7 +21,7 @@ export class UnansweredQuestionsRepository {
         `SELECT status,faq_entry_seq AS "faqId",faq_conversion_hash AS "conversionHash"
        FROM unanswered_questions WHERE unanswered_question_seq=$1
        AND EXISTS(SELECT 1 FROM call_sessions c WHERE c.call_session_seq=unanswered_questions.call_session_seq
-        AND c.deleted_at IS NULL AND (c.incoming_at IS NULL OR c.incoming_at>clock_timestamp()-interval '5 years') FOR SHARE)
+        AND c.deleted_at IS NULL FOR SHARE)
        FOR UPDATE`,
         [id],
       )
@@ -71,7 +72,6 @@ export class UnansweredQuestionsRepository {
          LEFT JOIN customers customer ON customer.customer_seq=COALESCE(o.customer_seq,c.customer_seq) AND customer.deleted_at IS NULL
          LEFT JOIN faq_entries f ON f.faq_entry_seq=u.faq_entry_seq AND f.deleted_at IS NULL
          WHERE u.status IN ('OPEN','REGISTERED') AND ($1::text='ALL' OR u.status=$1) AND c.deleted_at IS NULL
-           AND (c.incoming_at IS NULL OR c.incoming_at>transaction_timestamp()-interval '5 years')
            AND ($2::integer IS NULL OR u.unanswered_question_seq=$2)
            AND ($3::integer IS NULL OR u.call_session_seq=$3)
            AND ($4::integer IS NULL OR a.ai_persona_version_seq=$4)
@@ -99,8 +99,10 @@ export class UnansweredQuestionsRepository {
   async findCall(client: PoolClient, id: number): Promise<string | undefined> {
     return (
       await client.query<{ providerCallId: string }>(
-        'SELECT provider_call_id AS "providerCallId" FROM call_sessions WHERE call_session_seq=$1 AND deleted_at IS NULL AND (incoming_at IS NULL OR incoming_at>clock_timestamp()-interval \'5 years\') FOR SHARE',
-        [id],
+        preparedQuery(
+          'SELECT provider_call_id AS "providerCallId" FROM call_sessions WHERE call_session_seq=$1 AND deleted_at IS NULL AND (incoming_at IS NULL OR incoming_at>clock_timestamp()-interval \'5 years\') FOR SHARE',
+          [id],
+        ),
       )
     ).rows[0]?.providerCallId;
   }
@@ -112,17 +114,19 @@ export class UnansweredQuestionsRepository {
   ): Promise<number | undefined> {
     return (
       await client.query<{ id: number }>(
-        `INSERT INTO unanswered_questions(event_id,call_session_seq,question_text,occurred_at,offset_seconds,reason,payload_hash)
+        preparedQuery(
+          `INSERT INTO unanswered_questions(event_id,call_session_seq,question_text,occurred_at,offset_seconds,reason,payload_hash)
          VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(event_id) DO NOTHING RETURNING unanswered_question_seq AS id`,
-        [
-          input.eventId,
-          input.callSessionSeq,
-          input.questionText,
-          input.occurredAt,
-          input.offsetSeconds,
-          input.reason ?? null,
-          hash,
-        ],
+          [
+            input.eventId,
+            input.callSessionSeq,
+            input.questionText,
+            input.occurredAt,
+            input.offsetSeconds,
+            input.reason ?? null,
+            hash,
+          ],
+        ),
       )
     ).rows[0]?.id;
   }
@@ -130,9 +134,11 @@ export class UnansweredQuestionsRepository {
   async findExisting(client: PoolClient, eventId: string) {
     return (
       await client.query<{ id: number; callSessionSeq: number; hash: string }>(
-        `SELECT unanswered_question_seq AS id,call_session_seq AS "callSessionSeq",payload_hash AS hash
+        preparedQuery(
+          `SELECT unanswered_question_seq AS id,call_session_seq AS "callSessionSeq",payload_hash AS hash
          FROM unanswered_questions WHERE event_id=$1 FOR KEY SHARE`,
-        [eventId],
+          [eventId],
+        ),
       )
     ).rows[0];
   }

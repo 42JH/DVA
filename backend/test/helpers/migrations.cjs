@@ -130,6 +130,18 @@ async function migrate(pool) {
         "SELECT count(*)::int AS n FROM information_schema.columns WHERE table_schema='public' AND table_name IN ('ai_persona_versions','ai_persona_drafts') AND column_name IN ('role_text','personality_text','tone_text','speed_instruction','backchannel_text','interruption_text') AND is_nullable='NO'",
       );
       assert.equal(promptFields.rows[0].n, 12, 'Apply migration 060 to the isolated DB first');
+      const roles = await client.query(
+        "SELECT 1 FROM pg_constraint WHERE conrelid='public.admin_users'::regclass AND conname='admin_users_role_check' AND pg_get_constraintdef(oid) NOT LIKE '%SUPERVISOR%'",
+      );
+      assert.equal(roles.rowCount, 1, 'Apply migration 066 to the isolated DB first');
+      assert.ok(
+        (
+          await client.query(
+            "SELECT to_regclass('public.customers_related_deletion_due_idx') AS name",
+          )
+        ).rows[0].name,
+        'Apply migration 067 to the isolated DB first',
+      );
     } else {
       const directory = join(__dirname, '../../migrations');
       for (const file of readdirSync(directory)

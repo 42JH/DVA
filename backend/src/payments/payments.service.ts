@@ -1,3 +1,4 @@
+import { OrderCardPaymentsService } from '../orders/order-card-payments.service';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Environment } from '../config/environment';
@@ -7,6 +8,7 @@ import { isZonedDate } from '../orders/order-draft';
 import { PaymentsRepository } from './payments.repository';
 import { PaymentClient } from './payment.client';
 import { paymentCompletionMessage, paymentMessage } from './payment-message';
+import { PaymentCardsService } from './payment-cards.service';
 
 @Injectable()
 export class PaymentsService {
@@ -16,6 +18,8 @@ export class PaymentsService {
     private readonly repository: PaymentsRepository,
     private readonly client: PaymentClient,
     private readonly orders: OrderPaymentsService,
+    private readonly cards: PaymentCardsService,
+    private readonly cardPayments: OrderCardPaymentsService,
   ) {}
   ensureEnabled() {
     if (!this.config.get('ORDER_PAYMENTS_ENABLED', { infer: true }))
@@ -44,10 +48,44 @@ export class PaymentsService {
     return promise;
   }
   async reconcile(id: string, requestId: string) {
-    const view = await this.read(id);
-    return this.process(id, view.amount, undefined, requestId);
+    try {
+      const view = await this.read(id);
+      if (view.autoCharge) return await this.processCard(id, requestId);
+      return await this.process(id, view.amount, undefined, requestId, 'ORDER_PAYMENT_RECONCILED');
+    } catch (error: unknown) {
+      await this.orders.recordPaymentFailure(id, requestId, error, 'ORDER_PAYMENT_RECONCILED');
+      throw error;
+    }
   }
-  private async process(id: string, amount: number, key: string | undefined, requestId: string) {
+
+  async processCard(id: string, requestId: string) {
+    this.ensureEnabled();
+    await this.cardPayments.process(id, requestId);
+    return this.repository.read(id);
+  }
+
+  private async process(
+    id: string,
+    amount: number,
+    key: string | undefined,
+    requestId: string,
+    action:
+      'ORDER_PAYMENT_CONFIRMATION' | 'ORDER_PAYMENT_RECONCILED' = 'ORDER_PAYMENT_CONFIRMATION',
+  ) {
+    try {
+      return await this.processApproval(id, amount, key, requestId);
+    } catch (error: unknown) {
+      await this.orders.recordPaymentFailure(id, requestId, error, action);
+      throw error;
+    }
+  }
+
+  private async processApproval(
+    id: string,
+    amount: number,
+    key: string | undefined,
+    requestId: string,
+  ) {
     const claim = await this.orders.claimApproval(id, amount, key);
     if (claim.done) return this.repository.read(id);
     try {
@@ -108,6 +146,10 @@ export class PaymentsService {
     );
     await this.orders.finishNotification(id, result);
     return true;
+  }
+
+  async revokeDeletedCard(requestId: string) {
+    return this.cards.revokeDeleted(requestId);
   }
   async retryNotification(id: string, adminId: number, requestId: string) {
     this.ensureEnabled();

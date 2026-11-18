@@ -5,6 +5,113 @@ const { randomUUID } = require('node:crypto');
 const { Pool } = require('pg');
 const { hashPassword } = require('./seed-password.cjs');
 
+test('customer retention local cleanup preserves newer children and erases only expired personal details', async t=>{
+  assert.equal(process.env.NODE_ENV,'test');assert.equal(process.env.PGDATABASE,'dva_webhook_test');
+  const {RetentionRepository}=require('../dist/retention/retention.repository');
+  const db=new Pool();t.after(()=>db.end());
+  const transaction=async work=>{const client=await db.connect();try{await client.query('BEGIN');const result=await work(client);await client.query('COMMIT');return result;}catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}};
+  const repo=new RetentionRepository({pool:db,transaction});
+  await truncateFixture(db,'TRUNCATE customers,organizations,departments,memberships,personal_pins,payment_cards RESTART IDENTITY CASCADE');
+  const at=process.env.RETENTION_AT;assert.ok(Number.isFinite(Date.parse(at)));
+  const address={name:'보존 수령인',phoneNumber:'0212345678',roadAddress:'보존 도로',jibunAddress:'보존 지번',detailAddress:'',dongName:'보존동',postalCode:'01234'};
+  const own={roadAddress:'개인 도로',jibunAddress:'개인 지번',detailAddress:'',dongName:'개인동',postalCode:'01234'};
+  for(const [n,age]of [[1,null],[2,6],[3,4]])await db.query(`INSERT INTO customers(name,phone_number,status,deleted_at,monthly_billing_enabled,address_data)
+    VALUES($1,$2,'ACTIVE',CASE WHEN $4::text IS NULL THEN NULL ELSE $3::timestamptz-$4::interval END,true,$5)`,['개인정보 '+n,'0100000000'+n,at,age===null?null:age+' years',own]);
+  for(const [n,age]of [[1,6],[2,6],[3,4],[4,null]])await db.query(`INSERT INTO organizations(name,status,created_at,deleted_at)
+    VALUES($1,'ACTIVE',$2::timestamptz-interval '7 years',CASE WHEN $3::text IS NULL THEN NULL ELSE $2::timestamptz-$3::interval END)`,['조직 '+n,at,age===null?null:age+' years']);
+  for(const [n,org,age]of [[1,1,6],[2,2,6],[3,2,4]])await db.query(`INSERT INTO departments(organization_seq,name,created_at,deleted_at)
+    VALUES($1,$2,$3::timestamptz-interval '7 years',$3::timestamptz-$4::interval)`,[org,'부서 '+n,at,age+' years']);
+  for(const [n,customer,org,dept,age]of [[1,2,1,1,6],[2,3,2,2,4]])await db.query(`INSERT INTO memberships(customer_seq,organization_seq,department_seq,employee_no,role,status,deleted_at)
+    VALUES($1,$2,$3,$4,'MEMBER','ACTIVE',$5::timestamptz-$6::interval)`,[customer,org,dept,'employee'+n,at,age+' years']);
+  for(const [n,age]of [[1,6],[2,4]])await db.query(`INSERT INTO personal_pins(customer_seq,label,address_data,deleted_at)
+    VALUES(2,$1,$2,$3::timestamptz-$4::interval)`,['주소 '+n,{...address,detailAddress:String(n)},at,age+' years']);
+  for(const [n,customer,org,age]of [[1,2,null,6],[2,3,null,4],[3,null,1,6],[4,null,2,4]])await db.query(`INSERT INTO payment_cards(customer_seq,organization_seq,registration_key,request_hash,provider_customer_key,provider_environment,masked_number,expiration_year,expiration_month,status,created_at,updated_at,deleted_at)
+    VALUES($1,$2,$3,repeat('a',64),$3,'test','****1234',2029,1,'FAILED',$4::timestamptz-interval '7 years',$4::timestamptz-interval '7 years',$4::timestamptz-$5::interval)`,[customer,org,'40000000-0000-4000-8000-'+String(n).padStart(12,'0'),at,age+' years']);
+  const tables=[['customers','customer_seq'],['organizations','organization_seq'],['departments','department_seq'],['memberships','membership_seq'],['personal_pins','personal_pin_seq'],['payment_cards','payment_card_seq']];
+  const snapshot=async()=>{const result={};for(const[table,key]of tables)result[table]=(await db.query(`SELECT to_jsonb(t) AS row FROM ${table} t ORDER BY ${key}`)).rows.map(r=>r.row);return result;};
+  const before=await snapshot();
+  const hasOutbox=!!(await db.query("SELECT to_regclass('outbox_events') AS name")).rows[0].name;
+  const pending=async()=>hasOutbox?(await db.query("SELECT event_id,payload FROM outbox_events WHERE event_type='CustomerPaymentCardsPurged' ORDER BY outbox_seq")).rows:[];
+  const pendingBefore=await pending();
+  for(const [key,value]of [[20261103,157],[20261027,37]]){const gate=await db.connect();try{await gate.query('SELECT pg_advisory_lock($1,$2)',[key,value]);await repo.purgeDatabase();assert.deepEqual(await snapshot(),before);}finally{await gate.query('SELECT pg_advisory_unlock($1,$2)',[key,value]);gate.release();}}
+  await db.query("CREATE FUNCTION customer_retention_fault() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.anonymized_at IS DISTINCT FROM OLD.anonymized_at THEN RAISE EXCEPTION 'controlled anonymization failure'; END IF; RETURN NEW; END $$; CREATE TRIGGER customer_retention_fault BEFORE UPDATE ON customers FOR EACH ROW EXECUTE FUNCTION customer_retention_fault()");
+  try{await assert.rejects(repo.purgeDatabase());assert.deepEqual(await snapshot(),before);assert.deepEqual(await pending(),pendingBefore);}finally{await db.query('DROP TRIGGER customer_retention_fault ON customers; DROP FUNCTION customer_retention_fault()');}
+  const gate=await db.connect();try{await gate.query('BEGIN');await gate.query('SELECT 1 FROM payment_cards WHERE payment_card_seq=1 FOR UPDATE');await repo.purgeDatabase();assert.deepEqual((await db.query('SELECT payment_card_seq FROM payment_cards ORDER BY payment_card_seq')).rows.map(r=>r.payment_card_seq),[1,2,4]);}finally{await gate.query('ROLLBACK');gate.release();}
+  await repo.purgeDatabase();const after=await snapshot();
+  assert.deepEqual(after.payment_cards.map(r=>r.payment_card_seq),[2,4]);assert.deepEqual(after.memberships.map(r=>r.membership_seq),[2]);assert.deepEqual(after.personal_pins.map(r=>r.personal_pin_seq),[2]);assert.deepEqual(after.departments.map(r=>r.department_seq),[2,3]);assert.deepEqual(after.organizations.map(r=>r.organization_seq),[2,3,4]);
+  assert.equal(after.customers.length,3);assert.equal(after.customers[1].name,'삭제된 고객');assert.equal(after.customers[1].phone_number,'0002');assert.equal(after.customers[1].address_data,null);assert.equal(after.customers[1].monthly_billing_enabled,false);assert.ok(after.customers[1].anonymized_at);assert.deepEqual(after.customers[0],before.customers[0]);assert.deepEqual(after.customers[2],before.customers[2]);
+  await repo.purgeDatabase();assert.deepEqual(await snapshot(),after);
+  if(hasOutbox){const oldIds=new Set(pendingBefore.map(row=>row.event_id));assert.deepEqual((await pending()).filter(row=>!oldIds.has(row.event_id)).flatMap(row=>row.payload.ids).sort((a,b)=>a-b),[1,3]);}
+  for(const rows of Object.values(after))for(const row of rows)for(const key of Object.keys(row))if(key.endsWith('_at')&&row[key]&&Date.parse(row[key])>=Date.parse(at)){assert.ok(Date.parse(row[key])<=Date.now()+2000);row[key]='<new fixture or retention timestamp>';}
+  console.log(JSON.stringify({customerLocalRetention:after,localChildrenProtectRoot:true,rollback:true,lockedCardSkipped:true}));
+});
+
+test('customer retention hard deletion passes referenced pages and preserves source batches and child guards',async t=>{
+  const {RetentionRepository}=require('../dist/retention/retention.repository');
+  const {createHash}=require('node:crypto'),{createServer}=require('node:http');
+  const db=new Pool();t.after(()=>db.end());
+  await truncateFixture(db,'TRUNCATE customers,organizations,departments,memberships,personal_pins,payment_cards RESTART IDENTITY CASCADE');
+  const at=process.env.RETENTION_AT,token='retention-reference-test-'.padEnd(48,'t');
+  const source=!!(await db.query("SELECT to_regclass('orders') AS name")).rows[0].name;
+  if(source)await truncateFixture(db,'TRUNCATE call_sessions RESTART IDENTITY CASCADE');
+  else await db.query('TRUNCATE outbox_events,inbox_events');
+  await db.query(`INSERT INTO customers(name,phone_number,status,deleted_at)
+    SELECT '만료 고객 '||n,'010'||lpad(n::text,8,'0'),'ACTIVE',
+    CASE WHEN n=1160 THEN NULL WHEN n=1159 THEN $1::timestamptz-interval '4 years' ELSE $1::timestamptz-interval '6 years' END FROM generate_series(1,1160) n`,[at]);
+  await db.query("INSERT INTO organizations(name,status) VALUES('보존 기업','ACTIVE')");
+  await db.query("INSERT INTO memberships(customer_seq,organization_seq,employee_no,status,deleted_at) VALUES(1158,1,'kept','ACTIVE',$1::timestamptz-interval '4 years')",[at]);
+  const address={name:'보존 수령인',phoneNumber:'0212345678',roadAddress:'보존 도로',jibunAddress:'보존 지번',detailAddress:'',dongName:'보존동',postalCode:'01234'};
+  await db.query('INSERT INTO personal_pins(customer_seq,address_data) VALUES(1156,$1)',[address]);
+  await db.query("INSERT INTO payment_cards(customer_seq,registration_key,request_hash,provider_customer_key,provider_environment,expiration_year,expiration_month,status,deleted_at) VALUES(1157,$1,'kept',$1,'test',2099,12,'FAILED',$2::timestamptz-interval '4 years')",['40000000-0000-4000-8000-000000009999',at]);
+  if(source)await db.query("INSERT INTO orders(customer_seq,creation_source,created_at,updated_at) SELECT customer_seq,'ADMIN',$1,$1 FROM customers WHERE customer_seq<=1050",[at]);
+  let mode='ok',url='http://order:3002';const requests=[],errors=[];
+  if(!source){const server=createServer(async(req,res)=>{try{const chunks=[];for await(const chunk of req)chunks.push(chunk);const event=JSON.parse(Buffer.concat(chunks));
+    require('@dva/events/call-read-references.cjs').validateRetainedCustomersQuery(event);assert.equal(req.headers.authorization,'Bearer '+token);requests.push(event.payload.ids);
+    if(mode==='fail'){res.writeHead(503).end();return;}res.writeHead(200,{'Content-Type':'application/json'}).end(JSON.stringify({eventId:event.eventId,status:'processed',payload:event.payload.ids.filter(id=>id<=1050).sort((a,b)=>a-b)}));
+  }catch(error){errors.push(error.message);res.writeHead(500).end();}});await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));url='http://127.0.0.1:'+server.address().port;t.after(async()=>{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));});}
+  const transaction=async work=>{const client=await db.connect();try{await client.query('BEGIN');const result=await work(client);await client.query('COMMIT');return result;}catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}};
+  const repo=new RetentionRepository({pool:db,transaction},{get:key=>key==='ORDER_URL'?url:token});
+  const {RetentionWorker}=require('../dist/retention/retention.worker');
+  const worker=new RetentionWorker(repo,{pool:db,erase:async()=>{}},{get:key=>key==='ORDER_URL'?url:key==='NODE_ENV'?'test':token});t.after(()=>worker.onModuleDestroy());
+  const snapshot=async()=>(await db.query('SELECT to_jsonb(c) AS row FROM customers c ORDER BY customer_seq')).rows.map(({row})=>{if(row.anonymized_at)row.anonymized_at='<anonymized>';return row;});
+  const before=await snapshot();
+  if(!source){mode='fail';await assert.rejects(repo.purgeDatabase());assert.deepEqual(await snapshot(),before);mode='ok';requests.length=0;}
+  await db.query("CREATE FUNCTION retention_root_fault() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'controlled customer deletion failure'; END $$; CREATE TRIGGER retention_root_fault BEFORE DELETE ON customers FOR EACH ROW EXECUTE FUNCTION retention_root_fault()");
+  try{await assert.rejects(repo.purgeDatabase());assert.deepEqual(await snapshot(),before);}finally{await db.query('DROP TRIGGER retention_root_fault ON customers; DROP FUNCTION retention_root_fault()');}
+  requests.length=0;const gate=await db.connect(),batches=[];let count=1160;
+  try{await gate.query('BEGIN');await gate.query('SELECT 1 FROM customers WHERE customer_seq=1051 FOR UPDATE');
+    for(const expected of [100,4]){await worker.run();const rows=await snapshot();batches.push(count-rows.length);assert.equal(count-rows.length,expected);count=rows.length;assert.ok(rows.some(row=>row.customer_seq===1051));}
+    if(!source){assert.ok(requests.some(ids=>ids.length===1000));assert.ok(requests.length>=4);assert.ok(requests.every(ids=>!ids.includes(1051)));}
+  }finally{await gate.query('ROLLBACK');gate.release();}
+  await worker.run();const after=await snapshot();batches.push(count-after.length);assert.deepEqual(batches,[100,4,1]);
+  assert.deepEqual(after.map(row=>row.customer_seq),[...Array.from({length:1050},(_,n)=>n+1),1156,1157,1158,1159,1160]);
+  assert.deepEqual(errors,[]);
+  console.log(JSON.stringify({customerRetentionRoots:{batches,remaining:after.length,rowsHash:createHash('sha256').update(JSON.stringify(after)).digest('hex')}}));
+});
+
+test('customer retention worker preserves source scheduling, shared runs, retry and shutdown',async t=>{
+  const {RetentionWorker}=require('../dist/retention/retention.worker');
+  const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+  const fakeDatabase={pool:{connect:async()=>({query:async()=>({rows:[]}),release:()=>{}})}};
+  const config=environment=>({get:key=>key==='NODE_ENV'?environment:key==='ORDER_URL'?'http://order:3002':'retention-worker-test-'.padEnd(48,'t')});
+  let calls=0,finish;
+  const pending=new RetentionWorker({claimCall:async()=>undefined,purgeDatabase:()=>{calls++;return new Promise(resolve=>{finish=resolve;});}},fakeDatabase,config('test'));
+  t.after(()=>pending.onModuleDestroy());pending.onApplicationBootstrap();await pause(5);assert.equal(calls,0);
+  const one=pending.run(),two=pending.run();assert.equal(one,two);
+  for(let n=0;!finish;n++){assert.ok(n<100);await pause(1);}
+  let stopped=false;const shutdown=pending.onModuleDestroy().then(()=>{stopped=true;});await pause(5);assert.equal(stopped,false);
+  finish(true);await Promise.all([one,two,shutdown]);await pending.run();assert.equal(calls,1);
+  let fail=true,retries=0;const logs=[];
+  const recovering=new RetentionWorker({claimCall:async()=>undefined,purgeDatabase:async()=>{retries++;if(fail)throw Error('private failure details');return true;}},fakeDatabase,config('test'));
+  t.after(()=>recovering.onModuleDestroy());recovering.logger.error=value=>logs.push(value);
+  await assert.rejects(recovering.run());fail=false;await recovering.run();assert.equal(retries,2);assert.deepEqual(logs,[{event:'retention_cleanup_failed'}]);await recovering.onModuleDestroy();
+  let ticks=0;const scheduled=new RetentionWorker({claimCall:async()=>undefined,purgeDatabase:async()=>{ticks++;return true;}},fakeDatabase,config('production'));
+  t.after(()=>scheduled.onModuleDestroy());scheduled.onApplicationBootstrap();
+  const deadline=Date.now()+15000;while(ticks<2){assert.ok(Date.now()<deadline,'ten-second retention timer');await pause(50);}
+  await scheduled.onModuleDestroy();assert.equal(ticks,2);await scheduled.run();assert.equal(ticks,2);
+  console.log(JSON.stringify({customerRetentionWorker:{singleRun:true,retry:true,shutdown:true,timer:true}}));
+});
+
 test('customer reads match monolith with independent operations sessions and immutable customer data', async t => {
   assert.equal(process.env.NODE_ENV, 'test');
   assert.equal(process.env.PGDATABASE, 'dva_webhook_test');
@@ -31,7 +138,7 @@ test('customer reads match monolith with independent operations sessions and imm
   for (const side of sides) {
     await truncateFixture(side.identity, 'TRUNCATE admin_users,audit_logs RESTART IDENTITY CASCADE');
     for (const [login, role, status] of [['root','SYSTEM_ADMIN','ACTIVE'], ['operator','OPERATOR','ACTIVE'],
-      ['supervisor','SUPERVISOR','ACTIVE'], ['pending','OPERATOR','PENDING'], ['inactive','OPERATOR','INACTIVE']]) {
+      ['supervisor','OPERATOR','ACTIVE'], ['pending','OPERATOR','PENDING'], ['inactive','OPERATOR','INACTIVE']]) {
       await side.identity.query(`INSERT INTO admin_users(login_id,name,password_hash,role,status,created_at)
         VALUES($1,$2,$3,$4,$5,'2025-10-01T00:00:00Z')`, [login, '테스트 '+login, hash, role, status]);
     }
@@ -57,7 +164,7 @@ test('customer reads match monolith with independent operations sessions and imm
       'SELECT customer_seq,name,phone_number,status,monthly_billing_enabled,address_data,deleted_at,anonymized_at FROM customers ORDER BY customer_seq',
       'SELECT organization_seq,name,status,monthly_billing_enabled,created_at,deleted_at FROM organizations ORDER BY organization_seq',
       'SELECT department_seq,organization_seq,name,group_billing_enabled,created_at,deleted_at FROM departments ORDER BY department_seq',
-      'SELECT membership_seq,customer_seq,organization_seq,department_seq,employee_no,role,status,deleted_at FROM memberships ORDER BY membership_seq',
+      'SELECT membership_seq,customer_seq,organization_seq,department_seq,employee_no,role,status,monthly_billing_enabled,group_billing_enabled,deleted_at FROM memberships ORDER BY membership_seq',
     ]) values.push((await db.query(query)).rows);
     return values;
   }
@@ -115,7 +222,7 @@ test('customer reads match monolith with independent operations sessions and imm
       await request('GET',path,actor,200);
   }
   for (const path of ['/api/customers?q=%25_%5B','/api/customers?phoneNumber=01000000004',
-    '/api/customers?status=WITHDRAWN','/api/customers?limit=1&offset=1','/api/customers?offset=99999',
+    '/api/customers?phoneNumber=0000','/api/customers?phoneNumber=0','/api/customers?status=WITHDRAWN','/api/customers?limit=1&offset=1','/api/customers?offset=99999',
     '/api/companies?q=%25_%5B','/api/companies?status=INACTIVE','/api/companies?limit=1&offset=99999',
     '/api/companies/2/members?status=INACTIVE','/api/companies/1/members?limit=1&offset=99999',
     '/api/companies/4/members','/api/companies/1/departments?limit=1&offset=99999','/api/companies/4/departments'])
@@ -125,7 +232,8 @@ test('customer reads match monolith with independent operations sessions and imm
     const result = await request('GET',path,undefined,200);
     for (const item of result.data) for (const field of ['employeeNo','role','personalPins']) assert.equal(item[field], undefined);
   }
-  await request('GET','/api/companies/search?q=한빛','root',401,undefined,{ai:false});
+  for(const actor of ['root','operator','supervisor']) await request('GET','/api/companies/search?q=한빛',actor,200,undefined,{ai:false});
+  await request('GET','/api/companies/search?q=한빛',undefined,401,undefined,{ai:false});
   await request('GET','/api/customers/1',undefined,401,undefined,{ai:false});
   await request('GET','/api/customers/1',undefined,401,undefined,{token:'wrong'});
   await request('GET','/api/companies/members/search?q=김',undefined,401);
@@ -156,19 +264,23 @@ test('customer reads match monolith with independent operations sessions and imm
   await request('GET','/api/customers/1','operator',401,undefined,{ duplicate:true });
   await request('PATCH','/api/admins/2','root',204,{ status:'INACTIVE' });
   await request('GET','/api/customers','operator',401);
-  await request('GET','/api/companies/search?q=한빛','operator',200);
+  await request('GET','/api/companies/search?q=한빛','operator',401);
   await request('GET','/api/customers/1','operator',401);
   await request('PATCH','/api/admins/2','root',204,{ status:'ACTIVE' });
   await request('GET','/api/companies','operator',401);
   await login('operator');
   await request('GET','/api/companies','operator',200);
   await request('POST','/api/auth/logout','operator',204);
-  await request('GET','/api/companies/search?q=한빛','operator',200);
+  await request('GET','/api/companies/search?q=한빛','operator',401);
   await request('GET','/api/companies/search?q=한빛',undefined,200);
   await login('operator');
-  await request('DELETE','/api/admins/2','root',204);
+  await request('DELETE','/api/admins','root',204,{adminUserSeqs:[2]});
   await request('GET','/api/customers','operator',401);
   const docs = await Promise.all(sides.map(async side => (await (await fetch(side.base+'/api/docs-json')).json())));
+  for(const q of ['', '  ', '검색', '0000', '010-0000', '%', '_'])
+    await request('GET','/api/companies/1/members?q='+encodeURIComponent(q),'root',200);
+  for(const q of ['x'.repeat(101), '\0'])
+    await request('GET','/api/companies/1/members?q='+encodeURIComponent(q),'root',400);
   const schemas = new Set();
   function compareSchemas(value) {
     if (!value || typeof value !== 'object') return;

@@ -48,4 +48,4 @@ Cookie: dva_session=<관리자 세션>
 
 URL을 이 API로 바꾸고 관리자 쿠키 전송을 유지한다. `addressData.name`·`addressData.phoneNumber` 대신 최상위 `name`·`phoneNumber`를 사용한다. 기존 사원 여부 후처리 필터를 제거하고 상태 필드로 비활성 표시를 연결한다. `organizationSeq`를 이용한 기업 상세 이동은 유지한다.
 
-기존 `/api/companies/search`는 AI 업무 Bearer 전용이므로 관리자 쿠키만 보내면 401이다. 서비스 토큰을 브라우저에 넣지 않는다. FE 전환과 AI의 DIR-01 토큰·100자 대응을 백엔드 인증 배포와 함께 조정한다.
+`/api/companies/search`도 관리자 세션 또는 기존 AI 업무 Bearer로 조회할 수 있다. 기업·사원의 현재 공유 배송지 주소를 검색할 때는 해당 API를, 사번·주소 없는 사원까지 찾을 때는 이 사원 검색 API를 사용한다. 서비스 토큰을 브라우저에 넣지 않는다. [기업 배송지 관리자 조회 명세](../../backend/docs/company-directory-admin-access.md)를 따른다.

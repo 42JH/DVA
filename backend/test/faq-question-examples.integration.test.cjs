@@ -333,13 +333,13 @@ test('call soft deletion and the real call purge null the call link while preser
   const snapshots = await examples(id);
   assert.equal((await f.get(`/api/calls/${c.id}`)).status, 200);
   await f.error(await f.get(`/api/calls/${c.id}`, 0, { Cookie: undefined }), 401, 'UNAUTHORIZED');
-  await success(await f.write('DELETE', `/api/calls/${c.id}`, undefined, 2));
+  await success(await f.write('DELETE', '/api/calls', { callSessionSeqs: [c.id] }, 2));
   await f.error(await f.get(`/api/calls/${c.id}`), 404, 'NOT_FOUND');
   assert.deepEqual((await detail(id)).recentQuestions, withoutCall);
   assert.deepEqual(await examples(id), snapshots);
   const claimId = randomUUID();
   await f.pool.query(
-    "UPDATE call_sessions SET incoming_at=clock_timestamp()-interval '6 years',purge_claim_id=$2,purge_claimed_until=clock_timestamp()+interval '5 minutes' WHERE call_session_seq=$1",
+    "UPDATE call_sessions SET deleted_at=clock_timestamp()-interval '6 years',purge_claim_id=$2,purge_claimed_until=clock_timestamp()+interval '5 minutes' WHERE call_session_seq=$1",
     [c.id, claimId],
   );
   assert.equal(
@@ -356,7 +356,7 @@ test('call soft deletion and the real call purge null the call link while preser
   assert.deepEqual(await examples(id), snapshots);
 });
 
-test('call links follow detail visibility for legacy and expired calls without hiding recent examples', async () => {
+test('call links include older undeleted calls and hide deleted sources without hiding examples', async () => {
   const id = await faq(),
     c = await call();
   await success(await post(c, batch([id])));
@@ -368,6 +368,9 @@ test('call links follow detail visibility for legacy and expired calls without h
     "UPDATE call_sessions SET incoming_at=clock_timestamp()-interval '6 years' WHERE call_session_seq=$1",
     [c.id],
   );
+  assert.equal((await f.get(`/api/calls/${c.id}`)).status, 200);
+  assert.deepEqual((await detail(id)).recentQuestions, saved);
+  await f.pool.query('UPDATE call_sessions SET deleted_at=now() WHERE call_session_seq=$1', [c.id]);
   await f.error(await f.get(`/api/calls/${c.id}`), 404, 'NOT_FOUND');
   assert.equal(await sourceCount(c.id), 3);
   assert.deepEqual(

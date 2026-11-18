@@ -27,6 +27,8 @@ import { CustomersService } from './customers.service';
 import { AuditOperation } from '../audit/audit-operation';
 import { CallerContextEnvelopeDto, CallerContextRequestDto } from './dto/caller-context.dto';
 import { DeleteCustomersDto } from './dto/delete-customers.dto';
+import { BillingMonthQueryDto } from '../organizations/dto/billing-month.dto';
+import { CustomerBillingMonthEnvelopeDto } from './dto/customer-billing-month.dto';
 import {
   CreateCustomerDto,
   CustomerIdParamsDto,
@@ -50,6 +52,18 @@ import {
 export class CustomersController {
   constructor(private readonly customers: CustomersService) {}
 
+  @Get(':id/billing')
+  @ApiCookieAuth('adminSession')
+  @ApiOperation({
+    summary: '고객 개인 월결제 사용액 조회',
+    description:
+      '모든 ACTIVE 관리자. 결제 확정 시각의 한국 시간 월을 기준으로 개인 월결제 원금만 합산합니다. month 생략 시 한국 시간 이번 달입니다.',
+  })
+  @ApiOkResponse({ type: CustomerBillingMonthEnvelopeDto })
+  billingMonth(@Param() params: CustomerIdParamsDto, @Query() query: BillingMonthQueryDto) {
+    return this.customers.billingMonth(params.id, query.month);
+  }
+
   @Delete()
   @HttpCode(204)
   @ApiCookieAuth('adminSession')
@@ -57,7 +71,7 @@ export class CustomersController {
   @ApiOperation({
     summary: '고객 단건·다건 soft delete',
     description:
-      '모든 ACTIVE 관리자 세션·허용 Origin 전용. customerSeqs 배열 1~100개. 고객과 소속·개인 PIN을 soft delete하며 주문·통화·결제 이력은 보존합니다. 미존재·기삭제가 있거나 감사 저장에 실패하면 전체 롤백합니다. 잠금 경합은 409입니다.',
+      '모든 ACTIVE 관리자 세션·허용 Origin 전용. customerSeqs 배열 1~100개. 고객·소속·개인 PIN·등록 카드·연결된 주문·통화·배송 초안을 소프트 삭제합니다. 진행 중인 통화·녹취·결제·접수 또는 잠금 경합은 409이며 전체 요청을 롤백합니다.',
   })
   @ApiNoContentResponse({ description: '전체 삭제 완료. 응답 본문 없음.' })
   removeMany(@Body() input: DeleteCustomersDto, @Req() request: AuthRequest) {
@@ -129,7 +143,7 @@ export class CustomersController {
     summary: '고객 이름·상태 변경',
     security: [{ adminSession: [] }, { bearer: [] }],
     description:
-      'AI는 AI_BUSINESS_TOKEN의 Bearer 인증이 필요합니다. 내 주소 수정·삭제는 call_session_seq로 진행 중인 본인 통화도 확인합니다. 관리자는 통화 헤더 없이 기존 세션과 허용 Origin으로 수정합니다. status·월결제 자격은 관리자 전용이며 전화번호 변경·탈퇴 복구는 지원하지 않습니다.',
+      'AI는 AI_BUSINESS_TOKEN의 Bearer 인증이 필요합니다. 내 주소 수정·삭제는 call_session_seq로 진행 중인 본인 통화도 확인합니다. 관리자는 통화 헤더 없이 기존 세션과 허용 Origin으로 수정합니다. status·월결제 자격은 관리자 전용입니다. WITHDRAWN은 고객 삭제와 같은 보호 조건으로 주문·통화·배송 초안까지 소프트 삭제합니다.',
   })
   @ApiHeader({
     name: 'call_session_seq',

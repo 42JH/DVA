@@ -20,7 +20,7 @@ test('055 existing lists, both cancellations and call DELETE match source HTTP, 
       calls: await rows(side.call, 'SELECT * FROM call_sessions WHERE call_session_seq BETWEEN 600001 AND 600020 ORDER BY call_session_seq') });
     for (const side of sides) {
       const response = await fetch((call ? side.callUrl : side.orderUrl) + path, { method, headers: {
-        'X-Request-Id': requestId, ...(aiCall ? { call_session_seq: String(aiCall) } : { Origin: origin, Cookie: cookie }),
+        'X-Request-Id': requestId, ...(aiCall ? { Authorization: 'Bearer ' + process.env.PGPASSWORD, call_session_seq: String(aiCall) } : { Origin: origin, Cookie: cookie }),
         ...(body ? { 'Content-Type': 'application/json' } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(15000) });
       const text = await response.text();
       assert.equal(response.status, status, method + ' ' + path + ' ' + text);
@@ -87,7 +87,7 @@ test('055 existing lists, both cancellations and call DELETE match source HTTP, 
       if (finalized) await side.call.query(`UPDATE call_sessions SET order_completion_received_at='2050-01-02Z',order_completion_payload='{}',order_finalized_at='2050-01-02Z',order_finalization_result='{}' WHERE call_session_seq=$1`, [id]);
     }
     const statusCode = !deleted && !expired && !finalized && ['READY', 'EDITING'].includes(status) ? 409 : 204;
-    await pair('DELETE', '/api/calls/' + id, statusCode, { call: true, ...(statusCode === 204 ? { deletedCall: id } : {}) });
+    await pair('DELETE', '/api/calls', statusCode, { body: { callSessionSeqs: [id] }, call: true, ...(statusCode === 204 ? { deletedCall: id } : {}) });
   }
   console.log(JSON.stringify({ parcelDraftCompatibilityPairs: compared }));
 });

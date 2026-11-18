@@ -7,6 +7,7 @@ import { ApiException } from '../common/errors/api.exception';
 import { AiPersonaClient, validatePersonaOptions } from './ai-persona.client';
 import { AiSettingsRepository } from './ai-settings.repository';
 import { Persona, PersonaDraft, PersonaSettings, PersonaVersion } from './ai-settings.types';
+import { composePersonaPrompt, PERSONA_PROMPT_FIELDS } from './persona-prompt';
 import {
   CommitPersonaDraftDto,
   CreatePersonaDto,
@@ -14,7 +15,13 @@ import {
   UpdatePersonaDto,
 } from './dto/persona-request.dto';
 
-const SETTINGS = ['name', 'promptText', 'voiceId', 'speakingRate', 'turnWaitLevel'] as const;
+const SETTINGS = [
+  'name',
+  ...PERSONA_PROMPT_FIELDS,
+  'voiceId',
+  'speakingRate',
+  'turnWaitLevel',
+] as const;
 
 @Injectable()
 export class AiSettingsService {
@@ -24,6 +31,62 @@ export class AiSettingsService {
     private readonly ai: AiPersonaClient,
     private readonly audit: AuditService,
   ) {}
+
+  async remove(ids: number[], actorId: number, requestId: string): Promise<void> {
+    await this.database.transaction(async (client) => {
+      await this.repository.lock(client);
+      const targets = await this.repository.deletionTargets(
+        [...ids].sort((a, b) => a - b),
+        client,
+      );
+      if (targets.length !== ids.length)
+        throw new ApiException(
+          404,
+          'NOT_FOUND',
+          '삭제할 분류 중 찾을 수 없거나 이미 삭제된 분류가 있습니다.',
+        );
+      if (targets.some((row) => row.active))
+        throw new ApiException(
+          409,
+          'INVALID_STATE',
+          '현재 AI가 사용하는 ACTIVE 분류는 다른 분류 적용 완료 후 삭제해 주세요.',
+        );
+      const removed = await this.repository.removeMany(ids, client);
+      for (const id of removed.versions)
+        await this.audit.recordSuccess(
+          {
+            actorId,
+            targetId: id,
+            targetType: 'AI_PERSONA_VERSION',
+            action: 'PERSONA_VERSION_DELETED',
+            requestId,
+          },
+          client,
+        );
+      for (const id of removed.drafts)
+        await this.audit.recordSuccess(
+          {
+            actorId,
+            targetId: id,
+            targetType: 'AI_PERSONA',
+            action: 'PERSONA_DRAFT_DELETED',
+            requestId,
+          },
+          client,
+        );
+      for (const row of targets)
+        await this.audit.recordSuccess(
+          {
+            actorId,
+            targetId: row.id,
+            targetType: 'AI_PERSONA',
+            action: 'PERSONA_DELETED',
+            requestId,
+          },
+          client,
+        );
+    });
+  }
 
   async list(query: PersonaListQueryDto) {
     const page = await this.repository.personas(query);
@@ -91,10 +154,11 @@ export class AiSettingsService {
     actorId: number,
     requestId: string,
   ): Promise<PersonaVersion> {
-    validatePersonaOptions(input, await this.ai.options());
+    const settings = { ...input, promptText: composePersonaPrompt(input) };
+    validatePersonaOptions(settings, await this.ai.options());
     return this.database.transaction(async (client) => {
       const id = await this.repository.create(input.code, client);
-      const version = await this.repository.append(id, 1, input, actorId, client);
+      const version = await this.repository.append(id, 1, settings, actorId, client);
       await this.audit.recordSuccess(
         {
           actorId,
@@ -124,11 +188,19 @@ export class AiSettingsService {
     const source = draft ?? base;
     const settings: PersonaSettings = {
       name: input.name ?? source.name,
-      promptText: input.promptText ?? source.promptText,
+      role: input.role ?? source.role,
+      personality: input.personality ?? source.personality,
+      tone: input.tone ?? source.tone,
+      speedInstruction: input.speedInstruction ?? source.speedInstruction,
+      backchannel: input.backchannel ?? source.backchannel,
+      interruption: input.interruption ?? source.interruption,
+      promptText: source.promptText,
       voiceId: input.voiceId === undefined ? source.voiceId : input.voiceId,
       speakingRate: input.speakingRate === undefined ? source.speakingRate : input.speakingRate,
       turnWaitLevel: input.turnWaitLevel ?? source.turnWaitLevel,
     };
+    if (PERSONA_PROMPT_FIELDS.some((key) => input[key] !== undefined && input[key] !== source[key]))
+      settings.promptText = composePersonaPrompt(settings);
     validatePersonaOptions(settings, await this.ai.options());
     return this.database.transaction(async (client) => {
       await this.repository.lock(client);

@@ -29,7 +29,7 @@ test('both cancellation APIs preserve source HTTP, full order/payment/shipment r
   for(const [owner,forbidden] of [['delivery',['orders','order_parcels','customers','admin_users']],['order',['shipments','call_sessions','customers']]])
     for(const table of forbidden)assert.equal((await pools[owner].query('SELECT to_regclass($1) AS name',[table])).rows[0].name,null,owner+' owns only its tables');
   let next=8000,compared=0;
-  const generated=[new Map(),new Map()],times=[new Map(),new Map()];
+  const generated=[new Map(),new Map()],times=[new Map(),new Map()],cardOrderIds=[new Map(),new Map()];
   const rows=async(db,table)=>(await db.query(`SELECT to_jsonb(t) AS row FROM ${table} t ORDER BY to_jsonb(t)::text`)).rows.map(x=>x.row);
   async function state(side){const value={};for(const table of orderTables)value[table]=await rows(side.db,table);for(const table of ['shipments','shipment_status_history'])value[table]=await rows(side.delivery,table);return value;}
   function canonical(value,i){
@@ -37,6 +37,16 @@ test('both cancellation APIs preserve source HTTP, full order/payment/shipment r
     for(const [table,values] of Object.entries(result))for(const row of values){
       const key=table==='orders'?row.order_seq:table==='order_payment_requests'?row.payment_request_id:null;
       for(const col of ['updated_at','closed_at','created_at','invalidated_at'])if(times[i].has(table+':'+key+':'+col))row[col]=times[i].get(table+':'+key+':'+col);
+      if(table==='order_payment_requests') {
+        assert.match(row.card_payment_order_id,uuid);
+        const known=cardOrderIds[i].get(key);
+        if(known) assert.equal(row.card_payment_order_id,known,'cancellation preserves the card transaction identity');
+        else {
+          assert.ok(![...cardOrderIds[i].values()].includes(row.card_payment_order_id),'card transaction identities are unique');
+          cardOrderIds[i].set(key,row.card_payment_order_id);
+        }
+        row.card_payment_order_id='card-'+(generated[i].get(key)??key);
+      }
       if(table==='order_payment_requests'&&generated[i].has(row.payment_request_id))row.payment_request_id=generated[i].get(row.payment_request_id);
     }
     for(const values of Object.values(result))values.sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)));
@@ -68,17 +78,17 @@ test('both cancellation APIs preserve source HTTP, full order/payment/shipment r
     }
     return{id,parcels,requestId};
   }
-  async function call({phone='01000000001',ended=false,order=null,expired=false,deleted=false,customer=2}={}){
+  async function call({phone='01000000001',ended=false,order=null,expired=false,deleted=false,customer=2,draftEnabled=false}={}){
     const id=++next;
     for(const side of sides){await side.calls.query(`INSERT INTO call_sessions(call_session_seq,provider_call_id,caller_phone_number,customer_seq,order_seq,incoming_at,registered_at,started_at,ended_at,deleted_at,order_intake_enabled)
-      OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,$4,$5,$6,'2030-01-01Z',$7,$8,$9,false)`,[id,'cancel-scope-'+id,phone,customer,order,expired?'2000-01-01Z':'2030-01-01Z',ended?'2030-01-01Z':null,ended?'2030-01-02Z':null,deleted?'2030-01-03Z':null]);
+      OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,$4,$5,$6,'2030-01-01Z',$7,$8,$9,$10)`,[id,'cancel-scope-'+id,phone,customer,order,expired?'2000-01-01Z':'2030-01-01Z',ended?'2030-01-01Z':null,ended?'2030-01-02Z':null,deleted?'2030-01-03Z':null,draftEnabled]);
       if(expired){const lock=await side.calls.connect();retained.push(lock);await lock.query('BEGIN');await lock.query('SELECT 1 FROM call_sessions WHERE call_session_seq=$1 FOR KEY SHARE',[id]);}}
     return{call_session_seq:String(id)};
   }
   async function request(side,id,options={},requestId=randomUUID()){
     const selected=Object.hasOwn(options,'parcels')||Object.hasOwn(options,'body');
     const headers=options.headers??{Origin:origin,Cookie:cookie};
-    const response=await fetch(side.url+'/api/orders/'+id+(selected?'/parcels':'')+'/cancel',{method:'POST',headers:{...headers,'Content-Type':'application/json','X-Request-Id':requestId},
+    const response=await fetch(side.url+'/api/orders/'+id+(selected?'/parcels':'')+'/cancel',{method:'POST',headers:{Authorization:'Bearer '+process.env.PGPASSWORD,...headers,'Content-Type':'application/json','X-Request-Id':requestId},
       body:Object.hasOwn(options,'body')?JSON.stringify(options.body):selected?JSON.stringify({orderParcelSeqs:options.parcels}):undefined,signal:AbortSignal.timeout(40000)});
     const raw=await response.text();assert.equal(response.headers.get('x-request-id'),requestId);
     return{status:response.status,body:raw?JSON.parse(raw):null,cache:response.headers.get('cache-control')};
@@ -124,7 +134,7 @@ test('both cancellation APIs preserve source HTTP, full order/payment/shipment r
     for(const [owner,port] of [['order',3002],['delivery',3003],['consultation',3004],['customer',3001]]){const doc=await(await fetch(`http://${owner}-app:${port}/${owner}/docs-json`)).json();assert.ok(Object.keys(doc.paths).every(path=>!path.includes('internal')));}
   });
   await t.test('all roles, bad cookies/Origin, invalid IDs/headers/DTOs retain failures and no writes',async()=>{
-    for(const [i,role] of ['OPERATOR','SUPERVISOR','SYSTEM_ADMIN'].entries()){
+    for(const [i,role] of ['OPERATOR','OPERATOR','SYSTEM_ADMIN'].entries()){
       const f=await seed();const result=await compare(f.id,204,{headers:{Origin:origin,Cookie:'dva_session='+['a','b','c'][i].repeat(64)}});assert.equal(result.audit[0].actor_seq,i+1,role);
     }
     const f=await seed();
@@ -177,6 +187,23 @@ test('both cancellation APIs preserve source HTTP, full order/payment/shipment r
     for(const flags of [{approval:true,invalid:true},{approval:true,completed:true}])await compare((await seed(flags)).id,204);
     for(const notification of ['PENDING','SENDING','SENT','FAILED','UNKNOWN'])for(const completion of ['WAITING','PENDING','SENDING','SENT','FAILED','UNKNOWN']){
       const f=await seed({status:'notPaid',notification,completion});await compare(f.id,204,{parcels:[f.parcels[0]]});
+    }
+  });
+  await t.test('new AI calls cancel only the caller’s unpaid orders', async () => {
+    const headers = await call({ draftEnabled: true });
+    const unpaid = await seed({ status: 'notPaid' });
+    const partial = await compare(unpaid.id, 204, { headers, parcels: [unpaid.parcels[0]] });
+    assert.equal(partial.after[0].orders.find(row => row.order_seq === unpaid.id).total_amount, 3500);
+    const full = await compare(unpaid.id, 204, { headers });
+    assert.equal(full.after[0].orders.find(row => row.order_seq === unpaid.id).status, 'CANCELLED');
+
+    const foreign = await seed({ status: 'notPaid', customer: 2 });
+    const collecting = await seed();
+    const paid = await seed({ status: 'PAID' });
+    const approving = await seed({ status: 'notPaid', approval: true });
+    for (const [order, status] of [[foreign, 404], [collecting, 409], [paid, 409], [approving, 409]]) {
+      await compare(order.id, status, { headers });
+      await compare(order.id, status, { headers, parcels: [order.parcels[0]] });
     }
   });
   await t.test('every shipment status blocks active targets, while unrelated/cancelled siblings remain untouched',async()=>{

@@ -73,7 +73,6 @@ export class CreateCallAnalysisDto {
   })
   @IsString()
   @MaxLength(200)
-  // Reject embedded NUL while preserving the original provider identity contract.
   // eslint-disable-next-line no-control-regex
   @Matches(/^[^\s\u0000]+$/)
   providerCallId!: string;

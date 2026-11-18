@@ -256,7 +256,7 @@ test('soft-deleting a converted draft leaves actual order and sibling/source tex
   const resumed = await data(await create({ sourceDraftSeq: source.incomplete.draftSeq }), 201);
   const result = await data(await submit(resumed));
   const before = await data(await f.get('/api/orders/' + result.orderSeq));
-  const response = await f.write('DELETE', '/api/parcel-drafts/' + resumed.draftSeq);
+  const response = await f.write('DELETE', '/api/parcel-drafts', { draftSeqs: [resumed.draftSeq] });
   assert.equal(response.status, 204);
   await f.error(await f.get('/api/parcel-drafts/' + resumed.draftSeq), 404, 'NOT_FOUND');
   assert.deepEqual(await data(await f.get('/api/orders/' + result.orderSeq)), before);
@@ -296,9 +296,13 @@ test('a pending intake cannot lose its call or draft before finalization, and fi
     'UPDATE call_sessions SET started_at=incoming_at,ended_at=clock_timestamp() WHERE call_session_seq=$1',
     [id],
   );
-  await f.error(await f.write('DELETE', '/api/calls/' + id), 409, 'INVALID_STATE');
   await f.error(
-    await f.write('DELETE', '/api/parcel-drafts/' + draft.draftSeq),
+    await f.write('DELETE', '/api/calls', { callSessionSeqs: [id] }),
+    409,
+    'INVALID_STATE',
+  );
+  await f.error(
+    await f.write('DELETE', '/api/parcel-drafts', { draftSeqs: [draft.draftSeq] }),
     409,
     'INVALID_STATE',
   );
@@ -316,7 +320,7 @@ test('a pending intake cannot lose its call or draft before finalization, and fi
     ).status,
     'NO_ORDER',
   );
-  assert.equal((await f.write('DELETE', '/api/calls/' + id)).status, 204);
+  assert.equal((await f.write('DELETE', '/api/calls', { callSessionSeqs: [id] })).status, 204);
   assert.equal(
     (await data(await f.get('/api/parcel-drafts/' + draft.draftSeq))).parcel.origin.roadAddress,
     '삭제 보존',
@@ -363,7 +367,7 @@ test('migrated collecting orders are excluded once and cannot be resubmitted or 
   ])
     await f.error(await f.write(method, path, body), 409, 'INVALID_STATE');
   assert.deepEqual(await data(await f.get('/api/orders/' + old.orderSeq)), old);
-  assert.equal((await f.write('DELETE', '/api/orders/' + old.orderSeq)).status, 204);
+  assert.equal((await f.write('DELETE', '/api/orders', { orderSeqs: [old.orderSeq] })).status, 204);
   assert.equal(
     (await data(await f.get('/api/parcel-drafts/' + id))).parcel.origin.roadAddress,
     '이관 주소',
@@ -374,7 +378,7 @@ test('five-year draft purge is independent from weekly logs and from the convert
   const ready = await data(await create(), 201);
   const result = await data(await submit(ready));
   const active = await data(await create({ status: 'EDITING' }), 201);
-  await f.write('DELETE', '/api/parcel-drafts/' + active.draftSeq);
+  await f.write('DELETE', '/api/parcel-drafts', { draftSeqs: [active.draftSeq] });
   await f.pool.query(
     "UPDATE order_parcel_drafts SET deleted_at=clock_timestamp()-interval '8 days' WHERE draft_seq=$1",
     [active.draftSeq],
@@ -389,6 +393,12 @@ test('five-year draft purge is independent from weekly logs and from the convert
       [ready.draftSeq, randomUUID()],
     )
   ).rows[0].audit_log_seq;
+  await f.app.get(RetentionRepository).purgeDatabase();
+  assert.equal((await f.get('/api/parcel-drafts/' + ready.draftSeq)).status, 200);
+  await f.pool.query(
+    "UPDATE order_parcel_drafts SET deleted_at=clock_timestamp()-interval '5 years 1 day' WHERE draft_seq=$1",
+    [ready.draftSeq],
+  );
   await f.app.get(RetentionRepository).purgeDatabase();
   assert.equal(
     (await f.pool.query('SELECT 1 FROM order_parcel_drafts WHERE draft_seq=$1', [ready.draftSeq]))

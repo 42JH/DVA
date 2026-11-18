@@ -10,6 +10,7 @@ import { ServiceAuditReceiver } from './service-audit.receiver';
 @Injectable()
 export class AuditService {
   private readonly logger = new Logger(AuditService.name);
+  private readonly failures = new WeakMap<object, string>();
   constructor(
     private readonly repository: AuditRepository,
     private readonly customer: ServiceAuditReceiver,
@@ -34,6 +35,11 @@ export class AuditService {
   }
 
   async recordFailure(event: AuditEvent, error: unknown): Promise<void> {
+    // Domain and HTTP boundaries can observe the same failed attempt.
+    if (error !== null && typeof error === 'object') {
+      if (this.failures.get(error) === event.requestId) return;
+      this.failures.set(error, event.requestId);
+    }
     const status = error instanceof HttpException ? error.getStatus() : 500;
     try {
       await this.repository.insert(event, [401, 403].includes(status) ? 'DENIED' : 'FAILED');
@@ -59,13 +65,13 @@ export class AuditService {
       );
     }
 
-    await this.customer.flushPending();
+    await this.customer.flushPendingSnapshot();
     const rows = await this.repository.findMany(query);
     return new ListResponse(rows, query.limit);
   }
 
   async findOne(id: number): Promise<AuditLog> {
-    await this.customer.flushPending();
+    await this.customer.flushPendingSnapshot();
     const row = await this.repository.findOne(id);
     if (!row) throw new ApiException(404, 'NOT_FOUND', '감사 로그를 찾을 수 없습니다.');
     return row;

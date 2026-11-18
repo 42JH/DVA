@@ -21,7 +21,7 @@ export function configureApp(app: INestApplication, logger = new Logger('Http'))
   const scopeParser = json({ limit: '256kb' });
   // Nest detects parsers by function name; keep its default public JSON parser.
   app.use(
-    '/internal/order-cancellation',
+    ['/internal/order-cancellation', '/internal/parcel-draft-write'],
     (request: Request, response: Response, next: NextFunction) => {
       scopeParser(request, response, next);
     },
@@ -49,13 +49,27 @@ export function configureApp(app: INestApplication, logger = new Logger('Http'))
   });
   app.setGlobalPrefix(API_PREFIX, {
     exclude: [
+      { path: 'internal/metrics', method: RequestMethod.ALL },
+      { path: 'internal/home-orders', method: RequestMethod.ALL },
       { path: 'order/health', method: RequestMethod.ALL },
       { path: 'order/health/ready', method: RequestMethod.ALL },
+      { path: 'internal/parcel-draft-write', method: RequestMethod.ALL },
+      { path: 'internal/card-payment-scope', method: RequestMethod.ALL },
+      { path: 'internal/parcel-draft-write/submit', method: RequestMethod.ALL },
+      { path: 'internal/parcel-draft-write/reference', method: RequestMethod.ALL },
       { path: 'internal/billing/read', method: RequestMethod.ALL },
+      { path: 'internal/billing/customer', method: RequestMethod.ALL },
       { path: 'internal/billing/initialize', method: RequestMethod.ALL },
       { path: 'internal/audit/flush', method: RequestMethod.ALL },
       { path: 'internal/call-draft-deletion-check', method: RequestMethod.ALL },
       { path: 'internal/order-read', method: RequestMethod.ALL },
+      { path: 'internal/admin-order-read', method: RequestMethod.ALL },
+      { path: 'internal/order-intake-result', method: RequestMethod.ALL },
+      { path: 'internal/parcel-draft-read', method: RequestMethod.ALL },
+      { path: 'internal/parcel-draft-delete', method: RequestMethod.ALL },
+      { path: 'internal/call-event-order-scope', method: RequestMethod.ALL },
+      { path: 'internal/call-read-references', method: RequestMethod.ALL },
+      { path: 'internal/call-read-references/events', method: RequestMethod.ALL },
       { path: 'internal/order-cancellation', method: RequestMethod.ALL },
     ],
   });

@@ -69,7 +69,7 @@ export class OrganizationsService {
       const id = await this.repository.insert(
         client,
         input.name,
-        input.monthlyBillingEnabled ?? false,
+        input.monthlyBillingEnabled ?? true,
       );
       await this.audit.recordSuccess(
         {

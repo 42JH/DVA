@@ -1,3 +1,4 @@
+import { DeleteMembersDto } from '../common/dto/delete-request.dto';
 import { MemberSearchEnvelopeDto, SearchMembersQueryDto } from './dto/search-members.dto';
 import {
   Body,
@@ -33,6 +34,7 @@ import {
   ListMembersQueryDto,
   MemberIdParamsDto,
   UpdateMemberDto,
+  UpdateMemberPaymentsDto,
 } from './dto/member-request.dto';
 import { MembersEnvelopeDto } from './dto/member-response.dto';
 
@@ -69,7 +71,8 @@ export class MembersController {
   @Get('companies/:id/members')
   @ApiOperation({
     summary: '기업 구성원 목록',
-    description: '모든 ACTIVE 관리자. 대표자 표시는 관리자 웹 권한과 무관합니다.',
+    description:
+      '모든 ACTIVE 관리자. q로 해당 기업의 이름·사번·전화번호를 부분 검색하며 status와 함께 적용합니다. status 생략 시 활성·비활성을 함께 조회하고 소속 번호 내림차순입니다. 대표자 표시는 관리자 웹 권한과 무관합니다.',
   })
   @ApiOkResponse({ type: MembersEnvelopeDto })
   list(@Param() params: MemberIdParamsDto, @Query() query: ListMembersQueryDto) {
@@ -118,16 +121,42 @@ export class MembersController {
     return this.members.update(params.id, input, request.admin.adminUserSeq, request.requestId);
   }
 
-  @Delete('members/:id')
+  @Patch('companies/:id/members')
   @HttpCode(204)
-  @AuditOperation({ action: 'MEMBERSHIP_REMOVED', targetType: 'MEMBERSHIP', target: 'id' })
+  @AuditOperation({ action: 'MEMBERSHIP_UPDATED', targetType: 'MEMBERSHIP', target: 'none' })
+  @ApiOperation({
+    summary: '직원 단건·복수 결제 권한 변경',
+    description: '같은 기업의 membershipSeqs 1~100개를 함께 저장하거나 롤백합니다.',
+  })
+  @ApiNoContentResponse()
+  updatePayments(
+    @Param() params: MemberIdParamsDto,
+    @Body() input: UpdateMemberPaymentsDto,
+    @Req() request: AuthRequest,
+  ) {
+    return this.members.updatePayments(
+      params.id,
+      input,
+      request.admin.adminUserSeq,
+      request.requestId,
+    );
+  }
+
+  @Delete('members')
+  @HttpCode(204)
+  @AuditOperation({
+    action: 'MEMBERSHIP_REMOVED',
+    targetType: 'MEMBERSHIP',
+    target: 'ids',
+    idsField: 'membershipSeqs',
+  })
   @ApiOperation({
     summary: '기업 소속 해제',
     description:
       '소속 연결 행만 삭제. 고객·개인 PIN·주문은 보존하며 이후 다른 기업 등록을 허용합니다.',
   })
   @ApiNoContentResponse()
-  remove(@Param() params: MemberIdParamsDto, @Req() request: AuthRequest) {
-    return this.members.remove(params.id, request.admin.adminUserSeq, request.requestId);
+  remove(@Body() input: DeleteMembersDto, @Req() request: AuthRequest) {
+    return this.members.remove(input.membershipSeqs, request.admin.adminUserSeq, request.requestId);
   }
 }

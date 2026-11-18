@@ -14,7 +14,7 @@ import { MemberViewDto } from './dto/member-response.dto';
 import { MemberSearchEntryDto, SearchMembersQueryDto } from './dto/search-members.dto';
 
 const memberColumns =
-  'membership_seq AS "membershipSeq", customer_seq AS "customerSeq", organization_seq AS "organizationSeq",department_seq AS "departmentSeq", employee_no AS "employeeNo", role, status';
+  'membership_seq AS "membershipSeq", customer_seq AS "customerSeq", organization_seq AS "organizationSeq",department_seq AS "departmentSeq", employee_no AS "employeeNo", role, status,monthly_billing_enabled AS "monthlyBillingEnabled",group_billing_enabled AS "groupBillingEnabled"';
 
 @Injectable()
 export class MembersRepository {
@@ -55,10 +55,27 @@ export class MembersRepository {
   }
 
   async list(companyId: number, query: ListMembersQueryDto): Promise<PageRows<MemberViewDto>> {
+    // 검색의 원시 키 정렬은 미일치 행의 반복 조인을 늘릴 수 있어 기존 계획을 유지한다.
+    if (!query.q && query.status === undefined)
+      return readPage<MemberViewDto>(
+        this.database.pool,
+        `SELECT m.membership_seq,m.customer_seq,m.organization_seq,m.department_seq,m.employee_no,m.role,m.status AS membership_status,m.monthly_billing_enabled AS member_monthly_billing_enabled,m.group_billing_enabled,
+          c.name,c.phone_number,c.status AS customer_status,c.monthly_billing_enabled,c.address_data
+         FROM memberships m JOIN customers c ON c.customer_seq=m.customer_seq
+         WHERE m.organization_seq=$1 AND m.deleted_at IS NULL AND c.deleted_at IS NULL`,
+        [companyId],
+        query,
+        'membership_seq DESC',
+        `page.__page_ordinal,jsonb_build_object('membershipSeq',page.membership_seq,'customerSeq',page.customer_seq,
+          'organizationSeq',page.organization_seq,'departmentSeq',page.department_seq,'employeeNo',page.employee_no,'role',page.role,'status',page.membership_status,'monthlyBillingEnabled',page.member_monthly_billing_enabled,'groupBillingEnabled',page.group_billing_enabled) AS membership,
+         jsonb_build_object('customerSeq',page.customer_seq,'name',page.name,'phoneNumber',page.phone_number,'status',page.customer_status,
+           'monthlyBillingEnabled',page.monthly_billing_enabled,'address',page.address_data) AS customer`,
+      );
     const result = await readPage<MemberViewDto>(
       this.database.pool,
       `SELECT jsonb_build_object('membershipSeq',m.membership_seq,'customerSeq',m.customer_seq,
-        'organizationSeq',m.organization_seq,'departmentSeq',m.department_seq,'employeeNo',m.employee_no,'role',m.role,'status',m.status) AS membership,
+        'organizationSeq',m.organization_seq,'departmentSeq',m.department_seq,'employeeNo',m.employee_no,'role',m.role,'status',m.status,
+        'monthlyBillingEnabled',m.monthly_billing_enabled,'groupBillingEnabled',m.group_billing_enabled) AS membership,
         jsonb_build_object('customerSeq',c.customer_seq,'name',c.name,'phoneNumber',c.phone_number,'status',c.status,'monthlyBillingEnabled',c.monthly_billing_enabled,'address',c.address_data) AS customer
        FROM memberships m JOIN customers c ON c.customer_seq=m.customer_seq
        WHERE m.organization_seq=$1 AND m.deleted_at IS NULL AND c.deleted_at IS NULL AND ($2::text IS NULL OR m.status=$2)
@@ -92,22 +109,32 @@ export class MembersRepository {
 
   async create(companyId: number, input: CreateMemberDto, client: PoolClient): Promise<number> {
     const result = await client.query<{ id: number }>(
-      `INSERT INTO memberships (organization_seq,customer_seq,employee_no,role,status,department_seq)
-       VALUES ($1,$2,$3,$4,'ACTIVE',$5) RETURNING membership_seq AS id`,
-      [companyId, input.customerSeq, input.employeeNo, input.role, input.departmentSeq],
+      `INSERT INTO memberships (organization_seq,customer_seq,employee_no,role,status,department_seq,monthly_billing_enabled,group_billing_enabled)
+       VALUES ($1,$2,$3,$4,'ACTIVE',$5,$6,$7) RETURNING membership_seq AS id`,
+      [
+        companyId,
+        input.customerSeq,
+        input.employeeNo,
+        input.role,
+        input.departmentSeq,
+        input.monthlyBillingEnabled ?? true,
+        input.groupBillingEnabled ?? false,
+      ],
     );
     return result.rows[0].id;
   }
 
   async update(id: number, changes: UpdateMemberDto, client: PoolClient): Promise<void> {
     await client.query(
-      'UPDATE memberships SET role=COALESCE($2,role),status=COALESCE($3,status),department_seq=CASE WHEN $5::boolean THEN $4::int ELSE department_seq END WHERE membership_seq=$1',
+      'UPDATE memberships SET role=COALESCE($2,role),status=COALESCE($3,status),department_seq=CASE WHEN $5::boolean THEN $4::int ELSE department_seq END,monthly_billing_enabled=COALESCE($6,monthly_billing_enabled),group_billing_enabled=COALESCE($7,group_billing_enabled) WHERE membership_seq=$1',
       [
         id,
         changes.role ?? null,
         changes.status ?? null,
         changes.departmentSeq ?? null,
         changes.departmentSeq !== undefined,
+        changes.monthlyBillingEnabled ?? null,
+        changes.groupBillingEnabled ?? null,
       ],
     );
   }
@@ -153,7 +180,9 @@ export class MembersRepository {
       `SELECT c.customer_seq AS "customerSeq",c.name,c.phone_number AS "phoneNumber",c.status AS "customerStatus",
        m.membership_seq AS "membershipSeq",m.organization_seq AS "organizationSeq",m.employee_no AS "employeeNo"
        FROM customers c LEFT JOIN memberships m ON m.customer_seq=c.customer_seq AND m.deleted_at IS NULL
-       WHERE c.deleted_at IS NULL AND (c.phone_number=ANY($1::text[]) OR (m.organization_seq=$2 AND m.employee_no=ANY($3::text[])))`,
+       WHERE (c.deleted_at IS NULL OR c.status='WITHDRAWN')
+        AND (c.phone_number=ANY($1::text[]) OR (m.organization_seq=$2 AND m.employee_no=ANY($3::text[])))
+       ORDER BY c.deleted_at DESC NULLS LAST,c.customer_seq`,
       [rows.map((row) => row.phoneNumber), companyId, rows.map((row) => row.employeeNo)],
     );
     return result.rows;
@@ -174,17 +203,18 @@ export class MembersRepository {
     const added = rows.filter((row) => row.membershipSeq === null);
     if (added.length)
       await client.query(
-        `INSERT INTO memberships(organization_seq,customer_seq,employee_no,role,status,department_seq)
-         SELECT $1,r."customerSeq",r."employeeNo",COALESCE(r.role,'MEMBER'),'ACTIVE',r."departmentSeq"
-         FROM jsonb_to_recordset($2::jsonb) AS r("customerSeq" int,"employeeNo" text,"departmentSeq" int,role text)`,
+        `INSERT INTO memberships(organization_seq,customer_seq,employee_no,role,status,department_seq,monthly_billing_enabled,group_billing_enabled)
+         SELECT $1,r."customerSeq",r."employeeNo",COALESCE(r.role,'MEMBER'),'ACTIVE',r."departmentSeq",COALESCE(r."monthlyBillingEnabled",true),COALESCE(r."groupBillingEnabled",false)
+         FROM jsonb_to_recordset($2::jsonb) AS r("customerSeq" int,"employeeNo" text,"departmentSeq" int,role text,"monthlyBillingEnabled" boolean,"groupBillingEnabled" boolean)`,
         [companyId, JSON.stringify(added)],
       );
     const updated = rows.filter((row) => row.membershipSeq !== null);
     if (updated.length)
       await client.query(
         `UPDATE memberships m SET department_seq=CASE WHEN r."changeDepartment" THEN r."departmentSeq" ELSE m.department_seq END,
-         role=COALESCE(r.role,m.role)
-         FROM jsonb_to_recordset($1::jsonb) AS r("membershipSeq" int,"departmentSeq" int,"changeDepartment" boolean,role text)
+         role=COALESCE(r.role,m.role),monthly_billing_enabled=COALESCE(r."monthlyBillingEnabled",m.monthly_billing_enabled),
+         group_billing_enabled=COALESCE(r."groupBillingEnabled",m.group_billing_enabled)
+         FROM jsonb_to_recordset($1::jsonb) AS r("membershipSeq" int,"departmentSeq" int,"changeDepartment" boolean,role text,"monthlyBillingEnabled" boolean,"groupBillingEnabled" boolean)
          WHERE m.membership_seq=r."membershipSeq"`,
         [
           JSON.stringify(

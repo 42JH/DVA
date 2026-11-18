@@ -1,3 +1,4 @@
+import { preparedQuery } from '../database/prepared-query';
 import { readPage, PageRows } from '../common/pagination-query';
 import { Injectable } from '@nestjs/common';
 import { PoolClient } from 'pg';
@@ -24,7 +25,7 @@ export class CallEventsRepository {
     return (
       (
         await this.database.pool.query(
-          "SELECT 1 FROM call_sessions WHERE call_session_seq=$1 AND deleted_at IS NULL AND (incoming_at IS NULL OR incoming_at>clock_timestamp()-interval '5 years')",
+          'SELECT 1 FROM call_sessions WHERE call_session_seq=$1 AND deleted_at IS NULL',
           [id],
         )
       ).rowCount === 1
@@ -85,13 +86,15 @@ export class CallEventsRepository {
 
   async findCall(client: PoolClient, id: number): Promise<EventCall | undefined> {
     // 같은 통화 이벤트를 직렬화하면서 PBX·주문의 일반 갱신과 잠금을 분리한다.
-    await client.query('SELECT pg_advisory_xact_lock(20261031,$1)', [id]);
+    await client.query(preparedQuery('SELECT pg_advisory_xact_lock(20261031,$1)', [id]));
     return (
       await client.query<EventCall>(
-        `SELECT provider_call_id AS "providerCallId",caller_phone_number AS phone,order_seq AS "orderSeq"
+        preparedQuery(
+          `SELECT provider_call_id AS "providerCallId",caller_phone_number AS phone,order_seq AS "orderSeq"
        FROM call_sessions WHERE call_session_seq=$1 AND deleted_at IS NULL
          AND (incoming_at IS NULL OR incoming_at>clock_timestamp()-interval '5 years') FOR SHARE`,
-        [id],
+          [id],
+        ),
       )
     ).rows[0];
   }
@@ -99,9 +102,11 @@ export class CallEventsRepository {
   async findExisting(client: PoolClient, callId: number, event: CallEventInputDto) {
     return (
       await client.query<{ eventId: string; callId: number; eventOrder: number; hash: string }>(
-        `SELECT event_id AS "eventId",call_session_seq AS "callId",event_order AS "eventOrder",payload_hash AS hash
+        preparedQuery(
+          `SELECT event_id AS "eventId",call_session_seq AS "callId",event_order AS "eventOrder",payload_hash AS hash
        FROM call_insight_events WHERE event_id=$1 OR (call_session_seq=$2 AND event_order=$3)`,
-        [event.eventId, callId, event.eventOrder],
+          [event.eventId, callId, event.eventOrder],
+        ),
       )
     ).rows;
   }
@@ -112,13 +117,15 @@ export class CallEventsRepository {
     call: EventCall,
   ): Promise<boolean | undefined> {
     const result = await client.query<{ allowed: boolean | null }>(
-      `SELECT o.order_seq=$2 OR o.customer_seq=COALESCE(
+      preparedQuery(
+        `SELECT o.order_seq=$2 OR o.customer_seq=COALESCE(
          (SELECT customer_seq FROM orders WHERE order_seq=$2 AND deleted_at IS NULL
            AND COALESCE(closed_at,created_at)>clock_timestamp()-interval '5 years'),
          (SELECT customer_seq FROM customers WHERE phone_number=$3 AND deleted_at IS NULL)) AS allowed
        FROM orders o WHERE o.order_seq=$1 AND o.deleted_at IS NULL
          AND COALESCE(o.closed_at,o.created_at)>clock_timestamp()-interval '5 years' FOR SHARE OF o`,
-      [orderId, call.orderSeq, call.phone],
+        [orderId, call.orderSeq, call.phone],
+      ),
     );
     return result.rows[0] ? result.rows[0].allowed === true : undefined;
   }
@@ -126,8 +133,10 @@ export class CallEventsRepository {
   async questionCall(client: PoolClient, id: number): Promise<number | undefined> {
     return (
       await client.query<{ call_session_seq: number }>(
-        'SELECT call_session_seq FROM unanswered_questions WHERE unanswered_question_seq=$1 FOR KEY SHARE',
-        [id],
+        preparedQuery(
+          'SELECT call_session_seq FROM unanswered_questions WHERE unanswered_question_seq=$1 FOR KEY SHARE',
+          [id],
+        ),
       )
     ).rows[0]?.call_session_seq;
   }
@@ -138,31 +147,37 @@ export class CallEventsRepository {
         questionSpeaker: string | null;
         answerSpeaker: string | null;
       }>(
-        `SELECT
+        preparedQuery(
+          `SELECT
          (SELECT speaker FROM call_utterances WHERE call_session_seq=$1 AND utterance_order=$2) AS "questionSpeaker",
          (SELECT speaker FROM call_utterances WHERE call_session_seq=$1 AND utterance_order=$3) AS "answerSpeaker"`,
-        [callId, payload.questionUtteranceOrder, payload.answerUtteranceOrder],
+          [callId, payload.questionUtteranceOrder, payload.answerUtteranceOrder],
+        ),
       )
     ).rows[0];
   }
 
   async findOrInsertUtterance(client: PoolClient, callId: number, payload: UtterancePayloadDto) {
     await client.query(
-      `INSERT INTO call_utterances(call_session_seq,utterance_order,speaker,utterance_text,last_sentence_seq)
+      preparedQuery(
+        `INSERT INTO call_utterances(call_session_seq,utterance_order,speaker,utterance_text,last_sentence_seq)
        VALUES($1,$2,$3,$4,$5) ON CONFLICT(call_session_seq,utterance_order) DO NOTHING`,
-      [
-        callId,
-        payload.utteranceOrder,
-        payload.speaker,
-        payload.utteranceText,
-        payload.lastSentenceSeq,
-      ],
+        [
+          callId,
+          payload.utteranceOrder,
+          payload.speaker,
+          payload.utteranceText,
+          payload.lastSentenceSeq,
+        ],
+      ),
     );
     return (
       await client.query<{ id: number; speaker: string; text: string; lastSentenceSeq: number }>(
-        `SELECT call_utterance_seq AS id,speaker,utterance_text AS text,last_sentence_seq AS "lastSentenceSeq"
+        preparedQuery(
+          `SELECT call_utterance_seq AS id,speaker,utterance_text AS text,last_sentence_seq AS "lastSentenceSeq"
        FROM call_utterances WHERE call_session_seq=$1 AND utterance_order=$2 FOR KEY SHARE`,
-        [callId, payload.utteranceOrder],
+          [callId, payload.utteranceOrder],
+        ),
       )
     ).rows[0];
   }
@@ -184,7 +199,8 @@ export class CallEventsRepository {
     const ids = [...new Set(results.map((result) => result.faq_entry_seq))];
     // FAQ 수정/삭제와 같은 번호순 잠금을 사용해 여러 통화의 10개 제한을 직렬화한다.
     await client.query(
-      `WITH current_faqs AS (
+      preparedQuery(
+        `WITH current_faqs AS (
          SELECT faq_entry_seq,updated_at FROM faq_entries
          WHERE faq_entry_seq=ANY($3::int[]) AND deleted_at IS NULL
          ORDER BY faq_entry_seq FOR UPDATE
@@ -198,17 +214,20 @@ export class CallEventsRepository {
          AND r.occurred_at>statement_timestamp()-interval '5 years'
        ORDER BY r.occurred_at,r.event_id
        ON CONFLICT(faq_entry_seq,event_id) DO NOTHING`,
-      [callId, JSON.stringify(results), ids],
+        [callId, JSON.stringify(results), ids],
+      ),
     );
     await client.query(
-      `DELETE FROM faq_question_examples WHERE faq_entry_seq=ANY($1::int[])
+      preparedQuery(
+        `DELETE FROM faq_question_examples WHERE faq_entry_seq=ANY($1::int[])
        AND (occurred_at<=statement_timestamp()-interval '5 years' OR faq_question_example_seq IN (
          SELECT faq_question_example_seq FROM (
            SELECT faq_question_example_seq,row_number() OVER(PARTITION BY faq_entry_seq
              ORDER BY occurred_at DESC,faq_question_example_seq DESC) AS position
            FROM faq_question_examples WHERE faq_entry_seq=ANY($1::int[])
          ) ranked WHERE position>10))`,
-      [ids],
+        [ids],
+      ),
     );
   }
 
@@ -221,21 +240,23 @@ export class CallEventsRepository {
     questionId: number | null,
   ): Promise<boolean> {
     const result = await client.query(
-      `INSERT INTO call_insight_events(event_id,call_session_seq,event_order,kind,occurred_at,offset_seconds,
+      preparedQuery(
+        `INSERT INTO call_insight_events(event_id,call_session_seq,event_order,kind,occurred_at,offset_seconds,
        call_utterance_seq,unanswered_question_seq,payload,payload_hash)
        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10) ON CONFLICT DO NOTHING RETURNING call_insight_event_seq`,
-      [
-        event.eventId,
-        callId,
-        event.eventOrder,
-        event.kind,
-        event.occurredAt,
-        event.offsetSeconds,
-        utteranceId,
-        questionId,
-        event.kind === 'UTTERANCE' ? null : JSON.stringify(event.payload),
-        hash,
-      ],
+        [
+          event.eventId,
+          callId,
+          event.eventOrder,
+          event.kind,
+          event.occurredAt,
+          event.offsetSeconds,
+          utteranceId,
+          questionId,
+          event.kind === 'UTTERANCE' ? null : JSON.stringify(event.payload),
+          hash,
+        ],
+      ),
     );
     return result.rowCount === 1;
   }

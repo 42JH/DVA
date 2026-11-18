@@ -1,3 +1,4 @@
+const { seedTestCard, configureTestCardPayments } = require('./helpers/payment-cards.cjs');
 const { legacyOrderIntake } = require('./helpers/legacy-order-intake.cjs');
 const customerAddress = require('./helpers/customer-address.cjs');
 require('reflect-metadata');
@@ -59,6 +60,7 @@ before(async () => {
     )
   ).rows[0].call_session_seq;
   app = legacyOrderIntake(await NestFactory.create(AppModule, { logger: false }));
+  configureTestCardPayments(app);
   payments = app.get(OrderPaymentsService);
   billing = app.get(OrganizationBillingService);
   maintenance = app.get(OrderMaintenanceWorker);
@@ -107,7 +109,7 @@ async function createFinal(body = finalBody(), ai = false, key = randomUUID()) {
     headers: {
       'Content-Type': 'application/json',
       'Idempotency-Key': key,
-      ...(ai ? {} : { Cookie: cookie, Origin: origin }),
+      ...(ai ? businessHeaders() : { Cookie: cookie, Origin: origin }),
     },
     body: JSON.stringify(
       ai
@@ -204,8 +206,9 @@ test('personal card waits, partial cancellation replaces the request, and only t
 });
 
 test('monthly and group settlement require their own eligibility while corporate personal card remains allowed', async () => {
-  const company = (await request('/companies', { name: '결제 자격 기업' })).body.data
-    .organizationSeq;
+  const company = (
+    await request('/companies', { name: '결제 자격 기업', monthlyBillingEnabled: false })
+  ).body.data.organizationSeq;
   const department = (await request(`/companies/${company}/departments`, { name: '정산팀' })).body
     .data.departmentSeq;
   const phone = '010' + String(Math.floor(Math.random() * 90000000) + 10000000);
@@ -246,7 +249,7 @@ test('monthly and group settlement require their own eligibility while corporate
   );
   assert.equal(monthly.body.data.status, 'ACCEPTED', JSON.stringify(monthly.body));
   assert.equal(monthly.body.data.paymentRequest, null);
-  await request(`/departments/${department}`, { groupBillingEnabled: true }, false, 'PATCH');
+  await groupPolicy(company, customer, true);
   assert.equal(
     (await createFinal(finalBody({ customerSeq: customer, paymentMethodType: 'groupBilling' })))
       .body.data.status,
@@ -374,8 +377,9 @@ test('partial cancellation preserves parcel prices, recalculates the remainder a
 });
 
 test('department membership scopes monthly and group eligibility and only admins can change policy', async () => {
-  const company = (await request('/companies', { name: '부서 결제 검증' })).body.data
-    .organizationSeq;
+  const company = (
+    await request('/companies', { name: '부서 결제 검증', monthlyBillingEnabled: false })
+  ).body.data.organizationSeq;
   const other = (await request('/companies', { name: '다른 기업' })).body.data.organizationSeq;
   const first = await request(`/companies/${company}/departments`, { name: '개발팀' });
   assert.equal(first.status, 201);
@@ -412,18 +416,10 @@ test('department membership scopes monthly and group eligibility and only admins
       .status,
     204,
   );
-  assert.equal(
-    (await request(`/departments/${department}`, { groupBillingEnabled: true }, false, 'PATCH'))
-      .status,
-    204,
-  );
+  assert.equal((await groupPolicy(company, customer, true)).status, 204);
   context = (await request('/customers/context', { phoneNumber: phone }, true)).body.data;
   assert.deepEqual(context.availablePaymentMethods, ['billing', 'credit', 'groupBilling']);
-  assert.equal(
-    (await request(`/departments/${department}`, { groupBillingEnabled: false }, false, 'PATCH'))
-      .status,
-    204,
-  );
+  assert.equal((await groupPolicy(company, customer, false)).status, 204);
   context = (await request('/customers/context', { phoneNumber: phone }, true)).body.data;
   assert.deepEqual(context.availablePaymentMethods, ['billing', 'credit']);
   assert.equal(
@@ -483,6 +479,7 @@ test('corporate totals count at payment completion once, retain previous months,
     role: 'MEMBER',
     departmentSeq: department,
   });
+  await groupPolicy(company, customer, true);
   const [monthly, group] = await Promise.all([
     createFinal(finalBody({ customerSeq: customer, paymentMethodType: 'credit' })),
     createFinal(finalBody({ customerSeq: customer, paymentMethodType: 'groupBilling' })),
@@ -759,6 +756,77 @@ test('monthly initialization commits at most ten records per transaction and pre
   );
 });
 
+test('customer billing keeps the original personal charge across retries, edits and company enrollment', async () => {
+  const customer = await request('/customers', {
+    address: customerAddress(),
+    name: '개인 월결제 검증',
+    phoneNumber: '018' + String(Math.floor(Math.random() * 90000000) + 10000000),
+    monthlyBillingEnabled: true,
+  });
+  assert.equal(customer.status, 201);
+  const id = customer.body.data.customerSeq;
+  const path = `/customers/${id}/billing`;
+  const read = (suffix = '', ai = false) => request(path + suffix, undefined, ai, 'GET');
+  const initial = await read();
+  assert.equal(initial.status, 200);
+  assert.equal(initial.body.data.monthlyAmount, 0);
+  assert.equal((await read('?month=2026-13')).status, 400);
+  assert.equal((await read('', true)).status, 401);
+
+  const credit = finalBody({ customerSeq: id, paymentMethodType: 'credit' });
+  const key = randomUUID();
+  const personal = await createFinal(credit, false, key);
+  assert.equal(personal.body.data.status, 'ACCEPTED', JSON.stringify(personal.body));
+  const orderId = personal.body.data.orderSeq;
+  assert.equal((await createFinal(credit, false, key)).body.data.orderSeq, orderId);
+  const paidMonth = (
+    await pool.query(
+      "SELECT to_char(paid_at AT TIME ZONE 'Asia/Seoul','YYYY-MM') AS month FROM orders WHERE order_seq=$1",
+      [orderId],
+    )
+  ).rows[0].month;
+  const pending = await createFinal(finalBody({ customerSeq: id }));
+  assert.equal(pending.body.data.status, 'notPaid');
+  assert.equal((await request(`/orders/${pending.body.data.orderSeq}/cancel`, {})).status, 204);
+  await pool.query('UPDATE orders SET total_amount=10000 WHERE order_seq=$1', [orderId]);
+
+  const company = (
+    await request('/companies', { name: '개인 청구 분리 검증', monthlyBillingEnabled: true })
+  ).body.data.organizationSeq;
+  const department = (
+    await request(`/companies/${company}/departments`, {
+      name: '그룹결제 검증',
+      groupBillingEnabled: true,
+    })
+  ).body.data.departmentSeq;
+  assert.equal(
+    (
+      await request(`/companies/${company}/members`, {
+        customerSeq: id,
+        employeeNo: 'PERSONAL-BILLING',
+        role: 'MEMBER',
+        departmentSeq: department,
+      })
+    ).status,
+    204,
+  );
+  await groupPolicy(company, id, true);
+  assert.equal((await createFinal(credit)).body.data.status, 'ACCEPTED');
+  assert.equal(
+    (await createFinal({ ...credit, paymentMethodType: 'groupBilling' })).body.data.status,
+    'ACCEPTED',
+  );
+  const expected = { customerSeq: id, month: paidMonth, monthlyAmount: 12000 };
+  assert.deepEqual((await read(`?month=${paidMonth}`)).body.data, expected);
+  assert.deepEqual((await read()).body.data, expected);
+  assert.equal((await read('?month=2099-01')).body.data.monthlyAmount, 0);
+  const corporate = (
+    await request(`/companies/${company}/billing?month=${paidMonth}`, undefined, false, 'GET')
+  ).body.data;
+  assert.equal(corporate.monthlyAmount, 12000);
+  assert.equal(corporate.groupBillingAmount, 12000);
+});
+
 test('employees without departments retain corporate credit and cannot use group billing', async () => {
   const company = (
     await request('/companies', { name: '부서 없는 월결제 기업', monthlyBillingEnabled: true })
@@ -812,3 +880,14 @@ test('employees without departments retain corporate credit and cannot use group
     403,
   );
 });
+
+async function groupPolicy(company, customer, enabled) {
+  if (enabled) await seedTestCard(pool, 'ORGANIZATION', company);
+  const member = (
+    await pool.query(
+      'SELECT membership_seq FROM memberships WHERE customer_seq=$1 AND organization_seq=$2 AND deleted_at IS NULL',
+      [customer, company],
+    )
+  ).rows[0].membership_seq;
+  return request('/members/' + member, { groupBillingEnabled: enabled }, false, 'PATCH');
+}

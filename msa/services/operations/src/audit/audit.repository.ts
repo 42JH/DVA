@@ -22,7 +22,8 @@ const AUDIT_SELECT = `SELECT
           'departmentSeq',metadata->'departmentSeq','departmentName',metadata->'departmentName','customerSeq',metadata->'customerSeq',
           'amountBefore',metadata->'amountBefore','amountAfter',metadata->'amountAfter',
           'orderParcelSeqs',metadata->'orderParcelSeqs','billingMonth',metadata->'billingMonth',
-          'paymentMethodType',metadata->'paymentMethodType','reason',metadata->'reason')) AS metadata,
+          'paymentMethodType',metadata->'paymentMethodType','reason',metadata->'reason',
+          'hasComplaint',metadata->'hasComplaint','complaintCount',metadata->'complaintCount')) AS metadata,
         occurred_at AS "occurredAt"
       FROM audit_logs`;
 

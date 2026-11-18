@@ -14,7 +14,9 @@ PBX 수신 시 같은 발신번호·시작 시각에 정확히 일치하는 통�
 
 수신함 저장 실패는 기존 503, 같은 recordingId의 다른 본문은 409다. 수신함을 영속화한 뒤 즉시 매칭만 실패하면 200 ACK 후 기존 녹취 워커가 복구한다. S3 업로드 성공 여부는 종료 저장 조건이 아니다. 연결된 유효 수신·S3 재시도·처리권과 NO_ORDER를 보존한다. 최종 AI 주문 결과는 PBX 종료 뒤에도 기존 계약으로 저장한다.
 
-PBX 종료와 AI 분석 종료가 모두 누락되면 실제 통화가 끝났어도 집계에 남을 수 있다. 미연결 PBX 수신 30분 보관을 통화 자동 종료 시간으로 사용하지 않는다. AI는 [유효 통화 등록 계약](meaningful-call-registration-handoff.md)대로 업무 의도 확인 후 최초 providerCallId·incomingAt으로 등록한다.
+PBX 종료와 AI 분석 종료가 모두 누락됐을 때는 등록 후 2시간까지만 진행 통화로 집계한다. 열린 SSE는 기존 5초 재조회에서 이를 반영한다. 같은 시점에 목록·상세·홈 최근 통화의 분석 상태가 `EXPIRED`로 바뀐다. 등록 시각이 없는 통화의 분석 만료는 수신 시각을 사용한다. 늦게 도착한 실제 종료와 녹취는 기존 경로로 저장한다. [GPT-Live SIP 연결 시간 상한](https://developers.openai.com/api/docs/guides/voice-sip#handle-limits-and-errors)
+
+AI는 업무 의도 확인 후 최초 providerCallId·incomingAt으로 등록한다. [유효 통화 등록 계약](meaningful-call-registration-handoff.md)
 
 ## 호출자별 역할과 데이터 이동
 

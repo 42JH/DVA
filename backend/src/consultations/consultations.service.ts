@@ -1,9 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { ApiException } from '../common/errors/api.exception';
 import { ListResponse } from '../common/pagination';
+import { CoalescedPages } from '../common/coalesced-pages';
 import { ConsultationsRepository } from './consultations.repository';
 import { CallQueryDto } from './dto/call-query.dto';
-import { CallDetailDto } from './dto/call-response.dto';
+import { CallDetailDto, CallListItemDto } from './dto/call-response.dto';
 import { TranscriptQueryDto } from './dto/transcript.dto';
 import { RecordingPlaybackService } from './recording-playback.service';
 import { PoolClient } from 'pg';
@@ -17,6 +18,8 @@ import { DatabaseService } from '../database/database.service';
 
 @Injectable()
 export class ConsultationsService {
+  private readonly pages = new CoalescedPages<CallQueryDto, ListResponse<CallListItemDto>>();
+
   constructor(
     private readonly repository: ConsultationsRepository,
     private readonly playback: RecordingPlaybackService,
@@ -26,35 +29,39 @@ export class ConsultationsService {
     private readonly database: DatabaseService,
   ) {}
 
-  async delete(id: number, adminId: number, requestId: string): Promise<void> {
+  async delete(id: number | number[], adminId: number, requestId: string): Promise<void> {
+    const ids = (Array.isArray(id) ? [...id] : [id]).sort((a, b) => a - b);
     await this.database
       .transaction(async (client) => {
         await client.query("SET LOCAL lock_timeout='2s'");
-        const call = await this.repository.lockForDeletion(client, id);
-        if (!call) throw new ApiException(404, 'NOT_FOUND', '통화 기록을 찾을 수 없습니다.');
-        if (!call.endedAt || (await this.repository.recordingInProgress(client, id)))
-          throw new ApiException(
-            409,
-            'INVALID_STATE',
-            '통화 종료와 녹취 저장이 완료된 뒤 삭제해 주세요.',
+
+        for (const id of ids) {
+          const call = await this.repository.lockForDeletion(client, id);
+          if (!call) throw new ApiException(404, 'NOT_FOUND', '통화 기록을 찾을 수 없습니다.');
+          if (!call.endedAt || (await this.repository.recordingInProgress(client, id)))
+            throw new ApiException(
+              409,
+              'INVALID_STATE',
+              '통화 종료와 녹취 저장이 완료된 뒤 삭제해 주세요.',
+            );
+          if (await this.repository.orderIntakeInProgress(client, id))
+            throw new ApiException(
+              409,
+              'INVALID_STATE',
+              '배송 초안의 주문 확정을 마친 뒤 통화를 삭제해 주세요.',
+            );
+          await this.repository.softDelete(client, id);
+          await this.audit.recordSuccess(
+            {
+              actorId: adminId,
+              targetId: id,
+              targetType: 'CALL_SESSION',
+              action: 'CALL_DELETED',
+              requestId,
+            },
+            client,
           );
-        if (await this.repository.orderIntakeInProgress(client, id))
-          throw new ApiException(
-            409,
-            'INVALID_STATE',
-            '배송 초안의 주문 확정을 마친 뒤 통화를 삭제해 주세요.',
-          );
-        await this.repository.softDelete(client, id);
-        await this.audit.recordSuccess(
-          {
-            actorId: adminId,
-            targetId: id,
-            targetType: 'CALL_SESSION',
-            action: 'CALL_DELETED',
-            requestId,
-          },
-          client,
-        );
+        }
       })
       .catch((error: unknown) => {
         if (error && typeof error === 'object' && 'code' in error && error.code === '55P03')
@@ -138,7 +145,11 @@ export class ConsultationsService {
       (from !== undefined && to !== undefined && from >= to)
     )
       throw new ApiException(400, 'INVALID_REQUEST', '시작 시각은 종료 시각보다 빨라야 합니다.');
-    return new ListResponse(await this.repository.findMany(query), query.limit);
+    return this.pages.read(
+      [],
+      query,
+      async (page) => new ListResponse(await this.repository.findMany(page), page.limit),
+    );
   }
 
   async findOne(id: number): Promise<CallDetailDto> {

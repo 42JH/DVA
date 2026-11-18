@@ -57,7 +57,7 @@ HTTP 200. 최상위는 `{ data, hasNext, total_count }`이며 meta·page 객체�
 
 활성 기업 사원의 기본 이름·연락처·주소를 기업 간 공유 배송지로 사용한다는 요구사항을 따른다. 개인 PIN·사번·역할·결제 설정은 검색하거나 반환하지 않는다. 이전 company_pins의 데이터도 검색하지 않는다.
 
-이 GET은 AI_BUSINESS_TOKEN Bearer 인증 전용이다. 누락·잘못된 토큰·중복 Authorization은 401, BE 토큰 미설정은 503이다. 관리자 쿠키는 인증을 대신하지 않는다. call_session_seq는 요구하지 않으며 발신자의 소속 기업에 한정하지 않는다. 허용되지 않은 Origin은 공통 CORS에서 거절한다. 관리자 검색은 [별도 사원 검색](company-members-search.md)을 사용한다. 기업 관리·전체 구성원 목록·개인 PIN 접근 권한은 유지한다.
+이 GET은 활성 관리자 세션 또는 기존 AI_BUSINESS_TOKEN Bearer로 인증한다. 관리자는 HttpOnly `dva_session` 쿠키를 보내며 OPERATOR·SUPERVISOR·SYSTEM_ADMIN 모두 조회할 수 있다. 관리자 요청에는 AI 키가 필요 없고 서버의 AI 토큰 미설정과도 독립적이다. 세션 쿠키가 있으면 관리자 세션을 우선 검증하며 잘못된·만료·중복 쿠키는 Bearer가 유효해도 401이다. 세션 쿠키가 없으면 기존 AI 인증을 적용해 누락·잘못된 토큰·중복 Authorization은 401, BE 토큰 미설정은 503이다. call_session_seq는 요구하지 않으며 특정 소속 기업에 한정하지 않는다. 허용되지 않은 Origin은 공통 CORS에서 거절한다. 주소가 없는 사원·사번 검색은 [별도 사원 검색](company-members-search.md)을 사용한다. 기업 관리·전체 구성원 목록·개인 PIN 접근 권한은 유지한다. [관리자 조회 연동 명세](../../backend/docs/company-directory-admin-access.md)를 함께 확인한다.
 
 성공·오류에 Cache-Control: no-store를 적용한다. 요청 로그에 검색어·주소·연락처·응답 본문을 남기지 않는다. DB 장애를 빈 성공으로 바꾸지 않는다. 검색용 테이블·인덱스·외부 API는 추가하지 않는다. 별도 기업 PIN 제거는 아래 053 전환을 따른다.
 

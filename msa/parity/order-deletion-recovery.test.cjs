@@ -52,7 +52,7 @@ test('order deletion audit recovers across ACK loss, duplicate delivery and actu
     await until(async()=> (await ops.query('SELECT 1 FROM order_audit_preparations WHERE event_id=$1 AND aborted AND audit IS NULL',[producer.event_id])).rowCount===1,'automatic orphan abort');
     assert.deepEqual((await order.query('SELECT * FROM orders WHERE order_seq=$1',[id])).rows,before);
     assert.deepEqual(await auditRows(requestId),[]);
-    const response=await fetch('http://order-app:3002/api/orders/'+id,{method:'DELETE',headers:{Origin:'http://localhost:5173',Cookie:'dva_session='+'a'.repeat(64),'X-Request-Id':requestId}});
+    const response=await fetch('http://order-app:3002/api/orders',{method:'DELETE',headers:{Origin:'http://localhost:5173',Cookie:'dva_session='+'a'.repeat(64),'X-Request-Id':requestId,'Content-Type':'application/json'},body:JSON.stringify({orderSeqs:[id]})});
     assert.equal(response.status,204);assert.equal((await auditRows(requestId)).length,1);
   });
 

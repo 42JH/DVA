@@ -18,4 +18,13 @@
   <changeSet id="004-parcel-drafts" author="dva" dbms="postgresql" runInTransaction="true">
     <sqlFile path="004-parcel-drafts.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
   </changeSet>
+  <changeSet id="005-parcel-draft-order-reservation" author="dva" dbms="postgresql" runInTransaction="true">
+    <sqlFile path="005-parcel-draft-order-reservation.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
+  </changeSet>
+  <changeSet id="006-customer-monthly-billing" author="dva" dbms="postgresql" runInTransaction="true">
+    <sqlFile path="006-customer-monthly-billing.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
+  </changeSet>
+  <changeSet id="007-payment-cards" author="dva" dbms="postgresql" runInTransaction="true">
+    <sqlFile path="007-payment-cards.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
+  </changeSet>
 </databaseChangeLog>

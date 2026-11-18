@@ -4,7 +4,7 @@ import { Environment } from '../config/environment';
 import { ApiException } from '../common/errors/api.exception';
 import { createHash } from 'node:crypto';
 
-async function responseText(response: Response) {
+export async function responseText(response: Response) {
   const chunks: Uint8Array[] = [];
   let size = 0;
   const reader = response.body!.getReader();

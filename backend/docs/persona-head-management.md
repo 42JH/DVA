@@ -1,5 +1,7 @@
 # 페르소나 유형별 HEAD와 publish
 
+관리자 권한은 SYSTEM_ADMIN·OPERATOR 두 개이며 계정 관리 4개만 최상위 전용입니다. DELETE와 권한의 최신 통합 계약은 [프론트 전달 명세](frontend-delete-admin-roles.md)를 우선합니다.
+
 2026-11-09 입력·조회·기존 데이터 이관은 [항목별 저장 명세](persona-prompt-fields.md)를 우선한다. promptText 쓰기를 6개 개별 필드로 전환했으며 아래 2026-11-01의 통짜 입력 예시는 과거 계약이다. 초안·HEAD·publish 흐름은 유지한다.
 
 2026-11-01 초안 도입 계약. 수정 PATCH는 이제 정식 버전 대신 초안을 반환한다. 프론트는 아래의 초안 저장·HEAD 확정 호출로 전환해야 한다. AI 통화 제어는 [다음 통화 적용 명세](ai-persona-next-call.md)를 따른다.
@@ -25,7 +27,7 @@
 
 ## 관리자 API
 
-목록·상세·버전 이력 조회는 ACTIVE 상태의 OPERATOR·SUPERVISOR·SYSTEM_ADMIN 세션으로 접근할 수 있다. 생성·수정·publish와 AI 지원 옵션 조회는 ACTIVE인 SUPERVISOR(개발자)·SYSTEM_ADMIN에게 허용하며 변경 요청에는 허용 Origin이 필요하다. 역할 코드 추가·변경은 없다. AI 토큰만으로 관리자 조회·편집·publish를 할 수 없다.
+목록·상세·버전 이력 조회는 ACTIVE 상태의 OPERATOR·SYSTEM_ADMIN 세션으로 접근할 수 있다. 생성·수정·publish와 AI 지원 옵션 조회는 ACTIVE인 OPERATOR·SYSTEM_ADMIN에게 허용하며 변경 요청에는 허용 Origin이 필요하다. SUPERVISOR 이관은 통합 권한 명세를 따른다. AI 토큰만으로 관리자 조회·편집·publish를 할 수 없다.
 
 | 동작 | API | 결과 |
 | --- | --- | --- |

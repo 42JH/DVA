@@ -1,3 +1,5 @@
+import { PaymentCardsService } from '../payments/payment-cards.service';
+import { OrderCustomerWritesService } from './order-customer-writes.service';
 import { CallScopeService } from '../call-scope/call-scope.service';
 import { CallContextClient } from './call-context.client';
 import { CallerContextRequestDto } from './dto/caller-context.dto';
@@ -17,13 +19,60 @@ import {
 
 @Injectable()
 export class CustomersService {
+  async removeMany(ids: number[], actorId: number, requestId: string): Promise<void> {
+    const sorted = [...ids].sort((a, b) => a - b);
+    try {
+      await this.database.transaction(async (client) => {
+        await client.query("SET LOCAL lock_timeout='2s'");
+        if ((await this.repository.lockMany(client, sorted)).length !== sorted.length)
+          throw new ApiException(
+            404,
+            'NOT_FOUND',
+            '삭제할 고객 중 찾을 수 없거나 이미 삭제된 고객이 있습니다.',
+          );
+        await this.cards.softDelete(client, 'CUSTOMER', sorted, actorId, requestId);
+        await this.repository.removeMany(client, sorted);
+        for (const id of sorted)
+          await this.audit.recordSuccess(
+            {
+              actorId,
+              targetId: id,
+              targetType: 'CUSTOMER',
+              action: 'CUSTOMER_DELETED',
+              requestId,
+            },
+            client,
+          );
+      });
+    } catch (error: unknown) {
+      if (
+        error &&
+        typeof error === 'object' &&
+        'code' in error &&
+        ['55P03', '40P01'].includes(String(error.code))
+      )
+        throw new ApiException(
+          409,
+          'REQUEST_IN_PROGRESS',
+          '다른 작업이 진행 중입니다. 잠시 후 재시도해 주세요.',
+        );
+      throw error;
+    }
+  }
+
   constructor(
     private readonly repository: CustomersRepository,
     private readonly database: DatabaseService,
     private readonly audit: AuditService,
     private readonly calls: CallContextClient,
     private readonly scope: CallScopeService,
+    private readonly orderWrites: OrderCustomerWritesService,
+    private readonly cards: PaymentCardsService,
   ) {}
+
+  lockOrderPhones(client: PoolClient, phones: string[]) {
+    return this.orderWrites.lockPhones(client, phones);
+  }
 
   // 소속 충돌 검증과 고객 잠금을 마친 호출자의 같은 트랜잭션에 참여한다.
   async importEmployeeIdentities(client: PoolClient, rows: EmployeeCustomerIdentity[]) {
@@ -65,6 +114,7 @@ export class CustomersService {
     if (actorId === null && input.monthlyBillingEnabled === true)
       throw new ApiException(403, 'FORBIDDEN', '월결제 자격은 관리자만 설정할 수 있습니다.');
     return this.database.transaction(async (client) => {
+      await this.orderWrites.lockPhones(client, [input.phoneNumber]);
       const customerSeq = await this.repository.insert(client, input);
       await this.audit.recordSuccess(
         {

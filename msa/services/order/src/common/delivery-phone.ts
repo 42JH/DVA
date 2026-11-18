@@ -1,0 +1,3 @@
+export const DELIVERY_SENDER_PHONE_PATTERN = /^01[016789][0-9]{8}(?![\s\S])/;
+export const DELIVERY_RECIPIENT_PHONE_PATTERN =
+  /^(?:01[016789][0-9]{8}|02[0-9]{7,8}|0(?:31|32|33|41|42|43|44|51|52|53|54|55|61|62|63|64)[0-9]{7,8}|070[0-9]{8})(?![\s\S])/;

@@ -49,7 +49,7 @@ export class AdminsService {
       throw new ApiException(
         403,
         'FORBIDDEN',
-        'OPERATOR와 SUPERVISOR 사이에서만 권한을 변경할 수 있습니다.',
+        '일반 관리자에게는 OPERATOR 권한만 지정할 수 있습니다.',
       );
     await this.repository.setAccess(target.adminUserSeq, role, status, client);
   }

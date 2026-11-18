@@ -4,6 +4,7 @@ import {
   AdminOrderStatusCountsDto,
 } from './dto/admin-order-list.dto';
 import { readPage } from '../common/pagination-query';
+import { searchSequence } from '../common/search-sequence';
 import { Injectable } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { Pool, PoolClient } from 'pg';
@@ -14,12 +15,59 @@ import { ParcelChangeDto, UpdateOrderDto, UpdatedOrderDto } from './dto/update-o
 import { ORDER_ADDRESS_FIELDS, OrderDraft } from './order-draft';
 import { OrderCreationSource, OrderStatus } from './orders.types';
 import { ParcelDraftsRepository } from './parcel-drafts.repository';
-const paymentRequestJson = `(SELECT jsonb_build_object('paymentRequestId',r.payment_request_id,'amount',r.amount,'expiresAt',r.expires_at,'notificationStatus',r.notification_status)
+const paymentRequestJson = `(SELECT jsonb_build_object('paymentRequestId',r.payment_request_id,'amount',r.amount,'expiresAt',r.expires_at,'notificationStatus',r.notification_status,'autoCharge',r.payment_card_seq IS NOT NULL,'cardPaymentFailed',r.card_payment_failed)
  FROM order_payment_requests r WHERE r.order_seq=o.order_seq AND r.invalidated_at IS NULL AND r.completed_at IS NULL AND r.expires_at>clock_timestamp())`;
 import {
   OrderAddressHistoryQueryDto,
   PreviousOrderAddressDto,
 } from './dto/order-address-history.dto';
+
+const ADMIN_ORDER_SORT = '"createdAt" DESC,"orderSeq" DESC';
+const ADMIN_ORDER_DETAILS = `o.order_seq AS "orderSeq",o.status,o.created_at AS "createdAt",
+  o.pickup_requested_at AS "pickupRequestedAt",customer.customer_seq AS "customerSeq",
+  company.name AS "organizationName",NULL::int AS "draftSeq",NULL::jsonb AS "_draftParcel"`;
+const ADMIN_ORDER_JOINS = `LEFT JOIN customers customer ON customer.customer_seq=o.customer_seq AND customer.deleted_at IS NULL
+  LEFT JOIN memberships membership ON membership.customer_seq=customer.customer_seq AND membership.deleted_at IS NULL
+  LEFT JOIN organizations company ON company.organization_seq=membership.organization_seq AND company.deleted_at IS NULL`;
+
+function adminOrderPage(
+  filter: string,
+  draftRows: string | undefined,
+  limit: string,
+  offset: string,
+) {
+  const keys = 'SELECT "orderSeq","createdAt","draftSeq"';
+  const orders = `${keys} FROM order_keys`;
+  const drafts = `${keys} FROM draft_matching`;
+  const branchLimit = `(${limit}::bigint + ${offset}::bigint)`;
+  // Merge the first offset+limit keys of each source before reading the selected details.
+  const slice = draftRows
+    ? `SELECT * FROM (
+        (${orders} ORDER BY ${ADMIN_ORDER_SORT} LIMIT ${branchLimit})
+        UNION ALL
+        (${drafts} ORDER BY ${ADMIN_ORDER_SORT} LIMIT ${branchLimit})
+      ) AS first_keys`
+    : orders;
+  return `WITH order_keys AS NOT MATERIALIZED (
+      SELECT o.order_seq AS "orderSeq",o.created_at AS "createdAt",NULL::int AS "draftSeq"
+      FROM orders o ${filter}
+    ),
+    ${draftRows ? `draft_matching AS NOT MATERIALIZED (${draftRows}),` : ''}
+    matching AS NOT MATERIALIZED (${orders}${draftRows ? ` UNION ALL ${drafts}` : ''}),
+    page_slice AS MATERIALIZED (
+      ${slice} ORDER BY ${ADMIN_ORDER_SORT} LIMIT ${limit} OFFSET ${offset}
+    ),
+    page_details AS (
+      SELECT ${ADMIN_ORDER_DETAILS}
+      FROM page_slice JOIN orders o ON page_slice."draftSeq" IS NULL AND o.order_seq=page_slice."orderSeq"
+      ${ADMIN_ORDER_JOINS}
+      ${draftRows ? 'UNION ALL SELECT draft_matching.* FROM page_slice JOIN draft_matching USING ("draftSeq")' : ''}
+    ),
+    page AS (
+      SELECT page_details.*,row_number() OVER (ORDER BY ${ADMIN_ORDER_SORT}) + ${offset}::bigint AS __page_ordinal
+      FROM page_details
+    )`;
+}
 
 @Injectable()
 export class OrdersRepository {
@@ -80,7 +128,7 @@ export class OrdersRepository {
       await client.query<import('./dto/order-response.dto').OrderResultDto>(
         `SELECT order_seq AS "orderSeq",version,status,total_amount AS "totalAmount",parcel_no AS "parcelNo",$2::int AS "callSessionSeq",
         payment_due_at AS "paymentDueAt",${paymentRequestJson} AS "paymentRequest"
-       FROM orders o WHERE order_seq=$1 AND o.deleted_at IS NULL AND COALESCE(o.closed_at,o.created_at)>statement_timestamp()-interval '5 years'`,
+       FROM orders o WHERE order_seq=$1 AND o.deleted_at IS NULL`,
         [id, callId],
       )
     ).rows[0];
@@ -147,26 +195,35 @@ export class OrdersRepository {
   async addressHistory(client: PoolClient, customerId: number, query: OrderAddressHistoryQueryDto) {
     // SQL 식별자는 검증된 두 방향의 상수에서만 선택한다. 검색값은 모두 바인딩한다.
     const side = query.direction === 'ORIGIN' ? 'origin' : 'destination';
-    const page = await readPage<PreviousOrderAddressDto & { __sort_position: number }>(
-      client,
-      `SELECT o.order_seq AS "orderSeq",p.order_parcel_seq AS "orderParcelSeq",o.created_at AS "createdAt",p.parcel_position AS __sort_position,
-        jsonb_build_object('name',p.${side}_name,'phoneNumber',p.${side}_phone_number,
-          'roadAddress',p.${side}_road_address,'jibunAddress',p.${side}_jibun_address,
-          'detailAddress',p.${side}_detail_address,'dongName',p.${side}_dong_name,
-          'postalCode',p.${side}_postal_code) AS address
+    const order = '"createdAt" DESC,"orderSeq" DESC,__sort_position,"orderParcelSeq"';
+    const matching = `SELECT o.order_seq AS "orderSeq",p.order_parcel_seq AS "orderParcelSeq",o.created_at AS "createdAt",p.parcel_position AS __sort_position
        FROM orders o JOIN order_parcels p ON p.order_seq=o.order_seq
        WHERE o.customer_seq=$1 AND o.status='ACCEPTED' AND p.status='ACTIVE' AND o.deleted_at IS NULL
-         AND COALESCE(o.closed_at,o.created_at)>clock_timestamp()-interval '5 years'
          AND ($2::timestamptz IS NULL OR o.created_at >= $2)
          AND ($3::timestamptz IS NULL OR o.created_at < $3)
          AND (NULLIF(btrim(p.${side}_road_address),'') IS NOT NULL
            OR NULLIF(btrim(p.${side}_jibun_address),'') IS NOT NULL)
          AND ($4::text IS NULL OR strpos(lower(normalize(concat_ws(' ',
            p.${side}_name,p.${side}_phone_number,p.${side}_road_address,p.${side}_jibun_address,
-           p.${side}_detail_address,p.${side}_dong_name,p.${side}_postal_code),NFC)),lower(normalize($4,NFC)))>0)`,
+           p.${side}_detail_address,p.${side}_dong_name,p.${side}_postal_code),NFC)),lower(normalize($4,NFC)))>0)`;
+    const page = await readPage<PreviousOrderAddressDto & { __sort_position: number }>(
+      client,
+      (limit, offset) => `WITH matching AS NOT MATERIALIZED (${matching}),
+       page_slice AS MATERIALIZED (
+         SELECT * FROM matching ORDER BY ${order} LIMIT ${limit} OFFSET ${offset}
+       ),
+       page AS (
+         SELECT page_slice.*,row_number() OVER (ORDER BY ${order}) + ${offset}::bigint AS __page_ordinal,
+          p.${side}_name AS __name,p.${side}_phone_number AS __phone,p.${side}_road_address AS __road,
+          p.${side}_jibun_address AS __jibun,p.${side}_detail_address AS __detail,p.${side}_dong_name AS __dong,p.${side}_postal_code AS __postal
+         FROM page_slice JOIN order_parcels p ON p.order_parcel_seq=page_slice."orderParcelSeq"
+       )`,
       [customerId, query.from ?? null, query.to ?? null, query.q || null],
       query,
-      '"createdAt" DESC,"orderSeq" DESC,__sort_position,"orderParcelSeq"',
+      order,
+      `page.__page_ordinal,page."orderSeq",page."orderParcelSeq",page."createdAt",page.__sort_position,
+       jsonb_build_object('name',page.__name,'phoneNumber',page.__phone,'roadAddress',page.__road,
+        'jibunAddress',page.__jibun,'detailAddress',page.__detail,'dongName',page.__dong,'postalCode',page.__postal) AS address`,
     );
     return {
       ...page,
@@ -198,58 +255,61 @@ export class OrdersRepository {
   private adminFilter(query: AdminOrderListQueryDto) {
     const phoneQuery =
       query.q && /^[0-9+() -]+$/.test(query.q) ? query.q.replace(/[^0-9]/g, '') : null;
+    const organizationSeq = query.organizationSeq ?? null;
     return {
-      sql: `FROM orders o
-       LEFT JOIN customers customer ON customer.customer_seq=o.customer_seq AND customer.deleted_at IS NULL
-       LEFT JOIN memberships membership ON membership.customer_seq=customer.customer_seq AND membership.deleted_at IS NULL
-       LEFT JOIN organizations company ON company.organization_seq=membership.organization_seq AND company.deleted_at IS NULL
-       WHERE o.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM order_parcel_drafts d WHERE d.legacy_order_seq=o.order_seq) AND COALESCE(o.closed_at,o.created_at)>transaction_timestamp()-interval '5 years'
-        AND ($1::text IS NULL OR EXISTS(SELECT 1 FROM order_parcels p WHERE p.order_seq=o.order_seq AND (
+      organizationScoped: organizationSeq !== null,
+      sql: `WHERE o.deleted_at IS NULL AND NOT o.migrated_to_parcel_drafts
+        AND NOT EXISTS(SELECT 1 FROM order_parcel_drafts d WHERE d.legacy_order_seq=o.order_seq)
+        AND ($1::text IS NULL OR o.order_seq=$7::int OR EXISTS(SELECT 1 FROM order_parcels p WHERE p.order_seq=o.order_seq AND (
          EXISTS(SELECT 1 FROM unnest(ARRAY[p.origin_name,p.origin_phone_number,p.origin_road_address,p.origin_jibun_address,p.origin_detail_address,
            p.destination_name,p.destination_phone_number,p.destination_road_address,p.destination_jibun_address,p.destination_detail_address]) AS v(value)
            WHERE strpos(lower(normalize(v.value,NFC)),lower($1))>0)
          OR ($5::text IS NOT NULL AND (strpos(p.origin_phone_number,$5)>0 OR strpos(p.destination_phone_number,$5)>0)))))
         AND ($2::timestamptz IS NULL OR o.created_at >= $2)
         AND ($3::timestamptz IS NULL OR o.created_at < $3)
-        AND ($4::text IS NULL OR o.status=$4 OR ($4='PAID' AND o.status IN ('SUBMITTING','ACCEPTED'))
-          OR ($4='SUBMISSION_FAILED' AND o.status='SUBMITTING_FAILED'))
-         AND ($6::int IS NULL OR company.organization_seq=$6)`,
+        AND ($4::text IS NULL OR o.status=$4 OR ($4='PAID' AND o.status IN ('SUBMITTING','SUBMITTING_FAILED')))
+         AND ${organizationSeq === null ? '$6::int IS NULL' : 'company.organization_seq=$6::int'}`,
       values: [
         query.q || null,
         query.from ?? null,
         query.to ?? null,
         query.statusGroup ?? null,
         phoneQuery || null,
-        query.organizationSeq ?? null,
+        organizationSeq,
+        searchSequence(query.q, 'DV-'),
       ],
     };
   }
 
   async adminStatusCounts(client: PoolClient, query: AdminOrderListQueryDto) {
     const filter = this.adminFilter({ ...query, statusGroup: undefined });
+    const joins = filter.organizationScoped ? ADMIN_ORDER_JOINS : '';
     return (
       await client.query<{ data: Omit<AdminOrderStatusCountsDto, 'incomplete'> }>(
         `SELECT jsonb_build_object('all',count(*),'notPaid',count(*) FILTER(WHERE o.status='notPaid'),
-       'paid',count(*) FILTER(WHERE o.status IN ('PAID','SUBMITTING','ACCEPTED')),
-       'submissionFailed',count(*) FILTER(WHERE o.status IN ('SUBMITTING_FAILED','SUBMISSION_FAILED')),
-       'cancelled',count(*) FILTER(WHERE o.status='CANCELLED')) AS data ${filter.sql}`,
+       'paid',count(*) FILTER(WHERE o.status IN ('PAID','SUBMITTING','SUBMITTING_FAILED')),
+       'accepted',count(*) FILTER(WHERE o.status='ACCEPTED'),
+       'submissionFailed',count(*) FILTER(WHERE o.status='SUBMISSION_FAILED'),
+       'cancelled',count(*) FILTER(WHERE o.status='CANCELLED')) AS data FROM orders o ${joins} ${filter.sql}`,
         filter.values,
       )
     ).rows[0].data;
   }
 
-  async adminList(client: Pool | PoolClient, query: AdminOrderListQueryDto) {
+  async adminList(client: Pool | PoolClient, query: AdminOrderListQueryDto, knownTotal?: number) {
     const filter = this.adminFilter(query);
-    const orders = `SELECT o.order_seq AS "orderSeq",o.status,o.created_at AS "createdAt",o.pickup_requested_at AS "pickupRequestedAt",
-       customer.customer_seq AS "customerSeq",company.name AS "organizationName",NULL::int AS "draftSeq",NULL::jsonb AS "_draftParcel" ${filter.sql}`;
+    const orders = `SELECT ${ADMIN_ORDER_DETAILS} FROM orders o ${ADMIN_ORDER_JOINS} ${filter.sql}`;
     const drafts = this.drafts.adminIncompleteRows(query);
     const onlyDrafts = query.statusGroup === 'COLLECTING';
     const combined = query.statusGroup === undefined;
-    const sql = onlyDrafts
-      ? drafts.sql
-      : combined
-        ? `${orders} UNION ALL ${drafts.sql.replace(/\$(\d+)/g, (_, n: string) => `$${Number(n) + filter.values.length}`)}`
-        : orders;
+    const draftRows = combined
+      ? drafts.sql.replace(/\$(\d+)/g, (_, n: string) => `$${Number(n) + filter.values.length}`)
+      : undefined;
+    let sql: string | ((limit: string, offset: string) => string) = orders;
+    if (onlyDrafts) sql = drafts.sql;
+    else if (!filter.organizationScoped)
+      sql = (limit, offset) => adminOrderPage(filter.sql, draftRows, limit, offset);
+    else if (draftRows) sql = `${orders} UNION ALL ${draftRows}`;
     const values = onlyDrafts
       ? drafts.values
       : combined
@@ -260,7 +320,7 @@ export class OrdersRepository {
       sql,
       values,
       query,
-      '"createdAt" DESC,"orderSeq" DESC',
+      ADMIN_ORDER_SORT,
       `page."orderSeq",page.status,page."createdAt",page."pickupRequestedAt",page."customerSeq",page."organizationName",page."draftSeq",page.__page_ordinal,
        CASE WHEN page."draftSeq" IS NOT NULL THEN jsonb_build_array(jsonb_build_object(
          'orderParcelSeq',NULL,'status','ACTIVE',
@@ -277,6 +337,7 @@ export class OrdersRepository {
          'destination',jsonb_build_object('name',p.destination_name,'phoneNumber',p.destination_phone_number,'roadAddress',p.destination_road_address,'jibunAddress',p.destination_jibun_address,'detailAddress',p.destination_detail_address),
          'documentCount',p.document_count,'smallBoxCount',p.small_box_count,'mediumBoxCount',p.medium_box_count,'bigBoxCount',p.big_box_count,'otherItemDescription',p.other_item_description)
          ORDER BY p.parcel_position,p.order_parcel_seq) FROM order_parcels p WHERE p.order_seq=page."orderSeq"),'[]'::jsonb) END AS parcels`,
+      combined ? knownTotal : undefined,
     );
   }
 
@@ -286,11 +347,10 @@ export class OrdersRepository {
       `SELECT o.order_seq AS "orderSeq", o.customer_seq AS "customerSeq", o.status,
           o.creation_source AS "creationSource",o.total_amount AS "totalAmount",o.payment_due_at AS "paymentDueAt",o.paid_at AS "paidAt",
           o.payment_method_type AS "paymentMethodType", o.pickup_requested_at AS "pickupRequestedAt",
-          o.created_at AS "createdAt",
-          (SELECT count(*)::int FROM order_parcels p WHERE p.order_seq=o.order_seq) AS "parcelCount"
+          o.created_at AS "createdAt"
          FROM orders o
-         WHERE o.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM order_parcel_drafts d WHERE d.legacy_order_seq=o.order_seq)
-           AND COALESCE(o.closed_at,o.created_at)>clock_timestamp()-interval '5 years'
+         WHERE o.deleted_at IS NULL AND NOT o.migrated_to_parcel_drafts
+           AND NOT EXISTS(SELECT 1 FROM order_parcel_drafts d WHERE d.legacy_order_seq=o.order_seq)
            AND ($1::int IS NULL OR o.customer_seq=$1)
            AND ($2::timestamptz IS NULL OR o.created_at >= $2)
            AND ($3::timestamptz IS NULL OR o.created_at < $3)
@@ -307,6 +367,7 @@ export class OrdersRepository {
       ],
       query,
       '"createdAt" DESC,"orderSeq" DESC',
+      'page.*,(SELECT count(*)::int FROM order_parcels p WHERE p.order_seq=page."orderSeq") AS "parcelCount"',
     );
   }
 
@@ -355,7 +416,7 @@ export class OrdersRepository {
             WHERE p.order_seq=o.order_seq
           ),'[]'::jsonb)
         ) AS detail FROM orders o
-        WHERE o.order_seq=$1 AND o.deleted_at IS NULL AND COALESCE(o.closed_at,o.created_at)>clock_timestamp()-interval '5 years'
+        WHERE o.order_seq=$1 AND o.deleted_at IS NULL
           AND ($2::int IS NULL OR o.customer_seq=$2)`,
         [id, customerId],
       )
@@ -377,7 +438,7 @@ export class OrdersRepository {
         }
       >(
         `SELECT o.order_seq AS "orderSeq", o.version,o.creation_source AS "creationSource",
-          (o.deleted_at IS NOT NULL OR COALESCE(o.closed_at,o.created_at)<=clock_timestamp()-interval '5 years') AS deleted,
+          (o.deleted_at IS NOT NULL) AS deleted,
           CASE WHEN $2::int IS NULL THEN EXISTS(
             SELECT 1 FROM call_sessions c WHERE c.call_session_seq=$3 AND c.order_seq=o.order_seq AND c.deleted_at IS NULL)
           ELSE o.created_by_admin_user_seq=$2
@@ -415,9 +476,11 @@ export class OrdersRepository {
 
   async hasMigratedDrafts(client: PoolClient, id: number): Promise<boolean> {
     return !!(
-      await client.query('SELECT 1 FROM order_parcel_drafts WHERE legacy_order_seq=$1 LIMIT 1', [
-        id,
-      ])
+      await client.query(
+        `SELECT 1 FROM orders o WHERE o.order_seq=$1 AND (o.migrated_to_parcel_drafts
+         OR EXISTS(SELECT 1 FROM order_parcel_drafts d WHERE d.legacy_order_seq=o.order_seq))`,
+        [id],
+      )
     ).rowCount;
   }
 
@@ -429,6 +492,28 @@ export class OrdersRepository {
         [id],
       )
     ).rowCount;
+  }
+
+  async usablePersonalPinIds(
+    client: PoolClient,
+    customerId: number,
+    pins: OriginPinDto[],
+  ): Promise<Set<number>> {
+    const ids = [
+      ...new Set(pins.filter((pin) => pin.scope === 'PERSONAL').map((pin) => pin.pinSeq)),
+    ].sort((a, b) => a - b);
+    if (!ids.length) return new Set<number>();
+    if (ids.length === 1)
+      return new Set(
+        (await this.canUsePin(client, customerId, { scope: 'PERSONAL', pinSeq: ids[0] }))
+          ? ids
+          : [],
+      );
+    const result = await client.query<{ personal_pin_seq: number }>(
+      `SELECT personal_pin_seq FROM personal_pins WHERE personal_pin_seq=ANY($1::int[]) AND customer_seq=$2 AND deleted_at IS NULL ORDER BY personal_pin_seq FOR SHARE`,
+      [ids, customerId],
+    );
+    return new Set(result.rows.map((row) => row.personal_pin_seq));
   }
 
   async canUsePin(client: PoolClient, customerId: number, pin: OriginPinDto): Promise<boolean> {
@@ -468,7 +553,7 @@ export class OrdersRepository {
         totalAmount: number | null;
         paymentMethodType: string | null;
       }>(
-        'SELECT customer_seq AS "customerSeq",status,version,total_amount AS "totalAmount",payment_method_type AS "paymentMethodType" FROM orders WHERE order_seq=$1 AND deleted_at IS NULL AND COALESCE(closed_at,created_at)>clock_timestamp()-interval \'5 years\' FOR UPDATE',
+        'SELECT customer_seq AS "customerSeq",status,version,total_amount AS "totalAmount",payment_method_type AS "paymentMethodType" FROM orders WHERE order_seq=$1 AND deleted_at IS NULL FOR UPDATE',
         [id],
       )
     ).rows[0];

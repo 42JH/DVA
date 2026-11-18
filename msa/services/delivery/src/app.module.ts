@@ -4,6 +4,7 @@ import { AppController } from './app.controller';
 import { DatabaseService } from './database.service';
 import { validateEnvironment } from './environment';
 import { OrderShipmentCheckController } from './order-shipment-check.controller';
+import { OrderAcceptedController } from './order-accepted.controller';
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -12,7 +13,11 @@ import { OrderShipmentCheckController } from './order-shipment-check.controller'
       ignoreEnvFile: true,
     }),
   ],
-  controllers: [AppController, OrderShipmentCheckController],
+  controllers: [
+    AppController,
+    OrderShipmentCheckController,
+    OrderAcceptedController,
+  ],
   providers: [DatabaseService],
 })
 export class AppModule {}

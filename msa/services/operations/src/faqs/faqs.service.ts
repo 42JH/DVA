@@ -8,6 +8,7 @@ import { DatabaseService } from '../database/database.service';
 import { AdminFaqQueryDto, AiFaqQueryDto, CreateFaqDto, UpdateFaqDto } from './dto/faq-request.dto';
 import { FaqsRepository } from './faqs.repository';
 import { queueFaqChange } from './faq-change';
+import { faqWrite } from './faq-write';
 
 @Injectable()
 export class FaqsService {
@@ -39,7 +40,7 @@ export class FaqsService {
   }
 
   async create(items: CreateFaqDto[], adminId: number, requestId: string) {
-    return this.database.transaction((client) =>
+    return faqWrite(this.database, (client) =>
       this.createInTransaction(client, items, adminId, requestId),
     );
   }
@@ -70,7 +71,7 @@ export class FaqsService {
   }
 
   async delete(ids: number[], adminId: number, requestId: string) {
-    await this.database.transaction(async (client) => {
+    await faqWrite(this.database, async (client) => {
       const deleted = await this.repository.delete(client, ids);
       if (deleted.length !== ids.length)
         throw new ApiException(404, 'NOT_FOUND', '삭제할 FAQ를 찾을 수 없습니다.');
@@ -90,7 +91,7 @@ export class FaqsService {
   }
 
   async update(id: number, input: UpdateFaqDto, adminId: number, requestId: string) {
-    await this.database.transaction(async (client) => {
+    await faqWrite(this.database, async (client) => {
       if (!(await this.repository.update(client, id, input, adminId)))
         throw new ApiException(404, 'NOT_FOUND', 'FAQ를 찾을 수 없습니다.');
       await this.audit.recordSuccess(

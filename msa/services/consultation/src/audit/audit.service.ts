@@ -1,4 +1,9 @@
-import { createRelay, enqueue, sendEvent } from '@dva/events';
+import {
+  createRelay,
+  enqueue,
+  flushAuditSnapshot,
+  sendEvent,
+} from '@dva/events';
 import {
   HttpException,
   Injectable,
@@ -14,15 +19,24 @@ import type { Environment } from '../config/environment';
 import { DatabaseService } from '../database/database.service';
 import type { AuditEvent, AuditResult } from './audit.types';
 import { ApiException } from '../common/errors/api.exception';
+import {
+  splitFaqExamples,
+  type FaqExamplesPayload,
+} from '@dva/events/faq-question-examples.cjs';
+import {
+  requestFaqConversion,
+  type FaqConversionPayload,
+} from '@dva/events/faq-conversion.cjs';
 
 @Injectable()
 export class AuditService implements OnModuleInit, OnModuleDestroy {
   private readonly pending = new WeakMap<
     PoolClient,
-    { transactionId: string; eventIds: string[] }
+    { transactionId: string; eventIds: string[]; faqConversion?: boolean }
   >();
   private readonly logger = new Logger(AuditService.name);
-  private readonly relay: () => Promise<boolean>;
+  private readonly failures = new WeakMap<object, string>();
+  private readonly relay: ReturnType<typeof createRelay>;
   private timer?: NodeJS.Timeout;
   private running?: Promise<void>;
   private readonly url: string;
@@ -63,6 +77,48 @@ export class AuditService implements OnModuleInit, OnModuleDestroy {
 
   async recordSuccess(event: AuditEvent, client: PoolClient): Promise<void> {
     return this.recordResult(event, 'SUCCESS', client);
+  }
+  async prepareFaqConversion(
+    client: PoolClient,
+    input: Omit<FaqConversionPayload, 'transactionId'>,
+  ): Promise<number> {
+    const transactionId = await this.begin(client),
+      eventId = randomUUID();
+    const pending = this.pending.get(client)!;
+    pending.eventIds.push(eventId);
+    pending.faqConversion = true;
+    return requestFaqConversion(this.url + '/faq-conversion', this.token, {
+      eventId,
+      input: { ...input, transactionId },
+    });
+  }
+  async prepareFaqExamples(
+    client: PoolClient,
+    input: Omit<FaqExamplesPayload, 'transactionId'>,
+  ): Promise<void> {
+    const transactionId = await this.begin(client);
+    const eventId = randomUUID();
+    this.pending.get(client)!.eventIds.push(eventId);
+    const chunks = splitFaqExamples({ ...input, transactionId });
+    const chunkEventIds: string[] = [];
+    if (chunks.length > 1)
+      for (const chunk of chunks) {
+        const chunkId = randomUUID();
+        await sendEvent(this.url, this.token, {
+          eventId: chunkId,
+          source: 'consultation',
+          eventType: 'FaqQuestionExamplesChunkPrepared',
+          payload: chunk,
+        });
+        chunkEventIds.push(chunkId);
+      }
+    await sendEvent(this.url, this.token, {
+      eventId,
+      source: 'consultation',
+      eventType: 'FaqQuestionExamplesPrepared',
+      payload:
+        chunks.length === 1 ? chunks[0] : { transactionId, chunkEventIds },
+    });
   }
   async begin(client: PoolClient): Promise<string> {
     let pending = this.pending.get(client);
@@ -162,6 +218,11 @@ export class AuditService implements OnModuleInit, OnModuleDestroy {
       throw new Error('Invalid audit acknowledgement');
   }
   async recordFailure(event: AuditEvent, error: unknown): Promise<void> {
+    // Domain and HTTP boundaries can observe the same failed attempt.
+    if (error !== null && typeof error === 'object') {
+      if (this.failures.get(error) === event.requestId) return;
+      this.failures.set(error, event.requestId);
+    }
     const status = error instanceof HttpException ? error.getStatus() : 500;
     try {
       await this.database.transaction((client) =>
@@ -196,7 +257,9 @@ export class AuditService implements OnModuleInit, OnModuleDestroy {
     for (let offset = 0; offset < pending.eventIds.length; offset += 1000)
       eventId = await enqueue(client, {
         destination: 'operations',
-        eventType: 'AuditCommitted',
+        eventType: pending.faqConversion
+          ? 'FaqConversionCommitted'
+          : 'AuditCommitted',
         aggregateSeq: 1,
         payload: {
           transactionId: pending.transactionId,
@@ -235,10 +298,18 @@ export class AuditService implements OnModuleInit, OnModuleDestroy {
         );
         if (!rows[0].locked) return;
         const committed = await client.query(
-          "SELECT 1 FROM outbox_events WHERE event_type='AuditCommitted' AND payload->>'transactionId'=$1 LIMIT 1",
+          "SELECT 1 FROM outbox_events WHERE event_type IN ('AuditCommitted','FaqConversionCommitted') AND payload->>'transactionId'=$1 LIMIT 1",
           [transactionId],
         );
-        if (!committed.rowCount)
+        if (
+          !committed.rowCount &&
+          !(
+            await client.query(
+              "SELECT 1 FROM outbox_events WHERE destination='operations' AND event_type='AuditAborted' AND payload->>'transactionId'=$1 LIMIT 1",
+              [transactionId],
+            )
+          ).rowCount
+        )
           await enqueue(client, {
             destination: 'operations',
             eventType: 'AuditAborted',
@@ -246,6 +317,15 @@ export class AuditService implements OnModuleInit, OnModuleDestroy {
             payload: { transactionId },
           });
       });
+  }
+
+  flushSnapshot(ids: string[]): Promise<void> {
+    return flushAuditSnapshot(
+      this.database.pool,
+      this.relay,
+      (pending) => this.reconcile(pending),
+      ids,
+    );
   }
 
   async flush(eventId?: string): Promise<void> {

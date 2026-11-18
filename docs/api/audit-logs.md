@@ -1,9 +1,19 @@
 # 감사 로그
 
+관리자 권한은 SYSTEM_ADMIN·OPERATOR 두 개이며 계정 관리 4개만 최상위 전용입니다. DELETE와 권한의 최신 통합 계약은 [프론트 전달 명세](../../backend/docs/frontend-delete-admin-roles.md)를 우선합니다.
+
+## 2026-11-11 누락 보완
+
+- 자동 불만 판정은 `CALL_COMPLAINT_JUDGED / SUCCESS`로 통화 번호와 `hasComplaint`, `complaintCount`만 기록한다. 모델·녹음 장애와 입력 초과는 `CALL_COMPLAINT_FAILED / FAILED` 및 고정 사유 코드로 기록한다. 판정 결과·재시도 변경과 감사는 같은 트랜잭션이며 이미 판정된 행은 성공 감사를 추가하지 않는다. 녹음·발화가 준비되기를 기다리는 내부 대기는 실패 감사로 기록하지 않는다.
+- 결제 확인·결과 재조회·등록 카드 처리는 `ORDER_PAYMENT_CONFIRMATION`, `ORDER_PAYMENT_RECONCILED`, `ORDER_CARD_PAYMENT` 실패 감사를 남긴다. 확인 가능한 주문 번호와 `PAYMENT_DECLINED`, `PAYMENT_RESULT_UNKNOWN`, `PAYMENT_REQUEST_FAILED`만 저장한다. 입력 검증·Origin 거부처럼 주문 확인 전에 끝난 HTTP 요청은 대상 번호가 null이다. 같은 오류·requestId가 서비스와 HTTP 경계를 통과해도 실패 감사는 한 번만 남긴다.
+- 결제 링크·완료 알림은 각각 `ORDER_PAYMENT_NOTIFICATION_*`, `ORDER_PAYMENT_COMPLETION_NOTIFICATION_*`로 실제 상태 전환마다 기록한다. `ATTEMPTED`, `SENT`는 SUCCESS, `FAILED`, `UNKNOWN`은 FAILED다. UNKNOWN은 수신 여부 불명이며 전송 실패 확정을 뜻하지 않는다. 전송 중 재시작·응답 유실도 UNKNOWN으로 기록하고 기존 자동 재발송 금지를 유지한다. 상태와 감사는 함께 저장하며 동일 완료 재호출은 중복 감사를 만들지 않는다.
+- 운영 JSON 로그는 불만 판정·카드 결제·주문 확정/복구·통화 종료 매칭 등 기존 13종 이벤트명을 보존한다. 불만 결과는 여부·개수·소요 시간만 추가한다. 원문·판정 근거·이름·주소·전화번호·카드 번호·결제/빌링 키·오류 메시지·stack·알림 본문은 새 감사와 운영 로그에 복사하지 않는다.
+- API 동작·권한·결제/접수/재시도 기준과 감사 보관 7일 정책은 유지한다. 새 환경변수·migration은 없다. 실패 감사 DB도 불능이면 원래 결제 결과·오류를 유지하고 기존 `audit_write_failed` 운영 로그를 남긴다. 과거 누락 이력은 추정해서 생성하지 않는다.
+
 기업·부서 삭제는 `ORGANIZATION_DELETED`, `DEPARTMENT_DELETED`, 연결 정리는 `MEMBERSHIP_REMOVED`로 기록한다. 053 이후 새 기업 PIN 감사는 생성하지 않으며 과거 `COMPANY_PIN_CREATED/UPDATED/DELETED` 이력은 보존한다. 같은 requestId와 당시 기업/부서 번호·이름으로 삭제 후에도 추적한다. 요청 관리자는 ADMIN·표시명 운영자이며 작업자 번호·이름을 보존한다. [삭제 감사와 트랜잭션 계약](company-deletion.md)을 따른다.
 
 관련 Jira: [S15P31D109-101](https://ssafy.atlassian.net/browse/S15P31D109-101).
-조회는 `dva_session`으로 인증한 ACTIVE 상태의 SUPERVISOR·SYSTEM_ADMIN만 가능하다.
+조회는 `dva_session`으로 인증한 ACTIVE 상태의 OPERATOR·SYSTEM_ADMIN만 가능하다.
 
 ## 조회 API
 
@@ -28,7 +38,7 @@ limit은 기본 20·최대 100, offset은 기본 0이다. 기간은 시작 포�
 | targetAdminName | ADMIN_USER 대상의 당시 이름. 다른 대상·미식별 대상은 null |
 | requestId | 당시 업무 요청 ID. 조회 응답의 meta.requestId와 별개 |
 | result | SUCCESS / DENIED / FAILED |
-| metadata | 허용한 금액·기간·사유와 삭제 당시 연결 정보만 공개: amountBefore·amountAfter·orderParcelSeqs·billingMonth·paymentMethodType·reason·organizationSeq·organizationName·departmentSeq·departmentName·customerSeq. 그 외 빈 객체 |
+| metadata | 허용한 금액·기간·사유·불만 요약과 삭제 당시 연결 정보만 공개: amountBefore·amountAfter·orderParcelSeqs·billingMonth·paymentMethodType·reason·hasComplaint·complaintCount·organizationSeq·organizationName·departmentSeq·departmentName·customerSeq. 그 외 빈 객체 |
 | occurredAt | 발생 시각 |
 
 관리자 이름은 로그 자체에 저장하므로 계정을 삭제하거나 이름이 바뀌어도 기존 기록은 유지된다.

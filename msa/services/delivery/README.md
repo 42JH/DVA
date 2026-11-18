@@ -1,6 +1,6 @@
 # Delivery 서비스
 
-기존 NestJS에 자기 PostgreSQL DB 연결과 인증된 주문 배송 존재 확인을 제공한다. [주문 취소 계획](../../../docs/msa-order-cancellation-plan.md)을 따른다. 공개 배송 업무 API·배송 생성/후속 이벤트는 후속이며 이번에는 배송 행/이력을 변경하지 않는다. 적용된 delivery Liquibase 003까지를 그대로 사용한다.
+기존 NestJS에서 자기 PostgreSQL DB와 인증된 주문 배송 조회·생성 이벤트를 처리한다. [주문 취소 계획](../../../docs/msa-order-cancellation-plan.md)을 따르며 기존 delivery Liquibase 스키마를 사용한다.
 
 ## 실행과 배포
 
@@ -23,7 +23,9 @@ python3 msa/deploy/tests/integration_app_rollout.py --service delivery --image d
 
 공개 Ingress는 기존 `/delivery`만 유지한다. `/internal/...`는 Service 내부에서만 접근한다. readiness는 자기 DB만 의존하므로 order와의 시작 순환이 없다. operations → customer → consultation → delivery → order 순으로 배포하고 기존 RollingUpdate·실패 복구를 재사용한다. 실제 운영 Jenkins/HTTPS 검증과 로컬 production/격리 k3s 검증은 구분한다.
 
-원본 취소는 대상 배송이 존재하면 상태에 관계없이 거절하므로 배송 취소 UPDATE는 실행할 대상이 없다. 후속 배송 생성 생산자는 order 부모 잠금과 최신 상태 검증을 지켜야 한다. 이 조회만으로 분리 DB의 전역 원자성을 보장하지 않는다.
+원본 취소는 대상 배송이 존재하면 상태에 관계없이 거절하므로 배송 취소 UPDATE는 실행할 대상이 없다. 배송 생성 생산자는 order 부모 잠금과 최신 상태 검증을 지켜야 한다. 이 조회만으로 분리 DB의 전역 원자성을 보장하지 않는다.
+
+`POST /internal/order-accepted`는 기존 토큰으로 order 이벤트를 인증한다. `OrderSubmissionDeliveryRequested`는 배송과 최초 이력을 같은 트랜잭션에서 생성한다. `OrderParcelsPurged`는 원본 보관 만료 SQL과 같은 순서로 이력·배송을 삭제하고 inbox에 개인정보 없는 parcel ID만 남긴다. 두 경로가 같은 parcel 잠금을 사용하므로 삭제와 동시에 처리되거나 뒤늦게 도착한 생성 이벤트가 만료 배송을 다시 만들지 않는다. 이벤트 inbox와 모든 데이터 변경을 함께 커밋하며 실패·중복 수신은 기존 수신기의 재시도·충돌 검사를 따른다.
 
 ## MR 전 검증 기록 (2026-10-26)
 

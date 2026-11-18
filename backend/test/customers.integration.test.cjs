@@ -18,6 +18,7 @@ assert.ok(['db', '127.0.0.1'].includes(process.env.DB_HOST));
 process.env.SWAGGER_ENABLED = 'false';
 process.env.CORS_ORIGINS = 'http://localhost:5173';
 const { CustomersRepository } = require('../dist/customers/customers.repository');
+const { CustomersService } = require('../dist/customers/customers.service');
 
 const pool = createTestPool();
 const apps = [];
@@ -25,6 +26,119 @@ const origin = 'http://localhost:5173';
 let app, base, baseB, repository, adminCookie, adminId;
 const phone = () => '010' + String(randomInt(10000000, 100000000));
 const start = () => startTestApp(apps);
+
+test('all 12 shared entries require business authentication or an administrator session independently of AI configuration', async () => {
+  const { ConfigService } = require('@nestjs/config');
+  const { SwaggerModule, DocumentBuilder } = require('@nestjs/swagger');
+  const routes = [
+    ['GET', '/api/orders', '/api/orders'],
+    ['POST', '/api/orders', '/api/orders', {}],
+    ['GET', '/api/orders/2147483647', '/api/orders/{id}'],
+    ['PATCH', '/api/orders/2147483647', '/api/orders/{id}', { expectedVersion: 1 }],
+    ['POST', '/api/orders/2147483647/cancel', '/api/orders/{id}/cancel'],
+    [
+      'POST',
+      '/api/orders/2147483647/parcels/cancel',
+      '/api/orders/{id}/parcels/cancel',
+      { orderParcelSeqs: [2147483647] },
+    ],
+    ['POST', '/api/orders/2147483647/submit', '/api/orders/{id}/submit', { expectedVersion: 1 }],
+    [
+      'GET',
+      '/api/customers/2147483647/addresses?direction=DESTINATION',
+      '/api/customers/{id}/addresses',
+    ],
+    ['GET', '/api/customers/2147483647/pins', '/api/customers/{id}/pins'],
+    ['POST', '/api/customers/2147483647/pins', '/api/customers/{id}/pins', {}],
+    ['PATCH', '/api/pins/2147483647', '/api/pins/{id}', {}],
+    ['GET', '/api/ai/faqs', '/api/ai/faqs'],
+  ];
+  const send = ([method, path, , body], headers = {}) =>
+    fetch(base + path, {
+      method,
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': randomUUID(), ...headers },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+  const counts = async () =>
+    (
+      await pool.query(`SELECT
+    (SELECT count(*) FROM orders) AS orders,
+    (SELECT count(*) FROM personal_pins) AS pins,
+    (SELECT count(*) FROM faq_entries) AS faqs`)
+    ).rows[0];
+  const before = await counts();
+  const document = SwaggerModule.createDocument(
+    app,
+    new DocumentBuilder()
+      .addBearerAuth()
+      .addCookieAuth('dva_session', { type: 'apiKey', in: 'cookie' }, 'adminSession')
+      .build(),
+  );
+  for (const route of routes) {
+    const [method, path, schemaPath] = route;
+    assert.deepEqual(
+      document.paths[schemaPath][method.toLowerCase()].security,
+      [{ adminSession: [] }, { bearer: [] }],
+      `${method} ${path}`,
+    );
+    for (const headers of [
+      {},
+      { Authorization: 'Bearer wrong', call_session_seq: '2147483647' },
+      { Authorization: 'Basic invalid' },
+      { Authorization: businessHeaders().Authorization + ', ' + businessHeaders().Authorization },
+      { ...businessHeaders(), Cookie: 'dva_session=invalid', Origin: origin },
+      { ...businessHeaders(), Cookie: 'dva_session=' + 'f'.repeat(64), Origin: origin },
+      { ...businessHeaders(), Cookie: adminCookie + '; ' + adminCookie, Origin: origin },
+    ]) {
+      const response = await send(route, headers);
+      assert.equal(response.status, 401, `${method} ${path}`);
+      assert.equal((await response.json()).error.code, 'UNAUTHORIZED');
+    }
+    const authenticated = await send(route, businessHeaders());
+    assert.ok(
+      [200, 400, 404, 409, 422].includes(authenticated.status),
+      `${method} ${path}: ${authenticated.status}`,
+    );
+    if (method !== 'GET') {
+      assert.equal((await send(route, { Cookie: adminCookie })).status, 403);
+      assert.equal(
+        (await send(route, { Cookie: adminCookie, Origin: 'https://untrusted.invalid' })).status,
+        403,
+      );
+    }
+  }
+  const config = app.get(ConfigService);
+  const token = config.get('AI_BUSINESS_TOKEN');
+  config.set('AI_BUSINESS_TOKEN', '');
+  try {
+    assert.equal(config.get('AI_BUSINESS_TOKEN'), '');
+    for (const route of routes) {
+      const disabled = await send(route, { Authorization: 'Bearer ' + token });
+      assert.equal(disabled.status, 503, `${route[0]} ${route[1]}`);
+      assert.equal((await disabled.json()).error.code, 'DEPENDENCY_UNAVAILABLE');
+    }
+    for (const role of ['OPERATOR', 'SYSTEM_ADMIN']) {
+      const admin = await account(role);
+      for (const route of routes) {
+        const response = await send(route, { Cookie: admin.cookie, Origin: origin });
+        assert.ok(
+          [200, 400, 404, 409, 422].includes(response.status),
+          `${role} ${route[0]} ${route[1]}: ${response.status}`,
+        );
+        const withBearer = await send(route, {
+          Cookie: admin.cookie,
+          Origin: origin,
+          Authorization: 'Bearer ignored-for-admin',
+        });
+        assert.equal(withBearer.status, response.status);
+      }
+    }
+  } finally {
+    config.set('AI_BUSINESS_TOKEN', token);
+  }
+  assert.deepEqual(await counts(), before);
+});
+
 async function account(role = 'OPERATOR') {
   const loginId = 'cus' + randomUUID().replaceAll('-', '').slice(0, 16);
   const { rows } = await pool.query(
@@ -270,7 +384,7 @@ test('customer list and status changes require a real active administrator; forg
   }
   assert.equal((await (await request('/' + id)).json()).data.status, 'ACTIVE');
   assert.notEqual((await (await request('/' + id)).json()).data.name, '실패');
-  for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN']) {
+  for (const role of ['OPERATOR', 'SYSTEM_ADMIN']) {
     const { cookie } = await account(role);
     const headers = { Cookie: cookie, Origin: origin };
     assert.equal((await request('', { headers })).status, 200);
@@ -286,7 +400,7 @@ test('list supports literal name search, partial phone, state and stable offset 
   }));
   const ids = [];
   for (const input of inputs) ids.push(await register(input));
-  await patch(ids[1], { status: 'WITHDRAWN' }, adminHeaders());
+  await pool.query("UPDATE customers SET status='WITHDRAWN' WHERE customer_seq=$1", [ids[1]]);
   const list = async (query) => {
     const response = await request('?' + new URLSearchParams(query), { headers: adminHeaders() });
     assert.equal(response.status, 200);
@@ -456,7 +570,7 @@ test('customer list and caller context agree on personal and independent company
   }
 });
 
-test('customer list payment methods reflect withdrawal and deleted or missing company links on the next read', async () => {
+test('customer payment methods reflect withdrawal and company links while department changes keep employee card permissions', async () => {
   for (const change of [
     'UPDATE memberships SET deleted_at=clock_timestamp() WHERE customer_seq=$1',
     'UPDATE organizations SET deleted_at=clock_timestamp() WHERE organization_seq=(SELECT organization_seq FROM memberships WHERE customer_seq=$1)',
@@ -479,7 +593,9 @@ test('customer list payment methods reflect withdrawal and deleted or missing co
         ? []
         : change.startsWith('UPDATE organizations')
           ? ['billing']
-          : ['billing', 'credit'];
+          : change.startsWith('UPDATE departments') || change.includes('department_seq=NULL')
+            ? ['billing', 'credit', 'groupBilling']
+            : ['billing', 'credit'];
       await paymentMethods(customer, expected);
     }
   }
@@ -618,7 +734,7 @@ test('customer transaction failure rolls back registration and leaves the phone 
   assert.equal((await create(input)).status, 201);
 });
 
-test('withdrawal preserves related data, prevents AI access, duplicate registration and reactivation', async () => {
+test('withdrawal soft deletes the customer and order while preserving the phone reservation', async () => {
   const input = { name: '탈퇴 고객', phoneNumber: phone() };
   const key = randomUUID();
   const created = await create(input, key);
@@ -650,27 +766,29 @@ test('withdrawal preserves related data, prevents AI access, duplicate registrat
   await error(replay, 409, 'DUPLICATE_RESOURCE');
   await error(
     await patch(id, { name: '실패', status: 'ACTIVE' }, adminHeaders()),
-    409,
-    'INVALID_STATE',
+    404,
+    'NOT_FOUND',
   );
-  const detail = await request('/' + id, { headers: adminHeaders() });
-  assert.equal(detail.status, 200);
-  assert.deepEqual((await detail.json()).data, {
-    customerSeq: id,
-    ...input,
-    status: 'WITHDRAWN',
-    monthlyBillingEnabled: false,
-    address: customerAddress(),
-  });
-  assert.equal(
-    (await pool.query('SELECT status FROM memberships WHERE customer_seq=$1', [id])).rows[0].status,
-    'ACTIVE',
-  );
-  for (const table of ['orders', 'personal_pins'])
+  await error(await request('/' + id, { headers: adminHeaders() }), 404, 'NOT_FOUND');
+  for (const table of ['customers', 'memberships', 'personal_pins'])
     assert.equal(
-      (await pool.query(`SELECT count(*) FROM ${table} WHERE customer_seq=$1`, [id])).rows[0].count,
+      (
+        await pool.query(
+          `SELECT count(*) FROM ${table} WHERE customer_seq=$1 AND deleted_at IS NOT NULL`,
+          [id],
+        )
+      ).rows[0].count,
       '1',
     );
+  assert.equal(
+    (
+      await pool.query(
+        'SELECT count(*) FROM orders WHERE customer_seq=$1 AND deleted_at IS NOT NULL',
+        [id],
+      )
+    ).rows[0].count,
+    '1',
+  );
 });
 
 test('customer create/name/status writes record AI or the administrator name without retaining request payloads', async () => {
@@ -690,8 +808,9 @@ test('customer create/name/status writes record AI or the administrator name wit
     [adminCreated, 'CUSTOMER_CREATED', 'ADMIN'],
   ]) {
     const rows = (
-      await pool.query('SELECT * FROM audit_logs WHERE request_id=$1', [
+      await pool.query('SELECT * FROM audit_logs WHERE request_id=$1 AND action=$2', [
         response.headers.get('x-request-id'),
+        action,
       ])
     ).rows;
     assert.equal(rows.length, 1);
@@ -887,7 +1006,7 @@ test('AI basic address changes require a matching ongoing call while administrat
   assert.equal(customer.name, '주소 권한 고객');
   assert.deepEqual(customer.address, replacement);
   assert.equal((await patch(id, { name: '기존 이름 수정' })).status, 204);
-  for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN']) {
+  for (const role of ['OPERATOR', 'SYSTEM_ADMIN']) {
     const actor = await account(role);
     assert.equal(
       (await patch(id, { address: null }, { Cookie: actor.cookie, Origin: origin })).status,
@@ -960,8 +1079,8 @@ test('a customer address write waiting behind call termination rechecks the end 
   }
 });
 
-test('admin arrays soft-delete customers, memberships and PINs while preserving orders and calls', async () => {
-  for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN']) {
+test('admin arrays soft-delete customers, memberships, PINs, orders and calls', async () => {
+  for (const role of ['OPERATOR', 'SYSTEM_ADMIN']) {
     const actor = await account(role);
     const ids = [await register(), await register()];
     const organization = (
@@ -990,7 +1109,7 @@ test('admin arrays soft-delete customers, memberships and PINs while preserving 
     ).rows[0].order_seq;
     const callId = (
       await pool.query(
-        'INSERT INTO call_sessions(provider_call_id,customer_seq,order_seq) VALUES($1,$2,$3) RETURNING call_session_seq',
+        'INSERT INTO call_sessions(provider_call_id,customer_seq,order_seq,incoming_at,started_at,ended_at) VALUES($1,$2,$3,now(),now(),now()) RETURNING call_session_seq',
         [randomUUID(), ids[0], order],
       )
     ).rows[0].call_session_seq;
@@ -1016,7 +1135,11 @@ test('admin arrays soft-delete customers, memberships and PINs while preserving 
     assert.equal(response.status, 204, await response.clone().text());
     assert.equal(await response.text(), '');
     assert.equal(response.headers.get('cache-control'), 'no-store');
-    assert.deepEqual(await history(), before);
+    const after = await history();
+    assert.ok(after.order.deleted_at);
+    assert.ok(after.call.deleted_at);
+    assert.equal(after.order.status, before.order.status);
+    assert.equal(after.call.order_seq, order);
     const deleted = await pool.query(
       'SELECT deleted_at FROM customers WHERE customer_seq=ANY($1::int[])',
       [ids],
@@ -1055,6 +1178,134 @@ test('admin arrays soft-delete customers, memberships and PINs while preserving 
       204,
     );
   }
+});
+
+test('in-progress calls block the entire deletion batch and withdrawal until the call ends', async () => {
+  const ids = [await register(), await register()];
+  const callId = (
+    await pool.query(
+      'INSERT INTO call_sessions(provider_call_id,customer_seq,incoming_at) VALUES($1,$2,now()) RETURNING call_session_seq',
+      [randomUUID(), ids[0]],
+    )
+  ).rows[0].call_session_seq;
+  const remove = () =>
+    request('', {
+      method: 'DELETE',
+      headers: { ...adminHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ customerSeqs: ids }),
+    });
+  await error(await remove(), 409, 'INVALID_STATE');
+  await error(await patch(ids[0], { status: 'WITHDRAWN' }, adminHeaders()), 409, 'INVALID_STATE');
+  assert.equal(
+    (
+      await pool.query(
+        "SELECT 1 FROM customers WHERE customer_seq=ANY($1) AND deleted_at IS NULL AND status='ACTIVE'",
+        [ids],
+      )
+    ).rowCount,
+    2,
+  );
+  await pool.query(
+    'UPDATE call_sessions SET started_at=incoming_at,ended_at=now() WHERE call_session_seq=$1',
+    [callId],
+  );
+  const recordingId = randomUUID();
+  await pool.query(
+    "INSERT INTO pbx_webhooks.call_ended_events(recording_id,payload,call_session_seq) VALUES($1,'{}',$2)",
+    [recordingId, callId],
+  );
+  await error(await remove(), 409, 'INVALID_STATE');
+  await pool.query(
+    "UPDATE pbx_webhooks.call_ended_events SET processing_status='PROCESSED' WHERE recording_id=$1",
+    [recordingId],
+  );
+  assert.equal((await remove()).status, 204);
+});
+
+test('historical deletion skips protected calls and deletes confirmed links after they end', async () => {
+  const id = await register();
+  await pool.query('INSERT INTO personal_pins(customer_seq,address_data) VALUES($1,$2)', [
+    id,
+    { ...customerAddress(), name: '이전 주소록', phoneNumber: phone() },
+  ]);
+  const oldCall = (
+    await pool.query(
+      "INSERT INTO call_sessions(provider_call_id,customer_seq,incoming_at) VALUES($1,$2,now()-interval '2 days') RETURNING call_session_seq",
+      [randomUUID(), id],
+    )
+  ).rows[0].call_session_seq;
+  await pool.query(
+    "UPDATE customers SET deleted_at=now()-interval '1 day',related_deletion_due_at=now() WHERE customer_seq=$1",
+    [id],
+  );
+  const newCall = (
+    await pool.query(
+      'INSERT INTO call_sessions(provider_call_id,customer_seq,incoming_at) VALUES($1,$2,now()) RETURNING call_session_seq',
+      [randomUUID(), id],
+    )
+  ).rows[0].call_session_seq;
+  const draft = (
+    await pool.query(
+      "INSERT INTO order_parcel_drafts(call_session_seq,client_parcel_id,creation_payload,parcel_data,status,created_at,retention_started_at) VALUES($1,$2,'{}','{}','READY',now()-interval '2 days',now()-interval '2 days') RETURNING draft_seq",
+      [oldCall, randomUUID()],
+    )
+  ).rows[0].draft_seq;
+  const service = app.get(CustomersService);
+  await service.backfillRelatedDeletion();
+  assert.equal(
+    (await pool.query('SELECT deleted_at FROM call_sessions WHERE call_session_seq=$1', [oldCall]))
+      .rows[0].deleted_at,
+    null,
+  );
+  await pool.query(
+    'UPDATE call_sessions SET started_at=incoming_at,ended_at=now() WHERE call_session_seq=$1',
+    [oldCall],
+  );
+  await pool.query('UPDATE customers SET related_deletion_due_at=now() WHERE customer_seq=$1', [
+    id,
+  ]);
+  await service.backfillRelatedDeletion();
+  assert.equal(
+    (
+      await pool.query(
+        'SELECT call_session_seq FROM call_sessions WHERE call_session_seq=ANY($1) AND deleted_at IS NOT NULL',
+        [[oldCall, newCall]],
+      )
+    ).rows[0]?.call_session_seq,
+    oldCall,
+  );
+  assert.equal(
+    (
+      await pool.query(
+        'SELECT 1 FROM call_sessions WHERE call_session_seq=$1 AND deleted_at IS NULL',
+        [newCall],
+      )
+    ).rowCount,
+    1,
+  );
+  assert.equal(
+    (
+      await pool.query(
+        'SELECT 1 FROM order_parcel_drafts WHERE draft_seq=$1 AND deleted_at IS NOT NULL',
+        [draft],
+      )
+    ).rowCount,
+    1,
+  );
+  assert.equal(
+    (await pool.query('SELECT related_deletion_due_at FROM customers WHERE customer_seq=$1', [id]))
+      .rows[0].related_deletion_due_at,
+    null,
+  );
+  assert.equal(
+    (
+      await pool.query(
+        'SELECT 1 FROM personal_pins WHERE customer_seq=$1 AND deleted_at IS NOT NULL',
+        [id],
+      )
+    ).rowCount,
+    1,
+  );
 });
 
 test('customer deletion validates arrays and admin access and rolls back missing rows or audit failure', async () => {
@@ -1156,4 +1407,69 @@ test('customer deletion serializes reverse overlapping arrays and recovers after
     client.release();
   }
   assert.equal((await remove([held])).status, 204);
+});
+
+test('name search preserves short terms, literal punctuation and Unicode forms with phone/state/deletion filters', async () => {
+  const phonePrefix = '010' + String(randomInt(10000, 100000));
+  const names = [
+    'literal%_!\\Slash',
+    'MiXeD Case',
+    '가나다 NFC',
+    '가나다 NFD',
+    'AA!BB',
+    'AAZZBB',
+    '😀😀 literal',
+    '😀😀😀 literal',
+  ];
+  const rows = [];
+  for (const [index, name] of names.entries()) {
+    const id = await register({ name, phoneNumber: phonePrefix + String(index).padStart(3, '0') });
+    rows.push({ id, name, status: index === 1 ? 'WITHDRAWN' : 'ACTIVE' });
+  }
+  await pool.query("UPDATE customers SET status='WITHDRAWN' WHERE customer_seq=$1", [rows[1].id]);
+  const deleted = await register({ name: names[0], phoneNumber: phonePrefix + '999' });
+  await pool.query('UPDATE customers SET deleted_at=clock_timestamp() WHERE customer_seq=$1', [
+    deleted,
+  ]);
+  for (const q of [
+    '%',
+    '_',
+    '!',
+    '\\',
+    '%_!\\',
+    'mixed',
+    '가',
+    '가나다',
+    '가나다',
+    'AA',
+    'A',
+    '!BB',
+    'AA!BB',
+    '없는검색어',
+    '😀',
+    '😀😀',
+    '😀😀😀',
+  ]) {
+    for (const status of [undefined, 'ACTIVE', 'WITHDRAWN']) {
+      const query = new URLSearchParams({ q, phoneNumber: phonePrefix });
+      if (status) query.set('status', status);
+      const response = await request('?' + query, { headers: adminHeaders() });
+      assert.equal(response.status, 200);
+      const actual = await response.json();
+      const expected = rows
+        .filter(
+          (row) =>
+            row.name.toLowerCase().includes(q.toLowerCase()) && (!status || row.status === status),
+        )
+        .map((row) => row.id)
+        .toReversed();
+      assert.deepEqual(
+        actual.data.map((row) => row.customerSeq),
+        expected,
+        JSON.stringify({ q, status }),
+      );
+      assert.equal(actual.total_count, expected.length);
+      assert.equal(actual.hasNext, false);
+    }
+  }
 });

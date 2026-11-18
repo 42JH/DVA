@@ -1,5 +1,6 @@
 """Compare production reads and worker-isolated writes on three isolated Docker DBs."""
 import json
+import shutil
 from pathlib import Path
 import subprocess
 import time
@@ -35,7 +36,7 @@ def main():
         run('docker', 'create', '--name', name, '--label', LABEL, '--network', RUN,
             *args, image, *command, label=name+'-create')
         resources.append(('container', name))
-        if '--test' in command:
+        if '--test' in command and image != images.get('monolith'):
             run('docker', 'cp', str(ROOT/'msa/parity/fixture-reset.cjs'), name+':/app/service/test/fixture-reset.cjs',
                 label=name+'-copy-fixture-reset')
 
@@ -114,7 +115,7 @@ def main():
         name = RUN+'-differential'
         create(name, images['customer-checks'], '-e', 'NODE_ENV=test',
                '-e', 'AI_BUSINESS_TOKEN='+password, '-e', 'PGPASSWORD='+password, '-e', 'PGDATABASE=dva_webhook_test',
-               '-e', 'CUSTOMER_AUTH_TOKEN='+auth_token, command=('node', '--test', '--test-concurrency=1', 'test/member-input.test.cjs', 'test/customer-reads.test.cjs'))
+               '-e', 'CUSTOMER_AUTH_TOKEN='+auth_token, command=('node', '--test', '--test-concurrency=1', '--test-skip-pattern=^customer retention', 'test/member-input.test.cjs', 'test/customer-reads.test.cjs'))
         for source in (ROOT / 'backend/test/member-input.test.cjs', ROOT / 'msa/parity/customer-reads.test.cjs', ROOT / 'msa/parity/customer-writes.test.cjs', LOGS / 'seed-password.cjs'):
             run('docker', 'cp', str(source), name+':/app/service/test/'+source.name, label='copy-'+source.name)
         complete(name)
@@ -137,6 +138,31 @@ def main():
         for source in (ROOT / 'msa/parity/customer-writes.test.cjs', LOGS / 'seed-password.cjs'):
             run('docker','cp',str(source),name+':/app/service/test/'+source.name,label='writes-copy-'+source.name)
         complete(name)
+        for side in ('monolith','operations','customer'):
+            run('docker','stop',RUN+'-'+side+'-app',label=side+'-stop-before-local-retention')
+        probe=LOGS/'local-retention-probe';probe.mkdir(exist_ok=True)
+        for source in (ROOT/'msa/parity/customer-reads.test.cjs', ROOT/'msa/parity/fixture-reset.cjs', LOGS/'seed-password.cjs'):
+            shutil.copyfile(source,probe/source.name)
+        projections={};at=time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime())
+        for side in ('monolith','customer'):
+            name=RUN+'-'+side+'-local-retention'
+            create(name,images['monolith'] if side=='monolith' else images['customer-checks'],
+                   '-e','NODE_ENV=test','-e','PGDATABASE=dva_webhook_test','-e','PGPASSWORD='+password,
+                   '-e','PGHOST='+side+'-db','-e','PGUSER='+side+'_app','-e','RETENTION_AT='+at,
+                   command=('node','--test','--test-name-pattern=^customer retention','test/customer-reads.test.cjs'))
+            run('docker','cp',str(probe)+'/.',name+':/app/'+('' if side=='monolith' else 'service/')+'test',label=side+'-local-retention-copy')
+            complete(name)
+            output=run('docker','logs',name,label=side+'-local-retention-snapshot')
+            projections[side]={}
+            for line in output.splitlines():
+                try:value=json.loads(line.removeprefix('# '))
+                except ValueError:continue
+                if 'customerLocalRetention' in value:projections[side]['local']=value
+                if 'customerRetentionRoots' in value:projections[side]['roots']=value
+                if 'customerRetentionWorker' in value:projections[side]['worker']=value
+            assert set(projections[side])=={'local','roots','worker'}
+        assert len(projections)==2 and projections['monolith']==projections['customer']
+        report['customerLocalRetention']={'matched':True,'rollback':True,'orderReferencesAndHardDeletion':True,'worker':True}
         report['passed'] = True
     finally:
         for kind, name in reversed(resources):

@@ -1,6 +1,10 @@
 import { ApiProperty, ApiPropertyOptional, OmitType, PartialType } from '@nestjs/swagger';
 import { Transform, TransformFnParams } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  ArrayUnique,
+  IsArray,
   IsIn,
   IsInt,
   IsNumber,
@@ -181,4 +185,21 @@ export class PersonaListQueryDto extends PaginationQueryDto {
   declare limit: number;
   @ApiPropertyOptional({ description: '건너뛸 개수.', default: 0, minimum: 0 })
   declare offset: number;
+}
+
+export class DeletePersonasDto {
+  @ApiProperty({
+    type: [Number],
+    minItems: 1,
+    maxItems: 100,
+    description: '삭제할 분류 ID. 한 개이면 단건, 여러 개이면 다건. 중복 불가.',
+  })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(100)
+  @ArrayUnique()
+  @IsInt({ each: true })
+  @Min(1, { each: true })
+  @Max(2147483647, { each: true })
+  aiPersonaSeqs!: number[];
 }

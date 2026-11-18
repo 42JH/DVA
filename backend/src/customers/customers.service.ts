@@ -1,11 +1,15 @@
+import { PaymentCardsService } from '../payments/payment-cards.service';
 import { Injectable } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { PoolClient } from 'pg';
 import { AuditService } from '../audit/audit.service';
 import { DatabaseService } from '../database/database.service';
 import { ApiException } from '../common/errors/api.exception';
 import { ListResponse } from '../common/pagination';
+import { CoalescedPages } from '../common/coalesced-pages';
 import { CustomersRepository } from './customers.repository';
 import { CallerContextRequestDto } from './dto/caller-context.dto';
+import { CustomerListItemDto } from './dto/customer-response.dto';
 import { ConsultationsService } from '../consultations/consultations.service';
 import { callerPhone } from '../common/caller-phone';
 import { EmployeeCustomerIdentity } from './customers.types';
@@ -15,14 +19,35 @@ import {
   UpdateCustomerDto,
 } from './dto/customer-request.dto';
 
+function deletionLockConflict(error: unknown): boolean {
+  return (
+    !!error &&
+    typeof error === 'object' &&
+    'code' in error &&
+    ['55P03', '40P01'].includes(String(error.code))
+  );
+}
+
 @Injectable()
 export class CustomersService {
+  private readonly pages = new CoalescedPages<
+    ListCustomersQueryDto,
+    ListResponse<CustomerListItemDto>
+  >();
+
   constructor(
     private readonly repository: CustomersRepository,
     private readonly database: DatabaseService,
     private readonly audit: AuditService,
     private readonly calls: ConsultationsService,
+    private readonly cards: PaymentCardsService,
   ) {}
+
+  async billingMonth(id: number, month?: string) {
+    const result = await this.repository.billingMonth(id, month);
+    if (!result) throw new ApiException(404, 'NOT_FOUND', '고객을 찾을 수 없습니다.');
+    return result;
+  }
 
   async removeMany(ids: number[], actorId: number, requestId: string): Promise<void> {
     const sorted = [...ids].sort((a, b) => a - b);
@@ -35,32 +60,96 @@ export class CustomersService {
             'NOT_FOUND',
             '삭제할 고객 중 찾을 수 없거나 이미 삭제된 고객이 있습니다.',
           );
-        await this.repository.removeMany(client, sorted);
-        for (const id of sorted)
-          await this.audit.recordSuccess(
-            {
-              actorId,
-              targetId: id,
-              targetType: 'CUSTOMER',
-              action: 'CUSTOMER_DELETED',
-              requestId,
-            },
-            client,
-          );
+        await this.softDelete(client, sorted, actorId, requestId);
       });
     } catch (error) {
-      if (
-        error &&
-        typeof error === 'object' &&
-        'code' in error &&
-        ['55P03', '40P01'].includes(String(error.code))
-      )
+      if (deletionLockConflict(error))
         throw new ApiException(
           409,
           'REQUEST_IN_PROGRESS',
           '다른 작업이 진행 중입니다. 잠시 후 재시도해 주세요.',
         );
       throw error;
+    }
+  }
+
+  private async softDelete(
+    client: PoolClient,
+    ids: number[],
+    actorId: number,
+    requestId: string,
+  ): Promise<void> {
+    await this.deleteRelatedData(client, ids, actorId, requestId, null);
+    await this.cards.softDelete(client, 'CUSTOMER', ids, actorId, requestId);
+    await this.repository.removeMany(client, ids);
+    for (const id of ids)
+      await this.audit.recordSuccess(
+        { actorId, targetId: id, targetType: 'CUSTOMER', action: 'CUSTOMER_DELETED', requestId },
+        client,
+      );
+  }
+
+  private async deleteRelatedData(
+    client: PoolClient,
+    ids: number[],
+    actorId: number | null,
+    requestId: string,
+    cutoff: string | null,
+  ) {
+    const { orderIds, callIds } = await this.repository.lockRelatedData(client, ids, cutoff);
+    if (await this.repository.relatedDataInProgress(client, orderIds, callIds, ids))
+      throw new ApiException(
+        409,
+        'INVALID_STATE',
+        '통화·녹취·결제·접수 처리가 완료된 뒤 고객을 삭제해 주세요.',
+      );
+    const closedOrders = await this.repository.invalidateUnstartedPayments(client, orderIds);
+    const removed = await this.repository.removeRelatedData(client, ids, orderIds, callIds, cutoff);
+    for (const { rows, targetType, action } of [
+      {
+        rows: closedOrders.map((id) => ({ id })),
+        targetType: 'ORDER',
+        action: 'ORDER_PAYMENT_REQUEST_INVALIDATED',
+      },
+      { rows: removed.orders, targetType: 'ORDER', action: 'ORDER_DELETED' },
+      { rows: removed.calls, targetType: 'CALL_SESSION', action: 'CALL_DELETED' },
+      { rows: removed.drafts, targetType: 'ORDER_PARCEL_DRAFT', action: 'PARCEL_DRAFT_DELETED' },
+    ])
+      for (const { id: targetId } of rows)
+        await this.audit.recordSuccess(
+          {
+            actorId,
+            actorType: actorId === null ? 'SYSTEM' : 'ADMIN',
+            targetId,
+            targetType,
+            action,
+            requestId,
+          },
+          client,
+        );
+  }
+
+  async backfillRelatedDeletion() {
+    const id = await this.repository.claimRelatedDeletion();
+    if (id === undefined) return;
+    try {
+      await this.database.transaction(async (client) => {
+        await client.query("SET LOCAL lock_timeout='2s'");
+        const cutoff = await this.repository.lockRelatedDeletion(client, id);
+        if (cutoff === undefined) return;
+        const requestId = randomUUID();
+        await this.deleteRelatedData(client, [id], null, requestId, cutoff);
+        await this.cards.softDelete(client, 'CUSTOMER', [id], null, requestId, undefined, 'SYSTEM');
+        await this.repository.removeMany(client, [id]);
+        await this.repository.finishRelatedDeletion(client, id);
+      });
+    } catch (error) {
+      // A protected customer remains queued with its next attempt already reserved.
+      if (
+        !deletionLockConflict(error) &&
+        !(error instanceof ApiException && error.getStatus() === 409)
+      )
+        throw error;
     }
   }
 
@@ -141,7 +230,11 @@ export class CustomersService {
   }
 
   list(query: ListCustomersQueryDto) {
-    return this.repository.list(query).then((rows) => new ListResponse(rows, query.limit));
+    return this.pages.read(
+      [],
+      query,
+      async (page) => new ListResponse(await this.repository.list(page), page.limit),
+    );
   }
 
   async find(id: number, administrator: boolean) {
@@ -155,6 +248,8 @@ export class CustomersService {
     if (actorId === null && input.monthlyBillingEnabled === true)
       throw new ApiException(403, 'FORBIDDEN', '월결제 자격은 관리자만 설정할 수 있습니다.');
     return this.database.transaction(async (client) => {
+      if (await this.repository.findByPhoneForOrder(client, input.phoneNumber))
+        throw new ApiException(409, 'DUPLICATE_RESOURCE', '이미 등록된 전화번호입니다.');
       const customerSeq = await this.repository.insert(client, input);
       await this.audit.recordSuccess(
         {
@@ -228,6 +323,8 @@ export class CustomersService {
       if (customer.status === 'WITHDRAWN' && changes.status === 'ACTIVE')
         throw new ApiException(409, 'INVALID_STATE', '탈퇴 고객의 복구는 지원하지 않습니다.');
       await this.repository.update(id, changes, client);
+      if (changes.status === 'WITHDRAWN' && actorId !== null)
+        await this.softDelete(client, [id], actorId, requestId);
       await this.audit.recordSuccess(
         {
           actorId,

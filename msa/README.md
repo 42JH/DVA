@@ -1,4 +1,4 @@
-전체 동등성 최종 검증은 사용자 요청에 따라 최초 기준 `6a141a0`(052, HTTP 선언 95개)으로 고정한다. [검증 계획](../docs/msa-final-parity-plan.md)과 [실행 결과](../docs/msa-final-parity-results.md)를 따른다. 이후 API 변경 이식은 보류하며 현재 구현을 보존한 상태에서 최초 계약과의 차이를 기록한다. 기존 Jenkins의 055 inventory 검사는 !369의 고정 원본 CI 작업공간에서 유지한다. 아래 내용은 단계별 구현 당시 기록이다.
+현재 작업은 최신 원격 `develop-backend`의 기능을 순서대로 대조·이식한다. 진행 상태와 검증 근거는 [현재 작업 보고서](CURRENT-PARITY.md)에 기록한다. CI 비교 원본은 새 통화의 본인 결제 대기 주문 취소를 포함한 `5eeacbcc`(066, HTTP 선언 117개)다. 배열 DELETE·두 관리자 역할·수령인 집전화/발송인 번호를 포함하며 보관 및 최종 동등성 검증은 진행 중이다. 최초 052 최종 검증과 아래 단계별 기록은 당시 기준의 이력이다.
 
 055 배송 초안 변경이 포함된 `develop-backend` `9624b7789ee7876648b6c56b5e7a4a7a5a9ef378`을 기준으로 [초안 저장 구조·기존 API 호환](../docs/msa-draft-compatibility-plan.md)을 동기화한다. 원본 기준 목록은 공개 선언 104개·SQL 54개 파일(마지막 번호 055)·워커 6개다. order 004/consultation 008 이관, 기존 주문 목록·취소·통화 삭제, 초안의 최초 5년 보관과 배포 전환 검사를 연결한다. 신규 초안 CRUD/재개·관리자 보완·통화 주문 완료/확정 API와 결제/배송·남은 상담·전체 동등성은 후속이다.
 
@@ -11,6 +11,9 @@ MR !355 병합 `256d8157c68cc8a252253484ab3ab8086cd4d95e`를 기준으로 [주�
 MR !352 병합 `c400c72`를 기준으로 [주문 조회 4개 API](../docs/msa-order-reads-plan.md)를 이식한다. 원본 054/backend tree `f5b00cd9f9d2f7e09805ed042cbc56a7e305c799`가 기준이다. 주문 목록·상세·관리자 목록·이전 주문 주소와 기존 관리자 세션/AI 통화·고객 범위를 연결한다. 주문 쓰기·결제·청구·접수/배송 이벤트·통화 이벤트/미답변 목록/FAQ 전환·보관 워커와 전체 동등성은 후속이다.
 
 # MSA CI/CD
+
+최초 동등성 작업 기준은 develop-backend `864ccde5`의 backend였다. 현재 기준과
+기능별 대조·계획·구현·검증은 [작업 보고서](CURRENT-PARITY.md)에 기록한다. 아래 개별 MR 기록은 도입 당시의 범위이며 최신 완료 판정을 뜻하지 않는다.
 
 MR !337 병합 기준 `1597c62`에서 착수하고 최신 `ad40526`(고객 등록 주소 필수·주문 가격 정책)을 반영해 [미답변 수집·삭제와 통화 콘텐츠 조회·삭제 6개 API](../docs/msa-call-content-plan.md)를 이식한다. 원본 054와 동일 입력/응답·삭제 조건·감사를 유지하며 통화 이벤트 수집/FAQ 사례 생성·미답변 목록/전환·주문과 전체 동등성은 후속이다.
 
@@ -32,10 +35,10 @@ Jenkins의 Linux 빌드 노드에서 검증하고, MSA 서버 `k15d109.p.ssafy.i
 
 [CI 비용·#40 전환 실패 보완](../docs/msa-ci-runtime-plan.md)은 앱 배포와 회귀 선택을 분리하고,
 전체 선택 시 11개 checks/production/Liquibase 이미지를 공유한다. 기존 회귀의 원본은
-`baseline.json`의 055 커밋 `9624b778`로 고정하며 `msa/.ci-source/`에서 현재 MSA와 검증한다.
-원래 `backend/`는 변경하지 않는다. 이후 056/API는 이 검사에 섞지 않는다.
-임시 원본의 application 테스트 helper에는 !371의 반복 로그인 제거만 적용한다.
-API·migration·테스트 기대값은 그대로이며 승인된 fixture patch 이외의 backend 차이는 거부한다.
+`baseline.json`의 현재 기준 `fa0e4a2f`(066까지)로 고정하며 `msa/.ci-source/`에서 현재 MSA와 검증한다.
+원래 `backend/`는 변경하지 않는다. 후속 원격 변경은 대조·구현·검증한 뒤 기준을 순서대로 갱신한다.
+현재 원본에는 반복 로그인 제거가 이미 포함되어 있으므로 과거 055용 fixture patch를 적용하지 않는다.
+API·migration·테스트 helper를 포함한 backend tree가 고정 원본과 정확히 일치해야 한다.
 실제 checkout의 backend와 최초 052 수동 진단 기준은 보존한다.
 최초 052 전체 동등성 진단은 별도 MR !364의 수동 검증이며, 현재 업무 동등성 완료를 의미하지 않는다.
 [Jenkins #44 샌드박스 오류 수정](../docs/msa-build-44-fix.md)은 검증 성공 기록과 Checkout 승계를
@@ -61,7 +64,7 @@ Webhook → develop-backend checkout → 스크립트 검사 → 고정 원본 �
 - 5개 서비스 이미지는 `@dva/events` 파일 의존성을 포함하도록 `docker build -f msa/services/<서비스>/Dockerfile msa`로 빌드한다. delivery도 같은 context를 사용한다. Jenkins·비교 검증기·k3s fixture도 같은 경로를 사용한다.
 - customer/consultation은 operations에 현재 세션을 확인하며 consultation은 customer 조회 이벤트에도 의존한다. order는 AI 범위 확인을 위해 customer·consultation, 취소 시 배송 확인을 위해 delivery에 의존한다. delivery readiness는 자기 DB만 검사한다. 모두 선택되면 operations → customer → consultation → delivery → order 순서로 배포한다. 기존 서비스 Secret 값은 보존하며 customer의 조회에는 consultation의 readiness를 요구하지 않아 의존 순환을 만들지 않는다. 통화 등록 요청의 의존 장애는 503으로 반환한다.
 - DB·서비스 회귀·이벤트·배포 회귀의 성공 commit/build는 각 단계가 통과한 즉시 기록한다. 뒤의 CD 실패도 이 기록을 없애지 않는다. 다음 실행은 각 검사의 마지막 성공 입력과 비교하며, 없는 기록·잘못된 기록·이력 분기는 다시 검사한다.
-- DB CI는 migration·실행기·검증기·고정 기준 정책 변경으로 선택한다. 배포 pending·SSH 코드·DB 문서 변경만으로 전체 DB 검증을 반복하지 않는다. 동일 입력을 재사용한 DB 패키지에는 이전 검증 commit/build와 이번 이미지 ID를 함께 기록하며, 실제 서버의 fingerprint·migration·백업·복구 검사는 유지한다.
+- DB CI는 migration·실행기·검증기·검사 정책 변경으로 선택한다. 고정 원본 갱신은 SQL 파일명·해시가 바뀐 경우에 선택하며, 코드만 바뀌면 이전 DB 검증을 재사용한다. 잘못되거나 누락된 기준은 새 검사로 처리한다. 배포 pending·SSH 코드·DB 문서 변경만으로 전체 DB 검증을 반복하지 않는다. 재사용한 DB 패키지에도 이전 검증 commit/build와 이번 이미지 ID를 함께 기록하며, 서비스 API 회귀와 실제 서버의 fingerprint·migration·백업·복구 검사는 유지한다.
 - 준비된 이미지는 선택된 검사와 배포에 필요한 것만 빌드한다. 검증이 끝난 배포 재시도는 checks/monolith 이미지를 만들지 않는다. 배포 없는 CI는 앱·DB 전송 패키지를 만들지 않는다. inventory·최종 검증기·fixture 초기화 회귀 10개는 별도 Node 단계에서 빠르게 확인한다.
 - [테스트 정리 결과](../docs/msa-test-prune-results.md)는 전체 CI 계획을 1,160개에서 584개로 줄였다. 불변 원본의 단위/통합 재검사와 구형 migration 버전별 재현을 제거했다. 원본 production 이미지와 MSA의 HTTP·DB 비교, MSA 직접 검사, 현재 055 데이터 전환·롤백은 유지한다. delivery 단위는 builder에서 한 번 실행하며 별도 checks 이미지를 만들지 않는다.
 - 실행 중인 워커와 테스트 데이터 초기화가 충돌하지 않도록 전용 테스트 DB의 TRUNCATE는 관련 테이블을 NOWAIT로 잠근 뒤 실행한다. 경합 시 초기화 트랜잭션만 되돌려 최대 5초 안에서 재시도하며 API 요청·업무 기대값은 그대로 검사한다. 실제 PostgreSQL의 잠금 경합 회귀는 operations 단계에서 한 번 실행한다.

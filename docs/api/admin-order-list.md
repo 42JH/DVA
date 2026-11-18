@@ -8,7 +8,7 @@
 | --- | --- |
 | q | 보내는 분·받는 분의 이름·전화번호·도로명/지번/상세 주소 부분 검색. NFC·대소문자 무시, %·_는 일반 문자. 숫자·공백·전화번호 구분자만 있는 검색은 전화번호 구분자를 제거해 비교. 최대 200자 |
 | from / to | 주문 생성 시각. from 포함·to 미포함, 시간대가 있는 ISO8601. from은 to보다 빨라야 함 |
-| statusGroup | 전체 생략. COLLECTING=접수 중, notPaid=결제 대기, PAID=결제 완료, CANCELLED=주문 취소. PAID 탭은 PAID·SUBMITTING·ACCEPTED·SUBMISSION_FAILED 포함 |
+| statusGroup | 전체 생략. COLLECTING=미완료 초안, notPaid=결제 대기, PAID=PAID·SUBMITTING·SUBMITTING_FAILED, ACCEPTED=접수 완료, SUBMISSION_FAILED=최종 접수 실패, CANCELLED=주문 취소 |
 | limit / offset | 기본 20/0, limit 1~100. 주문 단위 페이지 |
 
 응답은 `{data:[주문],hasNext,total_count}`다. total_count는 모든 조건 적용 후 페이지 제한 전 주문 수이며 빈 페이지에서도 유지한다. 생성 시각·주문 번호 내림차순이다.
@@ -16,7 +16,7 @@
 | 화면 | 필드 |
 | --- | --- |
 | 행 식별·상세 열기 | orderSeq → 기존 GET /api/orders/{id} |
-| 상태 | status는 실제 주문 상태. COLLECTING/접수 중, notPaid/결제 대기, PAID·SUBMITTING·ACCEPTED·SUBMISSION_FAILED/결제 완료, CANCELLED/주문 취소로 표시. 접수 성공은 ACCEPTED만 해당 |
+| 상태 | status는 8개 실제 주문 상태를 그대로 반환한다. PAID=결제 완료, SUBMITTING=디버 접수 중, SUBMITTING_FAILED=자동 접수 재시도, ACCEPTED=접수 완료, SUBMISSION_FAILED=최종 접수 실패. 그룹과 실제 status를 구분한다. |
 | 접수 시각 | createdAt(ISO8601), 브라우저에서 한국 시각으로 표시 |
 | 수거 희망일시 | pickupRequestedAt(ISO8601 또는 null) |
 | 보내는 분 | parcels[].origin.name·phoneNumber·roadAddress·jibunAddress·detailAddress |
@@ -28,3 +28,5 @@
 주문 저장 전의 진행 중 통화는 표시하지 않는다. 결제 정보·좌표·PIN·요청키·배송 이력·CSV 전용 필드는 포함하지 않는다. CSV 내보내기는 기존 상세 조회와 별도로 연결한다.
 
 잘못된 검색·기간·상태·페이지는 400, 세션 없음·만료·비활성은 401, 권한 오류는 403이다. Cache-Control은 no-store다. 이 조회에는 DB migration이 필요 없다.
+
+응답의 `statusCounts`는 `all`·`incomplete`·`notPaid`·`paid`·`accepted`·`submissionFailed`·`cancelled`다. `accepted`는 새 접수 완료 그룹 건수이며 `paid`·`submissionFailed`는 위 그룹 기준으로 집계한다. 검색·기간·기업 조건을 적용하고 선택한 그룹·페이지는 적용하지 않는다. [6개 그룹 변경 명세](../../backend/docs/order-status-groups.md)를 참고한다.

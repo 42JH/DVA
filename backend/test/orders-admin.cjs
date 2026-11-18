@@ -61,6 +61,7 @@ module.exports = function registerOrdersAdmin(suite) {
       incomplete: 0,
       notPaid: 0,
       paid: 0,
+      accepted: 0,
       submissionFailed: 0,
       cancelled: 0,
     });
@@ -128,6 +129,7 @@ module.exports = function registerOrdersAdmin(suite) {
         incomplete: 0,
         notPaid: 0,
         paid: 0,
+        accepted: 0,
         submissionFailed: 0,
         cancelled: 0,
       },
@@ -141,6 +143,7 @@ module.exports = function registerOrdersAdmin(suite) {
         incomplete: 0,
         notPaid: 0,
         paid: 0,
+        accepted: 0,
         submissionFailed: 0,
         cancelled: 0,
       },
@@ -172,7 +175,14 @@ module.exports = function registerOrdersAdmin(suite) {
         [id, status],
       );
     }
-    for (const statusGroup of ['COLLECTING', 'notPaid', 'PAID', 'SUBMISSION_FAILED', 'CANCELLED']) {
+    for (const statusGroup of [
+      'COLLECTING',
+      'notPaid',
+      'PAID',
+      'ACCEPTED',
+      'SUBMISSION_FAILED',
+      'CANCELLED',
+    ]) {
       const body = await (
         await screenOrders({
           from: '2092-01-01T00:00:00Z',
@@ -184,17 +194,16 @@ module.exports = function registerOrdersAdmin(suite) {
         statusGroup === 'COLLECTING'
           ? []
           : statusGroup === 'PAID'
-            ? ['PAID', 'SUBMITTING', 'ACCEPTED']
-            : statusGroup === 'SUBMISSION_FAILED'
-              ? ['SUBMITTING_FAILED', 'SUBMISSION_FAILED']
-              : [statusGroup];
+            ? ['PAID', 'SUBMITTING', 'SUBMITTING_FAILED']
+            : [statusGroup];
       assert.equal(body.total_count, expected.length);
       assert.deepEqual(body.statusCounts, {
         all: 8,
         incomplete: 0,
         notPaid: 1,
         paid: 3,
-        submissionFailed: 2,
+        accepted: 1,
+        submissionFailed: 1,
         cancelled: 1,
       });
       assert.ok(body.data.every((order) => order.parcels.length === 1));

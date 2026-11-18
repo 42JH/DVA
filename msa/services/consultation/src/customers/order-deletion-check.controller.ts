@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import { ApiExcludeController } from '@nestjs/swagger';
 import { validateEvent } from '@dva/events';
+import { validateRetainedOrdersQuery } from '@dva/events/call-read-references.cjs';
 import { DatabaseService } from '../database/database.service';
 
 @ApiExcludeController()
@@ -21,11 +22,40 @@ export class OrderDeletionCheckController {
   @HttpCode(200)
   @Header('Cache-Control', 'no-store')
   async query(@Body() event: unknown) {
+    if (
+      event !== null &&
+      typeof event === 'object' &&
+      'eventType' in event &&
+      event.eventType === 'OrderRetentionReferencesReadRequested'
+    ) {
+      try {
+        validateRetainedOrdersQuery(event);
+      } catch {
+        throw new HttpException(
+          { error: 'INVALID_ORDER_RETENTION_REFERENCES' },
+          422,
+        );
+      }
+      const { rows } = await this.database.referencePool.query<{
+        order_seq: number;
+      }>(
+        'SELECT DISTINCT order_seq FROM call_sessions WHERE order_seq=ANY($1::int[]) ORDER BY order_seq',
+        [event.payload.ids],
+      );
+      return {
+        eventId: event.eventId,
+        status: 'processed',
+        payload: rows.map((row) => row.order_seq),
+      };
+    }
     try {
       validateEvent(event);
       if (
         event.source !== 'order' ||
-        event.eventType !== 'OrderDeletionCheckRequested' ||
+        ![
+          'OrderDeletionCheckRequested',
+          'OrderSubmissionCheckRequested',
+        ].includes(event.eventType) ||
         Object.keys(event.payload).join(',') !== 'orderSeq' ||
         !Number.isInteger(event.payload.orderSeq) ||
         Number(event.payload.orderSeq) < 1 ||
@@ -35,10 +65,15 @@ export class OrderDeletionCheckController {
     } catch {
       throw new HttpException({ error: 'INVALID_ORDER_DELETION_CHECK' }, 422);
     }
-    // Match the monolith predicate, including live calls older than the retention window.
-    const { rows } = await this.database.pool.query<{ blocked: boolean }>(
+    const predicate =
+      event.eventType === 'OrderSubmissionCheckRequested'
+        ? 'order_intake_enabled AND (ended_at IS NULL OR order_finalized_at IS NULL)'
+        : 'deleted_at IS NULL AND ended_at IS NULL';
+    const { rows } = await this.database.referencePool.query<{
+      blocked: boolean;
+    }>(
       `SELECT EXISTS(SELECT 1 FROM call_sessions
-       WHERE order_seq=$1 AND deleted_at IS NULL AND ended_at IS NULL) AS blocked`,
+       WHERE order_seq=$1 AND ${predicate}) AS blocked`,
       [event.payload.orderSeq],
     );
     return { eventId: event.eventId, status: 'processed', payload: rows[0] };

@@ -8,6 +8,7 @@ const {
 } = require('./helpers/application.cjs');
 const { OrdersRepository } = require('../dist/orders/orders.repository');
 const f = applicationFixture('주문 탭 집계');
+process.env.SWAGGER_ENABLED = 'true';
 const orderIds = [],
   draftIds = [];
 after(async () => {
@@ -25,7 +26,15 @@ after(async () => {
     await pool.end();
   }
 });
-const empty = { all: 0, incomplete: 0, notPaid: 0, paid: 0, submissionFailed: 0, cancelled: 0 };
+const empty = {
+  all: 0,
+  incomplete: 0,
+  notPaid: 0,
+  paid: 0,
+  accepted: 0,
+  submissionFailed: 0,
+  cancelled: 0,
+};
 const range = { from: '2096-01-01T00:00:00+09:00', to: '2096-01-02T00:00:00+09:00' };
 async function json(response) {
   assert.equal(response.status, 200, await response.clone().text());
@@ -100,7 +109,8 @@ test('status counts retain payment groups independently of the selected tab and 
     incomplete: 1,
     notPaid: 1,
     paid: 3,
-    submissionFailed: 2,
+    accepted: 1,
+    submissionFailed: 1,
     cancelled: 1,
   };
   for (const statusGroup of [
@@ -108,6 +118,7 @@ test('status counts retain payment groups independently of the selected tab and 
     'COLLECTING',
     'notPaid',
     'PAID',
+    'ACCEPTED',
     'SUBMISSION_FAILED',
     'CANCELLED',
   ]) {
@@ -119,7 +130,75 @@ test('status counts retain payment groups independently of the selected tab and 
     assert.deepEqual(outside.statusCounts, expected);
     assert.equal(outside.total_count, first.total_count);
     assert.deepEqual(outside.data, []);
+    if (statusGroup) {
+      const statuses = {
+        COLLECTING: ['COLLECTING'],
+        notPaid: ['notPaid'],
+        PAID: ['PAID', 'SUBMITTING', 'SUBMITTING_FAILED'],
+        ACCEPTED: ['ACCEPTED'],
+        SUBMISSION_FAILED: ['SUBMISSION_FAILED'],
+        CANCELLED: ['CANCELLED'],
+      }[statusGroup];
+      assert.equal(first.total_count, statuses.length);
+      assert.equal(first.hasNext, statuses.length > 1);
+      const rows = [];
+      for (let offset = 0; offset < first.total_count; offset++) {
+        const page = await json(await list({ ...query, offset }));
+        assert.deepEqual(page.statusCounts, expected);
+        assert.equal(page.total_count, statuses.length);
+        assert.equal(page.hasNext, offset < statuses.length - 1);
+        rows.push(page.data[0].status);
+      }
+      assert.deepEqual(rows.sort(), [...statuses].sort());
+    }
   }
+});
+
+test('order number search matches actual and reserved numbers in the list and counts', async () => {
+  const period = { from: '2097-01-01T00:00:00Z', to: '2097-01-02T00:00:00Z' };
+  const id = (
+    await f.pool.query('INSERT INTO orders(created_at) VALUES($1) RETURNING order_seq', [
+      period.from,
+    ])
+  ).rows[0].order_seq;
+  orderIds.push(id);
+  const draftId = await draft('번호 검색 초안', 'INCOMPLETE', null, period.from);
+  const reserved = (
+    await f.pool.query('SELECT reserved_order_seq FROM order_parcel_drafts WHERE draft_seq=$1', [
+      draftId,
+    ])
+  ).rows[0].reserved_order_seq;
+
+  for (const q of [String(id), `dv-${String(id).padStart(5, '0')}`]) {
+    const actual = await json(await list({ ...period, q }));
+    assert.deepEqual(
+      actual.data.map((row) => [row.orderSeq, row.draftSeq]),
+      [[id, null]],
+    );
+    assert.equal(actual.total_count, 1);
+    assert.deepEqual(actual.statusCounts, { ...empty, all: 1 });
+  }
+
+  const q = `DV-${String(reserved).padStart(5, '0')}`;
+  const query = { ...period, q, statusGroup: 'COLLECTING' };
+  const incomplete = await json(await list(query));
+  assert.deepEqual(
+    incomplete.data.map((row) => [row.orderSeq, row.draftSeq]),
+    [[reserved, draftId]],
+  );
+  assert.equal(incomplete.total_count, 1);
+  assert.deepEqual(incomplete.statusCounts, { ...empty, all: 1, incomplete: 1 });
+  const drafts = await json(
+    await f.get('/api/parcel-drafts?' + new URLSearchParams({ ...period, q })),
+  );
+  assert.deepEqual(
+    drafts.data.map((row) => row.reservedOrderSeq),
+    [reserved],
+  );
+  const wrongGroup = await json(await list({ ...query, statusGroup: 'notPaid' }));
+  assert.equal(wrongGroup.total_count, 0);
+  assert.deepEqual(wrongGroup.statusCounts, incomplete.statusCounts);
+  assert.equal((await json(await list({ ...period, q: 'DV-2147483648' }))).total_count, 0);
 });
 
 test('draft counts and the incomplete list share search, date, current company, deletion and retention filters', async () => {
@@ -168,7 +247,7 @@ test('draft counts and the incomplete list share search, date, current company, 
   assert.deepEqual((await json(await list(query))).statusCounts, empty);
 });
 
-test('migrated originals, deleted and expired orders do not contribute to actual-order counts', async () => {
+test('actual-order counts include old undeleted orders and exclude migrated originals and deleted orders', async () => {
   const q = randomUUID();
   const migrated = await order(q);
   const migratedDraft = await draft(q);
@@ -183,8 +262,14 @@ test('migrated originals, deleted and expired orders do not contribute to actual
     expired,
   ]);
   const response = await json(await list({ q }));
-  assert.deepEqual(response.statusCounts, { ...empty, all: 1, incomplete: 1 });
-  assert.equal(response.total_count, 1);
+  assert.deepEqual(response.statusCounts, { ...empty, all: 2, incomplete: 1 });
+  assert.equal(response.total_count, 2);
+  await f.pool.query('UPDATE orders SET migrated_to_parcel_drafts=true WHERE order_seq=$1', [
+    migrated,
+  ]);
+  await f.pool.query('DELETE FROM order_parcel_drafts WHERE draft_seq=$1', [migratedDraft]);
+  assert.deepEqual((await json(await list({ q }))).statusCounts, { ...empty, all: 1 });
+  await f.error(await f.write('POST', `/api/orders/${migrated}/cancel`, {}), 409, 'INVALID_STATE');
 });
 
 test('mixed order and incomplete rows paginate together and use reservation numbers without leaking snapshots', async () => {
@@ -222,18 +307,18 @@ test('mixed order and incomplete rows paginate together and use reservation numb
   assert.equal(before.data[0].draftSeq, older);
 });
 
-test('page and counts use the same snapshot when another connection inserts after the page query', async () => {
+test('page and counts use the same snapshot when another connection inserts before the page query', async () => {
   const q = randomUUID();
   await order(q, 'notPaid');
   const repository = f.app.get(OrdersRepository);
   const original = repository.adminList;
-  repository.adminList = async function (client, query) {
-    const result = await original.call(this, client, query);
+  repository.adminList = async function (client, query, knownTotal) {
     if (query.q === q) await order(q, 'notPaid');
-    return result;
+    return original.call(this, client, query, knownTotal);
   };
   try {
     const response = await json(await list({ q }));
+    assert.equal(response.data.length, 1);
     assert.equal(response.total_count, 1);
     assert.equal(response.statusCounts.all, 1);
     assert.equal(response.statusCounts.notPaid, 1);
@@ -251,6 +336,15 @@ test('empty scopes, administrator roles, AI denial, new draft filter validation 
     401,
     'UNAUTHORIZED',
   );
+  const spec = await json(await f.get('/api/docs-json'));
+  assert.deepEqual(
+    spec.paths['/api/admin/orders'].get.parameters.find(
+      (parameter) => parameter.name === 'statusGroup',
+    ).schema.enum,
+    ['COLLECTING', 'notPaid', 'PAID', 'ACCEPTED', 'SUBMISSION_FAILED', 'CANCELLED'],
+  );
+  assert.equal(spec.components.schemas.AdminOrderStatusCountsDto.properties.accepted.minimum, 0);
+  assert.ok(spec.components.schemas.AdminOrderStatusCountsDto.required.includes('accepted'));
   for (const query of [
     { organizationSeq: 0 },
     { from: '2096-01-02T00:00:00Z', to: '2096-01-01T00:00:00Z' },

@@ -162,10 +162,10 @@ async function call(changes = {}) {
   if (opts.stage !== undefined)
     await sent(await post(c, 'stage-metrics', { dropoffStage: opts.stage }));
   if (opts.wait !== undefined) await sent(await post(c, 'response-wait-metrics', opts.wait));
-  if (opts.deleted) await sent(await f.write('DELETE', '/api/calls/' + c.id));
+  if (opts.deleted) await sent(await f.write('DELETE', '/api/calls', { callSessionSeqs: [c.id] }));
   if (opts.expired)
     await f.pool.query(
-      "UPDATE call_sessions SET incoming_at=statement_timestamp()-interval '5 years 1 day' WHERE call_session_seq=$1",
+      "UPDATE call_sessions SET deleted_at=statement_timestamp()-interval '5 years 1 day' WHERE call_session_seq=$1",
       [c.id],
     );
   return c;
@@ -464,8 +464,8 @@ test('complaint rates count calls once, type rows deduplicate within a call and 
   const result = await read(paths[2]);
   assert.equal(result.assessedCallCount, 4);
   assert.equal(result.unassessedCallCount, 1);
-  assert.equal(result.complaintCallCount, 3);
-  assert.equal(result.complaintRatePercent, 75);
+  assert.equal(result.complaintCallCount, 2);
+  assert.equal(result.complaintRatePercent, 50);
   assert.equal(result.typeTotalCount, 4);
   assert.equal(result.legacyTypeCallCount, 1);
   const byType = Object.fromEntries(result.types.map((x) => [x.type, x]));
@@ -531,7 +531,7 @@ test('the real retention finalizer removes metrics with expired analysis and pre
   const expired = await call({ stage: 'RECIPIENT_INFO', wait: sampleWait() });
   const claimId = randomUUID();
   await f.pool.query(
-    "UPDATE call_sessions SET incoming_at=statement_timestamp()-interval '5 years 1 day',purge_claim_id=$2,purge_claimed_until=statement_timestamp()+interval '5 minutes' WHERE call_session_seq=$1",
+    "UPDATE call_sessions SET deleted_at=statement_timestamp()-interval '5 years 1 day',purge_claim_id=$2,purge_claimed_until=statement_timestamp()+interval '5 minutes' WHERE call_session_seq=$1",
     [expired.id, claimId],
   );
   const { RetentionRepository } = require('../dist/retention/retention.repository');
@@ -579,5 +579,53 @@ test('query failures remain redacted errors and Swagger exposes four cookie-auth
   assert.doesNotMatch(
     JSON.stringify(f.logs),
     /비공개 불편 근거|비공개 프롬프트|rtc_dashboard_read_private_|Bearer /,
+  );
+});
+
+test('AI 품질은 AI 오류와 ai_service 불만만 집계하고 참고·다른 책임·미상은 구분한다', async () => {
+  for (const complaints of [
+    [{ type: 'DISSATISFACTION_EXPRESSION', target: 'ai_service', level: 'mild' }],
+    [{ type: 'DISSATISFACTION_EXPRESSION', target: 'price_policy', level: 'explicit' }],
+    [{ type: 'DISSATISFACTION_EXPRESSION', target: 'delivery_other', level: 'mild' }],
+    [{ type: 'DISSATISFACTION_EXPRESSION' }],
+    [{ type: 'UNSUPPORTED_ANSWER' }],
+    [{ type: 'REPEATED_QUESTION' }],
+    [
+      { type: 'SLOW_RESPONSE' },
+      { type: 'SLOW_RESPONSE' },
+      { type: 'UNSUPPORTED_ANSWER' },
+      { type: 'DISSATISFACTION_EXPRESSION', target: 'ai_service', level: 'explicit' },
+      { type: 'DISSATISFACTION_EXPRESSION', target: 'price_policy', level: 'mild' },
+    ],
+  ]) {
+    const c = await call();
+    await f.pool.query(
+      'UPDATE call_analyses SET has_complaint=true,complaints=$2::jsonb WHERE call_session_seq=$1',
+      [c.id, JSON.stringify(complaints.map((item) => ({ ...complaint(item.type), ...item })))],
+    );
+  }
+  await call();
+  await call({ hasComplaint: null });
+  const result = await read(paths[2]);
+  assert.equal(result.assessedCallCount, 8);
+  assert.equal(result.unassessedCallCount, 1);
+  assert.equal(result.complaintCallCount, 2);
+  assert.equal(result.complaintRatePercent, 25);
+  assert.equal(result.typeTotalCount, 3);
+  assert.equal(result.legacyTypeCallCount, 1);
+  const types = Object.fromEntries(result.types.map((item) => [item.type, item]));
+  assert.equal(types.DISSATISFACTION_EXPRESSION.callCount, 2);
+  near(types.DISSATISFACTION_EXPRESSION.sharePercent, 200 / 3);
+  assert.equal(types.SLOW_RESPONSE.callCount, 1);
+  assert.deepEqual(types.UNSUPPORTED_ANSWER, {
+    type: 'UNSUPPORTED_ANSWER',
+    callCount: 0,
+    sharePercent: null,
+    referenceOnly: true,
+  });
+  assert.ok(
+    result.types
+      .filter((item) => item.type !== 'UNSUPPORTED_ANSWER')
+      .every((item) => item.referenceOnly === false),
   );
 });

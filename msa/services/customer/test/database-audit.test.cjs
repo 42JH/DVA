@@ -2,9 +2,28 @@ require('reflect-metadata');
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const {DatabaseService}=require('../dist/database/database.service');
+
+test('card selection reuses a held customer transaction and avoids the occupied business pool otherwise', async () => {
+  const { ParcelDraftWriteController } = require('../dist/customers/parcel-draft-write.controller');
+  const { randomUUID } = require('node:crypto');
+  let referenceReads = 0, heldReads = 0;
+  const database = {
+    pool: { query: async () => { throw new Error('All five business connections are occupied'); } },
+    referencePool: { query: async () => { referenceReads++; return { rows: [{ id: 7 }] }; } },
+  };
+  const held = { query: async () => { heldReads++; return { rows: [] }; } };
+  const controller = new ParcelDraftWriteController(database, null, { use: async (_id, work) => work(held) }, null, null);
+  const event = { eventId: randomUUID(), source: 'order', eventType: 'ParcelDraftWriteReferenceRequested',
+    payload: { operation: 'CustomerPaymentCardRead', input: { customerSeq: 1, organizationSeq: null } } };
+  assert.equal((await controller.reference(event)).payload, 7);
+  const scopeId = randomUUID();
+  assert.equal((await controller.reference(event, scopeId)).payload, null);
+  assert.equal(referenceReads, 1);
+  assert.equal(heldReads, 1);
+});
 async function fixture(mode){
   const values={DB_HOST:'unused',DB_PORT:5432,DB_USER:'unused',DB_PASSWORD:'unused',DB_NAME:'unused'};
-  const db=new DatabaseService({get:key=>values[key]});await db.pool.end();
+  const db=new DatabaseService({get:key=>values[key]});assert.equal(db.pool.options.max,5);assert.equal(db.referencePool.options.max,1);await Promise.all([db.pool.end(),db.referencePool.end()]);
   const events=[];let released=false;
   const client={query:async sql=>{events.push(sql);if(mode==='lost-commit'&&sql==='COMMIT')throw Error('connection lost');},release:()=>{released=true;events.push('release');}};
   db.pool={connect:async()=>client};
@@ -35,7 +54,7 @@ test('large corporate audit confirmations fit the HTTP body limit and wait for t
   });
   const client={query:async(sql,values)=>{
     if(sql.includes('transaction_timestamp()'))return{rows:[{at:new Date()}]};
-    if(sql.startsWith('INSERT INTO outbox_events')){const id=randomUUID();decisions.push({id,payload:values[3]});return{rows:[{event_id:id}]};}
+    if(sql.startsWith('INSERT INTO outbox_events')){const id=randomUUID();decisions.push({id,type:values[1],key:values[2],payload:values[3]});return{rows:[{event_id:id}]};}
     return{rows:[]};
   }};
   const config={OPERATIONS_URL:'http://operations:3005',CUSTOMER_AUTH_TOKEN:'test-only-audit-token-'.padEnd(40,'a')};
@@ -44,6 +63,40 @@ test('large corporate audit confirmations fit the HTTP body limit and wait for t
   const confirm=await audit.beforeCommit(client);
   for(const decision of decisions)assert.ok(Buffer.byteLength(JSON.stringify({eventId:decision.id,source:'customer',eventType:'AuditCommitted',payload:decision.payload}))<100*1024,'confirmation exceeds Nest HTTP limit');
   assert.deepEqual(decisions.flatMap(item=>item.payload.preparedEventIds),prepared);
+  const key=decisions[0].key;
+  assert.ok(key>=2&&key<=2147483647);
+  assert.ok(decisions.every(decision=>decision.key===key));
   let confirmed;audit.flush=async id=>{confirmed=id;};await confirm();
   assert.equal(confirmed,decisions.at(-1).id);
+  await audit.rollback(client);
+  assert.equal(decisions.at(-1).type,'AuditAborted');
+  assert.equal(decisions.at(-1).key,key);
+});
+
+test('audit recovery skips decided keys and rechecks before aborting a possible concurrent commit', async () => {
+  const { AuditService } = require('../dist/audit/audit.service');
+  const { randomUUID } = require('node:crypto');
+  const ids = [randomUUID(), randomUUID(), randomUUID()];
+  const [decided, racing, busy] = ids;
+  const steps = [];
+  const database = { pool: { query: async (sql, values) => {
+    assert.match(sql, /NOT EXISTS/);
+    assert.deepEqual(values, [ids]);
+    steps.push('prefilter');
+    return { rows: [{ id: racing }, { id: busy }] };
+  } }, transaction: work => work({ query: async (sql, [id]) => {
+    assert.notEqual(id, decided);
+    if (sql.includes('pg_try_advisory_xact_lock')) {
+      steps.push(id);
+      return { rows: [{ locked: id !== busy }] };
+    }
+    assert.match(sql, /AuditCommitted/);
+    assert.equal(id, racing);
+    steps.push('concurrent decision');
+    return { rowCount: 1 };
+  } }) };
+  const config = { OPERATIONS_URL: 'http://operations:3005', CUSTOMER_AUTH_TOKEN: 'a'.repeat(48) };
+  const audit = new AuditService(database, { get: key => config[key] });
+  await audit.reconcile(ids);
+  assert.deepEqual(steps, ['prefilter', racing, 'concurrent decision', busy]);
 });

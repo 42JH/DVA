@@ -44,7 +44,41 @@ def main():
         if code != '0':
             raise RuntimeError(name+' exited with '+code)
 
+    def wait_app(side, port, name=None):
+        path = '/health' if side == 'monolith' else '/'+side+'/health'
+        url = json.dumps('http://127.0.0.1:'+str(port)+path)
+        script = "(async()=>{const end=Date.now()+30000;let attempts=0;while(Date.now()<end){attempts++;try{if((await fetch("+url+",{signal:AbortSignal.timeout(1000)})).ok){console.log(JSON.stringify({ready:true,attempts}));return;}}catch{}await new Promise(r=>setTimeout(r,100));}throw Error('application startup unavailable after '+attempts+' probes')})().catch(error=>{console.error(error.message);process.exit(1)})"
+        run('docker', 'exec', name or RUN+'-'+side+'-app', 'node', '-e', script, label=side+'-app-ready')
+
     password, token = uuid.uuid4().hex, uuid.uuid4().hex
+    def start_app(side, port, payment_reads=False):
+        name = RUN+'-'+side+('-payment-read-app' if payment_reads else '-app')
+        create(name, images[side], '--network-alias', side+'-app', '-e', 'NODE_ENV='+('test' if payment_reads else 'production'), '-e', 'PORT='+str(port),
+               '-e', 'DB_HOST='+side+'-db', '-e', 'DB_USER='+side+'_app', '-e', 'DB_PASSWORD='+password,
+               '-e', 'DB_NAME=dva_webhook_test', '-e', 'SECURITY_LOG_HMAC_KEY='+uuid.uuid4().hex+uuid.uuid4().hex,
+               '-e', 'CORS_ORIGINS=http://localhost:5173,https://payments.example.test', '-e', 'SWAGGER_ENABLED=true', '-e', 'AI_BUSINESS_TOKEN='+password,
+               *(['-e', 'ORDER_PAYMENTS_ENABLED=true', '-e', 'PAYMENT_PUBLIC_URL=https://payments.example.test/api/payments',
+                  '-e', 'TOSS_TEST_CLIENT_KEY=test_gck_parity', '-e', 'TOSS_TEST_SECRET_KEY=test_gsk_parity',
+                  '-e', 'TOSS_BILLING_SECRET_KEY=test_sk_parity', '-e', 'PAYMENT_CARD_ENCRYPTION_KEY='+'11'*32,
+                  '-e', 'PAYMENT_TOSS_BASE_URL=http://127.0.0.1:8000',
+                  '-e', 'DVER_API_URL=http://127.0.0.1:8000/parcel', '-e', 'DVER_API_KEY='+password,
+                  '-e', 'PAYMENT_MATTERMOST_WEBHOOK_URL=https://mattermost.example.test/hooks/parity'] if payment_reads else []),
+               '-e', 'AI_AGENT_URL=http://ai.invalid:8000', '-e', 'OPERATIONS_URL=http://operations-app:3005',
+               '-e', 'CUSTOMER_URL=http://customer-app:3001', '-e', 'CONSULTATION_URL=http://consultation-app:3004',
+               '-e', 'DELIVERY_URL=http://delivery-app:3003', '-e', 'ORDER_URL=http://order-app:3002', '-e', 'CUSTOMER_AUTH_TOKEN='+password, '-e', 'CONSULTATION_AUTH_TOKEN='+token)
+        run('docker', 'start', name, label=side+('-payment-read-start' if payment_reads else '-app-start'))
+        wait_app(side, port, name)
+        if payment_reads:
+            peer = RUN+'-'+side+'-payment-peer'
+            create(peer, images[side], '-e', 'NODE_ENV=test', '-e', 'FINAL_SERVICE_TOKEN='+password,
+                   '-e', 'FINAL_TOSS_TEST_SECRET_KEY=test_gsk_parity',
+                   '-e', 'FINAL_TOSS_BILLING_SECRET_KEY=test_sk_parity',
+                   *(['-e', 'FINAL_ORDER_CARD_CLAIMS=true'] if side == 'monolith' else []),
+                   command=('node', '/tmp/final-peer.cjs'), network='container:'+name)
+            run('docker', 'cp', str(ROOT/'msa/parity/final-peer.cjs'), peer+':/tmp/final-peer.cjs',
+                label=side+'-payment-peer-copy')
+            run('docker', 'start', peer, label=side+'-payment-peer-start')
+
     try:
         images = {}
         for side, path, target in (
@@ -95,23 +129,36 @@ def main():
         for side in ('order', 'consultation'):
             run('docker', 'stop', '--time=5', RUN+'-'+side+'-draft-app', label='draft-'+side+'-stop')
         for side, port in (('monolith', 3000), ('operations', 3005), ('customer', 3001), ('consultation', 3004), ('delivery', 3003), ('order', 3002)):
-            name = RUN+'-'+side+'-app'
-            create(name, images[side], '--network-alias', side+'-app', '-e', 'NODE_ENV=production', '-e', 'PORT='+str(port),
-                   '-e', 'DB_HOST='+side+'-db', '-e', 'DB_USER='+side+'_app', '-e', 'DB_PASSWORD='+password,
-                   '-e', 'DB_NAME=dva_webhook_test', '-e', 'SECURITY_LOG_HMAC_KEY='+uuid.uuid4().hex+uuid.uuid4().hex,
-                   '-e', 'CORS_ORIGINS=http://localhost:5173', '-e', 'SWAGGER_ENABLED=true', '-e', 'AI_BUSINESS_TOKEN='+password,
-                   '-e', 'AI_AGENT_URL=http://ai.invalid:8000', '-e', 'OPERATIONS_URL=http://operations-app:3005',
-                   '-e', 'CUSTOMER_URL=http://customer-app:3001', '-e', 'CONSULTATION_URL=http://consultation-app:3004',
-                   '-e', 'DELIVERY_URL=http://delivery-app:3003', '-e', 'ORDER_URL=http://order-app:3002', '-e', 'CUSTOMER_AUTH_TOKEN='+password, '-e', 'CONSULTATION_AUTH_TOKEN='+token)
-            run('docker', 'start', name, label=side+'-app-start')
-            if side == 'consultation':
-                # Order restores legacy call bindings through consultation during bootstrap.
-                run('docker', 'exec', name, 'node', '-e', "(async()=>{for(let i=0;i<100;i++){try{if((await fetch('http://127.0.0.1:3004/consultation/health')).ok)return;}catch{}await new Promise(r=>setTimeout(r,100));}throw Error('consultation startup unavailable')})().catch(()=>process.exit(1))", label='consultation-app-ready')
+            start_app(side, port)
+        # Payment read fixtures must not become notification jobs in the independent five-second worker.
+        # Cancellation/retention/scheduler suites keep the original production processes below.
+        for side, port in (('monolith', 3000), ('order', 3002)):
+            run('docker', 'stop', '--time=5', RUN+'-'+side+'-app', label=side+'-payment-read-stop')
+            start_app(side, port, payment_reads=True)
+        runtime = LOGS/'monolith-runtime'
+        runtime.mkdir(exist_ok=True)
+        run('docker', 'cp', RUN+'-monolith-app:/app/dist/.', str(runtime), label='reference-runtime')
         name = RUN+'-differential'
         create(name, images['order-checks'], '-e', 'NODE_ENV=test', '-e', 'PGPASSWORD='+password, '-e', 'PGDATABASE=dva_webhook_test',
                '-e', 'CUSTOMER_AUTH_TOKEN='+password, '-e', 'CONSULTATION_AUTH_TOKEN='+token,
-               command=('node', '--test', 'test/order-reads-parity.test.cjs'))
+               command=('node', '--test', '--test-skip-pattern=^production order retention ', 'test/order-reads-parity.test.cjs'))
         run('docker', 'cp', str(ROOT/'msa/parity/order-reads-parity.test.cjs'), name+':/app/service/test/order-reads-parity.test.cjs', label='differential-copy')
+        run('docker', 'cp', str(runtime), name+':/app/service/test/monolith-runtime', label='differential-source-copy')
+        run('docker', 'cp', str(ROOT/'msa/parity/final-parity.cjs'), name+':/app/service/test/final-parity.cjs', label='differential-helper-copy')
+        customer_runtime = LOGS/('customer-runtime-'+RUN)
+        customer_runtime.mkdir(exist_ok=True)
+        run('docker', 'cp', RUN+'-customer-app:/app/service/dist/.', str(customer_runtime), label='customer-runtime')
+        run('docker', 'cp', str(customer_runtime), name+':/app/service/test/customer-runtime', label='differential-customer-runtime-copy')
+        complete(name)
+        for side in ('monolith', 'order'):
+            run('docker', 'stop', '--time=5', RUN+'-'+side+'-payment-peer', label=side+'-payment-peer-finish')
+            run('docker', 'stop', '--time=5', RUN+'-'+side+'-payment-read-app', label=side+'-payment-read-finish')
+            run('docker', 'start', RUN+'-'+side+'-app', label=side+'-production-restart')
+            wait_app(side, 3000 if side == 'monolith' else 3002)
+        name = RUN+'-retention-production'
+        create(name, images['order-checks'], '-e', 'PGPASSWORD='+password, '-e', 'PGDATABASE=dva_webhook_test',
+               command=('node', '--test', '--test-name-pattern=^production order retention ', 'test/order-reads-parity.test.cjs'))
+        run('docker', 'cp', str(ROOT/'msa/parity/order-reads-parity.test.cjs'), name+':/app/service/test/order-reads-parity.test.cjs', label='retention-production-copy')
         complete(name)
         for suite in ['order-deletion-parity', 'order-deletion-recovery', 'order-cancellation-parity', 'order-cancellation-recovery', 'parcel-draft-compatibility']:
             name = RUN+'-'+suite
@@ -127,12 +174,16 @@ def main():
                command=('node', '--test', 'test/order-cancellation-outage.test.cjs'))
         run('docker', 'cp', str(ROOT/'msa/parity/order-cancellation-outage.test.cjs'), name+':/app/service/test/order-cancellation-outage.test.cjs', label='delivery-outage-copy')
         complete(name)
+        run('docker', 'start', RUN+'-delivery-app', label='delivery-outage-recovered')
+        wait_app('delivery', 3003)
         run('docker', 'stop', '--time=5', RUN+'-consultation-app', label='consultation-outage')
         name = RUN+'-outage'
         create(name, images['order-checks'], '-e', 'PGPASSWORD='+password, '-e', 'PGDATABASE=dva_webhook_test',
                command=('node', '--test', 'test/order-read-outage.test.cjs'))
         run('docker', 'cp', str(ROOT/'msa/parity/order-read-outage.test.cjs'), name+':/app/service/test/order-read-outage.test.cjs', label='outage-copy')
         complete(name)
+        run('docker', 'start', RUN+'-consultation-app', label='consultation-outage-recovered')
+        wait_app('consultation', 3004)
         # Isolate deterministic rollover instants from the real 10-second production timers.
         for side in ('monolith', 'order'):
             run('docker', 'stop', '--time=5', RUN+'-'+side+'-app', label=side+'-billing-controlled-stop')
@@ -144,9 +195,7 @@ def main():
                    '-e', 'CUSTOMER_URL=http://customer-app:3001', '-e', 'CONSULTATION_URL=http://consultation-app:3004',
                    '-e', 'DELIVERY_URL=http://delivery-app:3003', '-e', 'CUSTOMER_AUTH_TOKEN='+password)
             run('docker', 'start', name, label=side+'-billing-controlled-start')
-        runtime = LOGS/'billing-monolith-runtime'
-        runtime.mkdir(exist_ok=True)
-        run('docker', 'cp', RUN+'-monolith-app:/app/dist/.', str(runtime), label='billing-source-runtime')
+            wait_app(side, 3000 if side == 'monolith' else 3002, name)
         for suite in ('billing-months-parity', 'billing-months-recovery'):
             name = RUN+'-'+suite
             create(name, images['order-checks'], '-e', 'NODE_ENV=test', '-e', 'PGPASSWORD='+password, '-e', 'PGDATABASE=dva_webhook_test',
@@ -159,6 +208,7 @@ def main():
         for side in ('monolith', 'order'):
             run('docker', 'stop', '--time=5', RUN+'-'+side+'-billing-app', label=side+'-billing-controlled-finish')
             run('docker', 'start', RUN+'-'+side+'-app', label=side+'-billing-production-restart')
+            wait_app(side, 3000 if side == 'monolith' else 3002)
         name = RUN+'-billing-scheduler'
         create(name, images['order-checks'], '-e', 'PGPASSWORD='+password, '-e', 'PGDATABASE=dva_webhook_test',
                command=('node', '--test', 'test/billing-months-scheduler.test.cjs'))
@@ -171,6 +221,7 @@ def main():
         run('docker', 'cp', str(ROOT/'msa/parity/billing-months-outage.test.cjs'), name+':/app/service/test/billing-months-outage.test.cjs', label='billing-outage-copy')
         complete(name)
         run('docker', 'start', RUN+'-consultation-app', label='draft-deletion-consultation-restart')
+        wait_app('consultation', 3004)
         run('docker', 'exec', RUN+'-consultation-app', 'node', '-e', "(async()=>{for(let i=0;i<100;i++){try{if((await fetch('http://127.0.0.1:3004/consultation/health')).ok)return;}catch{}await new Promise(r=>setTimeout(r,100));}throw Error('consultation startup unavailable')})().catch(()=>process.exit(1))", label='draft-deletion-consultation-ready')
         name = RUN+'-draft-deletion-outage'
         create(name, images['order-checks'], '-e', 'PGPASSWORD='+password, '-e', 'PGDATABASE=dva_webhook_test',

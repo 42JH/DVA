@@ -1,0 +1,9 @@
+services:
+  backend:
+    environment:
+      LIVEKIT_URL: ws://${KICK_TEST_HOST:-127.0.0.1}:7880
+      LIVEKIT_API_KEY: devkey
+      LIVEKIT_API_SECRET: kick-local-livekit-test-secret-only
+      LIVEKIT_LOCAL_TEST: 'true'
+    ports: !override
+      - "${KICK_TEST_HOST:-127.0.0.1}:${KICK_BACKEND_PORT:-3010}:3000"

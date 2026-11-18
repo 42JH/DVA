@@ -1,8 +1,24 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional, OmitType } from '@nestjs/swagger';
 import { RequestMetaDto } from '../../common/dto/api-response.dto';
 import { APPLY_ERRORS, PERSONA_STATUSES, TURN_WAIT_LEVELS } from '../ai-settings.types';
+import { PERSONA_PROMPT_FIELDS } from '../persona-prompt';
 
-export class PersonaVersionDto {
+export class PersonaPromptDto {
+  @ApiProperty({ description: '역할. 과거 본문의 미분류 내용도 보존합니다.' })
+  role!: string;
+  @ApiProperty({ description: '성격. 과거 원문에 없던 항목은 빈 문자열.' })
+  personality!: string;
+  @ApiProperty({ description: '발화 톤. 과거 원문에 없던 항목은 빈 문자열.' })
+  tone!: string;
+  @ApiProperty({ description: '발화 속도 지시문. 숫자 speakingRate와 별개.' })
+  speedInstruction!: string;
+  @ApiProperty({ description: '맞장구. 과거 원문에 없던 항목은 빈 문자열.' })
+  backchannel!: string;
+  @ApiProperty({ description: '끼어들기. 과거 원문에 없던 항목은 빈 문자열.' })
+  interruption!: string;
+}
+
+export class PersonaVersionDto extends PersonaPromptDto {
   @ApiProperty({ description: '페르소나 번호.', example: 1 })
   aiPersonaSeq!: number;
   @ApiProperty({ description: '고유 코드.', example: 'parcel' })
@@ -14,7 +30,8 @@ export class PersonaVersionDto {
   @ApiProperty({ description: '이 버전의 표시명.', example: '친절한 택배 상담원' })
   name!: string;
   @ApiProperty({
-    description: '수정 없이 보존한 전체 프롬프트.',
+    description: '읽기 전용 전체 본문 스냅샷. 신규 입력은 6개 개별 항목으로 받습니다.',
+    readOnly: true,
     example: '차분한 한국어로 택배 접수를 안내합니다.',
   })
   promptText!: string;
@@ -79,7 +96,7 @@ export class PersonaVersionDto {
   applyErrorCode!: string | null;
 }
 
-export class PersonaDraftDto {
+export class PersonaDraftDto extends PersonaPromptDto {
   @ApiProperty({ description: '초안이 속한 페르소나 유형 번호.' })
   aiPersonaSeq!: number;
   @ApiProperty({
@@ -91,7 +108,7 @@ export class PersonaDraftDto {
   baseVersion!: number;
   @ApiProperty({ description: '작성 중 표시명.' })
   name!: string;
-  @ApiProperty({ description: '작성 중 전체 프롬프트. 원문을 보존합니다.' })
+  @ApiProperty({ description: '읽기 전용 전체 본문 스냅샷.', readOnly: true })
   promptText!: string;
   @ApiProperty({ description: '작성 중 음성 ID.', type: String, nullable: true })
   voiceId!: string | null;
@@ -105,6 +122,18 @@ export class PersonaDraftDto {
   createdAt!: string;
   @ApiProperty({ description: '초안 마지막 변경 저장 시각.', type: String, format: 'date-time' })
   updatedAt!: string;
+}
+
+export class AiPersonaVersionDto extends OmitType(PersonaVersionDto, [
+  ...PERSONA_PROMPT_FIELDS,
+  'createdByAdminUserName',
+] as const) {}
+
+export class AiPersonaVersionResponseDto {
+  @ApiProperty({ type: AiPersonaVersionDto })
+  data!: AiPersonaVersionDto;
+  @ApiProperty({ type: RequestMetaDto })
+  meta!: RequestMetaDto;
 }
 
 export class PersonaDraftResponseDto {

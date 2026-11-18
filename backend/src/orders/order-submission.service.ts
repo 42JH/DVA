@@ -130,9 +130,13 @@ export class OrderSubmissionService {
     requestId: string,
   ) {
     const snapshot = (await this.repository.detail(client, id, null))!;
+    const policy = await this.payments.eligibility(client, customerId);
+    if (snapshot.paymentMethodType === null && policy.organizationSeq !== null && policy.monthly) {
+      await this.payments.defaultMonthly(client, id);
+      snapshot.paymentMethodType = 'credit';
+    }
     assertOrderSubmissionReady(snapshot, Date.now(), false);
     assertOrderAmount(snapshot);
-    const policy = await this.payments.eligibility(client, customerId);
     if (
       (snapshot.paymentMethodType === 'credit' && !policy.monthly) ||
       (snapshot.paymentMethodType === 'groupBilling' && !policy.group)
@@ -140,12 +144,19 @@ export class OrderSubmissionService {
       throw new ApiException(403, 'FORBIDDEN', '선택한 결제 방식의 사용 자격이 없습니다.');
     if (await this.submissions.hasShipments(client, id))
       throw new ApiException(409, 'INVALID_STATE', '이미 배송 정보가 생성된 주문입니다.');
+    const usablePinIds = await this.repository.usablePersonalPinIds(
+      client,
+      customerId,
+      snapshot.parcels
+        .filter((parcel) => parcel.status !== 'CANCELLED')
+        .flatMap((parcel) => (parcel.originPin ? [parcel.originPin] : [])),
+    );
     for (const parcel of snapshot.parcels) {
       if (parcel.status === 'CANCELLED') continue;
       if (
         parcel.originPin &&
         parcel.originPin.scope === 'PERSONAL' &&
-        !(await this.repository.canUsePin(client, customerId, parcel.originPin))
+        !usablePinIds.has(parcel.originPin.pinSeq)
       )
         throw new ApiException(403, 'FORBIDDEN', '고객이 사용할 수 없는 출발지 PIN입니다.');
     }
@@ -162,7 +173,14 @@ export class OrderSubmissionService {
           },
           client,
         );
-    if (snapshot.paymentMethodType === 'billing') {
+    if (snapshot.paymentMethodType === 'billing' || snapshot.paymentMethodType === 'groupBilling') {
+      if (snapshot.paymentMethodType === 'groupBilling')
+        await this.payments.prepareCompanyCard(
+          client,
+          id,
+          policy.organizationSeq!,
+          policy.departmentSeq,
+        );
       await this.payments.waitForPayment(client, id);
       await this.audit.recordSuccess(
         {

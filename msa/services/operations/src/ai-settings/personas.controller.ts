@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   Param,
@@ -15,6 +16,7 @@ import {
   ApiCookieAuth,
   ApiAcceptedResponse,
   ApiCreatedResponse,
+  ApiNoContentResponse,
   ApiOkResponse,
   ApiOperation,
   ApiResponse,
@@ -28,6 +30,7 @@ import { PersonaApplicationService } from './persona-application.service';
 import { ActivatePersonaDto } from './dto/persona-application.dto';
 import {
   CreatePersonaDto,
+  DeletePersonasDto,
   CommitPersonaDraftDto,
   PersonaIdDto,
   PersonaListQueryDto,
@@ -43,7 +46,7 @@ import {
 
 @ApiTags('Personas')
 @ApiCookieAuth('adminSession')
-@Roles('SUPERVISOR', 'SYSTEM_ADMIN')
+@Roles('OPERATOR', 'SYSTEM_ADMIN')
 @ApiResponse({
   status: 400,
   description: '요청 형식 오류 또는 변경값 없음.',
@@ -63,6 +66,24 @@ export class PersonasController {
     private readonly personas: AiSettingsService,
     private readonly applications: PersonaApplicationService,
   ) {}
+
+  @Delete()
+  @HttpCode(204)
+  @AuditOperation({ action: 'PERSONA_DELETED', targetType: 'AI_PERSONA', target: 'none' })
+  @ApiOperation({
+    summary: '페르소나 분류 단건·다건 삭제',
+    description:
+      '배열의 모든 분류와 소속 버전·초안을 함께 soft delete합니다. ACTIVE 버전이 있는 분류는 HEAD와 무관하게 삭제할 수 없습니다. 한 항목이라도 실패하면 전체 롤백합니다.',
+  })
+  @ApiNoContentResponse({ description: '모든 대상 분류·버전·초안 삭제 완료.' })
+  @ApiResponse({
+    status: 409,
+    description: '현재 AI가 사용하는 ACTIVE 분류 포함.',
+    type: ErrorResponseDto,
+  })
+  remove(@Body() input: DeletePersonasDto, @Req() request: AuthRequest) {
+    return this.personas.remove(input.aiPersonaSeqs, request.admin.adminUserSeq, request.requestId);
+  }
 
   @Post(':id/activate')
   @HttpCode(202)
@@ -112,7 +133,7 @@ export class PersonasController {
   }
 
   @Get()
-  @Roles('OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN')
+  @Roles('OPERATOR', 'SYSTEM_ADMIN')
   @ApiOperation({
     summary: '페르소나 목록 조회',
     description:
@@ -128,7 +149,7 @@ export class PersonasController {
   @ApiOperation({
     summary: '페르소나 등록',
     description:
-      '전체 프롬프트와 음성 설정을 버전 1·INACTIVE로 저장하고 HEAD로 지정합니다. 실제 상담 적용은 별도 publish 요청입니다.',
+      '역할·성격·톤·속도 지시문·맞장구·끼어들기 6개 항목과 음성 설정을 버전 1·INACTIVE로 저장합니다. promptText는 서버가 조합한 읽기 전용 본문이며 입력받지 않습니다. 실제 상담 적용은 별도 publish 요청입니다.',
   })
   @ApiCreatedResponse({ description: '생성한 전체 설정 버전.', type: PersonaVersionResponseDto })
   @ApiResponse({ status: 409, description: '고유 코드 중복.', type: ErrorResponseDto })
@@ -143,7 +164,7 @@ export class PersonasController {
   }
 
   @Get(':id')
-  @Roles('OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN')
+  @Roles('OPERATOR', 'SYSTEM_ADMIN')
   @ApiOperation({
     summary: '페르소나 상세 조회',
     description:
@@ -214,7 +235,7 @@ export class PersonasController {
   }
 
   @Get(':id/versions')
-  @Roles('OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN')
+  @Roles('OPERATOR', 'SYSTEM_ADMIN')
   @ApiOperation({
     summary: '페르소나 버전 이력 조회',
     description:

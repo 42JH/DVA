@@ -12,6 +12,7 @@ const {requestOrderCancellation}=require('@dva/events/order-cancellation.cjs');
 const {AuditService}=require('../dist/audit/audit.service');
 const {OrdersService}=require('../dist/orders/orders.service');
 const {OrdersRepository}=require('../dist/orders/orders.repository');
+const {ParcelDraftWriteScope}=require('../dist/orders/parcel-draft-write-scope.service');
 const {OrderShipmentCheckClient}=require('../dist/orders/order-shipment-check.client');
 const {OrderDeletionCheckClient}=require('../dist/orders/order-deletion-check.client');
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
@@ -104,7 +105,7 @@ test('partial cancellation and payment replacement recover across ACK loss, dupl
       });
       await new Promise(resolve=>server.listen(0,'0.0.0.0',resolve));
       const values={DB_HOST:'order-db',DB_PORT:5432,DB_USER:'order_app',DB_PASSWORD:process.env.PGPASSWORD,DB_NAME:'dva_webhook_test',
-        OPERATIONS_URL:'http://127.0.0.1:'+server.address().port,DELIVERY_URL:'http://delivery-app:3003',CONSULTATION_URL:'http://consultation-app:3004',CUSTOMER_AUTH_TOKEN:process.env.CUSTOMER_AUTH_TOKEN};
+        OPERATIONS_URL:'http://127.0.0.1:'+server.address().port,CUSTOMER_URL:'http://customer-app:3001',DELIVERY_URL:'http://delivery-app:3003',CONSULTATION_URL:'http://consultation-app:3004',CUSTOMER_AUTH_TOKEN:process.env.CUSTOMER_AUTH_TOKEN};
       const config={get:key=>values[key]},database=new DatabaseService(config),audit=new AuditService(database,config);
       if(boundary==='AuditCommitted') {
         const before=audit.beforeCommit.bind(audit);
@@ -120,7 +121,7 @@ test('partial cancellation and payment replacement recover across ACK loss, dupl
         };
       }
       const id=await seed(),requestId=randomUUID();
-      const service=new OrdersService(database,new OrdersRepository(),config,audit,new OrderDeletionCheckClient(config),new OrderShipmentCheckClient(config));
+      const service=new OrdersService(database,new OrdersRepository(new ParcelDraftWriteScope(database,config,audit)),config,audit,new OrderDeletionCheckClient(config),new OrderShipmentCheckClient(config));
       try {
         if(boundary==='AuditPrepared') {
           await assert.rejects(service.cancel(1,id,requestId,undefined,[id*10+1]));await audit.flush();

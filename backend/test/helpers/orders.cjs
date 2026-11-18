@@ -1,3 +1,4 @@
+const { configureTestCardPayments } = require('./payment-cards.cjs');
 const {
   createTestPool,
   createTestSession,
@@ -55,7 +56,7 @@ module.exports = function ordersFixture() {
 
   before(async () => {
     await migrate(pool);
-    for (const [index, role] of ['OPERATOR', 'SYSTEM_ADMIN', 'SUPERVISOR'].entries()) {
+    for (const [index, role] of ['OPERATOR', 'SYSTEM_ADMIN', 'OPERATOR'].entries()) {
       const result = await pool.query(
         `INSERT INTO admin_users(login_id,name,password_hash,role,status) VALUES($1,'주문 검증','not-for-login',$2,'ACTIVE') RETURNING admin_user_seq`,
         [`orderTest${index}`, role],
@@ -63,6 +64,7 @@ module.exports = function ordersFixture() {
       if (index === 0) adminId = result.rows[0].admin_user_seq;
       // 두 인스턴스의 동시성 검증은 유지하고 세 번째 역할은 첫 앱에서 인증한다.
       const app = index < 2 ? legacyOrderIntake(await startTestApp(apps)) : apps[0];
+      configureTestCardPayments(app);
       hosts.push(await app.getUrl());
       cookies.push(await createTestSession(pool, result.rows[0].admin_user_seq));
     }
@@ -171,6 +173,7 @@ module.exports = function ordersFixture() {
     ).rows[0].call_session_seq;
   const aiCreate = (callId, body, key = randomUUID(), index = 0, extra = {}) =>
     create(body, key, index, {
+      ...businessHeaders(),
       Cookie: undefined,
       Origin: undefined,
       call_session_seq: callId === undefined ? undefined : String(callId),
@@ -210,7 +213,11 @@ module.exports = function ordersFixture() {
         Object.entries({ Cookie: cookies[index], ...extra }).filter(([, v]) => v !== undefined),
       ),
     });
-  const aiReadHeaders = (callId) => ({ Cookie: undefined, call_session_seq: String(callId) });
+  const aiReadHeaders = (callId) => ({
+    ...businessHeaders(),
+    Cookie: undefined,
+    call_session_seq: callId === undefined ? undefined : String(callId),
+  });
 
   const readDetail = (id, extra = {}, index = 0) =>
     fetch(hosts[index] + '/api/orders/' + id, {

@@ -1,5 +1,5 @@
 {
-  "commit": "9624b7789ee7876648b6c56b5e7a4a7a5a9ef378",
+  "commit": "5eeacbcc8595a21453f7a577c56e99c1acb1e0e7",
   "jira": "S15P31D109-160",
   "inventory": {
     "routes": [
@@ -23,6 +23,13 @@
         "service": "operations",
         "stream": false,
         "file": "backend/src/ai-settings/ai-runtime.controller.ts"
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/personas",
+        "service": "operations",
+        "stream": false,
+        "file": "backend/src/ai-settings/personas.controller.ts"
       },
       {
         "method": "POST",
@@ -96,7 +103,7 @@
       },
       {
         "method": "DELETE",
-        "path": "/api/admins/:id",
+        "path": "/api/admins",
         "service": "operations",
         "stream": false,
         "file": "backend/src/auth/admin-access.controller.ts"
@@ -187,6 +194,13 @@
       },
       {
         "method": "POST",
+        "path": "/api/ai/calls/:id/analysis/failure",
+        "service": "consultation",
+        "stream": false,
+        "file": "backend/src/call-insights/call-insights.controller.ts"
+      },
+      {
+        "method": "POST",
         "path": "/api/ai/calls/:id/analysis",
         "service": "consultation",
         "stream": false,
@@ -194,7 +208,7 @@
       },
       {
         "method": "DELETE",
-        "path": "/api/calls/:id",
+        "path": "/api/calls",
         "service": "consultation",
         "stream": false,
         "file": "backend/src/consultations/consultations.controller.ts"
@@ -235,6 +249,20 @@
         "file": "backend/src/consultations/consultations.controller.ts"
       },
       {
+        "method": "GET",
+        "path": "/api/customers/:id/billing",
+        "service": "customer",
+        "stream": false,
+        "file": "backend/src/customers/customers.controller.ts"
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/customers",
+        "service": "customer",
+        "stream": false,
+        "file": "backend/src/customers/customers.controller.ts"
+      },
+      {
         "method": "POST",
         "path": "/api/customers/context",
         "service": "customer",
@@ -268,6 +296,13 @@
         "service": "customer",
         "stream": false,
         "file": "backend/src/customers/customers.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/api/dashboard/home",
+        "service": "consultation",
+        "stream": false,
+        "file": "backend/src/dashboard/dashboard.controller.ts"
       },
       {
         "method": "GET",
@@ -382,8 +417,15 @@
         "file": "backend/src/members/members.controller.ts"
       },
       {
+        "method": "PATCH",
+        "path": "/api/companies/:id/members",
+        "service": "customer",
+        "stream": false,
+        "file": "backend/src/members/members.controller.ts"
+      },
+      {
         "method": "DELETE",
-        "path": "/api/members/:id",
+        "path": "/api/members",
         "service": "customer",
         "stream": false,
         "file": "backend/src/members/members.controller.ts"
@@ -391,7 +433,7 @@
       {
         "method": "GET",
         "path": "/internal/metrics",
-        "service": "operations",
+        "service": "order",
         "stream": false,
         "file": "backend/src/observability/observability.controller.ts"
       },
@@ -425,7 +467,7 @@
       },
       {
         "method": "DELETE",
-        "path": "/api/parcel-drafts/:id",
+        "path": "/api/parcel-drafts",
         "service": "order",
         "stream": false,
         "file": "backend/src/orders/admin-parcel-drafts.controller.ts"
@@ -440,20 +482,20 @@
       {
         "method": "POST",
         "path": "/api/calls/:id/order-intake/complete",
-        "service": "order",
+        "service": "consultation",
         "stream": false,
         "file": "backend/src/orders/order-intake.controller.ts"
       },
       {
         "method": "GET",
         "path": "/api/calls/:id/order-intake",
-        "service": "order",
+        "service": "consultation",
         "stream": false,
         "file": "backend/src/orders/order-intake.controller.ts"
       },
       {
         "method": "DELETE",
-        "path": "/api/orders/:id",
+        "path": "/api/orders",
         "service": "order",
         "stream": false,
         "file": "backend/src/orders/orders.controller.ts"
@@ -558,7 +600,7 @@
       },
       {
         "method": "DELETE",
-        "path": "/api/departments/:id",
+        "path": "/api/departments",
         "service": "customer",
         "stream": false,
         "file": "backend/src/organizations/departments.controller.ts"
@@ -607,10 +649,52 @@
       },
       {
         "method": "DELETE",
-        "path": "/api/companies/:id",
+        "path": "/api/companies",
         "service": "customer",
         "stream": false,
         "file": "backend/src/organizations/organizations.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/api/customers/:id/card",
+        "service": "customer",
+        "stream": false,
+        "file": "backend/src/payments/payment-cards.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/api/companies/:id/group-card",
+        "service": "customer",
+        "stream": false,
+        "file": "backend/src/payments/payment-cards.controller.ts"
+      },
+      {
+        "method": "PUT",
+        "path": "/api/customers/:id/card",
+        "service": "customer",
+        "stream": false,
+        "file": "backend/src/payments/payment-cards.controller.ts"
+      },
+      {
+        "method": "PUT",
+        "path": "/api/companies/:id/group-card",
+        "service": "customer",
+        "stream": false,
+        "file": "backend/src/payments/payment-cards.controller.ts"
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/customers/cards",
+        "service": "customer",
+        "stream": false,
+        "file": "backend/src/payments/payment-cards.controller.ts"
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/companies/group-cards",
+        "service": "customer",
+        "stream": false,
+        "file": "backend/src/payments/payment-cards.controller.ts"
       },
       {
         "method": "POST",
@@ -676,6 +760,13 @@
         "file": "backend/src/payments/payments.controller.ts"
       },
       {
+        "method": "DELETE",
+        "path": "/api/pins",
+        "service": "customer",
+        "stream": false,
+        "file": "backend/src/pins/pins.controller.ts"
+      },
+      {
         "method": "GET",
         "path": "/api/customers/:id/pins",
         "service": "customer",
@@ -705,7 +796,7 @@
       },
       {
         "method": "DELETE",
-        "path": "/api/unanswered-questions/:id",
+        "path": "/api/unanswered-questions",
         "service": "consultation",
         "stream": false,
         "file": "backend/src/unanswered-questions/unanswered-questions-management.controller.ts"
@@ -948,9 +1039,54 @@
       {
         "file": "backend/migrations/055-parcel-draft-intake.sql",
         "sha256": "4ea7e8bca1e95e8d2a1ebf2a067df3dd961fb72a05840ab32822ec5354651d72"
+      },
+      {
+        "file": "backend/migrations/056-call-analysis-failure.sql",
+        "sha256": "b5711c4d91b1b9ab2a6f7a6222e10b06138d5167379aef9f7e7608ab0443e99d"
+      },
+      {
+        "file": "backend/migrations/057-call-complaint-judging.sql",
+        "sha256": "bed72577bd5ad5c9b0344a07d0282081939b71d140d61e8e75c5d1bb008bbc7d"
+      },
+      {
+        "file": "backend/migrations/058-parcel-draft-order-reservation.sql",
+        "sha256": "4dbdf76b042425f4a4917619ede9c47aaaf21388bf3790a657dc793a2747188f"
+      },
+      {
+        "file": "backend/migrations/059-incomplete-latest-call-index.sql",
+        "sha256": "1368b4446d2d59d6b785dc5f15ccb5e7f11dcc04198f6911904fb76f06bcc5dd"
+      },
+      {
+        "file": "backend/migrations/060-persona-prompt-fields.sql",
+        "sha256": "4e38b0540c16c7dd599412af6307f779b972c034fee43da046f14f586d8f20a7"
+      },
+      {
+        "file": "backend/migrations/061-customer-name-search.sql",
+        "sha256": "b26530851ca87bea88e0f39b281cbbc5451c07a0a4c8ef4fd6bb5df491ea2f24"
+      },
+      {
+        "file": "backend/migrations/062-customer-monthly-billing.sql",
+        "sha256": "3878260c42f540675b389d2eca55d724a76749be89c5388067def9dcee486954"
+      },
+      {
+        "file": "backend/migrations/063-member-payment-policy.sql",
+        "sha256": "0a17f60baf865e0f1028904b520574a676781f54739b93adb50fa7bf979956d5"
+      },
+      {
+        "file": "backend/migrations/064-payment-cards.sql",
+        "sha256": "9d9dbbf226a4abac0c6081c0ff9513a30e98185ff0230d488b93e4652ebf1194"
+      },
+      {
+        "file": "backend/migrations/065-persona-soft-delete.sql",
+        "sha256": "61e4bafde50ad01887b35d45726284f1b613fdcd1ae066ae4e268fd14510095c"
+      },
+      {
+        "file": "backend/migrations/066-admin-role-consolidation.sql",
+        "sha256": "0da37f5a82d47763c8facd1a99cce28fb3fbc0ac8998f09944888a3000c06599"
       }
     ],
     "workers": [
+      "backend/src/call-insights/complaints/complaint-judge.worker.ts",
       "backend/src/consultations/active-call-count.service.ts",
       "backend/src/faqs/faq-notifications.worker.ts",
       "backend/src/orders/order-maintenance.worker.ts",

@@ -192,6 +192,7 @@ test('Nginx preserves a new empty AI call with completion replay and no actual o
               incomplete: 0,
               notPaid: 0,
               paid: 0,
+              accepted: 0,
               submissionFailed: 0,
               cancelled: 0,
             },
@@ -360,9 +361,11 @@ test('production customer service authentication through Nginx preserves AI and 
   });
   assert.equal(withdrawn.status, 204);
   assert.equal((await fetch('http://proxy/api/customers/' + id, { headers })).status, 404);
-  const adminDetail = await fetch('http://proxy/api/customers/' + id, { headers: adminHeaders });
-  assert.equal(adminDetail.status, 200);
-  assert.equal((await adminDetail.json()).data.status, 'WITHDRAWN');
+  const adminDetail = await fetch('http://proxy/api/customers/' + id, {
+    headers: { Cookie: adminHeaders.Cookie },
+  });
+  assert.equal(adminDetail.status, 404);
+  assert.equal((await adminDetail.json()).error.code, 'NOT_FOUND');
 });
 
 test('real Nginx preserves /api, strips the legacy prefix and hides readiness', async () => {
@@ -490,7 +493,11 @@ test('production login through Nginx authorizes company operations and logout re
 });
 
 test('Nginx forwards the call_session_seq header without losing its underscores', async () => {
-  const headers = { 'Content-Type': 'application/json', 'Idempotency-Key': randomUUID() };
+  const headers = {
+    ...businessHeaders(),
+    'Content-Type': 'application/json',
+    'Idempotency-Key': randomUUID(),
+  };
   const body = JSON.stringify({ customer: { name: '주문 검증', phoneNumber: '01000880088' } });
   const missing = await fetch('http://proxy/api/orders', { method: 'POST', headers, body });
   assert.equal(missing.status, 400);
@@ -678,7 +685,7 @@ test('HTTPS and development login IP buckets reject bursts with the established 
       headers: { Origin: 'https://13.209.59.180', 'Access-Control-Request-Method': 'POST' },
     });
     assert.equal(preflight.status, 204);
-    assert.equal((await fetch(root + '/ai/faqs')).status, 200);
+    assert.equal((await fetch(root + '/ai/faqs', { headers: businessHeaders() })).status, 200);
   }
 });
 

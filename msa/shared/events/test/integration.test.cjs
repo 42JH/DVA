@@ -7,7 +7,7 @@ const { createServer } = require('node:http');
 const { fork } = require('node:child_process');
 const { once } = require('node:events');
 const { Pool } = require('pg');
-const { enqueue, createReceiver, createRelay, eventHttpHandler } = require('../index.cjs');
+const { enqueue, createReceiver, createRelay, eventHttpHandler, flushAuditSnapshot } = require('../index.cjs');
 
 assert.equal(process.env.NODE_ENV, 'test');
 assert.equal(process.env.PGHOST, 'events-db');
@@ -86,6 +86,39 @@ test('relay delivers a committed event and acknowledges exactly that event after
   assert.equal((await rows(receiver, 'inbox_events'))[0].event_id, id);
   assert.ok((await rows(sender, 'outbox_events'))[0].delivered_at);
   assert.equal(await relay(), false);
+});
+
+test('a filtered relay leaves unrelated durable intents pending and preserves selected aggregate order', async () => {
+  const intent = await transaction(sender, client => enqueue(client, { destination: 'delivery', eventType: 'PreparationRequested', aggregateSeq: 1, payload: {} }));
+  const first = await add({orderSeq: 1}), second = await add({orderSeq: 2});
+  const selected = createRelay({ pool: sender, source: 'order', destinations: { delivery: { url, token } }, eventTypes: ['OrderAccepted'] });
+  mode = 'http-failure'; await selected();
+  assert.deepEqual(await counts(), [0, 0]);
+  assert.equal(await selected(), false, 'the following selected event must wait for its failed predecessor');
+  await sender.query("UPDATE outbox_events SET next_attempt_at=clock_timestamp()-interval '1 second' WHERE event_id=$1", [first]);
+  mode = 'success'; assert.equal(await selected(), true); assert.equal(await selected(), true); assert.equal(await selected(), false);
+  const events = new Map((await rows(sender, 'outbox_events')).map(row => [row.event_id, row]));
+  assert.equal(events.get(intent).delivered_at, null); assert.equal(events.get(intent).attempt_count, 0);
+  assert.ok(events.get(first).delivered_at); assert.ok(events.get(second).delivered_at);
+  assert.deepEqual((await receiver.query('SELECT event_id FROM inbox_events ORDER BY processed_at')).rows.map(row => row.event_id), [first, second]);
+});
+
+test('audit recovery leaves an earlier outbox event from an uncaptured transaction pending', async () => {
+  const captured = randomUUID(), later = randomUUID();
+  const queue = (transactionId, orderSeq, aggregateSeq) => transaction(sender, client => enqueue(client, {
+    destination: 'operations', eventType: 'OrderAccepted', aggregateSeq, payload: { orderSeq, transactionId },
+  }));
+  // The captured transaction can commit after the later-started transaction.
+  const unrelated = await queue(later, 1, 1);
+  const first = await queue(captured, 2, 2);
+  const second = await queue(captured, 3, 2);
+  const scoped = createRelay({ pool: sender, source: 'order', destinations: { operations: { url, token } } });
+  await flushAuditSnapshot(sender, scoped, async () => {}, [captured]);
+  assert.deepEqual((await rows(receiver, 'inbox_events')).map(row => row.event_id).sort(), [first, second].sort());
+  const asDelivered = new Map((await rows(sender, 'outbox_events')).map(row => [row.event_id, row.delivered_at !== null]));
+  assert.equal(asDelivered.get(unrelated), false);
+  assert.equal(await scoped(), true);
+  assert.deepEqual(await counts(), [3, 3]);
 });
 
 test('concurrent duplicate deliveries apply one business change', async () => {

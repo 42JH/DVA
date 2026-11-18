@@ -1,4 +1,5 @@
 const customerAddress = require('./helpers/customer-address.cjs');
+const { businessHeaders } = require('./helpers/application.cjs');
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -37,7 +38,13 @@ async function order() {
   return { ...result, key, body };
 }
 const remove = (kind, id, actor = 0, headers = {}) =>
-  f.write('DELETE', `/api/${kind}/${id}`, undefined, actor, headers);
+  f.write(
+    'DELETE',
+    `/api/${kind}`,
+    { [{ calls: 'callSessionSeqs', orders: 'orderSeqs' }[kind]]: [id] },
+    actor,
+    headers,
+  );
 const ai = (path, body) =>
   fetch(f.base + path, {
     method: 'POST',
@@ -232,7 +239,11 @@ test('deleted calls reject AI registration, STT/events, analysis, questions and 
     'NOT_FOUND',
   );
   await f.error(
-    await f.get('/api/orders', 0, { Cookie: undefined, call_session_seq: String(c.id) }),
+    await f.get('/api/orders', 0, {
+      Cookie: undefined,
+      ...businessHeaders(),
+      call_session_seq: String(c.id),
+    }),
     404,
     'NOT_FOUND',
   );
@@ -297,7 +308,7 @@ test('expired order references reject AI events atomically while a current custo
       [customer],
     )
   ).rows[0].order_seq;
-  await f.error(await f.get('/api/orders/' + expired), 404, 'NOT_FOUND');
+  assert.equal((await f.get('/api/orders/' + expired)).status, 200);
   const event = (orderSeq, eventOrder = 1, eventId = randomUUID()) => ({
     eventId,
     eventOrder,
@@ -489,7 +500,7 @@ test('company deletion preserves rows and historical identifiers while membershi
       [cu],
     )
   ).rows[0];
-  assert.equal((await remove('companies', co)).status, 204);
+  assert.equal((await f.write('DELETE', '/api/companies', { organizationSeqs: [co] })).status, 204);
   for (const [table, key, id] of [
     ['organizations', 'organization_seq', co],
     ['memberships', 'membership_seq', old.membership_seq],
@@ -525,3 +536,4 @@ test('company deletion preserves rows and historical identifiers while membershi
   assert.equal(links[1].deleted_at, null);
   assert.notEqual(links[1].membership_seq, old.membership_seq);
 });
+require('./delete-array-contracts.cjs')(f);

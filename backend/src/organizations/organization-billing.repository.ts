@@ -41,14 +41,16 @@ export class OrganizationBillingRepository {
   async insertCharge(client: PoolClient, id: number) {
     return (
       await client.query<{
-        organizationSeq: number;
+        organizationSeq: number | null;
         billingMonth: string;
         paymentMethodType: 'credit' | 'groupBilling';
         amount: number;
       }>(
-        `INSERT INTO order_billing_charges(order_seq,organization_seq,billing_month,payment_method_type,amount,occurred_at)
-       SELECT order_seq,billing_organization_seq,date_trunc('month',paid_at AT TIME ZONE 'Asia/Seoul')::date,payment_method_type,total_amount,paid_at FROM orders
-       WHERE order_seq=$1 AND paid_at IS NOT NULL AND billing_organization_seq IS NOT NULL AND payment_method_type IN ('credit','groupBilling')
+        `INSERT INTO order_billing_charges(order_seq,organization_seq,customer_seq,billing_month,payment_method_type,amount,occurred_at)
+       SELECT order_seq,billing_organization_seq,CASE WHEN billing_organization_seq IS NULL THEN customer_seq END,
+        date_trunc('month',paid_at AT TIME ZONE 'Asia/Seoul')::date,payment_method_type,total_amount,paid_at FROM orders
+       WHERE order_seq=$1 AND paid_at IS NOT NULL AND payment_method_type IN ('credit','groupBilling')
+        AND (billing_organization_seq IS NOT NULL OR (payment_method_type='credit' AND customer_seq IS NOT NULL))
        ON CONFLICT(order_seq) DO NOTHING RETURNING organization_seq AS "organizationSeq",billing_month::text AS "billingMonth",payment_method_type AS "paymentMethodType",amount`,
         [id],
       )

@@ -1,5 +1,6 @@
 import { AdminOrderListQueryDto } from './dto/admin-order-list.dto';
 import { Injectable } from '@nestjs/common';
+import { OrderCardPaymentsService } from './order-card-payments.service';
 import { OrderSubmissionService } from './order-submission.service';
 import { writeOrder } from './order-write';
 import { PoolClient } from 'pg';
@@ -8,7 +9,7 @@ import { ApiException } from '../common/errors/api.exception';
 import { DatabaseService } from '../database/database.service';
 import { CustomersService } from '../customers/customers.service';
 import { CreateOrderDto } from './dto/create-order.dto';
-import { CreatedOrderDto, OrderResultDto } from './dto/order-response.dto';
+import { CreatedOrderDto, OrderResultDto, OrderSummaryDto } from './dto/order-response.dto';
 import { NoOrderResultDto } from './dto/no-order-result.dto';
 import { OrderQueryDto } from './dto/order-query.dto';
 import { ListResponse } from '../common/pagination';
@@ -18,16 +19,32 @@ import { UpdateOrderDto, UpdatedOrderDto } from './dto/update-order.dto';
 import { assertOrderUpdate } from './order-update.validation';
 import { SubmitOrderDto, SubmittedOrderDto } from './dto/submit-order.dto';
 import { callerPhone } from '../common/caller-phone';
-import { OrderAddressHistoryQueryDto } from './dto/order-address-history.dto';
+import {
+  OrderAddressHistoryQueryDto,
+  PreviousOrderAddressDto,
+} from './dto/order-address-history.dto';
 import { CreateManualOrderDto, ManualOrderResultDto } from './dto/manual-order.dto';
 import { ConsultationsService } from '../consultations/consultations.service';
 import { OrderPaymentsRepository } from './order-payments.repository';
 import { DeliveriesService } from '../deliveries/deliveries.service';
 import { ParcelDraftsRepository } from './parcel-drafts.repository';
 import { ParcelDraftQueryDto } from './dto/parcel-draft.dto';
+import { CoalescedReads } from '../common/coalesced-reads';
+import { CoalescedPages } from '../common/coalesced-pages';
 
 @Injectable()
 export class OrdersService {
+  private readonly adminReads = new CoalescedPages<
+    AdminOrderListQueryDto,
+    Awaited<ReturnType<OrdersService['readAdminList']>>
+  >();
+  private readonly orderReads = new CoalescedReads<ListResponse<OrderSummaryDto>>();
+  private readonly orderPages = new CoalescedPages<OrderQueryDto, ListResponse<OrderSummaryDto>>();
+  private readonly addressPages = new CoalescedPages<
+    OrderAddressHistoryQueryDto,
+    ListResponse<PreviousOrderAddressDto>
+  >();
+
   constructor(
     private readonly database: DatabaseService,
     private readonly repository: OrdersRepository,
@@ -38,26 +55,36 @@ export class OrdersService {
     private readonly deliveries: DeliveriesService,
     private readonly submission: OrderSubmissionService,
     private readonly drafts: ParcelDraftsRepository,
+    private readonly cardPayments: OrderCardPaymentsService,
   ) {}
 
-  async delete(id: number, adminId: number, requestId: string): Promise<void> {
+  async delete(id: number | number[], adminId: number, requestId: string): Promise<void> {
+    const ids = (Array.isArray(id) ? [...id] : [id]).sort((a, b) => a - b);
     await writeOrder(this.database, async (client) => {
-      const order = await this.repository.lockOrder(client, id);
-      if (!order) throw new ApiException(404, 'NOT_FOUND', '주문을 찾을 수 없습니다.');
-      if (
-        !['COLLECTING', 'CANCELLED', 'ACCEPTED'].includes(order.status) ||
-        (await this.repository.deletionBlocked(client, id))
-      )
-        throw new ApiException(
-          409,
-          'INVALID_STATE',
-          '진행 중인 통화·결제·접수 처리를 마친 뒤 삭제해 주세요.',
+      for (const id of ids) {
+        const order = await this.repository.lockOrder(client, id);
+        if (!order) throw new ApiException(404, 'NOT_FOUND', '주문을 찾을 수 없습니다.');
+        if (
+          !['COLLECTING', 'CANCELLED', 'ACCEPTED'].includes(order.status) ||
+          (await this.repository.deletionBlocked(client, id))
+        )
+          throw new ApiException(
+            409,
+            'INVALID_STATE',
+            '진행 중인 통화·결제·접수 처리를 마친 뒤 삭제해 주세요.',
+          );
+        await this.repository.softDelete(client, id);
+        await this.audit.recordSuccess(
+          {
+            actorId: adminId,
+            action: 'ORDER_DELETED',
+            targetType: 'ORDER',
+            targetId: id,
+            requestId,
+          },
+          client,
         );
-      await this.repository.softDelete(client, id);
-      await this.audit.recordSuccess(
-        { actorId: adminId, action: 'ORDER_DELETED', targetType: 'ORDER', targetId: id, requestId },
-        client,
-      );
+      }
     });
   }
 
@@ -80,9 +107,16 @@ export class OrdersService {
     adminId: number | null,
     callId: number | null,
     orderId?: number,
+    draftCancellation = false,
   ) {
     if (adminId !== null) return null;
     const call = await this.repository.readCustomer(client, callId!);
+    if (!call && draftCancellation)
+      throw new ApiException(
+        409,
+        'INVALID_STATE',
+        '신규 통화의 수정·취소는 배송 초안 API를 사용해 주세요.',
+      );
     if (!call) throw new ApiException(404, 'NOT_FOUND', '통화를 찾을 수 없습니다.');
     if (call.endedAt !== null && call.orderSeq !== orderId)
       throw new ApiException(
@@ -110,9 +144,16 @@ export class OrdersService {
 
   async adminList(query: AdminOrderListQueryDto) {
     this.assertDateRange(query);
+    return this.adminReads.read([], query, (page) => this.readAdminList(page));
+  }
+
+  private readAdminList(query: AdminOrderListQueryDto) {
     return this.database.transaction(async (client) => {
       await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
-      const page = new ListResponse(await this.repository.adminList(client, query), query.limit);
+      const filteredPage =
+        query.statusGroup === undefined
+          ? undefined
+          : new ListResponse(await this.repository.adminList(client, query), query.limit);
       const statusCounts = await this.repository.adminStatusCounts(client, query);
       const incomplete = await this.drafts.countIncomplete(
         client,
@@ -123,8 +164,12 @@ export class OrdersService {
           organizationSeq: query.organizationSeq,
         }),
       );
+      const all = statusCounts.all + incomplete;
+      const page =
+        filteredPage ??
+        new ListResponse(await this.repository.adminList(client, query, all), query.limit);
       return Object.assign(page, {
-        statusCounts: { ...statusCounts, all: statusCounts.all + incomplete, incomplete },
+        statusCounts: { ...statusCounts, all, incomplete },
       });
     });
   }
@@ -132,6 +177,20 @@ export class OrdersService {
   async list(adminId: number | null, query: OrderQueryDto, callSessionHeader?: string) {
     const callId = this.callId(adminId, callSessionHeader);
     this.assertDateRange(query);
+    if (adminId !== null) {
+      if (callSessionHeader === undefined) {
+        return this.orderPages.read([adminId], query, (page) =>
+          this.readList(adminId, page, callId),
+        );
+      }
+      return this.orderReads.read(JSON.stringify([adminId, query]), () =>
+        this.readList(adminId, query, callId),
+      );
+    }
+    return this.readList(adminId, query, callId);
+  }
+
+  private readList(adminId: number | null, query: OrderQueryDto, callId: number | null) {
     return this.database.transaction(async (client) => {
       // 통화의 고객 범위와 주문 목록을 같은 시점의 데이터로 읽는다.
       await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
@@ -157,6 +216,20 @@ export class OrdersService {
   ) {
     const callId = this.callId(adminId, header);
     this.assertDateRange(query);
+    if (adminId !== null && header === undefined) {
+      return this.addressPages.read([adminId, customerId], query, (page) =>
+        this.readAddressHistory(adminId, customerId, page, callId),
+      );
+    }
+    return this.readAddressHistory(adminId, customerId, query, callId);
+  }
+
+  private readAddressHistory(
+    adminId: number | null,
+    customerId: number,
+    query: OrderAddressHistoryQueryDto,
+    callId: number | null,
+  ) {
     return this.database.transaction(async (client) => {
       await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
       const callerCustomer = await this.readCustomer(client, adminId, callId);
@@ -308,6 +381,14 @@ export class OrdersService {
       const customerId = customer?.customerSeq ?? null;
       if (callId !== null && customerId !== null)
         await this.calls.attachCustomer(client, callId, customerId);
+      const usablePinIds =
+        customerId === null
+          ? new Set<number>()
+          : await this.repository.usablePersonalPinIds(
+              client,
+              customerId,
+              draft.parcels.flatMap((parcel) => (parcel.originPin ? [parcel.originPin] : [])),
+            );
       for (const parcel of draft.parcels) {
         if (parcel.originPin?.scope === 'COMPANY')
           throw new ApiException(
@@ -315,11 +396,7 @@ export class OrdersService {
             'INVALID_REQUEST',
             '기업 배송지는 PIN 대신 주소로 전달해 주세요.',
           );
-        if (
-          parcel.originPin &&
-          (customerId === null ||
-            !(await this.repository.canUsePin(client, customerId, parcel.originPin)))
-        )
+        if (parcel.originPin && (customerId === null || !usablePinIds.has(parcel.originPin.pinSeq)))
           throw new ApiException(403, 'FORBIDDEN', '고객이 사용할 수 없는 출발지 PIN입니다.');
       }
       if (input.call && input.outcome !== 'COMPLETE' && !hasOrderData(draft)) {
@@ -375,13 +452,19 @@ export class OrdersService {
           : undefined;
       return { result: await this.repository.result(client, result.orderSeq, callId), payload };
     });
-    if (!prepared.payload || prepared.result.orderSeq === null) return prepared.result;
-    await this.submission.submitPaidOrder(prepared.result.orderSeq, requestId);
+    if (
+      prepared.result.orderSeq === null ||
+      (!prepared.payload && (prepared.result as OrderResultDto).status !== 'notPaid')
+    )
+      return prepared.result;
+    if (prepared.payload)
+      await this.submission.submitPaidOrder(prepared.result.orderSeq, requestId);
+    else await this.cardPayments.forOrder(prepared.result.orderSeq, requestId);
     try {
       return await this.database.transaction((client) =>
         this.repository.result(
           client,
-          prepared.result.orderSeq,
+          prepared.result.orderSeq!,
           (prepared.result as OrderResultDto).callSessionSeq,
         ),
       );
@@ -475,6 +558,16 @@ export class OrdersService {
       for (const parcelId of input.removeParcelSeqs ?? [])
         if (!byId.has(parcelId))
           throw new ApiException(404, 'NOT_FOUND', '해당 주문의 상세를 찾을 수 없습니다.');
+      const usablePinIds = await this.repository.usablePersonalPinIds(
+        client,
+        customer.customerSeq,
+        (input.parcels ?? []).flatMap((change) => {
+          const previous =
+            change.orderParcelSeq === undefined ? undefined : byId.get(change.orderParcelSeq);
+          const pin = change.originPin === undefined ? previous?.originPin : change.originPin;
+          return pin ? [pin] : [];
+        }),
+      );
       for (const change of input.parcels ?? []) {
         const previous =
           change.orderParcelSeq === undefined ? undefined : byId.get(change.orderParcelSeq);
@@ -499,7 +592,7 @@ export class OrdersService {
               'INVALID_REQUEST',
               '기존 기업 PIN 참조를 새로 지정하거나 주소 변경에 사용할 수 없습니다.',
             );
-        } else if (pin && !(await this.repository.canUsePin(client, customer.customerSeq, pin)))
+        } else if (pin && !usablePinIds.has(pin.pinSeq))
           throw new ApiException(403, 'FORBIDDEN', '고객이 사용할 수 없는 출발지 PIN입니다.');
       }
       await this.repository.updateHeader(
@@ -607,22 +700,24 @@ export class OrdersService {
   ): Promise<void> {
     const callId = this.callId(adminId, callSessionHeader);
     await this.database.transaction(async (client) => {
-      if (adminId === null && (await this.repository.isDraftCall(client, callId!)))
-        throw new ApiException(
-          409,
-          'INVALID_STATE',
-          '신규 통화의 수정·취소는 배송 초안 API를 사용해 주세요.',
-        );
-      const customerId = await this.readCustomer(client, adminId, callId, id);
+      const unpaidOnly = adminId === null && (await this.repository.isDraftCall(client, callId!));
+      const customerId = await this.readCustomer(client, adminId, callId, id, unpaidOnly);
       const order = await this.repository.lockOrder(client, id);
-      if (await this.repository.hasMigratedDrafts(client, id))
+      const ownsOrder = customerId === null || order?.customerSeq === customerId;
+      if (ownsOrder && (await this.repository.hasMigratedDrafts(client, id)))
         throw new ApiException(
           409,
           'INVALID_STATE',
           '미완료 배송 초안으로 이관된 주문입니다. 배송 초안 API에서 보완해 주세요.',
         );
-      if (!order || (customerId !== null && order.customerSeq !== customerId))
+      if (!order || !ownsOrder)
         throw new ApiException(404, 'NOT_FOUND', '주문을 찾을 수 없습니다.');
+      if (unpaidOnly && order.status !== 'notPaid')
+        throw new ApiException(
+          409,
+          'INVALID_STATE',
+          '신규 통화에서 결제 대기 주문만 취소할 수 있습니다.',
+        );
       const parcels = await this.repository.lockParcels(client, id);
       const selectedIds = orderParcelSeqs === undefined ? null : new Set(orderParcelSeqs);
       const selected = selectedIds
@@ -764,6 +859,8 @@ export class OrdersService {
       if (call && call.orderSeq === null) await this.calls.attachOrder(client, callId!, id);
       return { status: payload ? ('PAID' as const) : ('notPaid' as const) };
     });
+    if (prepared.status === 'notPaid')
+      return (await this.cardPayments.forOrder(id, requestId)) ?? prepared;
     return prepared.status === 'PAID' ? this.submission.submitPaidOrder(id, requestId) : prepared;
   }
 }

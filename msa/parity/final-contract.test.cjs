@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { coverage, envelope, schema, generatedTimes, countSnapshot } = require('./final-parity.cjs');
+const { msaRoutes, coverage, envelope, schema, generatedTimes, countSnapshot } = require('./final-parity.cjs');
 
 test('a missing declaration cannot pass merely because both invalid-ID probes return 404', () => {
   const reference = [{ method: 'GET', path: '/api/orders/:id' }, { method: 'POST', path: '/api/orders' }];
@@ -52,4 +52,10 @@ test('active-count clock normalization requires a valid recent snapshot and reta
   assert.throws(() => countSnapshot({ ...value, activeCallCount: -1 }, start, start));
   assert.throws(() => countSnapshot({ ...value, observedAt: 'invalid' }, start, start));
   assert.throws(() => countSnapshot(value, start + 20000, start + 21000));
+});
+
+
+test('final inventory keeps canonical health and existing service probes as distinct routes',()=>{
+  const routes=msaRoutes(require('node:path').join(__dirname,'../..')).filter(route=>route.service==='operations'&&route.method==='GET');
+  for(const path of ['/health','/health/ready','/operations/health','/operations/health/ready'])assert.equal(routes.filter(route=>route.path===path).length,1,path);
 });

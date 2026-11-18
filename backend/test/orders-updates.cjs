@@ -241,7 +241,7 @@ module.exports = function registerOrdersUpdates(suite) {
       await errorCode(await patchOrder(id, input, aiReadHeaders(callId)), 403, 'FORBIDDEN');
     for (const header of [undefined, 'abc', '0', '2147483648'])
       await errorCode(
-        await patchOrder(id, input, { Cookie: undefined, call_session_seq: header }),
+        await patchOrder(id, input, { ...aiReadHeaders(header), call_session_seq: header }),
         400,
         'INVALID_REQUEST',
       );

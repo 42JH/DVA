@@ -176,16 +176,23 @@ export class RecordingStorage implements OnApplicationShutdown {
             if (length !== undefined && (!/^\d+$/.test(length) || Number(length) > MAX_BYTES))
               throw new RecordingProcessingError('TOO_LARGE', false);
             const chunks: Buffer[] = [];
+            const output =
+              length !== undefined && Number(length) >= 8 * 1024 * 1024
+                ? Buffer.alloc(Number(length))
+                : null;
             let size = 0;
             for await (const chunk of response) {
-              const bytes = Buffer.from(chunk);
+              const bytes = output && Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
               size += bytes.length;
               if (size > MAX_BYTES) throw new RecordingProcessingError('TOO_LARGE', false);
-              chunks.push(bytes);
+              if (output) {
+                if (size > output.length) throw new RecordingProcessingError('DOWNLOAD_INCOMPLETE');
+                bytes.copy(output, size - bytes.length);
+              } else chunks.push(bytes);
             }
             if (!size || (length !== undefined && Number(length) !== size))
               throw new RecordingProcessingError('DOWNLOAD_INCOMPLETE');
-            resolve({ bytes: Buffer.concat(chunks, size), contentType });
+            resolve({ bytes: output ?? Buffer.concat(chunks, size), contentType });
           } catch (error) {
             response.destroy();
             reject(

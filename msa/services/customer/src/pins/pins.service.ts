@@ -19,6 +19,46 @@ export class PinsService {
     private readonly scope: CallScopeService,
   ) {}
 
+  async removeMany(ids: number[], actorId: number, requestId: string): Promise<void> {
+    const sorted = [...ids].sort((a, b) => a - b);
+    try {
+      await this.database.transaction(async (client) => {
+        await client.query("SET LOCAL lock_timeout='2s'");
+        if ((await this.repository.lockForRemoval(client, sorted)).length !== sorted.length)
+          throw new ApiException(
+            404,
+            'NOT_FOUND',
+            '삭제할 주소록 중 찾을 수 없거나 이미 삭제된 주소록이 있습니다.',
+          );
+        await this.repository.removeMany(client, sorted);
+        for (const id of sorted)
+          await this.audit.recordSuccess(
+            {
+              actorId,
+              targetId: id,
+              targetType: 'PERSONAL_PIN',
+              action: 'PERSONAL_PIN_DELETED',
+              requestId,
+            },
+            client,
+          );
+      });
+    } catch (error: unknown) {
+      if (
+        error &&
+        typeof error === 'object' &&
+        'code' in error &&
+        ['55P03', '40P01'].includes(String(error.code))
+      )
+        throw new ApiException(
+          409,
+          'REQUEST_IN_PROGRESS',
+          '다른 작업이 진행 중입니다. 잠시 후 재시도해 주세요.',
+        );
+      throw error;
+    }
+  }
+
   private caller(header: string | undefined, lock: boolean) {
     if (
       header === undefined ||

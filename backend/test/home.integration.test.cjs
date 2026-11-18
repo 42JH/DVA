@@ -145,7 +145,7 @@ test('home bounds previews, counts all pending rows and shares deletion, expiry 
   assert.deepEqual(value.pendingWork, {
     incomplete: baseline.incomplete + 13,
     notPaid: baseline.notPaid + 1,
-    submissionFailed: baseline.submissionFailed + 2,
+    submissionFailed: baseline.submissionFailed + 1,
     unansweredQuestions: baseline.unansweredQuestions + 13,
   });
   assert.equal(value.incompleteDrafts.length, 11);
@@ -283,7 +283,7 @@ test('today counts use KST midnight, actual orders, call start precedence and ex
     const repository = f.app.get(DashboardRepository);
     assert.deepEqual(await repository.todayCounts(new Date(last), client), {
       todayOrderCount: 3,
-      todayCallCount: 4,
+      todayCallCount: 5,
     });
     assert.deepEqual(await repository.todayCounts(new Date(next), client), {
       todayOrderCount: 1,

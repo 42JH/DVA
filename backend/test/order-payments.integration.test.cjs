@@ -1,3 +1,4 @@
+const { configureTestCardPayments } = require('./helpers/payment-cards.cjs');
 const { legacyOrderIntake } = require('./helpers/legacy-order-intake.cjs');
 require('reflect-metadata');
 const { before, after, test } = require('node:test');
@@ -5,7 +6,12 @@ const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
 const { createServer } = require('node:http');
 const { once } = require('node:events');
-const { createTestSession, createTestPool, startTestApp } = require('./helpers/application.cjs');
+const {
+  createTestSession,
+  createTestPool,
+  startTestApp,
+  businessHeaders,
+} = require('./helpers/application.cjs');
 const { NestFactory } = require('@nestjs/core');
 const { ConfigService } = require('@nestjs/config');
 const { migrate } = require('./helpers/migrations.cjs');
@@ -143,6 +149,7 @@ before(async () => {
     )
   ).rows[0].customer_seq;
   app = legacyOrderIntake(await startTestApp(apps));
+  configureTestCardPayments(app);
   origin = await app.getUrl();
   base = origin + '/api';
   app.get(ConfigService).set('PAYMENT_PUBLIC_URL', base + '/payments');
@@ -203,7 +210,7 @@ async function create(body = orderBody(), key = randomUUID(), ai = false) {
     headers: {
       'Content-Type': 'application/json',
       'Idempotency-Key': key,
-      ...(ai ? {} : { Cookie: cookie, Origin: adminOrigin }),
+      ...(ai ? businessHeaders() : { Cookie: cookie, Origin: adminOrigin }),
     },
     body: JSON.stringify(
       ai
@@ -460,6 +467,68 @@ test('verified Toss approval updates the real order and posts Dver once with pic
   assert.equal(parcels.length - start, 1);
   assert.equal((await confirm(r, 'different')).status, 409);
 });
+test('withdrawn and deleted customer links close and never request a new provider approval', async () => {
+  for (const [index, change] of [
+    'withdraw',
+    'delete',
+    'legacy-withdraw',
+    'legacy-delete',
+  ].entries()) {
+    const customer = (
+      await pool.query(
+        "INSERT INTO customers(name,phone_number,status) VALUES('탈퇴 검증',$1,'ACTIVE') RETURNING customer_seq",
+        ['0100021080' + index],
+      )
+    ).rows[0].customer_seq;
+    const order = await create({ ...orderBody(), customerSeq: customer });
+    const id = order.paymentRequest.paymentRequestId;
+    if (change === 'withdraw') {
+      assert.equal(
+        (await request('/customers/' + customer, { status: 'WITHDRAWN' }, true, 'PATCH')).status,
+        204,
+      );
+    } else if (change === 'delete') {
+      await pool.query(
+        'UPDATE order_payment_requests SET approval_started_at=clock_timestamp(),provider_payment_key=$2 WHERE payment_request_id=$1',
+        [id, randomUUID()],
+      );
+      assert.equal(
+        (await request('/customers', { customerSeqs: [customer] }, true, 'DELETE')).status,
+        409,
+      );
+      await pool.query(
+        'UPDATE order_payment_requests SET approval_started_at=NULL,provider_payment_key=NULL WHERE payment_request_id=$1',
+        [id],
+      );
+      assert.equal(
+        (await request('/customers', { customerSeqs: [customer] }, true, 'DELETE')).status,
+        204,
+      );
+    } else {
+      await pool.query(
+        change === 'legacy-withdraw'
+          ? "UPDATE customers SET status='WITHDRAWN' WHERE customer_seq=$1"
+          : 'UPDATE customers SET deleted_at=clock_timestamp() WHERE customer_seq=$1',
+        [customer],
+      );
+    }
+    const current = await request(`/payments/requests/${id}`, undefined, false, 'GET');
+    const legacy = change.startsWith('legacy-');
+    assert.equal(current.status, legacy ? 200 : 404);
+    if (legacy) assert.equal(current.body.data.status, 'CANCELLED');
+    assert.equal((await confirm(order)).status, legacy ? 403 : 404);
+    assert.ok(!calls.some((call) => call.body?.orderId === id));
+    const stored = (
+      await pool.query(
+        'SELECT invalidated_at,approval_started_at FROM order_payment_requests WHERE payment_request_id=$1',
+        [id],
+      )
+    ).rows[0];
+    assert.equal(Boolean(stored.invalidated_at), !change.startsWith('legacy-'));
+    assert.equal(stored.approval_started_at, null);
+  }
+});
+
 test('amount/order mismatch, expired/invalidated links and foreign origins cannot approve', async () => {
   const r = await create(),
     id = r.paymentRequest.paymentRequestId;
@@ -543,6 +612,7 @@ test('timeout after Toss success recovers after application restart using GET on
   await app.close();
   apps.splice(apps.indexOf(app), 1);
   app = await startTestApp(apps);
+  configureTestCardPayments(app);
   origin = await app.getUrl();
   base = origin + '/api';
   app.get(ConfigService).set('PAYMENT_PUBLIC_URL', base + '/payments');
@@ -642,7 +712,7 @@ test('public page/status expose no provider key or secrets and cannot accept sel
   assert.equal((await request(`/payments/requests/${id}/reconcile`, { paid: true })).status, 400);
 });
 
-test('monthly and group billing bypass Toss and notifications and preserve a future requested pickup', async () => {
+test('monthly bypasses card approval while group uses a registered card and sends a completion notice', async () => {
   await worker.run();
   const count = messages.length,
     postCount = calls.filter((c) => c.method === 'POST').length;
@@ -680,7 +750,8 @@ test('monthly and group billing bypass Toss and notifications and preserve a fut
     assert.equal(o.pickup_requested_at.toISOString(), requested);
   }
   await worker.run();
-  assert.equal(messages.length, count);
+  assert.equal(messages.length, count + 1);
+  assert.match(messages.at(-1), /결제 완료/);
   assert.equal(calls.filter((c) => c.method === 'POST').length, postCount);
 });
 test('only an authenticated administrator can explicitly retry a notification; retries are audited', async () => {
@@ -1295,5 +1366,112 @@ test('a due retry gets its turn ahead of newer unchecked approvals', async () =>
   } finally {
     await client.query('ROLLBACK');
     client.release();
+  }
+});
+
+test('payment failures audit HTTP validation, Origin rejection and provider outcomes once without payment secrets', async () => {
+  const order = await create(),
+    id = order.paymentRequest.paymentRequestId;
+  const attempts = [
+    await request(`/payments/requests/${id}/confirm`, {}),
+    await request(`/payments/requests/${id}/reconcile`, {}, false, 'POST', false),
+    await confirm(order, 'reject_PRIVATE_payment_key'),
+  ];
+  assert.deepEqual(
+    attempts.map((r) => r.status),
+    [400, 403, 422],
+  );
+  for (const response of attempts) {
+    const rows = (
+      await pool.query(
+        'SELECT action,result,target_seq,metadata FROM audit_logs WHERE request_id=$1',
+        [response.body.meta.requestId],
+      )
+    ).rows;
+    assert.equal(rows.length, 1, JSON.stringify(rows));
+    assert.equal(rows[0].result, response.status === 403 ? 'DENIED' : 'FAILED');
+    assert.ok(!JSON.stringify(rows).match(/PRIVATE|paymentKey|paymentRequestId|phone|address/));
+    if (response.status === 422) {
+      assert.equal(rows[0].target_seq, order.orderSeq);
+      assert.deepEqual(rows[0].metadata, { reason: 'PAYMENT_DECLINED' });
+    }
+  }
+  assert.equal((await stored(order.orderSeq)).status, 'notPaid');
+  const original = app.get(require('../dist/audit/audit.service').AuditService).repository.insert;
+  const auditRepo = app.get(require('../dist/audit/audit.service').AuditService).repository;
+  auditRepo.insert = async () => {
+    throw Error('audit unavailable');
+  };
+  try {
+    assert.equal((await confirm(order, 'reject_PRIVATE_another')).status, 422);
+  } finally {
+    auditRepo.insert = original;
+  }
+  assert.equal((await confirm(order)).status, 200);
+});
+
+test('both notification streams audit every actual transition once, including ambiguous results and audit rollback', async () => {
+  const { OrderPaymentsRepository } = require('../dist/orders/order-payments.repository');
+  const { AuditService } = require('../dist/audit/audit.service');
+  const repo = app.get(OrderPaymentsRepository),
+    audit = app.get(AuditService);
+  const order = await create(),
+    id = order.paymentRequest.paymentRequestId;
+  for (const completion of [false, true]) {
+    const prefix = completion ? 'completion_' : '';
+    const action = `ORDER_PAYMENT_${completion ? 'COMPLETION_' : ''}NOTIFICATION_`;
+    const finish = completion
+      ? repo.finishCompletionNotification.bind(repo)
+      : repo.finishNotification.bind(repo);
+    for (const status of ['SENT', 'FAILED', 'UNKNOWN']) {
+      await pool.query(
+        `UPDATE order_payment_requests SET ${prefix}notification_status='SENDING' WHERE payment_request_id=$1`,
+        [id],
+      );
+      const before = (
+        await pool.query(
+          'SELECT count(*)::int AS n FROM audit_logs WHERE target_type=$1 AND target_seq=$2 AND action=$3',
+          ['ORDER', order.orderSeq, action + status],
+        )
+      ).rows[0].n;
+      await finish(id, status);
+      await finish(id, status);
+      const rows = (
+        await pool.query(
+          'SELECT result,metadata FROM audit_logs WHERE target_type=$1 AND target_seq=$2 AND action=$3',
+          ['ORDER', order.orderSeq, action + status],
+        )
+      ).rows;
+      assert.equal(rows.length, before + 1);
+      assert.ok(
+        rows.every(
+          (r) =>
+            r.result === (status === 'SENT' ? 'SUCCESS' : 'FAILED') &&
+            JSON.stringify(r.metadata) === '{}',
+        ),
+      );
+    }
+    await pool.query(
+      `UPDATE order_payment_requests SET ${prefix}notification_status='SENDING' WHERE payment_request_id=$1`,
+      [id],
+    );
+    const original = audit.recordResult;
+    audit.recordResult = async function (event, ...args) {
+      if (event.action === action + 'SENT') throw Error('audit unavailable');
+      return original.call(this, event, ...args);
+    };
+    try {
+      await assert.rejects(finish(id, 'SENT'), /audit unavailable/);
+    } finally {
+      audit.recordResult = original;
+    }
+    assert.equal((await storedPayment(id))[prefix + 'notification_status'], 'SENDING');
+    await pool.query(
+      `UPDATE order_payment_requests SET ${prefix}notification_attempted_at=clock_timestamp()-interval '2 minutes' WHERE payment_request_id=$1`,
+      [id],
+    );
+    if (completion) await repo.claimCompletionNotification();
+    else await repo.claimNotification();
+    assert.equal((await storedPayment(id))[prefix + 'notification_status'], 'UNKNOWN');
   }
 });

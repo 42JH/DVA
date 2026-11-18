@@ -1,0 +1,45 @@
+global:
+  scrape_interval: 30s
+  scrape_timeout: 8s
+  evaluation_interval: 15s
+rule_files: [alerts.yaml]
+scrape_configs:
+  - job_name: dva-msa-app
+    metrics_path: /internal/metrics
+    sample_limit: 12000
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names: [dva]
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_label_app, __meta_kubernetes_pod_container_port_name, __meta_kubernetes_pod_phase]
+        regex: "dva-(operations|customer|consultation|delivery|order);http;Running"
+        action: keep
+      - source_labels: [__meta_kubernetes_pod_label_app]
+        regex: "dva-(.+)"
+        target_label: service
+        replacement: "$1"
+      - source_labels: [__meta_kubernetes_pod_name]
+        target_label: pod
+    metric_relabel_configs:
+      - source_labels: [route]
+        regex: "/(operations|customer|consultation|delivery|order)/health(/.*)?"
+        action: drop
+  - job_name: dva-msa-kubelet
+    metrics_path: /metrics/resource
+    scheme: https
+    authorization:
+      credentials_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+    tls_config:
+      ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+    kubernetes_sd_configs:
+      - role: node
+    metric_relabel_configs:
+      - source_labels: [__name__, namespace]
+        regex: "(container_cpu_usage_seconds_total|container_memory_working_set_bytes);dva"
+        action: keep
+      - source_labels: [container]
+        regex: "operations|customer|consultation|delivery|order"
+        action: keep
+      - source_labels: [container]
+        target_label: service

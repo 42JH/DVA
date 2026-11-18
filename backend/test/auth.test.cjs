@@ -385,28 +385,43 @@ test('AI business authentication preserves administrator sessions, Origin and li
   await assert.rejects(list.run(), (error) => error.getStatus() === 401);
 });
 
-test('directory service authentication requires one valid Bearer independently of administrator cookies', async () => {
+test('directory search accepts administrator sessions or AI Bearer without falling back from invalid sessions', async () => {
   const { OrganizationsController } = require('../dist/organizations/organizations.controller');
   const access = (headers, settings) =>
     customerAccess('search', headers, settings, OrganizationsController);
-  for (const headers of [
-    {},
-    { cookie: 'dva_session=' + adminToken },
-    { authorization: 'Bearer wrong' },
-  ])
+  for (const headers of [{}, { authorization: 'Bearer wrong' }])
     await assert.rejects(access(headers).run(), (error) => error.getStatus() === 401);
-  for (const cookie of [undefined, 'dva_session=' + adminToken, 'dva_session=stale']) {
+  for (const cookie of [undefined, 'unrelated=value']) {
     const authenticated = access({ authorization: 'Bearer ' + businessToken, cookie });
     assert.equal(await authenticated.run(), true);
     assert.equal(authenticated.request.auditActorType, 'AI');
     assert.equal(authenticated.request.admin, undefined);
   }
+  for (const authorization of [undefined, 'Bearer wrong', 'Bearer ' + businessToken]) {
+    const authenticated = access({ cookie: 'dva_session=' + adminToken, authorization });
+    assert.equal(await authenticated.run(), true);
+    assert.equal(authenticated.request.admin.adminUserSeq, 7);
+    assert.equal(authenticated.request.auditActorType, undefined);
+  }
+  for (const cookie of [
+    'dva_session=stale',
+    'dva_session=' + 'f'.repeat(64),
+    `dva_session=${adminToken}; dva_session=${adminToken}`,
+  ])
+    await assert.rejects(
+      access({ cookie, authorization: 'Bearer ' + businessToken }).run(),
+      (error) => error.getStatus() === 401,
+    );
   const duplicate = access({ authorization: 'Bearer ' + businessToken });
   duplicate.request.rawHeaders.push('Authorization', 'Bearer ' + businessToken);
   await assert.rejects(duplicate.run(), (error) => error.getStatus() === 401);
   await assert.rejects(
-    access({ cookie: 'dva_session=' + adminToken }, { AI_BUSINESS_TOKEN: undefined }).run(),
+    access({ authorization: 'Bearer ' + businessToken }, { AI_BUSINESS_TOKEN: undefined }).run(),
     (error) => error.getStatus() === 503,
+  );
+  assert.equal(
+    await access({ cookie: 'dva_session=' + adminToken }, { AI_BUSINESS_TOKEN: undefined }).run(),
+    true,
   );
 });
 

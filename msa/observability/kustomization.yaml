@@ -1,0 +1,21 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - access.yaml
+  - stack.yaml
+configMapGenerator:
+  - name: msa-prometheus
+    namespace: dva-observability
+    files: [prometheus.yaml, alerts.yaml]
+  - name: msa-loki
+    namespace: dva-observability
+    files: [loki.yaml]
+  - name: msa-alloy
+    namespace: dva-observability
+    files: [config.alloy]
+  - name: msa-grafana-provisioning
+    namespace: dva-observability
+    files: [datasources.yaml, dashboards.yaml]
+  - name: msa-grafana-dashboards
+    namespace: dva-observability
+    files: [msa.json]

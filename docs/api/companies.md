@@ -35,7 +35,7 @@ AuthModule의 전역 Guard가 네 경로 모두에서 로그인·현재 계정 �
 | PATCH /api/companies/{id} | name·status·monthlyBillingEnabled 중 한 개 이상 | 204, 본문 없음 |
 
 Organization은 `{ organizationSeq, name, status, monthlyBillingEnabled }`다. 내부 주소록·구성원 정보는 조회하지 않는다.
-PATCH의 INACTIVE는 비활성화이며 ACTIVE로 다시 변경할 수 있다. 실제 삭제는 `DELETE /api/companies/{id}`를 사용한다. 소속·부서·기업 PIN을 정리하고 개인 고객·주문·통화·녹취·감사·청구 기록을 보존한다. [삭제 API와 기록 보존](company-deletion.md)을 따른다.
+PATCH의 INACTIVE는 비활성화이며 ACTIVE로 다시 변경할 수 있다. 실제 삭제는 `DELETE /api/companies`와 `{ "organizationSeqs": [id] }`를 사용한다. 단건 URL은 제거되었으며 [프론트 전환](../../backend/docs/company-delete-array-only.md)이 필요하다. 소속·부서·기업 PIN을 정리하고 개인 고객·주문·통화·녹취·감사·청구 기록을 보존한다. [삭제 API와 기록 보존](company-deletion.md)을 따른다.
 목록은 기업 번호 내림차순, limit 기본 20·최대 100, offset 기본 0이다. 목록에 total_count를 포함하며 meta·page 객체는 추가하지 않는다.
 q는 대소문자를 구분하지 않는 기업명 부분 검색이며 `%`, `_`도 검색어 자체로 취급한다.
 공백만 있는 q는 전체 조회다. status는 ACTIVE 또는 INACTIVE만 허용한다.

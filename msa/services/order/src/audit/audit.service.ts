@@ -1,4 +1,4 @@
-import { createRelay, enqueue, sendEvent } from '@dva/events';
+import { createRelay, enqueue, flushAuditSnapshot, sendEvent } from '@dva/events';
 import { HttpException, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
@@ -15,7 +15,8 @@ export class AuditService implements OnModuleInit, OnModuleDestroy {
     { transactionId: string; eventIds: string[] }
   >();
   private readonly logger = new Logger(AuditService.name);
-  private readonly relay: () => Promise<boolean>;
+  private readonly failures = new WeakMap<object, string>();
+  private readonly relay: ReturnType<typeof createRelay>;
   private timer?: NodeJS.Timeout;
   private running?: Promise<void>;
   private readonly url: string;
@@ -87,6 +88,11 @@ export class AuditService implements OnModuleInit, OnModuleDestroy {
     });
   }
   async recordFailure(event: AuditEvent, error: unknown): Promise<void> {
+    // Domain and HTTP boundaries can observe the same failed attempt.
+    if (error !== null && typeof error === 'object') {
+      if (this.failures.get(error) === event.requestId) return;
+      this.failures.set(error, event.requestId);
+    }
     const status = error instanceof HttpException ? error.getStatus() : 500;
     try {
       await this.database.transaction((client) =>
@@ -146,7 +152,15 @@ export class AuditService implements OnModuleInit, OnModuleDestroy {
           "SELECT 1 FROM outbox_events WHERE event_type='AuditCommitted' AND payload->>'transactionId'=$1 LIMIT 1",
           [transactionId],
         );
-        if (!committed.rowCount)
+        if (
+          !committed.rowCount &&
+          !(
+            await client.query(
+              "SELECT 1 FROM outbox_events WHERE destination='operations' AND event_type='AuditAborted' AND payload->>'transactionId'=$1 LIMIT 1",
+              [transactionId],
+            )
+          ).rowCount
+        )
           await enqueue(client, {
             destination: 'operations',
             eventType: 'AuditAborted',
@@ -154,6 +168,15 @@ export class AuditService implements OnModuleInit, OnModuleDestroy {
             payload: { transactionId },
           });
       });
+  }
+
+  flushSnapshot(ids: string[]): Promise<void> {
+    return flushAuditSnapshot(
+      this.database.pool,
+      this.relay,
+      (pending) => this.reconcile(pending),
+      ids,
+    );
   }
 
   async flush(eventId?: string): Promise<void> {

@@ -6,3 +6,5 @@ require('./orders-updates.cjs')(suite);
 require('./orders-submission.cjs')(suite);
 require('./orders-payment.cjs')(suite);
 require('./orders-admin.cjs')(suite);
+
+require('./orders-pin-batch.cjs')(suite);

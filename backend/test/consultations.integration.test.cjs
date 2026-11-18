@@ -106,13 +106,55 @@ test('call list requires a real administrator session, including AI/header calle
     { Cookie: 'dva_session=' + '0'.repeat(64) },
   ])
     await error(await list({}, headers), 401, 'UNAUTHORIZED');
-  for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN']) {
+  for (const role of ['OPERATOR', 'SYSTEM_ADMIN']) {
     const admin = role === 'OPERATOR' ? operator : await account(role);
     assert.deepEqual(
       await result(await list({ callerPhoneNumber: phoneNumber() }, admin.headers)),
       { data: [], hasNext: false, total_count: 0 },
     );
   }
+});
+
+test('unfiltered call pages preserve fallback timestamps, tie order and the total on an empty page', async (t) => {
+  const initial = await result(await list({ limit: 1 }));
+  const startedAt = '2090-01-01T00:00:00.000Z';
+  const endedAt = '2090-01-01T00:01:00.000Z';
+  const started = await call({ startedAt, endedAt });
+  const analysed = await call({ startedAt: null, endedAt: null });
+  const received = await call({ startedAt: null, endedAt: null });
+  const deleted = await call({ startedAt, endedAt });
+  t.after(async () => {
+    await pool.query(
+      'UPDATE call_sessions SET deleted_at=now() WHERE call_session_seq=ANY($1::int[])',
+      [[started.callSessionSeq, analysed.callSessionSeq, received.callSessionSeq]],
+    );
+  });
+  await pool.query('UPDATE call_sessions SET incoming_at=$2 WHERE call_session_seq=$1', [
+    received.callSessionSeq,
+    startedAt,
+  ]);
+  await pool.query('UPDATE call_sessions SET deleted_at=now() WHERE call_session_seq=$1', [
+    deleted.callSessionSeq,
+  ]);
+  await pool.query(
+    `INSERT INTO call_analyses
+      (call_session_seq,ai_started_at,ai_ended_at,has_complaint,complaints,payload_hash)
+      VALUES($1,$2,$3,false,'[]'::jsonb,repeat('1',64))`,
+    [analysed.callSessionSeq, startedAt, endedAt],
+  );
+  const expected = [received.callSessionSeq, analysed.callSessionSeq, started.callSessionSeq];
+  for (const [offset, callSessionSeq] of expected.entries()) {
+    const unfiltered = await result(await list({ limit: 1, offset }));
+    const filtered = await result(await list({ limit: 1, offset, from: startedAt }));
+    assert.deepEqual(unfiltered.data, filtered.data);
+    assert.equal(unfiltered.data[0].callSessionSeq, callSessionSeq);
+    assert.equal(unfiltered.total_count, initial.total_count + expected.length);
+  }
+  assert.deepEqual(await result(await list({ limit: 1, offset: Number.MAX_SAFE_INTEGER })), {
+    data: [],
+    hasNext: false,
+    total_count: initial.total_count + expected.length,
+  });
 });
 
 test('list combines order, exact phone and order status filters and treats SQL search text literally', async () => {
@@ -157,6 +199,29 @@ test('list combines order, exact phone and order status filters and treats SQL s
     (await pool.query('SELECT status FROM orders WHERE order_seq=$1', [orderSeq])).rows[0].status,
     'COLLECTING',
   );
+});
+
+test('list searches by displayed call number and applies the existing filters', async () => {
+  const row = await call();
+  const q = `#${row.callSessionSeq}`;
+  const query = { callerPhoneNumber: row.callerPhoneNumber };
+  for (const term of [q, String(row.callSessionSeq)]) {
+    assert.deepEqual(await result(await list({ ...query, q: term })), {
+      data: [row],
+      hasNext: false,
+      total_count: 1,
+    });
+  }
+  for (const conditions of [
+    { ...query, q, to: row.startedAt },
+    { ...query, q: '#2147483648' },
+  ])
+    assert.equal((await result(await list(conditions))).total_count, 0);
+
+  await pool.query('UPDATE call_sessions SET deleted_at=now() WHERE call_session_seq=$1', [
+    row.callSessionSeq,
+  ]);
+  assert.equal((await result(await list({ ...query, q }))).total_count, 0);
 });
 
 test('list searches international caller numbers preserved by the AI flow without dropping the country prefix', async () => {

@@ -1,3 +1,4 @@
+const { seedTestCard, configureTestCardPayments } = require('./helpers/payment-cards.cjs');
 const customerAddress = require('./helpers/customer-address.cjs');
 require('reflect-metadata');
 const { before, after, test } = require('node:test');
@@ -55,6 +56,7 @@ before(async () => {
     )
   ).rows[0].admin_user_seq;
   app = await NestFactory.create(AppModule, { logger: false });
+  configureTestCardPayments(app);
   const dver = app.get(DverClient);
   dver.ensureConfigured = () => {};
   dver.submit = async () => {
@@ -77,6 +79,7 @@ async function fixture() {
   const company = (
     await request('POST', '/companies', { name: '기록 보존 기업', monthlyBillingEnabled: true })
   ).body.data.organizationSeq;
+  await seedTestCard(pool, 'ORGANIZATION', company);
   const department = (
     await request('POST', `/companies/${company}/departments`, {
       name: '개발팀',
@@ -96,6 +99,7 @@ async function fixture() {
       await request('POST', `/companies/${company}/members`, {
         customerSeq: customer,
         employeeNo: 'EMP-1',
+        groupBillingEnabled: true,
         role: 'MEMBER',
         departmentSeq: department,
       })
@@ -235,7 +239,7 @@ test('company soft deletion hides company data while preserving personal, order,
       [f.company],
     )
   ).rows;
-  const response = await request('DELETE', `/companies/${f.company}`);
+  const response = await request('DELETE', '/companies', { organizationSeqs: [f.company] });
   assert.equal(response.status, 204, JSON.stringify(response.body));
   assert.deepEqual(await history(f), before);
   assert.deepEqual(
@@ -333,7 +337,10 @@ test('company soft deletion hides company data while preserving personal, order,
     ).rows,
     priorMonths,
   );
-  assert.equal((await request('DELETE', `/companies/${f.company}`)).status, 404);
+  assert.equal(
+    (await request('DELETE', '/companies', { organizationSeqs: [f.company] })).status,
+    404,
+  );
 });
 
 test('department deletion detaches only its employees and preserves other departments and settled snapshots', async () => {
@@ -360,7 +367,10 @@ test('department deletion detaches only its employees and preserves other depart
   );
   const settled = await order(f, 'groupBilling');
   const before = await detail(settled.orderSeq);
-  assert.equal((await request('DELETE', `/departments/${f.department}`)).status, 204);
+  assert.equal(
+    (await request('DELETE', '/departments', { departmentSeqs: [f.department] })).status,
+    204,
+  );
   assert.deepEqual(await detail(settled.orderSeq), before);
   assert.equal((await request('GET', `/companies/${f.company}`)).status, 200);
   assert.equal(
@@ -381,7 +391,10 @@ test('department deletion detaches only its employees and preserves other depart
     (await request('GET', `/companies/${f.company}/departments`)).body.data[0].departmentSeq,
     other,
   );
-  assert.equal((await request('DELETE', `/departments/${f.department}`)).status, 404);
+  assert.equal(
+    (await request('DELETE', '/departments', { departmentSeqs: [f.department] })).status,
+    404,
+  );
 });
 
 test('collecting legacy COMPANY snapshots survive deletion while current payment eligibility is still required', async () => {
@@ -413,7 +426,10 @@ test('collecting legacy COMPANY snapshots survive deletion while current payment
     [id],
   );
   const before = await detail(id);
-  assert.equal((await request('DELETE', `/companies/${f.company}`)).status, 204);
+  assert.equal(
+    (await request('DELETE', '/companies', { organizationSeqs: [f.company] })).status,
+    204,
+  );
   assert.deepEqual(await detail(id), before);
   assert.equal(
     (await request('POST', `/orders/${id}/submit`, { expectedVersion: before.version })).status,
@@ -444,18 +460,23 @@ test('detachment preserves the customer personal monthly policy without carrying
     (await request('PATCH', `/customers/${f.customer}`, { monthlyBillingEnabled: true })).status,
     204,
   );
-  assert.equal((await request('DELETE', `/departments/${f.department}`)).status, 204);
+  assert.equal(
+    (await request('DELETE', '/departments', { departmentSeqs: [f.department] })).status,
+    204,
+  );
   const context = (await request('POST', '/customers/context', { phoneNumber: f.phone })).body.data;
   assert.deepEqual(context.availablePaymentMethods, ['billing', 'credit']);
   const settled = await order(f, 'credit');
   const saved = await detail(settled.orderSeq);
   assert.equal(saved.billingOrganizationSeq, null);
   assert.equal(saved.billingDepartmentSeq, null);
-  assert.equal(
-    (await pool.query('SELECT 1 FROM order_billing_charges WHERE order_seq=$1', [settled.orderSeq]))
-      .rowCount,
-    0,
+  const charges = await pool.query(
+    'SELECT organization_seq,customer_seq,amount FROM order_billing_charges WHERE order_seq=$1',
+    [settled.orderSeq],
   );
+  assert.deepEqual(charges.rows, [
+    { organization_seq: null, customer_seq: f.customer, amount: saved.totalAmount },
+  ]);
 });
 
 test('department deletion preserves personal PINs and historical COMPANY_PIN audit events', async () => {
@@ -475,7 +496,10 @@ test('department deletion preserves personal PINs and historical COMPANY_PIN aud
   const before = await history(f);
   const oldAudit = (await pool.query('SELECT * FROM audit_logs WHERE request_id=$1', [requestId]))
     .rows;
-  assert.equal((await request('DELETE', '/departments/' + f.department)).status, 204);
+  assert.equal(
+    (await request('DELETE', '/departments', { departmentSeqs: [f.department] })).status,
+    204,
+  );
   assert.deepEqual(await history(f), before);
   assert.deepEqual(
     (await pool.query('SELECT * FROM audit_logs WHERE request_id=$1', [requestId])).rows,
@@ -502,7 +526,10 @@ test('audit failure after all company deletes rolls back the complete operation'
     return original.call(this, event, client);
   };
   try {
-    assert.equal((await request('DELETE', `/companies/${f.company}`)).status, 500);
+    assert.equal(
+      (await request('DELETE', '/companies', { organizationSeqs: [f.company] })).status,
+      500,
+    );
   } finally {
     audit.recordSuccess = original;
   }
@@ -539,7 +566,10 @@ test('company may disappear during the Dver HTTP request without interrupting th
   const f = await fixture();
   dverHook = async () => {
     dverHook = undefined;
-    assert.equal((await request('DELETE', `/companies/${f.company}`)).status, 204);
+    assert.equal(
+      (await request('DELETE', '/companies', { organizationSeqs: [f.company] })).status,
+      204,
+    );
   };
   try {
     const created = await order(f, 'groupBilling');
@@ -558,7 +588,10 @@ test('busy customers prevent partial deletion and concurrent deletes produce one
   try {
     await blocker.query('BEGIN');
     await blocker.query('SELECT 1 FROM customers WHERE customer_seq=$1 FOR UPDATE', [f.customer]);
-    assert.equal((await request('DELETE', `/companies/${f.company}`)).status, 409);
+    assert.equal(
+      (await request('DELETE', '/companies', { organizationSeqs: [f.company] })).status,
+      409,
+    );
     assert.equal(
       (
         await pool.query(
@@ -573,8 +606,8 @@ test('busy customers prevent partial deletion and concurrent deletes produce one
     blocker.release();
   }
   const results = await Promise.all([
-    request('DELETE', `/companies/${f.company}`),
-    request('DELETE', `/companies/${f.company}`),
+    request('DELETE', '/companies', { organizationSeqs: [f.company] }),
+    request('DELETE', '/companies', { organizationSeqs: [f.company] }),
   ]);
   assert.deepEqual(results.map((x) => x.status).sort(), [204, 404]);
 });
@@ -582,20 +615,26 @@ test('busy customers prevent partial deletion and concurrent deletes produce one
 test('deletion requires an active admin session, valid origin and valid ID; all admin roles are allowed', async () => {
   const f = await fixture();
   assert.equal(
-    (await request('DELETE', `/companies/${f.company}`, undefined, { Cookie: '' })).status,
+    (await request('DELETE', '/companies', { organizationSeqs: [f.company] }, { Cookie: '' }))
+      .status,
     401,
   );
   assert.equal(
-    (await request('DELETE', `/departments/${f.department}`, undefined, { Cookie: '' })).status,
+    (await request('DELETE', '/departments', { departmentSeqs: [f.department] }, { Cookie: '' }))
+      .status,
     401,
   );
   assert.equal(
-    (await request('DELETE', `/companies/${f.company}`, undefined, { Origin: '' })).status,
+    (await request('DELETE', '/companies', { organizationSeqs: [f.company] }, { Origin: '' }))
+      .status,
     403,
   );
-  assert.equal((await request('DELETE', '/companies/invalid')).status, 400);
-  assert.equal((await request('DELETE', '/departments/0')).status, 400);
-  for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN']) {
+  assert.equal(
+    (await request('DELETE', '/companies', { organizationSeqs: ['invalid'] })).status,
+    400,
+  );
+  assert.equal((await request('DELETE', '/departments', { departmentSeqs: ['0'] })).status, 400);
+  for (const role of ['OPERATOR', 'SYSTEM_ADMIN']) {
     const data = await fixture();
     const loginId = 'del' + randomUUID().slice(0, 8);
     const admin = await pool.query(
@@ -604,18 +643,38 @@ test('deletion requires an active admin session, valid origin and valid ID; all 
     );
     const token = await createTestSession(pool, admin.rows[0].admin_user_seq);
     assert.equal(
-      (await request('DELETE', `/departments/${data.department}`, undefined, { Cookie: token }))
-        .status,
+      (
+        await request(
+          'DELETE',
+          '/departments',
+          { departmentSeqs: [data.department] },
+          { Cookie: token },
+        )
+      ).status,
       204,
     );
     assert.equal(
-      (await request('DELETE', `/companies/${data.company}`, undefined, { Cookie: token })).status,
+      (
+        await request(
+          'DELETE',
+          '/companies',
+          { organizationSeqs: [data.company] },
+          { Cookie: token },
+        )
+      ).status,
       204,
     );
     await pool.query("UPDATE admin_users SET status='INACTIVE' WHERE login_id=$1", [loginId]);
     assert.ok(
       [401, 403].includes(
-        (await request('DELETE', `/companies/${f.company}`, undefined, { Cookie: token })).status,
+        (
+          await request(
+            'DELETE',
+            '/companies',
+            { organizationSeqs: [f.company] },
+            { Cookie: token },
+          )
+        ).status,
       ),
     );
   }
@@ -650,7 +709,10 @@ test('deleting a company without departments unlinks employees and preserves cus
     await pool.query('SELECT membership_seq FROM memberships WHERE customer_seq=$1', [customer])
   ).rows[0].membership_seq;
   const saved = await order({ company, customer });
-  assert.equal((await request('DELETE', `/companies/${company}`)).status, 204);
+  assert.equal(
+    (await request('DELETE', '/companies', { organizationSeqs: [company] })).status,
+    204,
+  );
   assert.equal((await request('GET', '/customers/' + customer)).status, 200);
   assert.equal(
     (

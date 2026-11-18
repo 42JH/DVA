@@ -14,6 +14,8 @@ export interface Environment extends PaymentEnvironment {
   AI_AGENT_URL: string;
   AI_BUSINESS_TOKEN?: string;
   AI_PERSONA_TOKEN?: string;
+  PERSONA_CHECK_URL?: string;
+  PERSONA_CHECK_TOKEN?: string;
   AI_FAQ_TOKEN?: string;
   AI_INSIGHTS_TOKEN?: string;
   // 통화 불만 판정(후처리) 전용 OpenAI 키 — 실시간 상담 키와 따로. 없으면 판정 워커가 꺼짐
@@ -85,6 +87,32 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
   } catch {
     errors.push('AI_AGENT_URL');
   }
+  let personaCheckUrl: string | undefined;
+  if (raw.PERSONA_CHECK_URL !== undefined && raw.PERSONA_CHECK_URL !== '') {
+    try {
+      const url = new URL(String(raw.PERSONA_CHECK_URL));
+      if (
+        typeof raw.PERSONA_CHECK_URL !== 'string' ||
+        !['http:', 'https:'].includes(url.protocol) ||
+        url.username ||
+        url.password ||
+        url.pathname !== '/' ||
+        url.search ||
+        url.hash
+      )
+        errors.push('PERSONA_CHECK_URL');
+      else personaCheckUrl = url.origin;
+    } catch {
+      errors.push('PERSONA_CHECK_URL');
+    }
+  }
+  const personaCheckToken = raw.PERSONA_CHECK_TOKEN;
+  if (
+    personaCheckToken !== undefined &&
+    personaCheckToken !== '' &&
+    (typeof personaCheckToken !== 'string' || !/^[a-fA-F0-9]{64}$/.test(personaCheckToken))
+  )
+    errors.push('PERSONA_CHECK_TOKEN');
   const origins =
     typeof raw.CORS_ORIGINS === 'string'
       ? raw.CORS_ORIGINS.split(',')
@@ -158,7 +186,7 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
   ) {
     errors.push('PBX_WEBHOOK_TOKEN');
   }
-  const dverUrl = raw.DVER_API_URL ?? 'https://public-n8n.dvercorp.co.kr:47514/webhook/parcel';
+  const dverUrl = raw.DVER_API_URL ?? 'https://purple-wood-25a4.summer2.workers.dev';
   try {
     const url = new URL(String(dverUrl));
     if (
@@ -203,6 +231,9 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
     AI_BUSINESS_TOKEN:
       typeof businessToken === 'string' && businessToken ? businessToken : undefined,
     AI_PERSONA_TOKEN: typeof personaToken === 'string' && personaToken ? personaToken : undefined,
+    PERSONA_CHECK_URL: personaCheckUrl,
+    PERSONA_CHECK_TOKEN:
+      typeof personaCheckToken === 'string' && personaCheckToken ? personaCheckToken : undefined,
     AI_FAQ_TOKEN: typeof faqToken === 'string' && faqToken ? faqToken : undefined,
     CALL_ANALYSIS_OPENAI_API_KEY:
       typeof analysisKey === 'string' && analysisKey ? analysisKey : undefined,

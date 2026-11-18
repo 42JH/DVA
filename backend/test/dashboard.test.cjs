@@ -3,6 +3,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { DashboardQueryDto } = require('../dist/dashboard/dto/dashboard-query.dto');
 const { createValidationPipe } = require('../dist/common/http/validation.pipe');
+const { CoalescedReads } = require('../dist/common/coalesced-reads');
 const pipe = createValidationPipe();
 const validate = (query) => pipe.transform(query, { type: 'query', metatype: DashboardQueryDto });
 
@@ -27,4 +28,43 @@ test('dashboard filter rejects repeated, empty, coerced and removed date/paginat
     { offset: '0' },
   ])
     await assert.rejects(() => validate(query), { status: 400 });
+});
+
+test('queued reads share an unopened snapshot and later readers observe the next snapshot', async () => {
+  const reads = new CoalescedReads();
+  const started = Promise.withResolvers();
+  const resume = Promise.withResolvers();
+  let current = 1;
+  const first = reads.read('home', async () => {
+    const snapshot = current;
+    started.resolve();
+    await resume.promise;
+    return snapshot;
+  });
+  const sameBatch = reads.read('home', () => assert.fail('queued request started a second read'));
+  assert.equal(first, sameBatch);
+  await started.promise;
+  current = 2;
+  const later = reads.read('home', async () => current);
+  assert.notEqual(first, later);
+  assert.equal(await reads.read('orders', async () => 'independent'), 'independent');
+  resume.resolve();
+  assert.deepEqual(await Promise.all([first, sameBatch, later]), [1, 1, 2]);
+  assert.equal(await reads.read('home', async () => 3), 3);
+});
+
+test('a failed shared read releases the following batch and does not retain an error', async () => {
+  const reads = new CoalescedReads();
+  const started = Promise.withResolvers();
+  const fail = Promise.withResolvers();
+  const first = reads.read('orders', async () => {
+    started.resolve();
+    await fail.promise;
+  });
+  const rejected = assert.rejects(first, /failed snapshot/);
+  await started.promise;
+  const next = reads.read('orders', async () => 'fresh');
+  fail.reject(new Error('failed snapshot'));
+  await rejected;
+  assert.equal(await next, 'fresh');
 });

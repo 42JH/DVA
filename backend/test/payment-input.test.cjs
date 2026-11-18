@@ -18,12 +18,16 @@ test('order payments are opt-in and reject live/mismatched key types and untrust
     CORS_ORIGINS: 'http://127.0.0.1:5173',
     TOSS_TEST_CLIENT_KEY: 'test_gck_fixture',
     TOSS_TEST_SECRET_KEY: 'test_gsk_fixture',
+    TOSS_BILLING_SECRET_KEY: 'test_sk_fixture',
+    PAYMENT_CARD_ENCRYPTION_KEY: 'ab'.repeat(32),
     PAYMENT_MATTERMOST_WEBHOOK_URL: 'http://127.0.0.1/hooks/test',
   };
   assert.equal(paymentEnvironment(valid, []).ORDER_PAYMENTS_ENABLED, true);
   for (const [field, value] of Object.entries({
     TOSS_TEST_CLIENT_KEY: 'live_gck_secret',
     TOSS_TEST_SECRET_KEY: 'test_sk_wrong',
+    TOSS_BILLING_SECRET_KEY: 'test_gsk_wrong',
+    PAYMENT_CARD_ENCRYPTION_KEY: 'short-encryption-key',
     PAYMENT_PUBLIC_URL: 'https://unlisted.example/api/payments',
     PAYMENT_TOSS_BASE_URL: 'https://untrusted.example',
     PAYMENT_MATTERMOST_WEBHOOK_URL: 'http://external.invalid/hooks/test',

@@ -45,7 +45,7 @@ const envelope = {
   description: 'AI 필수 통화 번호. 관리자 단독 초안은 헤더 없이 사용.',
   schema: { type: 'integer', minimum: 1, maximum: 2147483647 },
 })
-@Roles('OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN')
+@Roles('OPERATOR', 'SYSTEM_ADMIN')
 @Controller('parcel-drafts')
 export class ParcelDraftsController {
   constructor(private readonly drafts: ParcelDraftsService) {}

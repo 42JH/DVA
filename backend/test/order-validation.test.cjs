@@ -59,6 +59,39 @@ const complete = () =>
       },
     ],
   });
+
+test('final submission and Dver payload allow recipient landlines and reject sender landlines', () => {
+  const { dverPayload } = require('../dist/orders/dver.client');
+  for (const phone of ['021234567', '0212345678', '0321234567', '03212345678', '07012345678']) {
+    const value = complete();
+    value.parcels[0].destination.phoneNumber = phone;
+    assert.doesNotThrow(() => assertOrderSubmissionReady(value, now));
+    assert.equal(dverPayload(value, now).outboundParcels[0].destination.phoneNumber, phone);
+    value.parcels[0].origin.phoneNumber = phone;
+    assert.throws(
+      () => assertOrderSubmissionReady(value, now),
+      (error) =>
+        error
+          .getResponse()
+          .details.some(
+            (detail) =>
+              detail.field === 'parcels.0.origin.phoneNumber' && detail.reason === 'mobilePhone',
+          ),
+    );
+  }
+  const invalid = complete();
+  invalid.parcels[0].destination.phoneNumber = '0391234567';
+  assert.throws(
+    () => assertOrderSubmissionReady(invalid, now),
+    (error) =>
+      error
+        .getResponse()
+        .details.some(
+          (detail) =>
+            detail.field === 'parcels.0.destination.phoneNumber' && detail.reason === 'phoneNumber',
+        ),
+  );
+});
 test('stored item values outside one won through one hundred million cannot be submitted', () => {
   for (const itemPrice of [1, 100000000]) {
     const draft = complete();
@@ -90,9 +123,14 @@ test('stored item values outside one won through one hundred million cannot be s
   assert.doesNotThrow(() => assertOrderSubmissionReady(draft, now));
 });
 
-test('final submission checks stored origin and destination phones for eleven digits', () => {
+test('final submission rejects malformed stored phones on either address side', () => {
   for (const side of ['origin', 'destination'])
-    for (const phoneNumber of ['021234567', '0101234567', '010123456789', '01012345678\n']) {
+    for (const phoneNumber of [
+      side === 'origin' ? '021234567' : '02123456',
+      '0101234567',
+      '010123456789',
+      '01012345678\n',
+    ]) {
       const draft = complete();
       draft.parcels[0][side].phoneNumber = phoneNumber;
       assert.throws(

@@ -11,18 +11,22 @@ const options = {
 };
 const peers = Object.fromEntries(['monolith', 'operations'].map((side) => [side, {
   optionsMode: 'ok', refreshStatus: 202, notifications: [], optionRequests: 0,
-  faqStatus: 503, faqHold: false, faqNotifications: [],
+  faqStatus: 503, faqHold: false, faqNotifications: [], healthStatus: 200, healthHold: false,
 }]));
 const server = createServer(async (request, response) => {
   try {
+    const [, side, ...rest] = request.url.split('/');
+    const peer = peers[side];
+    const path = '/' + rest.join('/');
+    if (peer && path === '/health' && request.method === 'GET') {
+      if (!peer.healthHold) response.writeHead(peer.healthStatus).end();
+      return;
+    }
     if (request.headers.authorization !== 'Bearer ' + token) {
       response.writeHead(401).end();
       return;
     }
-    const [, side, ...rest] = request.url.split('/');
-    const peer = peers[side];
     assert.ok(peer);
-    const path = '/' + rest.join('/');
     let body = '';
     for await (const chunk of request) {
       body += chunk;
@@ -33,7 +37,7 @@ const server = createServer(async (request, response) => {
       response.end(JSON.stringify(peer));
     } else if (path === '/__control' && request.method === 'POST') {
       const input = JSON.parse(body);
-      assert.deepEqual(Object.keys(input).filter((key) => !['optionsMode', 'refreshStatus', 'faqStatus', 'faqHold'].includes(key)), []);
+      assert.deepEqual(Object.keys(input).filter((key) => !['optionsMode', 'refreshStatus', 'faqStatus', 'faqHold', 'healthStatus', 'healthHold'].includes(key)), []);
       Object.assign(peer, input);
       response.writeHead(204).end();
     } else if (path === '/internal/persona/options' && request.method === 'GET') {

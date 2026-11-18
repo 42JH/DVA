@@ -1,3 +1,5 @@
+import { PaymentCardsModule } from './payments/payment-cards.module';
+import { RetentionModule } from './retention/retention.module';
 import { PinsModule } from './pins/pins.module';
 import { CallScopeExecutionModule } from './call-scope/call-scope-execution.module';
 import { Module } from '@nestjs/common';
@@ -17,6 +19,8 @@ import { OrganizationsModule } from './organizations/organizations.module';
     AuditModule,
     AuthModule,
     CustomersModule,
+    PaymentCardsModule,
+    RetentionModule,
     PinsModule,
     CallScopeExecutionModule,
     OrganizationsModule,

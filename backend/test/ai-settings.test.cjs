@@ -203,3 +203,102 @@ test('persona service token is optional for existing services and is never echoe
       (error) => error.message.includes('AI_PERSONA_TOKEN') && !error.message.includes(secret),
     );
 });
+
+test('shared option reads isolate callers, expire on settlement and separate rotated credentials', async () => {
+  const { AiPersonaClient } = require('../dist/ai-settings/ai-persona.client');
+  const config = { url: 'http://synthetic.invalid', token: 'synthetic' };
+  const client = new AiPersonaClient({
+    get: (key) => (key === 'AI_AGENT_URL' ? config.url : config.token),
+  });
+  const value = {
+    voices: [{ id: 'one', label: 'Voice' }],
+    speakingRate: { min: null, max: null },
+    turnWaitLevels: ['NORMAL'],
+  };
+  let calls = 0,
+    release,
+    fail = false;
+  client.options = async () => {
+    calls++;
+    await new Promise((resolve) => {
+      release = resolve;
+    });
+    if (fail) throw Error('synthetic');
+    return structuredClone(value);
+  };
+  const first = client.sharedOptions(),
+    second = client.sharedOptions();
+  assert.equal(calls, 1);
+  release();
+  const [a, b] = await Promise.all([first, second]);
+  a.voices[0].label = 'changed';
+  assert.deepEqual(b, value);
+  const fresh = client.sharedOptions();
+  assert.equal(calls, 2);
+  release();
+  await fresh;
+  fail = true;
+  const rejected = client.sharedOptions();
+  release();
+  await assert.rejects(rejected);
+  fail = false;
+  const recovered = client.sharedOptions();
+  assert.equal(calls, 4);
+  release();
+  await recovered;
+  const pending = client.sharedOptions();
+  const oldRelease = release;
+  config.token = 'rotated';
+  const rotated = client.sharedOptions();
+  const newRelease = release;
+  oldRelease();
+  await pending;
+  const joined = client.sharedOptions();
+  assert.equal(calls, 6);
+  newRelease();
+  await Promise.all([rotated, joined]);
+});
+
+test('health shares only the upstream probe and checks each caller database independently', async (t) => {
+  const { HealthService } = require('../dist/health/health.service');
+  let fetches = 0,
+    queries = 0,
+    databaseOk = true,
+    release;
+  t.mock.method(globalThis, 'fetch', () => {
+    fetches++;
+    return new Promise((resolve) => {
+      release = resolve;
+    });
+  });
+  const health = new HealthService(
+    {
+      pool: {
+        query: async () => {
+          queries++;
+          if (!databaseOk) throw Error('synthetic');
+          return {};
+        },
+      },
+    },
+    { get: () => 'http://synthetic.invalid' },
+  );
+  const concurrent = Array.from({ length: 20 }, () => health.checkDependencies());
+  assert.equal(fetches, 1);
+  assert.equal(queries, 20);
+  release({ ok: true });
+  assert.ok((await Promise.all(concurrent)).every((value) => value.status === 'ok'));
+  databaseOk = false;
+  const databaseFailure = health.checkDependencies();
+  release({ ok: true });
+  await assert.rejects(databaseFailure, (error) => error.getStatus() === 503);
+  databaseOk = true;
+  const upstreamFailure = health.checkDependencies();
+  release({ ok: false });
+  await assert.rejects(upstreamFailure, (error) => error.getStatus() === 503);
+  const recovered = health.checkDependencies();
+  release({ ok: true });
+  assert.equal((await recovered).status, 'ok');
+  assert.equal(fetches, 4);
+  assert.equal(queries, 23);
+});

@@ -3,6 +3,8 @@ import { DatabaseService } from '../database/database.service';
 import { ApiException } from '../common/errors/api.exception';
 
 export interface PaymentView {
+  autoCharge: boolean;
+  cardPaymentFailed: boolean;
   token: string;
   orderId: string;
   orderSeq: number;
@@ -34,11 +36,14 @@ export class PaymentsRepository {
   async read(id: string): Promise<PaymentView> {
     const result = (
       await this.database.pool.query<PaymentView>(
-        `SELECT r.payment_request_id AS token,r.payment_request_id AS "orderId",r.order_seq AS "orderSeq",
+        `SELECT r.payment_card_seq IS NOT NULL AS "autoCharge",r.card_payment_failed AS "cardPaymentFailed",
+       r.payment_request_id AS token,r.payment_request_id AS "orderId",r.order_seq AS "orderSeq",
        'DVA 택배 결제' AS "orderName",r.amount,o.status AS "orderStatus",
        CASE WHEN r.completed_at IS NOT NULL THEN 'PAID'
         WHEN r.invalidated_at IS NOT NULL OR o.status='CANCELLED' THEN 'CANCELLED'
         WHEN r.approval_started_at IS NOT NULL THEN 'REVIEW_REQUIRED'
+        WHEN NOT EXISTS (SELECT 1 FROM customers c WHERE c.customer_seq=o.customer_seq
+          AND c.status='ACTIVE' AND c.deleted_at IS NULL) THEN 'CANCELLED'
         WHEN r.expires_at<=clock_timestamp() THEN 'EXPIRED' ELSE 'PENDING' END AS status,
        r.notification_status AS "notificationStatus",r.completion_notification_status AS "completionNotificationStatus",r.expires_at AS "expiresAt",
        o.pickup_requested_at AS "pickupRequestedAt",o.paid_at AS "approvedAt",
@@ -84,6 +89,26 @@ export class PaymentsRepository {
       UPDATE order_payment_requests r SET approval_next_check_at=clock_timestamp()+interval '1 minute'
       FROM candidates c WHERE r.payment_request_id=c.payment_request_id
       RETURNING r.payment_request_id AS id`)
+    ).rows;
+  }
+
+  async pendingCardApprovals() {
+    return (
+      await this.database.pool.query<{ id: string }>(
+        `WITH candidates AS (SELECT r.payment_request_id FROM order_payment_requests r JOIN orders o USING(order_seq)
+       WHERE r.payment_card_seq IS NOT NULL AND NOT r.card_payment_failed AND r.completed_at IS NULL
+        AND r.invalidated_at IS NULL AND o.status='notPaid' AND o.deleted_at IS NULL
+        AND COALESCE(o.closed_at,o.created_at)>statement_timestamp()-interval '5 years'
+        AND (r.approval_started_at IS NOT NULL OR r.expires_at>clock_timestamp())
+        AND (r.approval_started_at IS NOT NULL OR EXISTS (SELECT 1 FROM customers c
+          WHERE c.customer_seq=o.customer_seq AND c.status='ACTIVE' AND c.deleted_at IS NULL))
+        AND (r.approval_claimed_until IS NULL OR r.approval_claimed_until<=clock_timestamp())
+        AND (r.approval_next_check_at IS NULL OR r.approval_next_check_at<=clock_timestamp())
+       ORDER BY COALESCE(r.approval_next_check_at,r.created_at),r.payment_request_id LIMIT 4 FOR UPDATE OF r SKIP LOCKED)
+       UPDATE order_payment_requests r SET approval_next_check_at=clock_timestamp()+interval '1 minute'
+       FROM candidates c WHERE r.payment_request_id=c.payment_request_id
+       RETURNING r.payment_request_id AS id`,
+      )
     ).rows;
   }
 }

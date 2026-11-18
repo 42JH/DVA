@@ -1,3 +1,4 @@
+const { configureTestCardPayments } = require('./payment-cards.cjs');
 const { legacyOrderIntake } = require('./legacy-order-intake.cjs');
 const { testMembership } = require('./membership.cjs');
 require('reflect-metadata');
@@ -48,6 +49,7 @@ module.exports = function manualOrders() {
   });
   f.start = async () => {
     const app = legacyOrderIntake(await NestFactory.create(AppModule, { logger: false }));
+    configureTestCardPayments(app);
     f.apps.push(app);
     configureApplication(app, { log: () => {} });
     app.get(ConfigService).set('DVER_API_URL', f.dverUrl);
@@ -113,7 +115,8 @@ module.exports = function manualOrders() {
     f.dverUrl = `http://127.0.0.1:${f.server.address().port}/parcel`;
     f.app = await f.start();
     f.host = await f.app.getUrl();
-    for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN']) {
+    // Keep a second operator identity for cross-account scope checks.
+    for (const role of ['OPERATOR', 'OPERATOR', 'SYSTEM_ADMIN']) {
       const loginId = 'manual' + randomUUID().replaceAll('-', '').slice(0, 14);
       f.adminIds.push(
         (

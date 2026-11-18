@@ -1,3 +1,5 @@
+import { DeleteCallsDto } from '../common/dto/delete-request.dto';
+import { Body } from '@nestjs/common';
 import { Controller, Delete, Get, Header, HttpCode, Param, Query, Req, Sse } from '@nestjs/common';
 import { ApiCookieAuth, ApiOkResponse, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { AuthRequest, Roles } from '../auth/auth.guard';
@@ -13,7 +15,7 @@ import { AuditOperation } from '../audit/audit-operation';
 
 @ApiTags('Calls')
 @ApiCookieAuth('adminSession')
-@Roles('OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN')
+@Roles('OPERATOR', 'SYSTEM_ADMIN')
 @ApiResponse({
   status: 400,
   description: '조회 조건 또는 통화 번호 형식 오류.',
@@ -28,13 +30,18 @@ export class ConsultationsController {
     private readonly activeCalls: ActiveCallCountService,
   ) {}
 
-  @Delete(':id')
+  @Delete()
   @HttpCode(204)
-  @AuditOperation({ action: 'CALL_DELETED', targetType: 'CALL_SESSION', target: 'id' })
+  @AuditOperation({
+    action: 'CALL_DELETED',
+    targetType: 'CALL_SESSION',
+    target: 'ids',
+    idsField: 'callSessionSeqs',
+  })
   @ApiOperation({
     summary: '통화 soft delete',
     description:
-      '허용 Origin 필수. 통화와 분석·AI 이벤트·STT·녹취를 일반 조회에서 숨깁니다. 실제 폐기는 최초 incomingAt부터 5년 후 수행하며 주문은 별도로 유지합니다.',
+      '허용 Origin 필수. 통화와 분석·AI 이벤트·STT·녹취를 일반 조회에서 숨깁니다. 실제 폐기는 삭제일부터 5년 후 수행하며 주문은 별도로 유지합니다.',
   })
   @ApiResponse({ status: 204, description: '삭제 처리 완료.' })
   @ApiResponse({ status: 404, type: ErrorResponseDto, description: '없거나 삭제·만료된 통화.' })
@@ -43,8 +50,12 @@ export class ConsultationsController {
     type: ErrorResponseDto,
     description: '통화 종료 전 또는 녹취 대기·실패·업로드 중.',
   })
-  delete(@Param() params: CallIdParamsDto, @Req() request: AuthRequest) {
-    return this.consultations.delete(params.id, request.admin.adminUserSeq, request.requestId);
+  delete(@Body() input: DeleteCallsDto, @Req() request: AuthRequest) {
+    return this.consultations.delete(
+      input.callSessionSeqs,
+      request.admin.adminUserSeq,
+      request.requestId,
+    );
   }
 
   @Get('active-count')

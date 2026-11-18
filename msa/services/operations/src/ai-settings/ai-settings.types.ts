@@ -1,3 +1,5 @@
+import { PersonaPromptFields } from './persona-prompt';
+
 export const PERSONA_STATUSES = ['ACTIVE', 'PENDING', 'INACTIVE'] as const;
 export const TURN_WAIT_LEVELS = ['SHORT', 'NORMAL', 'LONG'] as const;
 export const APPLY_ERRORS = ['INVALID_CONFIG', 'UNSUPPORTED_OPTIONS', 'APPLY_FAILED'] as const;
@@ -5,7 +7,7 @@ export type PersonaStatus = (typeof PERSONA_STATUSES)[number];
 export type TurnWaitLevel = (typeof TURN_WAIT_LEVELS)[number];
 export type ApplyError = (typeof APPLY_ERRORS)[number] | 'AI_UNAVAILABLE';
 
-export interface PersonaSettings {
+export interface PersonaSettings extends PersonaPromptFields {
   name: string;
   promptText: string;
   voiceId: string | null;

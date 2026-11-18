@@ -129,31 +129,46 @@ async function acknowledged(response, eventId) {
   return object(ack) && ack.eventId === eventId && ['processed', 'duplicate'].includes(ack.status);
 }
 
-function createRelay({ pool, source, destinations, timeoutMs = 5000 }) {
+function requestId(eventId, payload) {
+  const incoming = payload?.command?.requestId ?? payload?.requestId;
+  return typeof incoming === 'string' && uuid.test(incoming) ? incoming : eventId;
+}
+
+function createRelay({ pool, source, destinations, timeoutMs = 5000, eventTypes }) {
   if (!services.has(source) || !Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 30000)
     throw new Error('Invalid event relay configuration');
+  if (eventTypes !== undefined && (!Array.isArray(eventTypes) || !eventTypes.length ||
+      !eventTypes.every(value => typeof value === 'string' && /^[A-Z][A-Za-z0-9]{0,99}$/.test(value)) ||
+      new Set(eventTypes).size !== eventTypes.length)) throw new Error('Invalid event relay types');
   const endpoints = new Map(Object.entries(destinations).map(([destination, config]) => {
     if (!services.has(destination)) throw new Error('Invalid event destination');
     const url = endpoint(config.url);
     checkToken(config.token);
     return [destination, { url, token: config.token }];
   }));
-  return () => transaction(pool, async client => {
+  async function deliver(client, auditTransactions) {
+    const args = [[...endpoints.keys()], eventTypes ?? null];
+    if (auditTransactions !== undefined) args.push(auditTransactions);
     const { rows } = await client.query(
       `SELECT pending.* FROM outbox_events pending
-       WHERE delivered_at IS NULL AND next_attempt_at<=clock_timestamp()
+       WHERE destination=ANY($1::text[]) AND delivered_at IS NULL AND next_attempt_at<=clock_timestamp()
+         ${auditTransactions === undefined ? '' : "AND pending.payload->>'transactionId'=ANY($3::text[])"}
+         AND ($2::text[] IS NULL OR pending.event_type=ANY($2::text[]))
          AND NOT EXISTS (SELECT 1 FROM outbox_events earlier
            WHERE earlier.destination=pending.destination AND earlier.aggregate_seq=pending.aggregate_seq
-             AND earlier.delivered_at IS NULL AND earlier.outbox_seq<pending.outbox_seq)
+             AND earlier.delivered_at IS NULL AND earlier.outbox_seq<pending.outbox_seq
+             AND ($2::text[] IS NULL OR earlier.event_type=ANY($2::text[])))
        ORDER BY outbox_seq FOR UPDATE OF pending SKIP LOCKED LIMIT 1`,
+      args,
     );
     if (!rows.length) return false;
     const event = rows[0], endpoint = endpoints.get(event.destination);
+    const traceId = requestId(event.event_id, event.payload);
     let ok = false, status = null;
     if (endpoint) {
       try {
         const response = await fetch(endpoint.url, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(timeoutMs),
-          headers: { Authorization: `Bearer ${endpoint.token}`, 'Content-Type': 'application/json' },
+          headers: { Authorization: `Bearer ${endpoint.token}`, 'Content-Type': 'application/json', 'X-Request-Id': traceId },
           body: JSON.stringify({ eventId: event.event_id, source, eventType: event.event_type, payload: event.payload }) });
         status = response.status;
         ok = await acknowledged(response, event.event_id);
@@ -165,17 +180,44 @@ function createRelay({ pool, source, destinations, timeoutMs = 5000 }) {
       `UPDATE outbox_events SET attempt_count=LEAST(attempt_count,2147483646)+1,
        next_attempt_at=clock_timestamp()+($2::int*interval '1 millisecond'),last_http_status=$3 WHERE event_id=$1`,
       [event.event_id, Math.min(60000, 250 * 2 ** Math.min(event.attempt_count, 8)), status]);
+    return { event: 'outbox_delivery', requestId: traceId, eventId: event.event_id, outcome: ok ? 'delivered' : 'retry' };
+  }
+  return async auditTransactions => {
+    const result = await transaction(pool, client => deliver(client, auditTransactions));
+    if (!result) return false;
+    if (process.env.NODE_ENV === 'production') {
+      try { console.log(JSON.stringify(result)); } catch { /* Logging does not affect committed delivery. */ }
+    }
     return true;
-  });
+  };
 }
 
-async function sendEvent(url, token, event) {
+async function flushAuditSnapshot(pool, relay, reconcile, ids) {
+  if (ids.length === 0) return;
+  const deadline = Date.now() + 8000;
+  // Active producer transactions are still invisible; wait only for durable decisions.
+  await reconcile(ids);
+  do {
+    const { rows: [{ pending }] } = await pool.query(
+      `SELECT EXISTS (SELECT 1 FROM outbox_events
+        WHERE destination='operations' AND delivered_at IS NULL AND payload->>'transactionId'=ANY($1::text[])) AS pending`,
+      [ids],
+    );
+    if (!pending) return;
+    if (Date.now() >= deadline) break;
+    if (await relay(ids)) continue;
+    await new Promise(resolve => setTimeout(resolve, 25));
+  } while (Date.now() < deadline);
+  throw new Error('Audit confirmation unavailable');
+}
+
+async function sendEvent(url, token, event, signal = AbortSignal.timeout(5000), extraHeaders) {
   validateEvent(event);
   checkToken(token);
   url = endpoint(url);
-  const response = await fetch(url, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(5000),
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(event) });
+  const response = await fetch(url, { method: 'POST', redirect: 'error', signal,
+    headers: { ...extraHeaders, Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'X-Request-Id': requestId(event.eventId, event.payload) }, body: JSON.stringify(event) });
   if (!await acknowledged(response, event.eventId)) throw new Error('Event acknowledgement unavailable');
 }
 
-module.exports = { enqueue, createReceiver, createRelay, eventHttpHandler, validateEvent, sendEvent };
+module.exports = { enqueue, createReceiver, createRelay, eventHttpHandler, validateEvent, sendEvent, flushAuditSnapshot };

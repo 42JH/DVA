@@ -6,6 +6,7 @@ import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import { configureApplication } from '../src/configure-application';
 import { DatabaseService } from '../src/database/database.service';
+import { AiPersonaClient } from '../src/ai-settings/ai-persona.client';
 
 describe('Operations infrastructure (e2e)', () => {
   let app: INestApplication<App>;
@@ -39,6 +40,69 @@ describe('Operations infrastructure (e2e)', () => {
     await request(app.getHttpServer()).get('/customer/health').expect(404);
   });
 
+  it('preserves the original public health and DB/AI readiness responses', async () => {
+    const config = app.get(ConfigService);
+    const previous = config.get<string>('AI_AGENT_URL');
+    config.set('AI_AGENT_URL', 'http://health-fixture');
+    const fetchHealth = jest.spyOn(globalThis, 'fetch');
+    try {
+      for (const databaseUp of [true, false]) {
+        pool.query.mockImplementation((sql: string) =>
+          sql === 'SELECT 1' && !databaseUp
+            ? Promise.reject(new Error('database unavailable'))
+            : Promise.resolve({ rows: [], rowCount: 0 }),
+        );
+        for (const aiUp of [true, false]) {
+          fetchHealth.mockImplementation((input, init) => {
+            expect(input).toBe('http://health-fixture/health');
+            expect(init?.signal).toBeInstanceOf(AbortSignal);
+            return Promise.resolve(new Response('', { status: aiUp ? 200 : 503 }));
+          });
+          await request(app.getHttpServer())
+            .get('/health/ready')
+            .set('Authorization', 'Bearer invalid')
+            .set('Cookie', 'dva_session=invalid')
+            .expect(databaseUp && aiUp ? 200 : 503)
+            .expect({
+              status: databaseUp && aiUp ? 'ok' : 'unhealthy',
+              dependencies: { database: databaseUp ? 'up' : 'down', aiAgent: aiUp ? 'up' : 'down' },
+            });
+          await request(app.getHttpServer())
+            .get('/health')
+            .expect(200)
+            .expect({ status: 'ok', service: 'backend' });
+        }
+      }
+      pool.query.mockResolvedValue({ rows: [], rowCount: 0 });
+      fetchHealth.mockImplementation(() => Promise.resolve(new Response('', { status: 200 })));
+      const previousQueries = pool.query.mock.calls.length;
+      await Promise.all(
+        Array.from({ length: 20 }, () =>
+          request(app.getHttpServer())
+            .get('/health/ready')
+            .expect(200)
+            .expect({
+              status: 'ok',
+              dependencies: { database: 'up', aiAgent: 'up' },
+            }),
+        ),
+      );
+      expect(pool.query.mock.calls.length - previousQueries).toBe(20);
+      pool.query.mockResolvedValue({ rows: [], rowCount: 0 });
+      fetchHealth.mockRejectedValue(new Error('AI unreachable'));
+      await request(app.getHttpServer())
+        .get('/health/ready')
+        .expect(503)
+        .expect({ status: 'unhealthy', dependencies: { database: 'up', aiAgent: 'down' } });
+      await request(app.getHttpServer()).get('/api/health').expect(404);
+      await request(app.getHttpServer()).get('/api/health/ready').expect(404);
+    } finally {
+      pool.query.mockResolvedValue({ rows: [], rowCount: 0 });
+      fetchHealth.mockRestore();
+      config.set('AI_AGENT_URL', previous);
+    }
+  });
+
   it('serves Swagger UI and its assets under the same prefix', async () => {
     await request(app.getHttpServer())
       .get('/operations/docs')
@@ -56,6 +120,8 @@ describe('Operations infrastructure (e2e)', () => {
       .expect(200)
       .expect(({ body }: { body: { info: { title: string }; paths: Record<string, unknown> } }) => {
         expect(body.info.title).toBe('DVA Operations API');
+        expect(body.paths['/health']).toBeUndefined();
+        expect(body.paths['/health/ready']).toBeUndefined();
         expect(Object.keys(body.paths)).toEqual(
           expect.arrayContaining([
             '/operations/health',
@@ -110,7 +176,28 @@ describe('Operations infrastructure (e2e)', () => {
     await request(app.getHttpServer()).get('/api/ai/options').expect(401);
     const token = 'persona-test-token-'.padEnd(40, 'p');
     app.get(ConfigService).set('AI_PERSONA_TOKEN', token);
+    const previousAiUrl = app.get(ConfigService).get<string>('AI_AGENT_URL');
+    app.get(ConfigService).set('AI_AGENT_URL', 'http://persona-fixture');
+    const capabilities = {
+      voices: [{ id: 'fixture', label: 'Fixture voice' }],
+      speakingRate: { min: null, max: null },
+      turnWaitLevels: ['NORMAL'],
+    };
+    const fetchOptions = jest.spyOn(globalThis, 'fetch');
     try {
+      fetchOptions.mockImplementation(() =>
+        Promise.resolve(new Response(JSON.stringify(capabilities))),
+      );
+      const client = app.get(AiPersonaClient);
+      const [first, second] = await Promise.all([client.options(), client.options()]);
+      first.voices[0].label = 'Caller changed';
+      expect(second).toEqual(capabilities);
+      fetchOptions.mockImplementation(() => Promise.resolve(new Response('', { status: 503 })));
+      await expect(client.options()).rejects.toMatchObject({ status: 503 });
+      fetchOptions.mockImplementation(() =>
+        Promise.resolve(new Response(JSON.stringify(capabilities))),
+      );
+      await expect(client.options()).resolves.toEqual(capabilities);
       await request(app.getHttpServer())
         .get('/api/ai/config')
         .set('Authorization', 'Bearer wrong')
@@ -121,6 +208,8 @@ describe('Operations infrastructure (e2e)', () => {
         .set('Cookie', 'dva_session=invalid')
         .expect(401);
     } finally {
+      fetchOptions.mockRestore();
+      app.get(ConfigService).set('AI_AGENT_URL', previousAiUrl);
       app.get(ConfigService).set('AI_PERSONA_TOKEN', undefined);
     }
   });
