@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>디바콜 관제</title>
+<style>
+  :root { --blue: #2ea3ff; --line: #d6e9fb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 18px/1.5 system-ui, sans-serif; background: #fff; color: #1a1a1a; height: 100vh; display: flex; flex-direction: column; }
+  header { background: var(--blue); color: #fff; padding: 8px 16px; display: flex; gap: 16px; align-items: center; }
+  header h1 { font-size: 22px; margin: 0; flex: 1; }
+  header button { font: inherit; background: #fff; color: var(--blue); border: 0; border-radius: 6px; padding: 4px 12px; cursor: pointer; }
+  main { flex: 1; display: grid; grid-template-columns: 280px 1fr 1fr; gap: 0; min-height: 0; }
+  section { border-right: 1px solid var(--line); overflow: auto; padding: 12px; min-height: 0; }
+  h2 { font-size: 18px; color: var(--blue); margin: 8px 0; }
+  .call { padding: 8px; border: 1px solid var(--line); border-radius: 8px; margin-bottom: 8px; cursor: pointer; }
+  .call.sel { border-color: var(--blue); background: #f0f8ff; }
+  .muted { color: #777; font-size: 15px; }
+  .bubble { margin: 6px 0; padding: 6px 10px; border-radius: 10px; max-width: 90%; }
+  .customer { background: #f2f2f2; }
+  .agent { background: #e3f2ff; margin-left: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 16px; }
+  td, th { border-bottom: 1px solid var(--line); padding: 4px 6px; text-align: left; vertical-align: top; }
+  .tool { border: 1px solid var(--line); border-radius: 8px; padding: 6px; margin: 6px 0; font-size: 15px; }
+  .tool pre { white-space: pre-wrap; word-break: break-all; margin: 4px 0 0; max-height: 160px; overflow: auto; }
+  .error { color: #c62828; }
+  #graph { display: none; position: fixed; inset: 52px 0 0; background: #fff; overflow: auto; padding: 16px; }
+  #graph .svg svg { max-width: none !important; }
+  #orders { display: none; position: fixed; inset: 52px 0 0; background: #fff; overflow: auto; padding: 16px; }
+</style>
+</head>
+<body>
+<header><h1>디바콜 관제</h1><span id="conn" class="muted"></span><button id="graphToggle">그래프</button><button id="toggle">접수 주문</button></header>
+<main>
+  <section><h2>통화</h2><div id="calls"></div></section>
+  <section><h2>받아쓰기</h2><div id="transcript"></div></section>
+  <section><h2>주문·진행</h2><div id="detail"></div><h2>도구 호출</h2><div id="tools"></div></section>
+</main>
+<div id="graph"><h2 id="graphTitle"></h2><div class="svg" id="graphSvg"></div></div>
+<div id="orders"><h2>접수 주문</h2><table id="orderTable"></table></div>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js"></script>
+<script>
+const calls = new Map();
+let selected = null;
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+const time = (t) => t ? new Date(t * 1000).toLocaleTimeString("ko-KR") : "";
+// 주소 확정 단계(address)의 결과
+const ADDRESS_STATUS = { confirmed: "확정", ambiguous: "1등으로 정함", not_found: "못 찾음(들은 그대로)", off: "보정 꺼짐" };
+const LABELS = { sender_name: "보내는 분", sender_phone: "보내는 분 전화", sender_address: "출발지", sender_address_detail: "출발지 상세",
+  receiver_name: "받는 분", receiver_phone: "받는 분 전화", receiver_address: "도착지", receiver_address_detail: "도착지 상세", item: "물품",
+  document_count: "서류", small_box_count: "소형 박스", medium_box_count: "중형 박스", big_box_count: "대형 박스", other_item: "기타 물품",
+  item_price: "물품 가액", client_comment: "요청 사항", sender_geo: "출발지 지번·좌표", receiver_geo: "도착지 지번·좌표", fare: "운임" };
+const CUSTOMER = { new: "신규", registered: "등록", withdrawn: "탈퇴" };
+const won = (v) => v == null ? "<span class=muted>모름</span>" : `${Number(v).toLocaleString("ko-KR")}원`;
+// 주문 항목 표. 값이 있는 항목만(hideEmpty) 또는 전부
+const orderRows = (o, hideEmpty) => Object.entries(o).filter(([k, v]) => !hideEmpty || (v !== null && v !== "")).map(([k, v]) =>
+  `<tr><th>${esc(LABELS[k] || k)}</th><td>${k === "fare" ? won(v) : v === null ? "<span class=muted>-</span>" : typeof v === "object" ? "있음" : esc(v === "" ? "(없음)" : v)}</td></tr>`).join("");
+
+function render() {
+  const list = [...calls.values()].sort((a, b) => b.started_at - a.started_at);
+  if (!selected && list.length) selected = list[0].session_id;
+  $("calls").innerHTML = list.map((c) => `<div class="call ${c.session_id === selected ? "sel" : ""}" data-id="${esc(c.session_id)}">
+    <b>${esc(c.caller)}</b> <span class="muted">${time(c.started_at)}</span><br>${esc(c.status)} · ${esc(c.stage)}
+    ${c.end_reason ? `<br><span class="muted">종료: ${esc(c.end_reason)}</span>` : ""}</div>`).join("");
+  const c = calls.get(selected);
+  if (!c) return;
+  $("transcript").innerHTML = c.transcript.map((b) => `<div class="bubble ${esc(b.speaker)}">${esc(b.text)}</div>`).join("");
+  const total = c.parcels.length && c.parcels.every((p) => p.fare != null) ? c.parcels.reduce((s, p) => s + p.fare, 0) : null;
+  $("detail").innerHTML = `<table><tr><th>고객</th><td>${esc(CUSTOMER[c.customer_type] || c.customer_type)}${c.customer_seq ? ` (고객번호 ${esc(c.customer_seq)})` : ""}</td></tr>
+    <tr><th>단계</th><td>${esc(c.stage)}</td></tr><tr><th>다음</th><td>${esc(c.next)}</td></tr>
+    <tr><th>수거 희망</th><td>${esc(c.pickup_at || "-")}</td></tr><tr><th>결제 방식</th><td>${esc(c.payment_method || "-")}</td></tr>
+    <tr><th>통화 결과</th><td>${c.result ? `${esc(c.result.status)} ${esc(c.result.parcelNo || "")}` : "<span class=muted>보내기 전</span>"}</td></tr></table>
+    ${c.parcels.map((p, i) => `<h2>담은 택배 ${i + 1}</h2><table>${orderRows(p, true)}</table>`).join("")}
+    ${c.parcels.length ? `<div>운임 합계 ${won(total)}</div>` : ""}
+    <h2>받는 중인 택배</h2><table>${orderRows(c.order, false)}<tr><th>운임</th><td>${won(c.fare)}</td></tr>
+    <tr><th>주소 확정</th><td>${esc(Object.entries(c.address || {}).map(([k, v]) => `${LABELS[k] || k} ${ADDRESS_STATUS[v.status] || v.status}${v.changed ? "(바뀜)" : ""}`).join(", "))}</td></tr></table>
+    <h2>단계 기록</h2>${c.history.map((h) => `<div class="muted">${time(h.at)} ${esc(h.from)} → ${esc(h.to)} (${esc(h.tool)}, ${esc(h.event)})</div>`).join("")}
+    ${c.errors.map((e) => `<div class="error">${time(e.at)} ${esc(e.message)}</div>`).join("")}`;
+  renderGraph(c);
+  $("tools").innerHTML = [...c.tool_calls].reverse().map((t) => `<div class="tool"><b>${esc(t.name)}</b> · ${esc(t.status)}
+    ${t.elapsed_ms != null ? `· ${t.elapsed_ms}ms` : ""}${t.total_ms != null ? ` · 말 끝→진행 상태 ${t.total_ms}ms` : ""}<pre>${esc(t.arguments)}</pre>${t.output ? `<pre>${esc(JSON.stringify(t.output, null, 1))}</pre>` : ""}</div>`).join("");
+}
+
+// 상태 그래프(/monitor/api/graph)에 선택한 통화의 지금 노드(파랑)와 거쳐 온 노드(옅은 파랑)를 칠한다
+let graphText = null, graphKey = "";
+async function renderGraph(c) {
+  if ($("graph").style.display !== "block") return;
+  const visited = [...new Set(c.history.map((h) => h.to).concat(c.history.map((h) => h.from)))].filter((s) => s && s !== c.stage);
+  const key = `${c.session_id}|${c.stage}|${visited.join(",")}`;
+  if (key === graphKey) return;
+  graphKey = key;
+  $("graphTitle").textContent = `${c.caller} · 지금 ${c.stage || "-"}${c.task ? ` (업무 ${c.task})` : ""}`;
+  graphText ??= (await (await fetch("/monitor/api/graph")).json()).mermaid;
+  const marks = ["classDef current fill:#2ea3ff,color:#fff,stroke:#1565c0,stroke-width:3px",
+    "classDef visited fill:#d6e9fb,stroke:#2ea3ff"];
+  if (visited.length) marks.push(`class ${visited.join(",")} visited`);
+  if (c.stage) marks.push(`class ${c.stage} current`);
+  if (!window.mermaid) { $("graphSvg").textContent = "그래프 라이브러리(CDN)를 불러오지 못했습니다."; return; }
+  const { svg } = await mermaid.render("flowGraph", [graphText, ...marks].join("\n"));
+  if (graphKey !== key) return;
+  $("graphSvg").innerHTML = svg;
+  $("graphSvg").querySelector(".current")?.scrollIntoView({ block: "center", inline: "center" });
+}
+
+$("graphToggle").addEventListener("click", () => {
+  const box = $("graph");
+  box.style.display = box.style.display === "block" ? "none" : "block";
+  graphKey = "";
+  render();
+});
+
+$("calls").addEventListener("click", (e) => {
+  const el = e.target.closest(".call");
+  if (el) { selected = el.dataset.id; render(); }
+});
+
+$("toggle").addEventListener("click", async () => {
+  const box = $("orders");
+  if (box.style.display === "block") { box.style.display = "none"; return; }
+  box.style.display = "block";
+  const orders = await (await fetch("/monitor/api/orders")).json();
+  // shortcut: 가짜 백엔드(mock)의 통화 결과만 보인다. 실제 백엔드 목록 API는 관리자 세션이 필요하다
+  $("orderTable").innerHTML = `<tr><th>주문번호</th><th>결과</th><th>상태</th><th>택배 수</th></tr>` +
+    orders.map((o) => `<tr><td>${esc(o.order_no)}</td><td>${esc(o.outcome)}</td><td>${esc(o.status)}</td>
+      <td>${esc(o.parcels)}</td></tr>`).join("");
+});
+
+// CDN을 못 받아도 관제(통화 목록·받아쓰기)는 돌아가야 한다: 그래프만 빠진다
+window.mermaid?.initialize({ startOnLoad: false, securityLevel: "strict", flowchart: { useMaxWidth: false, htmlLabels: false } });
+const source = new EventSource("/monitor/api/stream");
+source.onopen = () => { $("conn").textContent = "연결됨"; };
+source.onerror = () => { $("conn").textContent = "다시 연결 중…"; };
+source.onmessage = (e) => {
+  const msg = JSON.parse(e.data);
+  if (msg.type === "call") { calls.set(msg.call.session_id, msg.call); render(); }
+};
+</script>
+</body>
+</html>

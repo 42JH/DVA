@@ -1,0 +1,730 @@
+const customerAddress = require('./helpers/customer-address.cjs');
+const { testMembership } = require('./helpers/membership.cjs');
+require('reflect-metadata');
+const { before, after, test } = require('node:test');
+const assert = require('node:assert/strict');
+const { randomUUID, randomInt } = require('node:crypto');
+const {
+  createTestSession,
+  createTestPool,
+  startTestApp,
+  businessHeaders,
+} = require('./helpers/application.cjs');
+
+assert.equal(process.env.NODE_ENV, 'test');
+assert.equal(process.env.DB_NAME, 'dva_webhook_test');
+assert.ok(['db', '127.0.0.1'].includes(process.env.DB_HOST));
+process.env.SWAGGER_ENABLED = 'false';
+process.env.CORS_ORIGINS = 'http://localhost:5173';
+const { AuditService } = require('../dist/audit/audit.service');
+
+const pool = createTestPool();
+const apps = [];
+const origin = 'http://localhost:5173';
+let app, base, adminHeaders;
+const logs = [];
+const address = (overrides = {}) => ({
+  name: '수령인',
+  phoneNumber: '01000000001',
+  roadAddress: '예시로 12',
+  jibunAddress: '예시동 12',
+  detailAddress: randomUUID(),
+  dongName: '예시동',
+  postalCode: '01234',
+  ...overrides,
+});
+async function request(method, path, body, headers = adminHeaders) {
+  return fetch(base + '/api' + path, {
+    method,
+    headers: { 'Content-Type': 'application/json', ...headers },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+}
+async function success(response, status = 200) {
+  assert.equal(response.status, status, await response.clone().text());
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+  const body = await response.json();
+  assert.equal(body.meta.requestId, response.headers.get('x-request-id'));
+  return body.data;
+}
+async function error(response, status, code) {
+  assert.equal(response.status, status, await response.clone().text());
+  const body = await response.json();
+  assert.equal(body.error.code, code);
+  assert.ok(body.meta.requestId);
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+}
+async function admin(role = 'OPERATOR') {
+  const loginId = 'pin' + randomUUID().replaceAll('-', '').slice(0, 17);
+  const { rows } = await pool.query(
+    `INSERT INTO admin_users(login_id,name,password_hash,role,status)
+    VALUES($1,'주소록 관리자',$2,$3,'ACTIVE') RETURNING admin_user_seq`,
+    [loginId, 'not-for-login', role],
+  );
+  return { Origin: origin, Cookie: await createTestSession(pool, rows[0].admin_user_seq) };
+}
+before(async () => {
+  // check:docker의 선행 DB/주문 테스트가 배포 마이그레이션을 적용한다.
+  assert.equal(
+    (
+      await pool.query(`SELECT EXISTS(SELECT 1 FROM information_schema.columns
+    WHERE table_name='call_sessions' AND column_name='caller_phone_number') AS ready`)
+    ).rows[0].ready,
+    true,
+  );
+  app = await startTestApp(apps, { log: (entry) => logs.push(entry) });
+  base = await app.getUrl();
+  adminHeaders = await admin();
+});
+after(async () => {
+  for (const application of apps) await application.close();
+  await pool.end();
+});
+async function fixture({
+  customerStatus = 'ACTIVE',
+  memberStatus = 'ACTIVE',
+  companyStatus = 'ACTIVE',
+  role = 'MEMBER',
+  ended = false,
+} = {}) {
+  const phone = '010' + String(randomInt(10000000, 100000000));
+  const customer = (
+    await pool.query(
+      `INSERT INTO customers(name,phone_number,status)
+    VALUES('주소록 고객',$1,$2) RETURNING customer_seq`,
+      [phone, customerStatus],
+    )
+  ).rows[0].customer_seq;
+  const company = (
+    await pool.query(
+      `INSERT INTO organizations(name,status)
+    VALUES('주소록 기업',$1) RETURNING organization_seq`,
+      [companyStatus],
+    )
+  ).rows[0].organization_seq;
+  await testMembership(pool, {
+    customerSeq: customer,
+    organizationSeq: company,
+    employeeNo: randomUUID(),
+    role,
+    status: memberStatus,
+  });
+  const call = (
+    await pool.query(
+      `INSERT INTO call_sessions(provider_call_id,caller_phone_number,started_at,ended_at,customer_seq)
+    VALUES($1,$2,$3,$4,$5) RETURNING call_session_seq`,
+      [
+        randomUUID(),
+        phone,
+        ended ? '2026-10-27T00:00:00Z' : null,
+        ended ? '2026-10-27T00:01:00Z' : null,
+        customer,
+      ],
+    )
+  ).rows[0].call_session_seq;
+  return {
+    customer,
+    company,
+    call,
+    phone,
+    ai: { ...businessHeaders(), call_session_seq: String(call) },
+  };
+}
+async function personal(f, data = address(), extra = {}, headers = adminHeaders) {
+  return success(
+    await request(
+      'POST',
+      `/customers/${f.customer}/pins`,
+      { addressData: data, ...extra },
+      headers,
+    ),
+    201,
+  );
+}
+async function stored(id) {
+  return (await pool.query('SELECT * FROM personal_pins WHERE personal_pin_seq=$1', [id])).rows[0];
+}
+
+test('AI registers, searches and edits its active customer personal pins with business authentication', async () => {
+  const f = await fixture();
+  const input = address({ detailAddress: '101호' });
+  const created = await personal(f, input, { label: '  집  ' }, f.ai);
+  assert.equal(created.version, 1);
+  assert.deepEqual(Object.keys(created).sort(), ['personalPinSeq', 'version']);
+  const list = await request(
+    'GET',
+    `/customers/${f.customer}/pins?q=${encodeURIComponent('집')}`,
+    undefined,
+    f.ai,
+  );
+  assert.equal(list.status, 200);
+  const body = await list.json();
+  assert.deepEqual(Object.keys(body).sort(), ['data', 'hasNext', 'total_count']);
+  assert.equal(body.hasNext, false);
+  assert.deepEqual(body.data[0], {
+    ...created,
+    customerSeq: f.customer,
+    label: '집',
+    addressData: input,
+  });
+  const changed = await success(
+    await request(
+      'PATCH',
+      `/pins/${created.personalPinSeq}`,
+      {
+        addressData: { ...input, detailAddress: '103호' },
+      },
+      f.ai,
+    ),
+  );
+  assert.equal(changed.version, 2);
+  assert.equal((await stored(created.personalPinSeq)).label, '집');
+  assert.equal((await stored(created.personalPinSeq)).address_data.detailAddress, '103호');
+});
+
+test('another caller cannot list, create or edit private pins', async () => {
+  const owner = await fixture();
+  const other = await fixture();
+  const p = await personal(owner);
+  for (const [method, path, body] of [
+    ['GET', `/customers/${owner.customer}/pins`],
+    ['POST', `/customers/${owner.customer}/pins`, { addressData: address() }],
+    ['PATCH', `/pins/${p.personalPinSeq}`, { label: '침범' }],
+  ])
+    await error(await request(method, path, body, other.ai), 403, 'FORBIDDEN');
+  assert.equal((await stored(p.personalPinSeq)).label, null);
+  await pool.query(
+    'UPDATE memberships SET organization_seq=$1,department_seq=(SELECT department_seq FROM departments WHERE organization_seq=$1 LIMIT 1) WHERE customer_seq=$2',
+    [owner.company, other.customer],
+  );
+  await error(
+    await request('GET', `/customers/${owner.customer}/pins`, undefined, other.ai),
+    403,
+    'FORBIDDEN',
+  );
+});
+
+test('invalid call IDs are rejected and ended calls permit personal PIN writes while reads remain blocked', async () => {
+  const f = await fixture();
+  const p = await personal(f);
+  for (const header of [undefined, '0', '-1', '1.5', 'abc', '2147483648']) {
+    const headers = {
+      ...businessHeaders(),
+      ...(header === undefined ? {} : { call_session_seq: header }),
+    };
+    await error(
+      await request('GET', `/customers/${f.customer}/pins`, undefined, headers),
+      400,
+      'INVALID_REQUEST',
+    );
+  }
+  await error(
+    await request('GET', `/customers/${f.customer}/pins`, undefined, {
+      ...businessHeaders(),
+      call_session_seq: '2147483647',
+    }),
+    404,
+    'NOT_FOUND',
+  );
+  await pool.query(
+    "UPDATE call_sessions SET started_at='2026-10-27T00:00:00Z',ended_at='2026-10-27T00:01:00Z' WHERE call_session_seq=$1",
+    [f.call],
+  );
+  await error(
+    await request('GET', `/customers/${f.customer}/pins`, undefined, f.ai),
+    409,
+    'INVALID_STATE',
+  );
+  const data = address();
+  const added = await personal(f, data, {}, f.ai);
+  assert.deepEqual((await stored(added.personalPinSeq)).address_data, data);
+  const replacement = address();
+  await success(
+    await request(
+      'PATCH',
+      `/pins/${p.personalPinSeq}`,
+      { label: '끝난 통화', addressData: replacement },
+      f.ai,
+    ),
+  );
+  assert.deepEqual((await stored(p.personalPinSeq)).address_data, replacement);
+  await error(
+    await request('POST', `/customers/${f.customer}/pins`, { addressData: data }, f.ai),
+    409,
+    'DUPLICATE_RESOURCE',
+  );
+});
+
+test('post-call PIN writes retain customer identity, deletion and retention checks', async () => {
+  const other = await fixture();
+  for (const change of [
+    'customer_seq=$2',
+    'deleted_at=clock_timestamp()',
+    "incoming_at=clock_timestamp()-interval '6 years'",
+  ]) {
+    const f = await fixture({ ended: true });
+    const pin = await personal(f);
+    const before = await stored(pin.personalPinSeq);
+    await pool.query(
+      `UPDATE call_sessions SET ${change} WHERE call_session_seq=$1`,
+      change.includes('$2') ? [f.call, other.customer] : [f.call],
+    );
+    const status = change.includes('$2') ? 403 : 404;
+    const code = status === 403 ? 'FORBIDDEN' : 'NOT_FOUND';
+    await error(
+      await request('POST', `/customers/${f.customer}/pins`, { addressData: address() }, f.ai),
+      status,
+      code,
+    );
+    await error(
+      await request('PATCH', `/pins/${pin.personalPinSeq}`, { label: '거절' }, f.ai),
+      status,
+      code,
+    );
+    assert.deepEqual(await stored(pin.personalPinSeq), before);
+  }
+});
+
+test('an ended call cannot modify a new customer who reuses the deleted original customer phone', async () => {
+  const f = await fixture({ ended: true });
+  await pool.query('UPDATE customers SET deleted_at=clock_timestamp() WHERE customer_seq=$1', [
+    f.customer,
+  ]);
+  const response = await request(
+    'POST',
+    '/customers',
+    { address: customerAddress(), name: '새 고객', phoneNumber: f.phone },
+    businessHeaders(),
+  );
+  const customer = await success(response, 201);
+  assert.notEqual(customer.customerSeq, f.customer);
+  await error(
+    await request(
+      'POST',
+      `/customers/${customer.customerSeq}/pins`,
+      { addressData: address() },
+      f.ai,
+    ),
+    403,
+    'FORBIDDEN',
+  );
+  assert.equal(
+    (await pool.query('SELECT 1 FROM personal_pins WHERE customer_seq=$1', [customer.customerSeq]))
+      .rowCount,
+    0,
+  );
+});
+
+test('withdrawal blocks personal access for callers and administrators', async () => {
+  const f = await fixture();
+  const p = await personal(f);
+  await pool.query("UPDATE customers SET status='WITHDRAWN' WHERE customer_seq=$1", [f.customer]);
+  await error(
+    await request('PATCH', `/pins/${p.personalPinSeq}`, { label: '금지' }, f.ai),
+    403,
+    'FORBIDDEN',
+  );
+  await error(
+    await request('POST', `/customers/${f.customer}/pins`, { addressData: address() }),
+    409,
+    'INVALID_STATE',
+  );
+});
+
+test('duplicate personal addresses use existing normalized DB identity, independent of labels and request keys', async () => {
+  const f = await fixture();
+  const data = address({ name: 'TEST Name', detailAddress: '가 101호' });
+  const p = await personal(
+    f,
+    data,
+    { label: '첫 주소' },
+    { ...f.ai, 'Idempotency-Key': randomUUID() },
+  );
+  const duplicate = {
+    ...data,
+    name: '  test   name  ',
+    detailAddress: data.detailAddress.normalize('NFD'),
+  };
+  await error(
+    await request(
+      'POST',
+      `/customers/${f.customer}/pins`,
+      { label: '다른 별칭', addressData: duplicate },
+      f.ai,
+    ),
+    409,
+    'DUPLICATE_RESOURCE',
+  );
+  const other = await fixture();
+  await personal(other, data);
+  assert.equal((await stored(p.personalPinSeq)).label, '첫 주소');
+  const concurrent = address();
+  const results = await Promise.all(
+    [1, 2].map(() =>
+      request('POST', `/customers/${f.customer}/pins`, { addressData: concurrent }, f.ai),
+    ),
+  );
+  assert.deepEqual(results.map((r) => r.status).sort(), [201, 409]);
+});
+
+test('stale expectedVersion is accepted without a re-read and omitted fields survive', async () => {
+  const f = await fixture();
+  const data = address({ detailAddress: '101호' });
+  const p = await personal(f, data, { label: '집' });
+  assert.equal(
+    (
+      await success(
+        await request('PATCH', `/pins/${p.personalPinSeq}`, {
+          addressData: { ...data, detailAddress: '102호' },
+        }),
+      )
+    ).version,
+    2,
+  );
+  assert.equal(
+    (
+      await success(
+        await request(
+          'PATCH',
+          `/pins/${p.personalPinSeq}`,
+          { addressData: { ...data, detailAddress: '103호' }, expectedVersion: 1 },
+          f.ai,
+        ),
+      )
+    ).version,
+    3,
+  );
+  assert.equal((await stored(p.personalPinSeq)).address_data.detailAddress, '103호');
+  assert.equal((await stored(p.personalPinSeq)).label, '집');
+  const cleared = await success(
+    await request('PATCH', `/pins/${p.personalPinSeq}`, { label: null }, f.ai),
+  );
+  assert.equal(cleared.version, 4);
+  assert.equal((await stored(p.personalPinSeq)).address_data.detailAddress, '103호');
+  assert.equal(
+    (await success(await request('PATCH', `/pins/${p.personalPinSeq}`, { label: null }, f.ai)))
+      .version,
+    4,
+  );
+});
+
+test('concurrent partial updates preserve unrelated fields without a version conflict', async () => {
+  const f = await fixture();
+  const data = address();
+  const p = await personal(f, data);
+  const results = await Promise.all([
+    request('PATCH', `/pins/${p.personalPinSeq}`, { label: '새 별칭', expectedVersion: 1 }, f.ai),
+    request('PATCH', `/pins/${p.personalPinSeq}`, {
+      addressData: { ...data, detailAddress: '새 상세주소' },
+      expectedVersion: 1,
+    }),
+  ]);
+  for (const response of results) assert.equal(response.status, 200);
+  const final = await stored(p.personalPinSeq);
+  assert.equal(final.label, '새 별칭');
+  assert.equal(final.address_data.detailAddress, '새 상세주소');
+  assert.equal(final.version, 3);
+});
+
+test('duplicate edits roll back all fields and version rather than partially saving', async () => {
+  const f = await fixture();
+  const first = await personal(f, address(), { label: '보존' });
+  const duplicate = address();
+  await personal(f, duplicate);
+  const previous = await stored(first.personalPinSeq);
+  await error(
+    await request('PATCH', `/pins/${first.personalPinSeq}`, {
+      label: '저장하면 안 됨',
+      addressData: duplicate,
+    }),
+    409,
+    'DUPLICATE_RESOURCE',
+  );
+  assert.deepEqual(await stored(first.personalPinSeq), previous);
+});
+
+test('literal search, pagination and generated search updates stay scoped', async () => {
+  const f = await fixture();
+  for (let i = 0; i < 3; i++)
+    await personal(f, address({ name: '검색 수령인' }), { label: i === 0 ? '100%_특별' : '검색' });
+  let response = await request('GET', `/customers/${f.customer}/pins?limit=2`, undefined, f.ai);
+  let body = await response.json();
+  assert.equal(body.data.length, 2);
+  assert.equal(body.hasNext, true);
+  assert.equal(body.total_count, 3);
+  const pastEnd = await request('GET', `/customers/${f.customer}/pins?offset=100`, undefined, f.ai);
+  assert.deepEqual(await pastEnd.json(), { data: [], hasNext: false, total_count: 3 });
+  assert.ok(body.data[0].personalPinSeq < body.data[1].personalPinSeq);
+  response = await request(
+    'GET',
+    `/customers/${f.customer}/pins?limit=2&offset=2`,
+    undefined,
+    f.ai,
+  );
+  body = await response.json();
+  assert.equal(body.data.length, 1);
+  assert.equal(body.hasNext, false);
+  response = await request('GET', `/customers/${f.customer}/pins?q=%25_`, undefined, f.ai);
+  body = await response.json();
+  assert.equal(body.data.length, 1);
+  assert.equal(body.total_count, 1);
+  const id = body.data[0].personalPinSeq;
+  await success(await request('PATCH', `/pins/${id}`, { label: '새검색어' }));
+  assert.equal(
+    (await (await request('GET', `/customers/${f.customer}/pins?q=%25_`, undefined, f.ai)).json())
+      .data.length,
+    0,
+  );
+  assert.equal(
+    (
+      await (
+        await request(
+          'GET',
+          `/customers/${f.customer}/pins?q=${encodeURIComponent('새검색어')}`,
+          undefined,
+          f.ai,
+        )
+      ).json()
+    ).data.length,
+    1,
+  );
+});
+
+test('editing a referenced pin leaves existing order address snapshots and order version unchanged', async () => {
+  const f = await fixture();
+  const p = await personal(f);
+  const order = (
+    await pool.query('INSERT INTO orders(customer_seq) VALUES($1) RETURNING order_seq', [
+      f.customer,
+    ])
+  ).rows[0].order_seq;
+  const parcel = (
+    await pool.query(
+      `INSERT INTO order_parcels(order_seq,parcel_position,origin_pin_scope,origin_pin_seq,origin_detail_address)
+    VALUES($1,1,'PERSONAL',$2,'접수 당시 주소') RETURNING order_parcel_seq`,
+      [order, p.personalPinSeq],
+    )
+  ).rows[0].order_parcel_seq;
+  const beforeOrder = (await pool.query('SELECT * FROM orders WHERE order_seq=$1', [order]))
+    .rows[0];
+  await success(
+    await request(
+      'PATCH',
+      `/pins/${p.personalPinSeq}`,
+      { addressData: address({ detailAddress: '수정된 주소' }) },
+      f.ai,
+    ),
+  );
+  assert.equal(
+    (
+      await pool.query(
+        'SELECT origin_detail_address FROM order_parcels WHERE order_parcel_seq=$1',
+        [parcel],
+      )
+    ).rows[0].origin_detail_address,
+    '접수 당시 주소',
+  );
+  assert.deepEqual(
+    (await pool.query('SELECT * FROM orders WHERE order_seq=$1', [order])).rows[0],
+    beforeOrder,
+  );
+});
+
+test('audit success is atomic with writes and contains no address or phone; failure rolls back changes', async () => {
+  const f = await fixture({ ended: true });
+  const p = await personal(f);
+  const requestId = randomUUID();
+  await success(
+    await request(
+      'PATCH',
+      `/pins/${p.personalPinSeq}`,
+      { label: '기록' },
+      { ...f.ai, 'X-Request-Id': requestId },
+    ),
+  );
+  const audit = (
+    await pool.query("SELECT * FROM audit_logs WHERE request_id=$1 AND result='SUCCESS'", [
+      requestId,
+    ])
+  ).rows;
+  assert.equal(audit.length, 1);
+  assert.equal(audit[0].actor_type, 'AI');
+  assert.equal(audit[0].actor_name, 'AI');
+  assert.equal(audit[0].target_seq, p.personalPinSeq);
+  assert.deepEqual(audit[0].metadata, {});
+  const service = app.get(AuditService);
+  const original = service.recordSuccess;
+  const before = await stored(p.personalPinSeq);
+  service.recordSuccess = async () => {
+    throw new Error('private audit failure');
+  };
+  try {
+    await error(
+      await request('PATCH', `/pins/${p.personalPinSeq}`, { label: '롤백 대상' }, f.ai),
+      500,
+      'INTERNAL_ERROR',
+    );
+    assert.deepEqual(await stored(p.personalPinSeq), before);
+    const data = address();
+    await error(
+      await request('POST', `/customers/${f.customer}/pins`, { addressData: data }, f.ai),
+      500,
+      'INTERNAL_ERROR',
+    );
+    assert.equal(
+      (
+        await pool.query(
+          'SELECT count(*) FROM personal_pins WHERE customer_seq=$1 AND address_data=$2',
+          [f.customer, data],
+        )
+      ).rows[0].count,
+      '0',
+    );
+  } finally {
+    service.recordSuccess = original;
+  }
+});
+
+test('all admin roles delete PIN arrays across customers without changing owners or order snapshots', async () => {
+  for (const role of ['OPERATOR', 'SYSTEM_ADMIN']) {
+    const headers = await admin(role);
+    const a = await fixture(),
+      b = await fixture();
+    const first = await personal(a),
+      second = await personal(b);
+    const ids = [first.personalPinSeq, second.personalPinSeq];
+    const order = (
+      await pool.query(
+        "INSERT INTO orders(customer_seq,status) VALUES($1,'COLLECTING') RETURNING order_seq",
+        [a.customer],
+      )
+    ).rows[0].order_seq;
+    await pool.query(
+      "INSERT INTO order_parcels(order_seq,parcel_position,origin_name,origin_phone_number,document_count) VALUES($1,1,'과거 발송인','01012345678',1)",
+      [order],
+    );
+    const preserved = async () =>
+      (
+        await pool.query(
+          "SELECT jsonb_build_object('customers',(SELECT jsonb_agg(c ORDER BY customer_seq) FROM customers c WHERE customer_seq=ANY($1::int[])),'parcels',(SELECT jsonb_agg(p ORDER BY order_parcel_seq) FROM order_parcels p WHERE order_seq=$2)) AS data",
+          [[a.customer, b.customer], order],
+        )
+      ).rows[0].data;
+    const before = await preserved();
+    const requestId = randomUUID();
+    const response = await request(
+      'DELETE',
+      '/pins',
+      { personalPinSeqs: ids.toReversed() },
+      { ...headers, 'X-Request-Id': requestId },
+    );
+    assert.equal(response.status, 204, await response.clone().text());
+    assert.equal(await response.text(), '');
+    assert.deepEqual(await preserved(), before);
+    assert.ok((await stored(ids[0])).deleted_at);
+    assert.ok((await stored(ids[1])).deleted_at);
+    const listed = await request('GET', `/customers/${a.customer}/pins`, undefined, headers);
+    assert.equal((await listed.json()).total_count, 0);
+    assert.equal(
+      (
+        await pool.query(
+          "SELECT 1 FROM audit_logs WHERE request_id=$1 AND action='PERSONAL_PIN_DELETED' AND result='SUCCESS'",
+          [requestId],
+        )
+      ).rowCount,
+      2,
+    );
+    const replacement = await personal(a, (await stored(ids[0])).address_data);
+    assert.notEqual(replacement.personalPinSeq, ids[0]);
+    assert.equal(
+      (await request('DELETE', '/pins', { personalPinSeqs: [replacement.personalPinSeq] }, headers))
+        .status,
+      204,
+    );
+  }
+});
+
+test('PIN deletion rejects AI and invalid arrays and rolls back all rows on missing pins or audit failure', async () => {
+  const owner = await fixture();
+  const pins = [await personal(owner), await personal(owner)];
+  const ids = pins.map((p) => p.personalPinSeq);
+  const remove = (values, headers = adminHeaders) =>
+    request('DELETE', '/pins', { personalPinSeqs: values }, headers);
+  for (const values of [
+    [],
+    [ids[0], ids[0]],
+    ['1'],
+    [0],
+    [-1],
+    [1.1],
+    [2147483648],
+    Array.from({ length: 101 }, (_, i) => i + 1),
+    null,
+  ])
+    await error(await remove(values), 400, 'INVALID_REQUEST');
+  await error(await remove(ids, { ...owner.ai, Origin: origin }), 401, 'UNAUTHORIZED');
+  await error(await remove(ids, { ...businessHeaders(), Origin: origin }), 401, 'UNAUTHORIZED');
+  await error(
+    await remove(ids, { ...adminHeaders, Origin: 'https://untrusted.example' }),
+    403,
+    'FORBIDDEN',
+  );
+  await error(await remove([ids[0], 2147483647]), 404, 'NOT_FOUND');
+  const audit = app.get(AuditService),
+    original = audit.recordSuccess;
+  let writes = 0;
+  const requestId = randomUUID();
+  audit.recordSuccess = async function (event, client) {
+    if (event.action === 'PERSONAL_PIN_DELETED' && ++writes === 2)
+      throw new Error('test-only PIN audit failure');
+    return original.call(this, event, client);
+  };
+  try {
+    await error(
+      await remove(ids, { ...adminHeaders, 'X-Request-Id': requestId }),
+      500,
+      'INTERNAL_ERROR',
+    );
+  } finally {
+    audit.recordSuccess = original;
+  }
+  assert.equal((await stored(ids[0])).deleted_at, null);
+  assert.equal((await stored(ids[1])).deleted_at, null);
+  assert.equal(
+    (
+      await pool.query("SELECT 1 FROM audit_logs WHERE request_id=$1 AND result='SUCCESS'", [
+        requestId,
+      ])
+    ).rowCount,
+    0,
+  );
+  assert.equal((await remove([ids[1]])).status, 204);
+  await error(await remove(ids), 404, 'NOT_FOUND');
+  assert.equal((await stored(ids[0])).deleted_at, null);
+});
+
+test('PIN deletion uses a consistent customer-first lock order for overlap and lock-timeout recovery', async () => {
+  const owner = await fixture(),
+    a = await personal(owner),
+    b = await personal(owner);
+  const ids = [a.personalPinSeq, b.personalPinSeq];
+  const remove = (values) => request('DELETE', '/pins', { personalPinSeqs: values });
+  assert.deepEqual(
+    (await Promise.all([remove(ids), remove(ids.toReversed())])).map((r) => r.status).sort(),
+    [204, 404],
+  );
+  const held = await personal(owner);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('SELECT 1 FROM customers WHERE customer_seq=$1 FOR UPDATE', [
+      owner.customer,
+    ]);
+    await error(await remove([held.personalPinSeq]), 409, 'REQUEST_IN_PROGRESS');
+    assert.equal((await stored(held.personalPinSeq)).deleted_at, null);
+  } finally {
+    await client.query('ROLLBACK');
+    client.release();
+  }
+  assert.equal((await remove([held.personalPinSeq])).status, 204);
+});

@@ -1,0 +1,11 @@
+[Unit]
+Description=Check Dva IP certificate renewal every hour
+
+[Timer]
+OnBootSec=5min
+OnCalendar=hourly
+RandomizedDelaySec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

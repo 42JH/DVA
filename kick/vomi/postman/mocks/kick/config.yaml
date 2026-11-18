@@ -1,0 +1,10 @@
+version: 1
+name: kick-android-contract
+protocol: http
+port: 4018
+interceptRequests: true
+origin: 3.37.162.168
+scenarios:
+  - name: default
+    path: ./default.js
+    default: true

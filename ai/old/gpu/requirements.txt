@@ -1,0 +1,6 @@
+# Python 3.12 / CUDA 12.8 환경. GPU 서비스에만 설치한다.
+torch==2.7.1
+transformers==4.52.4
+fastapi
+uvicorn
+huggingface-hub

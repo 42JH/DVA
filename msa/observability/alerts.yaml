@@ -1,0 +1,31 @@
+groups:
+  - name: dva-msa
+    rules:
+      - alert: DvaMsaNoScrape
+        expr: >-
+          (
+            label_replace(vector(1), "service", "operations", "__name__", ".*")
+            or label_replace(vector(1), "service", "customer", "__name__", ".*")
+            or label_replace(vector(1), "service", "consultation", "__name__", ".*")
+            or label_replace(vector(1), "service", "delivery", "__name__", ".*")
+            or label_replace(vector(1), "service", "order", "__name__", ".*")
+          )
+          unless on (service) (last_over_time(up{job="dva-msa-app"}[75s]) == 1)
+        for: 1m
+        annotations:
+          summary: "{{ $labels.service }} has no reachable metrics target"
+      - alert: DvaMsaDatabaseUnavailable
+        expr: dva_database_up{job="dva-msa-app"} == 0
+        for: 1m
+        annotations:
+          summary: "{{ $labels.service }} cannot connect to its database"
+      - alert: DvaMsaOutboxDelayed
+        expr: dva_outbox_oldest_pending_seconds{job="dva-msa-app"} > 300
+        for: 1m
+        annotations:
+          summary: "{{ $labels.service }} has an undelivered event older than 5m"
+      - alert: DvaMsaOutboxMetricsUnavailable
+        expr: dva_outbox_metrics_success{job="dva-msa-app"} == 0
+        for: 1m
+        annotations:
+          summary: "{{ $labels.service }} cannot read outbox metrics"

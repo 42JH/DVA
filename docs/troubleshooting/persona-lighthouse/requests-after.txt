@@ -1,0 +1,42 @@
+# 4181 = 고치기 전 빌드(b062d685, !701), 4182 = 고친 뒤 빌드. API 지연 80ms
+
+http://localhost:4182/personas — 요청 11개 · 두 번 부른 것 0개 · 3박자 · 마지막 응답 358ms
+   82ms GET /auth/me
+  185ms GET /ai/options
+  186ms GET /personas
+  186ms GET /calls/active-count
+  186ms GET /parcel-drafts
+  186ms GET /unanswered-questions
+  201ms GET /calls/active-count/stream
+  271ms GET /personas/1
+  272ms GET /personas/1/versions
+  272ms GET /persona-check/scenarios
+  272ms GET /persona-check/runs
+
+http://localhost:4182/personas/1/tests/6 — 요청 10개 · 두 번 부른 것 0개 · 2박자 · 마지막 응답 307ms
+   32ms GET /auth/me
+  132ms GET /persona-check/scenarios
+  132ms GET /persona-check/runs
+  132ms GET /personas
+  132ms GET /personas/1
+  133ms GET /personas/1/versions
+  133ms GET /calls/active-count
+  133ms GET /parcel-drafts
+  133ms GET /unanswered-questions
+  140ms GET /calls/active-count/stream
+
+http://localhost:4182/personas/1/tests/6/A4 — 요청 14개 · 두 번 부른 것 0개 · 4박자 · 마지막 응답 323ms
+   53ms GET /auth/me
+  147ms GET /persona-check/scenarios
+  147ms GET /persona-check/runs
+  148ms GET /personas
+  148ms GET /personas/1
+  148ms GET /personas/1/versions
+  148ms GET /calls/active-count
+  148ms GET /parcel-drafts
+  148ms GET /unanswered-questions
+  154ms GET /calls/active-count/stream
+  240ms GET /persona-check/runs/seed-1-6/A4/verdict
+  240ms GET /persona-check/runs/seed-1-6/A4/record
+  241ms GET /persona-check/scenarios/A4
+  362ms GET /persona-check/runs/seed-1-6/A4/audio

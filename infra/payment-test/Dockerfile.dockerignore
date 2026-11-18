@@ -1,0 +1,9 @@
+**
+!backend
+!backend/payment-test
+!backend/payment-test/*.mjs
+!backend/payment-test/public
+!backend/payment-test/public/**
+!infra
+!infra/payment-test
+!infra/payment-test/Dockerfile

@@ -1,0 +1,191 @@
+// 화면 공통 부품 (버튼 · 탭 · 뱃지 · 아이콘 · 정렬 칸 머리). 색은 global.css의 ops-* 토큰
+import type { ButtonHTMLAttributes, ReactNode } from 'react'
+import { ACTION_BADGE_SIZE, BUTTON_LOOK } from './actionBadge'
+
+export type Tone = 'idle' | 'wait' | 'done' | 'stop' | 'route' | 'cancel'
+
+const TONE: Record<Tone, string> = {
+  idle: 'bg-ops-idle-soft text-ops-sub',
+  wait: 'bg-ops-wait-soft text-ops-wait',
+  done: 'bg-ops-done-soft text-ops-done',
+  stop: 'bg-ops-stop-soft text-ops-stop',
+  cancel: 'bg-ops-cancel-soft text-ops-cancel',
+  route: 'bg-ops-route-soft text-ops-route',
+}
+
+/** 상태 뱃지 — 목록 · 상세가 같은 것을 씀 (기업 피드백: 뱃지 색 통일) */
+export function Badge({ tone, children }: { tone: Tone; children: ReactNode }) {
+  return (
+    <span
+      className={`inline-flex h-[22px] shrink-0 items-center rounded px-1.5 text-[12px] font-medium whitespace-nowrap ${TONE[tone]}`}
+    >
+      {children}
+    </span>
+  )
+}
+
+// 버튼 모양 · 색 규칙은 actionBadge.ts BUTTON_LOOK. kind = 속성, 이름이 …Badge로 끝나면 목록 줄 안에 넣는 22px (나머지 32px)
+const BTN = {
+  primary: BUTTON_LOOK.solid, // 화면 맨 위 줄의 만들기(주문 추가 등) · 창의 저장 · 등록 · 확정 — 채움
+  primaryBadge: BUTTON_LOOK.line, // 줄 안 등록 (미답변 줄 FAQ 등록) — 줄 안은 테두리 (11/11 사용자)
+  lineBadge: BUTTON_LOOK.line, // 줄 안 승인 · 적용
+  line: BUTTON_LOOK.line, // 화면 안(카드 · 패널) 만들기 · 등록 — 테두리
+  edit: BUTTON_LOOK.edit, // 수정 · 설정 열기 — 자리 상관없이 테두리
+  editBadge: BUTTON_LOOK.edit,
+  danger: BUTTON_LOOK.danger, // 삭제 · 탈퇴 · 끝내기 — 테두리 (꽉 찬 빨강은 눈이 아픔, 11/11 사용자). 확정은 dangerSolid
+  dangerBadge: BUTTON_LOOK.danger,
+  dangerSolid: BUTTON_LOOK.solidDanger, // 확인 창의 삭제 확정
+  plain: BUTTON_LOOK.plain, // 닫기 · 취소 · 보기 · 이동 · 파일
+  plainBadge: BUTTON_LOOK.plain,
+}
+
+/** 버튼 높이 32 (기업 피드백: 버튼이 너무 큼) */
+export function Btn({
+  kind = 'plain',
+  className = '',
+  ...rest
+}: ButtonHTMLAttributes<HTMLButtonElement> & { kind?: keyof typeof BTN }) {
+  return (
+    <button
+      type="button"
+      data-kind={kind} // 창(Modal)이 Enter로 누를 확정 버튼(primary · dangerSolid)을 찾는 표시
+      {...rest}
+      className={`${kind.endsWith('Badge') ? ACTION_BADGE_SIZE : 'inline-flex h-8 items-center justify-center rounded-md px-3 text-[13px] leading-none font-semibold'} shrink-0 gap-1.5 whitespace-nowrap outline-none focus-visible:ring-2 focus-visible:ring-ops-route disabled:pointer-events-none disabled:opacity-40 ${BTN[kind]} ${className}`}
+    />
+  )
+}
+
+/** 시각 칸 머리 — 누르면 최신순 ↔ 오래된 순 (화살표 아래 = 최신이 위) */
+export function SortTh({
+  label,
+  asc,
+  onToggle,
+  className = '',
+}: {
+  label: string
+  asc: boolean
+  onToggle: () => void
+  className?: string
+}) {
+  return (
+    <th scope="col" aria-sort={asc ? 'ascending' : 'descending'} className={className}>
+      <button
+        type="button"
+        onClick={onToggle}
+        title={asc ? '오래된 순 (누르면 최신순)' : '최신순 (누르면 오래된 순)'}
+        // 글자는 다른 칸 머리처럼 가운데, 화살표는 칸 오른쪽 끝 (11/09 사용자)
+        className="relative flex h-9 w-full items-center justify-center outline-none hover:text-ops-route focus-visible:ring-2 focus-visible:ring-ops-route focus-visible:ring-inset"
+      >
+        {label}
+        <Icon name="chevron" className={`absolute right-3 size-3.5 ${asc ? 'rotate-180' : ''}`} />
+      </button>
+    </th>
+  )
+}
+
+/** 상태 묶음 고르기 — 옆에 건수 */
+export function Segments<T extends string>({
+  value,
+  items,
+  onPick,
+  label,
+}: {
+  value: T
+  items: { value: T; label: string; count?: number | null; badge?: ReactNode }[]
+  onPick: (v: T) => void
+  label: string
+}) {
+  return (
+    <div role="tablist" aria-label={label} className="flex flex-wrap items-center gap-1">
+      {items.map((it, i) => {
+        const on = it.value === value
+        // 나란한 고르지 않은 탭 사이 짧은 세로줄 (11/13 시안) — 가상 요소라 폭 · 높이는 그대로
+        const bar = i > 0 && !on && items[i - 1].value !== value
+        return (
+          <button
+            key={it.value}
+            type="button"
+            role="tab"
+            aria-selected={on}
+            onClick={() => onPick(it.value)}
+            className={`relative inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-[13px] font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ops-route ${bar ? 'before:absolute before:top-1/2 before:-left-[2.5px] before:h-3.5 before:w-px before:-translate-y-1/2 before:bg-[#c5ccd6]' : ''} ${on ? 'bg-white text-ops-ink shadow-[0_0_0_1px_var(--color-ops-line)]' : 'text-ops-sub hover:text-ops-ink'}`}
+          >
+            {it.label}
+            {it.badge}
+            {/* 건수 자리는 받기 전(null)에도 잡아 둠 — 숫자가 하나씩 오며 탭이 밀려 울렁이던 것 (11/09 사용자)
+                undefined = 건수 없는 탭(기간 등) */}
+            {it.count !== undefined && (
+              <span
+                className={`min-w-[2ch] tabular-nums ${on ? 'text-ops-sub' : 'text-ops-faint'}`}
+              >
+                {it.count?.toLocaleString('ko-KR')}
+              </span>
+            )}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+const PATHS = {
+  search: 'm21 21-4.3-4.3M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14Z',
+  x: 'M18 6 6 18M6 6l12 12',
+  plus: 'M12 5v14M5 12h14',
+  pen: 'M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z',
+  phone:
+    'M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2Z',
+  box: 'M21 8 12 3 3 8v8l9 5 9-5V8ZM3 8l9 5 9-5M12 13v8',
+  home: 'M3 10.5 12 3l9 7.5V21H3V10.5ZM9 21v-6h6v6',
+  inbox: 'M22 12h-6l-2 3h-4l-2-3H2M5.5 5h13L22 12v7a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-7l3.5-7Z',
+  book: 'M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5v14ZM4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5',
+  users:
+    'M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM23 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8',
+  building:
+    'M3 21h18M5 21V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16M9 7h1M9 11h1M9 15h1M14 7h1M14 11h1M14 15h1',
+  bot: 'M12 8V4H8M4 12a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v4a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4v-4ZM9 13v2M15 13v2',
+  gear: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z',
+  chart: 'M3 3v18h18M7 16v-4M12 16V8M17 16v-7',
+  out: 'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9',
+  arrowLeft: 'M19 12H5M12 19l-7-7 7-7',
+  chevron: 'm6 9 6 6 6-6',
+  chevrons: 'm11 17-5-5 5-5M18 17l-5-5 5-5', // « (오른쪽은 rotate-180)
+  alert:
+    'M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z',
+  pin: 'M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0ZM12 13a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z',
+  file: 'M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-6-6ZM14 3v6h6',
+  sheet:
+    'M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-6-6ZM14 3v6h6M9 14.5H7.5v4H9M13 14.5h-1.2a.8.8 0 0 0 0 1.6h.4a.8.8 0 0 1 0 1.6h-1.2M14.5 14.5l1 4 1-4',
+  download: 'M12 3v12M7 10l5 5 5-5M4 21h16',
+}
+export type IconName = keyof typeof PATHS
+
+export function Icon({ name, className = 'size-4' }: { name: IconName; className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={`shrink-0 ${className}`}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d={PATHS[name]} />
+    </svg>
+  )
+}
+
+/** 고객 용건 (택배 접수 · 주문 확인 · 접수 취소 · 문의) — 상태가 아니라 회색, 취소만 빨강. 올리면 한 문장 설명 */
+export function Kinds({ kinds }: { kinds: { kind: string; label: string; title?: string }[] }) {
+  return (
+    <>
+      {kinds.map((k) => (
+        <span key={k.kind} title={k.title}>
+          <Badge tone={k.kind === 'cancel' ? 'stop' : 'idle'}>{k.label}</Badge>
+        </span>
+      ))}
+    </>
+  )
+}

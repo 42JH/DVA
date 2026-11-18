@@ -1,0 +1,193 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: consultation
+  namespace: dva
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  minReadySeconds: 10
+  progressDeadlineSeconds: 180
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: dva-consultation
+  template:
+    metadata:
+      annotations:
+        dva.ssafy.io/parcel-drafts-contract: "055"
+      labels:
+        app: dva-consultation
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 40
+      containers:
+        - name: consultation
+          image: docker.io/library/dva-consultation:RELEASE_TAG
+          imagePullPolicy: Never
+          ports:
+            - name: http
+              containerPort: 3004
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: PORT
+              value: "3004"
+            - name: MSA_INSTANCE_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: SECURITY_LOG_HMAC_KEY
+              valueFrom:
+                secretKeyRef: {name: msa-security-logs, key: hmac-key}
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef: { name: consultation-db, key: PGHOST }
+            - name: DB_PORT
+              valueFrom:
+                secretKeyRef: { name: consultation-db, key: PGPORT }
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef: { name: consultation-db, key: PGUSER }
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: consultation-db, key: PGPASSWORD }
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef: { name: consultation-db, key: PGDATABASE }
+            - name: CUSTOMER_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef: {name: msa-customer-auth, key: customer-token}
+            - name: ORDER_URL
+              value: http://order:3002
+            - name: AI_BUSINESS_TOKEN
+              valueFrom:
+                secretKeyRef: {name: msa-ai-business, key: AI_BUSINESS_TOKEN, optional: true}
+            - name: CUSTOMER_URL
+              value: http://customer:3001
+            - name: OPERATIONS_URL
+              value: http://operations:3005
+            - name: CONSULTATION_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef: { name: msa-consultation-auth, key: consultation-token }
+            - name: CORS_ORIGINS
+              value: https://13.209.59.180,https://k15d109.p.ssafy.io,http://localhost:5173
+          envFrom:
+            - secretRef:
+                name: consultation-runtime
+                optional: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          startupProbe:
+            httpGet:
+              path: /consultation/health
+              port: http
+            periodSeconds: 2
+            timeoutSeconds: 2
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /consultation/health/ready
+              port: http
+            periodSeconds: 3
+            timeoutSeconds: 2
+            failureThreshold: 2
+          livenessProbe:
+            httpGet:
+              path: /consultation/health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sh", "-c", "sleep 10"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: consultation
+  namespace: dva
+spec:
+  type: ClusterIP
+  selector:
+    app: dva-consultation
+  ports:
+    - name: http
+      port: 3004
+      targetPort: http
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: consultation
+  namespace: dva
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.tls.certresolver: letsencrypt
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: k15d109.p.ssafy.io
+      http:
+        paths:
+          - path: /api/dashboard
+            pathType: Prefix
+            backend:
+              service:
+                name: consultation
+                port: { number: 3004 }
+          - path: /api/ai/unanswered-questions
+            pathType: Prefix
+            backend:
+              service:
+                name: consultation
+                port: { number: 3004 }
+          - path: /api/unanswered-questions
+            pathType: Prefix
+            backend:
+              service:
+                name: consultation
+                port: { number: 3004 }
+          - path: /api/ai/calls
+            pathType: Prefix
+            backend:
+              service:
+                name: consultation
+                port: { number: 3004 }
+          - path: /api/calls
+            pathType: Prefix
+            backend:
+              service:
+                name: consultation
+                port: { number: 3004 }
+          - path: /api/webhooks/pbx/call-ended
+            pathType: Exact
+            backend:
+              service:
+                name: consultation
+                port: { number: 3004 }
+          - path: /webhooks/pbx/call-ended
+            pathType: Exact
+            backend:
+              service:
+                name: consultation
+                port: { number: 3004 }
+          - path: /consultation
+            pathType: Prefix
+            backend:
+              service:
+                name: consultation
+                port:
+                  number: 3004

@@ -4,6 +4,7 @@
 # ==========================================
 .env
 .env.*
+!backend/.env.example
 
 *.pem
 *.key
@@ -46,6 +47,14 @@ yarn-error.log*
 *.log
 *.tmp
 *.temp
+.deploy/
+infra/observability/.runtime/
+infra/observability/deploy.lock
+infra/payment-test/deploy.lock
+msa-release/
+infra/jenkins/home/
+infra/jenkins/bootstrap-output/
+infra/jenkins/validation/
 
 # ==========================================
 # IDE / Editor
@@ -55,6 +64,10 @@ yarn-error.log*
 *.iml
 *.swp
 *.swo
+
+# AI 코딩 도구 개인 설정 · 스킬 (각자 로컬에만)
+.claude/
+skills-lock.json
 
 # ==========================================
 # Operating System

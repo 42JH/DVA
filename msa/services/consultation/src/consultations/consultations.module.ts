@@ -1,0 +1,50 @@
+import { ParcelDraftWriteController } from '../customers/parcel-draft-write.controller';
+import { ParcelDraftWriteService } from '../customers/parcel-draft-write.service';
+import { OrderReferenceScopes } from '../customers/order-reference-scopes.service';
+import { LegacyDraftCallBindingsController } from './legacy-draft-call-bindings.controller';
+import { CallDraftDeletionClient } from './call-draft-deletion.client';
+import { FaqCallSourcesController } from './faq-call-sources.controller';
+import { Module } from '@nestjs/common';
+import { DatabaseModule } from '../database/database.module';
+import { AuthModule } from '../auth/auth.module';
+import { ConsultationsController } from './consultations.controller';
+import { ConsultationsRepository } from './consultations.repository';
+import { ConsultationsService } from './consultations.service';
+import { CallSessionRepository } from './call-session.repository';
+import { CallEndRepository } from './call-end.repository';
+import { ActiveCallCountService } from './active-call-count.service';
+import { RecordingPlaybackService } from './recording-playback.service';
+import { CallReadReferencesClient } from './call-read-references.client';
+import { OrderIntakeController } from './order-intake.controller';
+import { OrderIntakeService } from './order-intake.service';
+@Module({
+  imports: [DatabaseModule, AuthModule],
+  controllers: [
+    ParcelDraftWriteController,
+    LegacyDraftCallBindingsController,
+    ConsultationsController,
+    FaqCallSourcesController,
+    OrderIntakeController,
+  ],
+  providers: [
+    ParcelDraftWriteService,
+    OrderReferenceScopes,
+    CallDraftDeletionClient,
+    ConsultationsRepository,
+    ConsultationsService,
+    CallSessionRepository,
+    CallEndRepository,
+    ActiveCallCountService,
+    RecordingPlaybackService,
+    CallReadReferencesClient,
+    OrderIntakeService,
+  ],
+  exports: [
+    OrderReferenceScopes,
+    ConsultationsService,
+    ConsultationsRepository,
+    CallEndRepository,
+    CallReadReferencesClient,
+  ],
+})
+export class ConsultationsModule {}

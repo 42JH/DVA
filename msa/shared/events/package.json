@@ -1,0 +1,14 @@
+{
+  "name": "@dva/events",
+  "version": "0.1.0",
+  "private": true,
+  "main": "index.cjs",
+  "types": "index.d.cts",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "test": "node --test test/unit.test.cjs test/parcel-drafts.test.cjs",
+    "test:integration": "node --test test/integration.test.cjs",
+    "verify": "node verify.cjs"
+  },
+  "devDependencies": { "pg": "8.23.1" }
+}

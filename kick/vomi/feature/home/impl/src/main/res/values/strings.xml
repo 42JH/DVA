@@ -1,0 +1,11 @@
+<resources>
+    <string name="home_title">친구</string>
+    <string name="home_empty">아직 등록된 친구가 없어요</string>
+    <string name="home_error">친구 목록을 불러오지 못했어요</string>
+    <string name="home_retry">다시 시도</string>
+    <string name="home_current_user">%1$s로 입장했어요</string>
+    <string name="home_call_connecting">전화 수신 연결을 준비하고 있어요</string>
+    <string name="home_call_connection_failed">전화 수신 연결에 실패했어요</string>
+    <string name="home_call_requesting">전화를 걸고 있어요</string>
+    <string name="home_call_error">통화를 요청하지 못했어요. 같은 친구를 눌러 다시 시도해 주세요</string>
+</resources>

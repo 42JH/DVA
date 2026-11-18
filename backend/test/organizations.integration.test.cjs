@@ -1,0 +1,351 @@
+const { testMembership } = require('./helpers/membership.cjs');
+require('reflect-metadata');
+const { before, after, test } = require('node:test');
+const assert = require('node:assert/strict');
+const { randomUUID } = require('node:crypto');
+const { migrate } = require('./helpers/migrations.cjs');
+const { createTestSession, createTestPool, startTestApp } = require('./helpers/application.cjs');
+
+assert.equal(process.env.NODE_ENV, 'test');
+assert.equal(process.env.DB_NAME, 'dva_webhook_test');
+assert.ok(['db', '127.0.0.1'].includes(process.env.DB_HOST));
+process.env.SWAGGER_ENABLED = 'false';
+process.env.CORS_ORIGINS = 'http://localhost:5173';
+
+const pool = createTestPool();
+let app, appB, base, baseB, adminA, sessionA;
+const apps = [];
+const cookies = new Map();
+const mutationHeaders = { Origin: 'http://localhost:5173' };
+
+const start = () => startTestApp(apps);
+async function account(loginId, role = 'OPERATOR', status = 'ACTIVE') {
+  const result = await pool.query(
+    'INSERT INTO admin_users (login_id,name,password_hash,role,status) VALUES ($1,$2,$3,$4,$5) RETURNING admin_user_seq',
+    [loginId, '기업 테스트', 'not-for-login', role, status],
+  );
+  return result.rows[0].admin_user_seq;
+}
+before(async () => {
+  await migrate(pool);
+  adminA = await account('companyTestA');
+  const adminB = await account('companyTestB', 'SYSTEM_ADMIN');
+  app = await start();
+  appB = await start();
+  base = await app.getUrl();
+  baseB = await appB.getUrl();
+  sessionA = await createTestSession(pool, adminA);
+  cookies.set(base, sessionA);
+  cookies.set(baseB, await createTestSession(pool, adminB));
+});
+after(async () => {
+  for (const application of apps) await application.close();
+  await pool.end();
+});
+
+const request = (path, options = {}, host = base) =>
+  fetch(host + '/api/companies' + path, {
+    ...options,
+    headers: Object.fromEntries(
+      Object.entries({ ...mutationHeaders, Cookie: cookies.get(host), ...options.headers }).filter(
+        ([, value]) => value !== undefined,
+      ),
+    ),
+  });
+const create = (name, key = undefined, host = base, extra = {}) =>
+  request(
+    '',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key },
+      body: JSON.stringify({ name, ...extra }),
+    },
+    host,
+  );
+const patch = (id, body) =>
+  request('/' + id, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+test('every company operation rejects missing, forged and malformed sessions before writes', async () => {
+  const count = (await pool.query('SELECT count(*) FROM organizations')).rows[0].count;
+  for (const cookie of [undefined, 'dva_session=invalid', 'dva_session=' + 'a'.repeat(64)]) {
+    for (const [method, path] of [
+      ['GET', ''],
+      ['POST', ''],
+      ['GET', '/1'],
+      ['PATCH', '/1'],
+    ]) {
+      const response = await request(path, {
+        method,
+        headers: { Cookie: cookie, 'X-Admin-User-Seq': String(adminA) },
+      });
+      assert.equal(response.status, 401, method + ' ' + path);
+      assert.equal((await response.json()).error.code, 'UNAUTHORIZED');
+    }
+  }
+  assert.equal((await pool.query('SELECT count(*) FROM organizations')).rows[0].count, count);
+});
+
+test('all active administrator roles can register, list, read and update companies', async () => {
+  const supervisor = await account('companySupervisor', 'OPERATOR');
+  for (const cookie of [sessionA, cookies.get(baseB), await createTestSession(pool, supervisor)]) {
+    const name = '역할 검증 ' + randomUUID();
+    const created = await request('', {
+      method: 'POST',
+      headers: {
+        Cookie: cookie,
+        'Content-Type': 'application/json',
+        'Idempotency-Key': randomUUID(),
+      },
+      body: JSON.stringify({ name }),
+    });
+    assert.equal(created.status, 201);
+    const id = (await created.json()).data.organizationSeq;
+    assert.equal((await request('/' + id, { headers: { Cookie: cookie } })).status, 200);
+    const list = await request('?q=' + encodeURIComponent(name), { headers: { Cookie: cookie } });
+    assert.equal(list.status, 200);
+    assert.equal((await list.json()).data[0].organizationSeq, id);
+    assert.equal(
+      (
+        await request('/' + id, {
+          method: 'PATCH',
+          headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+          body: '{"status":"INACTIVE"}',
+        })
+      ).status,
+      204,
+    );
+  }
+});
+
+test('lists use stable pagination, status and literal name searches without exposing other tables', async () => {
+  for (const name of ['검색 A', '검색 B', '검색 C', 'literal %_ company'])
+    assert.equal((await create(name)).status, 201);
+  const first = await (await request('?q=' + encodeURIComponent('검색') + '&limit=2')).json();
+  assert.deepEqual(Object.keys(first).sort(), ['data', 'hasNext', 'total_count']);
+  assert.equal(first.data.length, 2);
+  assert.equal(first.hasNext, true);
+  assert.equal(first.total_count, 3);
+  assert.ok(first.data[0].organizationSeq > first.data[1].organizationSeq);
+  const last = await (
+    await request('?q=' + encodeURIComponent('검색') + '&limit=2&offset=2')
+  ).json();
+  assert.equal(last.data.length, 1);
+  assert.equal(last.hasNext, false);
+  assert.equal(last.total_count, 3);
+  const pastEnd = await (await request('?q=' + encodeURIComponent('검색') + '&offset=100')).json();
+  assert.deepEqual(pastEnd, { data: [], hasNext: false, total_count: 3 });
+  assert.ok(!first.data.some((row) => row.organizationSeq === last.data[0].organizationSeq));
+  const literal = await (await request('?q=%25_')).json();
+  assert.equal(literal.data.length, 1);
+  assert.equal(literal.total_count, 1);
+  assert.equal(literal.data[0].name, 'literal %_ company');
+  for (const row of first.data)
+    assert.deepEqual(Object.keys(row).sort(), [
+      'createdAt',
+      'groupCardRegistered',
+      'memberCount',
+      'monthlyBillingEnabled',
+      'name',
+      'organizationSeq',
+      'status',
+    ]);
+});
+
+test('patch updates name/status with no response body and preserves memberships/personal pins', async () => {
+  const id = (await (await create('상태 변경 기업')).json()).data.organizationSeq;
+  const customer = await pool.query(
+    `INSERT INTO customers(name,phone_number,status) VALUES ('fixture','01000000000','ACTIVE') RETURNING customer_seq`,
+  );
+  await testMembership(pool, {
+    customerSeq: customer.rows[0].customer_seq,
+    organizationSeq: id,
+    employeeNo: '0001',
+  });
+  const address = {
+    name: 'fixture',
+    phoneNumber: '01000000000',
+    roadAddress: '테스트 도로',
+    jibunAddress: '테스트 지번',
+    detailAddress: '1층',
+    dongName: '테스트동',
+    postalCode: '00000',
+  };
+  await pool.query(`INSERT INTO personal_pins(customer_seq,address_data) VALUES ($1,$2::jsonb)`, [
+    customer.rows[0].customer_seq,
+    JSON.stringify(address),
+  ]);
+  const response = await patch(id, { name: ' 수정된 기업 ', status: 'INACTIVE' });
+  assert.equal(response.status, 204);
+  assert.equal(await response.text(), '');
+  assert.deepEqual((await (await request('/' + id)).json()).data, {
+    organizationSeq: id,
+    name: '수정된 기업',
+    status: 'INACTIVE',
+    memberCount: 1,
+    createdAt: (
+      await pool.query('SELECT created_at FROM organizations WHERE organization_seq=$1', [id])
+    ).rows[0].created_at.toISOString(),
+    monthlyBillingEnabled: true,
+    groupCardRegistered: false,
+  });
+  assert.equal(
+    (await pool.query('SELECT count(*) FROM memberships WHERE organization_seq=$1', [id])).rows[0]
+      .count,
+    '1',
+  );
+  assert.equal(
+    (
+      await pool.query('SELECT count(*) FROM personal_pins WHERE customer_seq=$1', [
+        customer.rows[0].customer_seq,
+      ])
+    ).rows[0].count,
+    '1',
+  );
+  const filtered = await (await request('?status=INACTIVE')).json();
+  assert.ok(filtered.data.some((row) => row.organizationSeq === id));
+  assert.equal((await patch(id, { status: 'ACTIVE' })).status, 204);
+  assert.equal(
+    (
+      await request('', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ organizationSeqs: [id] }),
+      })
+    ).status,
+    204,
+  );
+  assert.equal((await request('/' + id)).status, 404);
+});
+
+test('each company creation records its authenticated actor and request once', async () => {
+  const key = randomUUID();
+  const name = '감사 등록 ' + key;
+  const first = await create(name, key);
+  assert.equal(first.status, 201);
+  const id = (await first.json()).data.organizationSeq;
+  assert.equal((await create(name, key)).status, 201);
+  const rows = (
+    await pool.query(
+      "SELECT * FROM audit_logs WHERE target_type='ORGANIZATION' AND target_seq=$1 AND action='ORGANIZATION_CREATED' AND result='SUCCESS'",
+      [id],
+    )
+  ).rows;
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].actor_seq, adminA);
+  assert.equal(rows[0].request_id, first.headers.get('x-request-id'));
+  assert.deepEqual(rows[0].metadata, {});
+  const rejected = await create(' ', key);
+  assert.equal(rejected.status, 400);
+  const failures = (
+    await pool.query('SELECT * FROM audit_logs WHERE request_id=$1', [
+      rejected.headers.get('x-request-id'),
+    ])
+  ).rows;
+  assert.equal(failures.length, 1);
+  assert.equal(failures[0].result, 'FAILED');
+  assert.equal(failures[0].actor_seq, adminA);
+});
+
+test('company creation rolls back when success audit cannot be saved', async () => {
+  const { AuditService } = require('../dist/audit/audit.service');
+  const audit = app.get(AuditService);
+  const original = audit.recordSuccess;
+  const key = randomUUID();
+  const name = '감사 롤백 ' + key;
+  audit.recordSuccess = async () => {
+    throw new Error('private audit storage failure');
+  };
+  try {
+    const response = await create(name, key);
+    assert.equal(response.status, 500);
+    assert.ok(!(await response.text()).includes('private audit storage failure'));
+    assert.equal(
+      (await pool.query('SELECT count(*) FROM organizations WHERE name=$1', [name])).rows[0].count,
+      '0',
+    );
+    const rows = (
+      await pool.query('SELECT * FROM audit_logs WHERE request_id=$1', [
+        response.headers.get('x-request-id'),
+      ])
+    ).rows;
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].result, 'FAILED');
+    assert.equal(rows[0].action, 'ORGANIZATION_CREATED');
+  } finally {
+    audit.recordSuccess = original;
+  }
+  assert.equal((await create(name, key)).status, 201);
+});
+
+test('company update audit commits with the change and rolls back on audit failure', async () => {
+  const { AuditService } = require('../dist/audit/audit.service');
+  const audit = app.get(AuditService);
+  const created = await create('수정 감사 원본 ' + randomUUID());
+  assert.equal(created.status, 201);
+  const id = (await created.json()).data.organizationSeq;
+  const updated = await patch(id, { name: '수정 감사 성공', status: 'INACTIVE' });
+  assert.equal(updated.status, 204);
+  const rows = (
+    await pool.query('SELECT * FROM audit_logs WHERE request_id=$1', [
+      updated.headers.get('x-request-id'),
+    ])
+  ).rows;
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].action, 'ORGANIZATION_UPDATED');
+  assert.equal(rows[0].target_type, 'ORGANIZATION');
+  assert.equal(rows[0].target_seq, id);
+  assert.equal(rows[0].actor_seq, adminA);
+  assert.equal(rows[0].result, 'SUCCESS');
+  assert.deepEqual(rows[0].metadata, {});
+  const original = audit.recordSuccess;
+  audit.recordSuccess = async () => {
+    throw new Error('private audit error');
+  };
+  try {
+    const failed = await patch(id, { name: '저장되면 안 됨', status: 'ACTIVE' });
+    assert.equal(failed.status, 500);
+    const record = (
+      await pool.query('SELECT name,status FROM organizations WHERE organization_seq=$1', [id])
+    ).rows[0];
+    assert.deepEqual(record, { name: '수정 감사 성공', status: 'INACTIVE' });
+    const failures = (
+      await pool.query('SELECT * FROM audit_logs WHERE request_id=$1', [
+        failed.headers.get('x-request-id'),
+      ])
+    ).rows;
+    assert.equal(failures.length, 1);
+    assert.equal(failures[0].result, 'FAILED');
+    assert.equal(failures[0].target_seq, id);
+  } finally {
+    audit.recordSuccess = original;
+  }
+  const denied = await request('/' + id, {
+    method: 'PATCH',
+    headers: { Cookie: undefined, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status: 'ACTIVE' }),
+  });
+  assert.equal(denied.status, 401);
+  const denial = (
+    await pool.query('SELECT * FROM audit_logs WHERE request_id=$1', [
+      denied.headers.get('x-request-id'),
+    ])
+  ).rows;
+  assert.equal(denial.length, 1);
+  assert.equal(denial[0].result, 'DENIED');
+  assert.equal(denial[0].actor_seq, null);
+  assert.equal(denial[0].target_seq, id);
+  const missing = await patch(2147483647, { status: 'ACTIVE' });
+  assert.equal(missing.status, 404);
+  assert.equal(
+    (
+      await pool.query('SELECT result FROM audit_logs WHERE request_id=$1', [
+        missing.headers.get('x-request-id'),
+      ])
+    ).rows[0].result,
+    'FAILED',
+  );
+});

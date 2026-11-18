@@ -1,0 +1,209 @@
+"""정책 → 지시문·판정·Decision 질문의 일관성(overview.md §5 S2 완료 기준)."""
+
+import tomllib
+
+import pytest
+from pydantic import ValidationError
+
+from app.domain.assess import assess
+from app.domain.state import ConversationState
+from app.policy.model import ROOT, Policy, load_policy
+from app.policy.render import business_rules, decision_questions, default_persona, render_backend, render_live
+
+POLICY = load_policy()
+
+
+@pytest.mark.parametrize("persona", [None, "운영 페르소나"])
+def test_live_delegation_distinguishes_new_values_choices_and_current_results(persona):
+    from app.tools import function_specs
+
+    tools = tuple((t["name"], t["description"]) for t in function_specs(policy=POLICY))
+    text = render_live(persona, POLICY, tools=tools)
+    generate, no_generate = text.split("Generate <|SpawnThinking|> when:")[1].split(
+        "Do not generate <|SpawnThinking|> when:")
+    assert "정상 범위의 새 값을 제공하거나 기존 값을 고칠 때" in generate
+    assert "최신의 유효한 서버 결과에 답이 없을 때" in generate
+    assert "제시된 이름·주소·수량을 그대로 되풀이해 선택하는 답도 새 값이 아닙니다" in no_generate
+    assert "실제 새 값이나 정정이 함께 있으면 그 부분만 위임합니다" in no_generate
+    assert "상세주소가 없다는 답은 기록할 값이므로 생성합니다" in no_generate
+    assert "그 뒤 관련 정보나 조회 범위가 바뀌지 않은 질문·반복 요청" in no_generate
+    assert "서버의 다음 안내가 온 뒤에 이어갑니다" in text
+    assert "답이 없거나 조건이 바뀌었으면 매뉴얼 검색을 요청" in text
+    assert "질문은 직접 답하지 말고 매뉴얼 검색을 요청" not in text
+
+
+def test_route_correction_collects_a_value_before_recording():
+    for text in (render_live(None, POLICY), render_backend(POLICY)):
+        assert "정정할 값을 아직 말하지 않았으면" in text or "실제로 들은 값만" in text
+    text = render_live(None, POLICY)
+    assert "대상만 답했으면 새 주소를 묻고, 실제 새 주소 값을 들은 뒤 기록을 요청한다" in text
+    assert "어느 주소가 틀렸는지 묻고 그 답으로 기록을 요청한다" not in text
+
+
+def test_backend_server_handled_answers_do_not_request_a_waiting_message():
+    text = render_backend(POLICY)
+    assert "이 발화에서는 도구 호출과 텍스트 출력 없이 종료합니다" in text
+    assert "동의·거절의 요약이나 대기 안내도 출력하지 않습니다" in text
+    assert "confirmation=await_server이면 텍스트 출력 없이 종료합니다" in text
+    assert "확인과 함께 새 정보나 정정 내용을 들었으면 record_fields에 그 값만 넣습니다" in text
+    assert "Live에 서버의 다음 안내를 기다리라고 전달" not in text
+
+
+def raw() -> dict:
+    with (ROOT / "policy" / "workflow.toml").open("rb") as f:
+        return tomllib.load(f)
+
+
+def test_receive_order_matches_call_flow_rule():
+    """발송 정보를 마친 뒤 받는 분 성함·연락처·주소를 받는다."""
+    order = [n for s in POLICY.collect_stages() for n in s.required]
+    # 수거 일시는 묻지 않는다(사용자 결정 2026-11-03, BE가 결제 완료 + 1시간으로 정함)
+    assert order == ["sender_name", "sender_address", "sender_address_detail", "receiver_name", "receiver_phone",
+                     "receiver_address", "receiver_address_detail", "items", "item_price"]
+    assert POLICY.fields["sender_phone"].kind == "auto" and "sender_phone" not in order  # 발신번호, 묻지 않음
+
+
+def test_waiting_guidance_is_free_but_only_asks_to_wait():
+    """기본·운영 페르소나 모두 같은 대기 안내와 끼어들기 규칙을 적용한다."""
+    for text in (render_live(None, POLICY), render_live("운영 페르소나", POLICY)):
+        # 문장을 정해 주면 첫 문장만 반복한다(11-16 통화). 예시 없이 조건만 둔다
+        for phrase in ("네, 잠시만요.", "확인해 보겠습니다.", "잠시만 기다려 주세요."):
+            assert phrase not in text
+        assert "기다려 달라는 뜻만 담은 짧은 한 문장" in text
+        assert "이미 한 대기 멘트와 같은 문장은 쓰지 않습니다" in text
+        assert "공감·감상·위로, 택배 업무와 무관한 이야기" in text
+        assert "확인 질문, 다음 접수 질문을 넣지 않습니다" in text
+        assert "고객이 말을 시작하면 하던 말을 바로 멈추고" in text
+        assert "그때그때 짓습니다" not in text
+    assert "## 대기 안내" not in default_persona() and "네 고객님" not in default_persona()
+
+
+def test_readback_yields_to_customer_before_the_confirmation_question():
+    text = render_live("운영 페르소나", POLICY)
+    readback = POLICY.results["readback"]
+    assert "## 공통 끼어들기 규칙" in text
+    assert "접수 확인을 읽는 중에도 문장 중간에서 멈춥니다" in text
+    assert "끊긴 문장을 그대로 이어 읽지 않습니다" in text
+    assert "고객이 끼어들지 않으면" in readback and "이대로 접수할까요?" in readback
+    assert "바로 같은 응답에서 접수 내용을 요약한다" in readback
+    assert "요약해도 되는지 먼저 묻거나 중간에 고객의 답을 기다리지 않는다" in readback
+    assert "고객이 끼어들면 공통 끼어들기 규칙을 따른다" in readback
+    assert "읽는 중 고객이 끼어들면 공통 끼어들기 규칙이 우선합니다" in business_rules()
+    backend = render_backend(POLICY)
+    assert readback in backend and "{readback_rule}" not in backend
+    assert "고객의 최신 발화가 정정이나 새 질문이면 그 내용을 먼저 처리합니다" in backend
+
+
+def test_live_instructions_carry_policy_order_forbid_and_delegation():
+    text = render_live(None, POLICY)
+    labels = [POLICY.fields[n].label for s in POLICY.collect_stages() for n in s.required]
+    procedure = text[text.index("## 택배 정보 받는 순서"):]
+    positions = [procedure.index(label) for label in labels]
+    assert positions == sorted(positions)  # 지시문 속 순서 = 서버 판정 순서
+    assert all(item in text for item in POLICY.forbid.items)
+    delegate = text.split("Generate <|SpawnThinking|> when:")[1].split("Do not generate")[0]
+    assert all(POLICY.fields[n].label in delegate for n in POLICY.free_fields())  # 자유형은 전부 위임 규칙에(S0 U7)
+    assert "payment" not in POLICY.fields and "결제 방식" not in procedure.split("## 하지 않는 것")[0]  # 결제는 묻지 않는다
+    assert "수거 시각은 먼저 묻지 않는다" in text and text.startswith(default_persona()[:20])
+    # 위임 정책은 페르소나 바로 뒤, 업무 규칙·상담 절차보다 앞(지시문 끝 쪽에 있을 때 Live가 값을 받고도 위임하지 않음)
+    assert len(default_persona()) < text.index("# 백엔드 위임(<|SpawnThinking|>)") < text.index("# 업무 규칙") < text.index("# 상담 절차")
+
+
+def test_persona_first_then_fixed_business_rules_and_fallback_on_blank():
+    text = render_live("페르소나 지시문", POLICY, {"고객 성함": "김철수"})
+    assert text.startswith("페르소나 지시문")
+    rules = business_rules()
+    assert rules in text and text.index(rules) < text.index("# 상담 절차")  # 페르소나 → 업무 규칙 → 절차 → 통화 정보
+    assert "페르소나보다 우선" in rules and "페르소나 지시를 따르되" not in text  # 업무 규칙이 우선(예전 문장 없음)
+    assert text.rstrip().endswith("- 고객 성함: 김철수")
+    for blank in (None, "", "   "):  # P2: 페르소나 없음 → 기본 페르소나, 업무 규칙은 그대로
+        out = render_live(blank, POLICY)
+        assert out.startswith(default_persona()) and rules in out
+
+
+def test_server_results_are_rendered_from_workflow_policy():
+    text = render_live(None, POLICY)
+    for key in ("call_started", "closing", "agent", "receiver_phone_readback", "phone_question", "missing", "origin_confirm", "pickup",
+                "confirm_route", "readback", "sender_change_question", "address_detail_question", "destination_choices",
+                "destination_selected", "destination_change_question", "destination_partial_change",
+                "followup_help", "next_parcel_field"):
+        assert text.count(f"\n- {key}: {POLICY.results[key]}") == 1
+    assert "이대로 접수할까요?" in POLICY.results["readback"]  # 간소화한 되읽기도 질문으로 끝나야 G3을 통과한다
+    assert "접수 정보를 수집할 때만" in text
+    assert "자릿수가 모호해 보여도 들은 표현으로 기록을 요청합니다" in text
+    assert "수량·전화번호 또는" not in text
+    assert "궁금한 점이 더 있는지" not in POLICY.results["more_parcels"]
+    assert "{pickup_allowed}" not in text
+
+
+def test_backend_instructions_list_free_fields_and_no_choice_judgment():
+    text = render_backend(POLICY)
+    assert all(f"({n})" in text for n in POLICY.free_fields())
+    assert "예/아니요" in text and "하지 않습니다" in text and "{fields}" not in text
+    assert "끝 네 자리 사팔팔이요" in text and "범위나 나머지 숫자를 붙이지 않습니다" in text
+    assert "들은 그대로 기록" in text and "숫자로 바꾸지 않습니다" in text  # 주소 기록 규칙: 수사 변환·상세 분리는 서버가(P13)
+    assert "confirm_route" in text and "confirm_route" in business_rules()  # 두 주소가 갖춰지면 동 이름으로 확인(S15P31D109-164)
+
+
+def test_address_directions_and_short_detail_questions_are_rendered():
+    live, backend = render_live(None, POLICY), render_backend(POLICY)
+    for text in (live, backend):
+        assert "“○○에서 보낼게요”는 발송 주소, “○○로 보낼게요”는 받는 곳 주소" in text
+        assert "발송 기본주소와 상세주소가 기록된 뒤" in text and "destination_choices" in text
+    assert POLICY.fields["sender_address_detail"].label == "발송지 상세주소"
+    assert POLICY.fields["receiver_address_detail"].label == "받는 곳 상세주소"
+    assert "고객이 뜻을 되묻거나 무엇을 말해야 할지 몰라 할 때만" in live
+    assert "첫 상세주소 질문은 예시 없이 전달합니다" in backend
+    origin = next(q for q in decision_questions(POLICY, "sender", origin=True) if q["name"] == "origin")
+    assert "받는 곳만 말하고 발송 주소에 답하지 않으면 not_answer" in origin["instructions"]
+
+
+def test_server_missing_uses_same_order_as_instructions():
+    state = ConversationState(intent="order")
+    a = assess(state, POLICY)
+    assert list(a.missing) == [n for s in POLICY.collect_stages() for n in s.required]
+
+
+@pytest.mark.parametrize("stage, pending, expected", [
+    ("intent", False, ["task"]), ("receiver", False, ["switch"]), ("readback", True, ["confirm", "switch"]),
+    ("readback", False, ["switch"]), ("more_parcels", True, ["confirm", "more", "switch"]),
+    ("closing", False, ["switch"]),
+])
+def test_decision_questions_per_stage(stage, pending, expected):
+    qs = decision_questions(POLICY, stage, pending=pending)
+    assert [q["name"] for q in qs] == expected
+    assert all(q["type"] in ("choice", "predicate", "score") for q in qs)  # 자유형 추출 질문 없음(D1)
+    assert all(2 <= len(q["choices"]) <= 255 for q in qs if q["type"] == "choice")
+
+
+def test_pick_question_is_built_from_candidate_labels():
+    qs = decision_questions(POLICY, "receiver", pick_labels=("집", "회사"))
+    assert [c["value"] for c in qs[-1]["choices"]] == ["집", "회사", "none", "not_answer"]
+
+
+def test_partial_pick_choices_apply_only_to_personal_destinations():
+    from app.domain.state import CandidateSet, Place, Source
+
+    labels = ("이영희 강남구", "박민수 중구")
+    pin = Place("이영희", "01055556666", "서울 강남구 테헤란로 211", "", source=Source.PIN)
+    company = Place("박민수", "01011112222", "서울 중구 세종대로 110", "4층", source=Source.COMPANY)
+    candidates = CandidateSet("destination", labels, (pin, company))
+    question = decision_questions(POLICY, "address", pick_labels=labels, destination_candidates=candidates)[-1]
+    assert [choice["value"] for choice in question["choices"]] == [
+        *labels, "new_address_1", "new_recipient_1", "clarify_candidate", "none", "not_answer"]
+
+
+@pytest.mark.parametrize("breakage, message", [
+    (lambda d: d["stage"][1].update(required=["unknown_field"]), "모르는 필드"),
+    (lambda d: d["stage"][2]["required"].append("sender_name"), "두 단계"),
+    (lambda d: next(s for s in d["stage"] if s["id"] == "readback").update(required=["items"]), "gate"),
+    (lambda d: d["decision"].pop("collect"), "질문 세트"),
+    (lambda d: d["decision"]["intent"]["questions"][0].update(choices=["only"]), "선택지"),
+    (lambda d: d["decision"]["intent"]["questions"][0].update(type="text"), "type"),
+])
+def test_invalid_policy_is_rejected(breakage, message):
+    d = raw()
+    breakage(d)
+    with pytest.raises(ValidationError, match=message):
+        Policy.model_validate(d)
+

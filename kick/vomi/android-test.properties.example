@@ -1,0 +1,4 @@
+# Copy to android-test.properties. This local file is excluded from Git.
+# One debug build contains both test accounts; choose one on the first screen.
+KICK_TEST_ACCOUNT_1_TOKEN=
+KICK_TEST_ACCOUNT_2_TOKEN=

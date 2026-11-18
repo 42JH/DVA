@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+ xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+ xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.33.xsd"
+ logicalFilePath="dva/operations/db.changelog.xml">
+  <changeSet id="001-initial" author="dva" dbms="postgresql" runInTransaction="true">
+    <preConditions onFail="HALT" onError="HALT">
+      <sqlCheck expectedResult="0">SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE' AND table_name NOT IN ('databasechangelog','databasechangeloglock')</sqlCheck>
+    </preConditions>
+    <sqlFile path="001-initial.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
+  </changeSet>
+
+  <changeSet id="002-admin-status" author = "dva" dbms = "postgresql" runInTransaction="true">
+    <preConditions onFail="HALT" onError="HALT">
+      <sqlCheck expectedResult="0">SELECT count(*) FROM admin_users WHERE status ='INACTIVE'</sqlCheck>
+    </preConditions>
+    <sqlFile path="002-admin-status.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
+    </changeSet>
+  <changeSet id="003-event-transport" author="dva" dbms="postgresql" runInTransaction="true">
+    <sqlFile path="../shared/001-event-transport.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
+  </changeSet>
+  <changeSet id="004-admin-auth-audit" author="dva" dbms="postgresql" runInTransaction="true">
+    <preConditions onFail="HALT" onError="HALT" onFailMessage="Legacy administrator display names are unavailable. Preserve these accounts and prepare a verified name migration before enabling operations auth.">
+      <sqlCheck expectedResult="0">SELECT count(*) FROM admin_users</sqlCheck>
+    </preConditions>
+    <sqlFile path="004-admin-auth-audit.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
+  </changeSet>
+  <changeSet id="005-customer-audit" author="dva" dbms="postgresql" runInTransaction="true">
+    <sqlFile path="005-customer-audit.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
+  </changeSet>
+  <changeSet id="006-consultation-audit" author="dva" dbms="postgresql" runInTransaction="true">
+    <sqlFile path="006-consultation-audit.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
+  </changeSet>
+  <changeSet id="007-persona-settings" author="dva" dbms="postgresql" runInTransaction="true">
+    <sqlFile path="007-persona-settings.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
+  </changeSet>
+  <changeSet id="008-consultation-persona-references" author="dva" dbms="postgresql" runInTransaction="true">
+    <sqlFile path="008-consultation-persona-references.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
+  </changeSet>
+  <changeSet id="009-faqs" author="dva" dbms="postgresql" runInTransaction="true">
+    <sqlFile path="009-faqs.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
+  </changeSet>
+  <changeSet id="010-order-audit" author="dva" dbms="postgresql" runInTransaction="true">
+    <sqlFile path="010-order-audit.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
+  </changeSet>
+  <changeSet id="011-persona-prompt-fields" author="dva" dbms="postgresql" runInTransaction="true">
+    <sqlFile path="011-persona-prompt-fields.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
+  </changeSet>
+  <changeSet id="012-persona-soft-delete" author="dva" dbms="postgresql" runInTransaction="true">
+    <sqlFile path="012-persona-soft-delete.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
+  </changeSet>
+  <changeSet id="013-admin-role-consolidation" author="dva" dbms="postgresql" runInTransaction="true">
+    <sqlFile path="013-admin-role-consolidation.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
+  </changeSet>
+  <changeSet id="014-audit-action-result-index" author="dva" dbms="postgresql" runInTransaction="true">
+    <sqlFile path="014-audit-action-result-index.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
+  </changeSet>
+</databaseChangeLog>

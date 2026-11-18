@@ -1,0 +1,297 @@
+require('reflect-metadata');
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const { randomUUID } = require('node:crypto');
+const { Pool } = require('pg');
+const { hashPassword } = require('../dist/auth/password');
+const { truncateFixture } = require('./fixture-reset.cjs');
+
+test('FAQ production APIs preserve HTTP, snapshots, audits and durable notification intent', async (t) => {
+  assert.equal(process.env.NODE_ENV, 'test');
+  assert.equal(process.env.PGDATABASE, 'dva_webhook_test');
+  const began = Date.now();
+  assert.equal((await fetch('http://consultation-app:3004/consultation/health')).status,200,'FAQ source peer must finish schema/config startup');
+  const sides = ['monolith', 'operations'].map((name) => ({
+    name, base: `http://${name}-app:3005`, db: new Pool({ host: name+'-db' }), cookies: [],
+  }));
+  const consultation = new Pool({ host: 'consultation-db' });
+  const guards=[];
+  t.after(async () => {
+    try{for(const guard of guards){await guard.query('ROLLBACK');guard.release();}}
+    finally{await Promise.all([...sides.map((s) => s.db.end()), consultation.end()]);}
+  });
+  const documents=await Promise.all(sides.map(async side=>{
+    const response=await fetch(side.base+(side.name==='monolith'?'/api/docs-json':'/operations/docs-json'));
+    assert.equal(response.status,200);return response.json();
+  }));
+  const security=documents.map(document=>document.paths['/api/ai/faqs'].get.security);
+  assert.deepEqual(security[0],[{adminSession:[]},{bearer:[]}]);
+  assert.deepEqual(security[1],security[0],'AI FAQ OpenAPI must require the same session or Bearer authentication');
+  // Expired read fixtures stay in place; separate retention cases verify their physical removal.
+  for(const side of sides){const guard=await side.db.connect();guards.push(guard);await guard.query('BEGIN');await guard.query('SELECT pg_advisory_xact_lock(20261103,157)');}
+  const hash = await hashPassword('faq-parity-password');
+  for (const side of sides) {
+    await side.db.query(`DELETE FROM faq_entries; DELETE FROM faq_change_notifications;
+      DELETE FROM audit_logs WHERE action LIKE 'FAQ_%';
+      ALTER TABLE faq_entries ALTER COLUMN faq_entry_seq RESTART WITH 10001;
+      ALTER TABLE faq_change_notifications ALTER COLUMN faq_change_notification_seq RESTART WITH 10001;
+      ALTER TABLE faq_question_examples ALTER COLUMN faq_question_example_seq RESTART WITH 10001;`);
+    for (const [i, role] of ['OPERATOR','OPERATOR','SYSTEM_ADMIN'].entries()) {
+      await side.db.query(`INSERT INTO admin_users(admin_user_seq,login_id,name,password_hash,role,status)
+        OVERRIDING SYSTEM VALUE VALUES($1,$2,'FAQ 비교 관리자',$3,$4,'ACTIVE')`, [1000001+i,'faqparity'+i,hash,role]);
+      const response = await fetch(side.base+'/api/auth/login', { method:'POST',
+        headers:{ Origin:'http://localhost:5173','Content-Type':'application/json' },
+        body:JSON.stringify({loginId:'faqparity'+i,password:'faq-parity-password'}) });
+      assert.equal(response.status,200,await response.clone().text());
+      side.cookies.push(response.headers.get('set-cookie').split(';')[0]);
+    }
+  }
+  function normalized(value, key='') {
+    if (value === null) return value;
+    if (value instanceof Date || /(?:At|_at)$/.test(key)) {
+      const date = new Date(value), n=date.getTime();
+      assert.ok(Number.isFinite(n));
+      if (n >= began-2000) { assert.ok(n<=Date.now()+300_000,key); return '<now>'; }
+      return date.toISOString();
+    }
+    if (Array.isArray(value)) return value.map((v) => normalized(v));
+    if (value && typeof value==='object') return Object.fromEntries(Object.entries(value).map(([k,v])=>[k,normalized(v,k)]));
+    return value;
+  }
+  async function state(side) {
+    const faqs=(await side.db.query('SELECT * FROM faq_entries ORDER BY faq_entry_seq')).rows;
+    const examples=(await side.db.query('SELECT * FROM faq_question_examples ORDER BY faq_question_example_seq')).rows;
+    const queue=(await side.db.query('SELECT * FROM faq_change_notifications ORDER BY faq_change_notification_seq')).rows;
+    for(const row of queue) { assert.match(row.event_id,/^[0-9a-f-]{36}$/); row.event_id='<notification:'+row.faq_change_notification_seq+'>'; }
+    const audits=(await side.db.query(`SELECT actor_type,actor_seq,actor_name,action,target_type,target_seq,
+      request_id,result,metadata,occurred_at FROM audit_logs WHERE action LIKE 'FAQ_%' ORDER BY audit_log_seq`)).rows;
+    return normalized({faqs,examples,queue,audits});
+  }
+  let pairs=0;
+  async function pair(method,path,body,status=200,actor=0,extra={}) {
+    const id=randomUUID(), results=[];
+    for (const side of sides) {
+      const headers={Origin:'http://localhost:5173','X-Request-Id':id,
+        ...(path.startsWith('/api/ai/faqs')?{Authorization:'Bearer '+process.env.PGPASSWORD}:{}),
+        ...(actor===null?{}:{Cookie:side.cookies[actor]}),
+        ...(body===undefined?{}:{'Content-Type':'application/json'}),...extra};
+      for(const key of Object.keys(headers)) if(headers[key]===undefined) delete headers[key];
+      const response=await fetch(side.base+path,{method,headers,body:body===undefined?undefined:JSON.stringify(body)});
+      const text=await response.text();
+      assert.equal(response.status,status,side.name+' '+method+' '+path+' '+text);
+      assert.equal(response.headers.get('x-request-id'),id);
+      assert.equal(response.headers.get('cache-control'),'no-store');
+      results.push({body:text?normalized(JSON.parse(text)):null,location:response.headers.get('location'),
+        cors:response.headers.get('access-control-allow-origin'),credentials:response.headers.get('access-control-allow-credentials')});
+    }
+    assert.deepEqual(results[1],results[0],method+' '+path);
+    assert.deepEqual(await state(sides[1]),await state(sides[0]),method+' '+path+' business rows');
+    pairs++;
+    return results[0];
+  }
+  const faq=(question,category='기타')=>({question,category,answer:'문단\n\n|표|값|\n|--|--|\n|A|B|'});
+  await pair('GET','/api/faqs',undefined,401,null);
+  await pair('POST','/api/faqs',{items:[faq('금지')]},401,null);
+  for(let i=0;i<3;i++) {
+    const result=await pair('POST','/api/faqs',{items:[faq('역할 FAQ '+i)]},204,i);
+    assert.equal(result.location,'/api/faqs/'+(10001+i));
+    await pair('GET','/api/faqs/'+(10001+i),undefined,200,i);
+    await pair('PATCH','/api/faqs/'+(10001+i),faq('역할 수정 '+i,'접수'),204,i);
+  }
+  await pair('POST','/api/faqs',{items:[faq('Café 100%_'),faq('배송 질문','배송·운송장')]},204);
+  for(const suffix of ['', '?limit=1&offset=0','?limit=1&offset=999','?q=Cafe%CC%81','?q=%25_','?category=접수','?q=없는검색'])
+    await pair('GET','/api/faqs'+suffix);
+  for(const suffix of ['', '?faqEntrySeqs=10001,10005,2147483647&limit=1','?q=Cafe%CC%81','?limit=1&offset=999']) {
+    const result=await pair('GET','/api/ai/faqs'+suffix,undefined,200,null);
+    for(const row of result.body.data) assert.deepEqual(Object.keys(row).sort(),['answer','faqEntrySeq','question','updatedAt']);
+  }
+  await pair('GET','/api/ai/faqs/10001',undefined,404,null);
+  await pair('GET','/api/ai/faqs?category=기타',undefined,400,null);
+  await pair('GET','/api/ai/faqs',undefined,401,null,{Cookie:'dva_session=invalid'});
+  await pair('GET','/api/ai/faqs',undefined,401,null,{Authorization:undefined});
+  await pair('GET','/api/ai/faqs',undefined,401,null,{Authorization:'Bearer invalid'});
+  await pair('GET','/api/ai/faqs',undefined,200,0,{Authorization:undefined});
+  // Source AuthGuard requires Origin on writes; authenticated GET remains valid without it.
+  await pair('GET','/api/ai/faqs',undefined,200,0,{Origin:undefined});
+  await pair('PATCH','/api/faqs/10001',faq('Origin 거절'),403,0,{Origin:undefined});
+  for(const body of [faq('배열 필요'),{items:[]},{items:[null]},{items:[{...faq('미분류'),category:'전체'}]},
+    {items:[faq('  ')]},{items:[{...faq('NUL'),answer:'a\0b'}]},{items:[faq('x'.repeat(1001))]},
+    {items:[faq('동일'),faq('동일')]}]) await pair('POST','/api/faqs',body,body.items?.length===2?409:400);
+  await pair('POST','/api/faqs',{items:[faq('  역할   수정 0  ')]},409);
+  await pair('PATCH','/api/faqs/10001',{answer:'부분 수정'},400);
+  await pair('PATCH','/api/faqs/10001',faq('역할 수정 1'),409);
+  await pair('PATCH','/api/faqs/2147483647',faq('없음'),404);
+  await pair('DELETE','/api/faqs',{faqEntrySeqs:[10001,2147483647]},404);
+  await pair('DELETE','/api/faqs',{faqEntrySeqs:[10001,10001]},400);
+  for(const suffix of ['?limit=0','?q='+('x'.repeat(201)),'?category=unknown']) await pair('GET','/api/faqs'+suffix,undefined,400);
+  await pair('GET','/api/ai/faqs?faqEntrySeqs=1,1',undefined,400,null);
+  await pair('GET','/api/faqs/not-an-id',undefined,400);
+  await pair('GET','/api/faqs/2147483647',undefined,404);
+  // Pre-existing business rows test reads independently of the not-yet-ported event producer.
+  const sourceIds=Array.from({length:13},()=>randomUUID());
+  for(const db of [sides[0].db,consultation]) {
+    await db.query(`INSERT INTO call_sessions(call_session_seq,provider_call_id,incoming_at)
+      OVERRIDING SYSTEM VALUE VALUES(900001,'faq-source-call','2026-10-01Z')`);
+    for(const [i,id] of sourceIds.entries()) await db.query(`INSERT INTO call_insight_events(event_id,
+      call_session_seq,event_order,kind,occurred_at,payload,payload_hash)
+      VALUES($1,900001,$2,'BUSINESS_RESULT','2026-10-01Z','{"action":"FAQ_ANSWERED"}',repeat('a',64))`,[id,i+1]);
+  }
+  for(const side of sides) for(const [i,id] of sourceIds.entries()) await side.db.query(`INSERT INTO faq_question_examples(
+    faq_entry_seq,event_id,question_text,occurred_at) VALUES(10001,$1,$2,'2026-10-01Z'::timestamptz+make_interval(secs=>$3))`,[id,'고객 실제 질문 '+i,i]);
+  let detail=await pair('GET','/api/faqs/10001');
+  assert.equal(detail.body.data.recentQuestions.length,10);
+  assert.equal(detail.body.data.recentQuestions[0].questionText,'고객 실제 질문 12');
+  assert.ok(detail.body.data.recentQuestions.every((e)=>e.callSessionSeq===900001&&!('eventId' in e)));
+  for(const [db,sql] of [[sides[0].db,"UPDATE call_sessions SET deleted_at=clock_timestamp() WHERE call_session_seq=900001"],
+    [consultation,"UPDATE call_sessions SET deleted_at=clock_timestamp() WHERE call_session_seq=900001"]]) await db.query(sql);
+  detail=await pair('GET','/api/faqs/10001');
+  assert.ok(detail.body.data.recentQuestions.every((e)=>e.callSessionSeq===null));
+  for(const db of [sides[0].db,consultation]) await db.query("UPDATE call_sessions SET deleted_at=NULL,incoming_at='2001-01-01Z' WHERE call_session_seq=900001");
+  detail=await pair('GET','/api/faqs/10001');
+  assert.ok(detail.body.data.recentQuestions.every((e)=>e.callSessionSeq===null));
+  for(const db of [sides[0].db,consultation]) await db.query("UPDATE call_sessions SET incoming_at=NULL WHERE call_session_seq=900001; DELETE FROM call_insight_events WHERE call_session_seq=900001");
+  detail=await pair('GET','/api/faqs/10001');
+  assert.ok(detail.body.data.recentQuestions.every((e)=>e.callSessionSeq===null));
+  for(const side of sides) await side.db.query("UPDATE faq_question_examples SET occurred_at='2001-01-01Z'");
+  detail=await pair('GET','/api/faqs/10001');
+  assert.deepEqual(detail.body.data.recentQuestions,[]);
+  // Hold the real consultation read while a concurrent FAQ edit tries to reset its snapshot.
+  const raceEvent=randomUUID(),raceAt=new Date().toISOString();
+  for(const db of [sides[0].db,consultation]) {
+    await db.query("INSERT INTO call_sessions(call_session_seq,provider_call_id) OVERRIDING SYSTEM VALUE VALUES(900003,'faq-race-source')");
+    await db.query("INSERT INTO call_insight_events(event_id,call_session_seq,event_order,kind,occurred_at,payload,payload_hash) VALUES($1,900003,1,'BUSINESS_RESULT',$2,'{}',repeat('a',64))",[raceEvent,raceAt]);
+  }
+  for(const side of sides) await side.db.query("INSERT INTO faq_question_examples(faq_entry_seq,event_id,question_text,occurred_at) VALUES(10003,$1,'동시 고객 질문',$2)",[raceEvent,raceAt]);
+  const blocker=await consultation.connect(),getId=randomUUID(),patchId=randomUUID();
+  let read,edit,finished=false;
+  try {
+    await blocker.query('BEGIN');await blocker.query('LOCK TABLE call_insight_events IN ACCESS EXCLUSIVE MODE');
+    read=fetch(sides[1].base+'/api/faqs/10003',{headers:{Cookie:sides[1].cookies[0],'X-Request-Id':getId}});
+    const limit=Date.now()+2000;
+    for(;;) {
+      const active=(await consultation.query("SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE '%FROM call_insight_events%'")).rows[0].n;
+      if(active) break;
+      assert.ok(Date.now()<limit,'private call lookup did not reach the blocked table');
+      await new Promise((resolve)=>setTimeout(resolve,20));
+    }
+    edit=fetch(sides[1].base+'/api/faqs/10003',{method:'PATCH',headers:{Origin:'http://localhost:5173',Cookie:sides[1].cookies[0],'X-Request-Id':patchId,'Content-Type':'application/json'},body:JSON.stringify(faq('동시 수정 완료'))}).then((response)=>{finished=true;return response;});
+    await new Promise((resolve)=>setTimeout(resolve,100));
+    assert.equal(finished,false,'FAQ must remain stable until its cross-service source read finishes');
+    await blocker.query('ROLLBACK');
+    const actual=await read,changed=await edit;
+    assert.equal(actual.status,200);assert.equal(changed.status,204);
+    const actualBody=await actual.json();assert.equal(actualBody.data.recentQuestions[0].callSessionSeq,900003);
+    const source=await fetch(sides[0].base+'/api/faqs/10003',{headers:{Cookie:sides[0].cookies[0],'X-Request-Id':getId}});
+    assert.equal(source.status,200);assert.deepEqual(normalized(actualBody),normalized(await source.json()));
+    const sourceEdit=await fetch(sides[0].base+'/api/faqs/10003',{method:'PATCH',headers:{Origin:'http://localhost:5173',Cookie:sides[0].cookies[0],'X-Request-Id':patchId,'Content-Type':'application/json'},body:JSON.stringify(faq('동시 수정 완료'))});
+    assert.equal(sourceEdit.status,204);assert.deepEqual(await state(sides[1]),await state(sides[0]));
+    pairs+=2;
+  } finally {
+    await blocker.query('ROLLBACK');blocker.release();
+    await Promise.allSettled([read,edit].filter(Boolean));
+  }
+  await pair('PATCH','/api/faqs/10001',faq('사례 초기화'),204);
+  await pair('DELETE','/api/faqs',{faqEntrySeqs:[10001,10002]},204);
+  await pair('GET','/api/faqs/10001',undefined,404);
+  await pair('POST','/api/faqs',{items:[faq('사례 초기화')]},204);
+  // Private lookup validates source/type/IDs and stays outside public Swagger/Ingress.
+  const endpoint='http://consultation-app:3004/internal/faq-call-sources';
+  const event={eventId:randomUUID(),source:'operations',eventType:'FaqCallSourcesRequested',payload:{eventIds:[sourceIds[0]]}};
+  for(const [body,token,status] of [[event,'wrong',403],[{},process.env.CONSULTATION_AUTH_TOKEN,400],
+    [{...event,source:'customer'},process.env.CONSULTATION_AUTH_TOKEN,422],
+    [{...event,payload:{eventIds:[]}},process.env.CONSULTATION_AUTH_TOKEN,422],
+    [{...event,payload:{eventIds:[sourceIds[0],sourceIds[0].toUpperCase()]}},process.env.CONSULTATION_AUTH_TOKEN,422],
+    [event,process.env.CONSULTATION_AUTH_TOKEN,200]]) {
+    const response=await fetch(endpoint,{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(body)});
+    assert.equal(response.status,status,await response.clone().text());
+  }
+  const spec=await (await fetch('http://consultation-app:3004/consultation/docs-json')).json();
+  assert.ok(!Object.keys(spec.paths).some((path)=>path.includes('faq-call-sources')));
+  // Keep only a deterministic pair of pending business notifications for the real worker crash test.
+  const first=randomUUID(),second=randomUUID(),requestId=randomUUID();
+  for(const side of sides) {
+    assert.ok((await side.db.query('SELECT * FROM faq_change_notifications')).rows.every((r)=>r.attempts===0&&r.sent_at===null));
+    await side.db.query('DELETE FROM faq_change_notifications');
+    await side.db.query(`INSERT INTO faq_change_notifications(event_id,operation,faq_entry_seqs,request_id)
+      VALUES($1,'INSERT',ARRAY[10003],$3),($2,'DELETE',ARRAY[10001],$3)`,[first,second,requestId]);
+  }
+  console.log(JSON.stringify({httpPairs:pairs,recentQuestionReadOnlyFixture:true,notificationIds:[first,second]}));
+});
+
+test('operations retention timer clears expired audits without removing recent records', async (t) => {
+  assert.equal(process.env.NODE_ENV, 'test');
+  assert.equal(process.env.PGDATABASE, 'dva_webhook_test');
+  const db=new Pool();t.after(()=>db.end());
+  const ids=[];
+  for(const days of [8,6]) ids.push((await db.query("INSERT INTO audit_logs(actor_type,action,target_type,request_id,result,metadata,occurred_at) VALUES('SYSTEM','RETENTION_TEST','SYSTEM',$1,'SUCCESS','{}',clock_timestamp()-$2::interval) RETURNING audit_log_seq",[randomUUID(),days+' days'])).rows[0].audit_log_seq);
+  for(let n=0;(await db.query('SELECT 1 FROM audit_logs WHERE audit_log_seq=$1',[ids[0]])).rowCount;n++) {
+    assert.ok(n<160,'real 10s retention timer did not clear expired audit');
+    await new Promise(resolve=>setTimeout(resolve,250));
+  }
+  assert.equal((await db.query('SELECT 1 FROM audit_logs WHERE audit_log_seq=$1',[ids[1]])).rowCount,1);
+});
+
+test('operations retention preserves clocks, pending notifications, batch limits and transactional cleanup', async (t) => {
+  assert.equal(process.env.NODE_ENV,'test');assert.equal(process.env.PGDATABASE,'dva_webhook_test');
+  const {RetentionRepository}=require('../dist/retention/retention.repository');
+  const {RetentionWorker}=require('../dist/retention/retention.worker');
+  const db=new Pool();t.after(()=>db.end());
+  const transaction=async work=>{const client=await db.connect();try{await client.query('BEGIN');const value=await work(client);await client.query('COMMIT');return value;}catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}};
+  const repo=new RetentionRepository({pool:db,transaction});
+  await truncateFixture(db,'TRUNCATE audit_logs,faq_change_notifications,faq_question_examples,faq_entries,ai_personas,admin_users RESTART IDENTITY CASCADE');
+  const at=process.env.RETENTION_AT;assert.ok(Number.isFinite(Date.parse(at)));
+  await db.query(`INSERT INTO admin_users(login_id,name,password_hash,role,status,created_at,deleted_at)
+    SELECT login,login,'fixture-not-for-login','OPERATOR','ACTIVE',$1::timestamptz,
+    CASE WHEN age IS NULL THEN NULL ELSE $1::timestamptz-age::interval END
+    FROM (VALUES('rtActive',NULL::text),('rtExpired','6 years'),('rtRecent','4 years')) v(login,age)`,[at]);
+  await db.query(`INSERT INTO admin_sessions(session_token_hash,admin_user_seq,created_at,expires_at)
+    SELECT repeat(chr(96+admin_user_seq),64),admin_user_seq,$1::timestamptz,$1::timestamptz+interval '9 hours' FROM admin_users`,[at]);
+  await db.query("INSERT INTO ai_personas(code) VALUES('retention-projection')");
+  for(const [version,years] of [[1,6],[2,4]]) await db.query(`INSERT INTO ai_persona_versions(ai_persona_seq,version,name,prompt_text,turn_wait_level,created_at,created_by_admin_user_name)
+    VALUES(1,$1,'보존 설정','보존 프롬프트','NORMAL',$3::timestamptz-$2::interval,$4)`,[version,years+' years',at,version===1?'만료 작성자':'최근 작성자']);
+  for(const [question,years] of [['만료 FAQ',6],['최근 FAQ',4],['활성 FAQ',null]]) await db.query(`INSERT INTO faq_entries(question,answer,category,updated_by_admin_user_seq,created_at,updated_at,deleted_at)
+    VALUES($1,'보존 답변','기타',1,$3,$3,CASE WHEN $2::text IS NULL THEN NULL ELSE $3::timestamptz-$2::interval END)`,[question,years===null?null:years+' years',at]);
+  for(const [index,faq,years] of [[1,3,6],[2,3,4],[3,1,4]]) await db.query(`INSERT INTO faq_question_examples(faq_entry_seq,event_id,question_text,occurred_at)
+    VALUES($1,$2,'보존 질문',$4::timestamptz-$3::interval)`,[faq,'10000000-0000-4000-8000-'+String(index).padStart(12,'0'),years+' years',at]);
+  for(const [index,days] of [[1,8],[2,6],[3,null]]) await db.query(`INSERT INTO faq_change_notifications(event_id,operation,faq_entry_seqs,request_id,created_at,next_attempt_at,sent_at)
+    VALUES($1,'DELETE',ARRAY[2147483647],$1,$3::timestamptz-interval '30 days',$3,
+      CASE WHEN $2::text IS NULL THEN NULL ELSE $3::timestamptz-$2::interval END)`,['30000000-0000-4000-8000-'+String(index).padStart(12,'0'),days===null?null:days+' days',at]);
+  await db.query(`INSERT INTO audit_logs(actor_type,action,target_type,request_id,result,metadata,occurred_at)
+    SELECT 'SYSTEM','RETENTION_TEST','SYSTEM',('20000000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,'SUCCESS','{}',
+    $1::timestamptz-CASE WHEN n=1006 THEN interval '6 days' ELSE interval '8 days' END FROM generate_series(1,1006) n`,[at]);
+  const snapshot=async()=>{
+    const result={};for(const [table,key]of [['audit_logs','audit_log_seq'],['faq_change_notifications','faq_change_notification_seq'],['ai_persona_versions','ai_persona_version_seq'],['admin_users','admin_user_seq'],['admin_sessions','admin_session_seq'],['faq_entries','faq_entry_seq'],['faq_question_examples','faq_question_example_seq']]) {
+      const order=table==='admin_sessions'?'admin_user_seq,session_token_hash':key;
+      result[table]=(await db.query(`SELECT to_jsonb(t) AS row FROM ${table} t ORDER BY ${order}`)).rows.map(r=>r.row);
+    }return result;
+  };
+  const before=await snapshot();
+  for(const [key,value]of [[20261103,157],[20261027,37]]) {
+    const gate=await db.connect();try{await gate.query('SELECT pg_advisory_lock($1,$2)',[key,value]);await repo.purgeDatabase();assert.deepEqual(await snapshot(),before);}
+    finally{await gate.query('SELECT pg_advisory_unlock($1,$2)',[key,value]);gate.release();}
+  }
+  await db.query("CREATE FUNCTION retention_audit_fault() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'controlled retention deletion failure'; END $$; CREATE TRIGGER retention_audit_fault BEFORE DELETE ON faq_entries FOR EACH ROW EXECUTE FUNCTION retention_audit_fault()");
+  try{await assert.rejects(repo.purgeDatabase());assert.deepEqual(await snapshot(),before);}
+  finally{await db.query('DROP TRIGGER retention_audit_fault ON faq_entries; DROP FUNCTION retention_audit_fault()');}
+  const locked=await db.connect();try {
+    await locked.query('BEGIN');await locked.query('SELECT 1 FROM audit_logs WHERE audit_log_seq=1 FOR UPDATE');
+    await repo.purgeDatabase();assert.deepEqual((await db.query('SELECT audit_log_seq::int AS id FROM audit_logs ORDER BY audit_log_seq')).rows.map(r=>r.id),[1,1002,1003,1004,1005,1006]);
+  }finally{await locked.query('ROLLBACK');locked.release();}
+  await repo.purgeDatabase();const after=await snapshot();
+  assert.deepEqual(after.audit_logs.map(r=>Number(r.audit_log_seq)),[1006]);
+  assert.deepEqual(after.faq_change_notifications.map(r=>r.faq_change_notification_seq),[2,3]);
+  assert.deepEqual(after.ai_persona_versions.map(r=>r.created_by_admin_user_name),[null,'최근 작성자']);
+  assert.deepEqual(after.admin_users.map(r=>r.login_id),['rtActive','rtRecent']);
+  assert.deepEqual(after.admin_sessions.map(r=>r.admin_user_seq),[1,3]);
+  assert.deepEqual(after.faq_entries.map(r=>r.question),['최근 FAQ','활성 FAQ']);
+  assert.deepEqual(after.faq_question_examples.map(r=>r.faq_question_example_seq),[2]);
+  await repo.purgeDatabase();assert.deepEqual(await snapshot(),after);
+  const makeWorker=repository=>new RetentionWorker(repository,...(RetentionWorker.length===3?[{erase:()=>assert.fail('operations scope has no recording work')}]:[]),{get:()=> 'test'});
+  let finish,calls=0;const fake={claimCall:async()=>undefined,purgeDatabase:()=>{calls++;return new Promise(resolve=>finish=resolve);}};
+  const worker=makeWorker(fake);worker.onApplicationBootstrap();assert.equal(calls,0);
+  const first=worker.run();assert.equal(worker.run(),first);await Promise.resolve();await Promise.resolve();assert.equal(calls,1);
+  let stopped=false;const stopping=worker.onModuleDestroy().then(()=>stopped=true);await Promise.resolve();assert.equal(stopped,false);finish();await stopping;await worker.run();assert.equal(calls,1);
+  let retries=0;const retry=makeWorker({claimCall:async()=>undefined,purgeDatabase:async()=>{if(++retries===1)throw Error('private retention error');}});const events=[];retry.logger.error=event=>events.push(event);
+  await assert.rejects(retry.run());await retry.run();assert.equal(retries,2);assert.deepEqual(events,[{event:'retention_cleanup_failed'}]);await retry.onModuleDestroy();
+  console.log(JSON.stringify({retentionProjection:after,expiryBatch:1000,failedCleanupRolledBack:true,lockedRowsSkipped:true}));
+});

@@ -1,0 +1,226 @@
+# 통화·녹취 조회 API
+
+관련 작업: [S15P31D109-88](https://ssafy.atlassian.net/browse/S15P31D109-88).
+관리자 화면의 통화 목록·상담 상세·발화·녹취 재생을 담당한다.
+기존 AI 주문 수신과 PBX 녹취 수집 계약은 변경하지 않는다.
+
+## 공통
+
+- 경로: `/api`. OPERATOR·SUPERVISOR·SYSTEM_ADMIN의 활성 관리자 세션 쿠키 `dva_session`이 필요하다.
+- AI 통화 헤더나 Bearer 값만으로 관리자 통화 기록을 조회할 수 없다.
+- 목록: `{ data: [], hasNext, total_count }`. 단건: `{ data, meta: { requestId } }`.
+- 모든 응답은 `Cache-Control: no-store`. 전화번호·대화 내용·녹취 URL을 요청 로그에 남기지 않는다.
+- 경로 번호는 양의 int32다. 통화 경로의 `{id}`는 `call_sessions.call_session_seq`다.
+- 기존 통화·발화·녹취·이벤트와 `call_analyses`, `ai_persona_versions`, 고객·주문을 읽는다. 현재 앱은 통화 요약 041·대표 분류 삭제 042까지 적용해야 한다.
+
+## GET /api/calls — 통화 목록 조회
+
+| 선택 query | 의미 |
+| --- | --- |
+| `orderSeq` | 연결된 주문 번호 정확히 일치 |
+| `orderStatus` | 연결된 주문의 COLLECTING / notPaid / PAID / SUBMITTING / ACCEPTED / SUBMISSION_FAILED / CANCELLED |
+| `callerPhoneNumber` | 저장된 발신번호 정확히 일치. 숫자와 맨 앞의 `+` 허용 |
+| `from`, `to` | 응답 `startedAt`과 같은 기준(PBX 시작 → AI 시작 → 수신 이벤트 시각). from 포함·to 미포함, 시간대 필수 |
+| `q` | 현재 연결 고객 이름·발신번호 부분 검색. NFC 정규화·앞뒤 공백 제거, 최대 200자. `%`·`_`는 일반 문자 |
+| `hasComplaint` | 문자열 `true` / `false`만 허용. false는 확인된 불만 없음이며 미판정·분석 미수신은 제외 |
+| `aiPersonaVersionSeq` | 실제 사용했다고 분석에 기록된 페르소나 버전 DB 번호. 화면의 v6 같은 버전 숫자와 다름 |
+| `limit`, `offset` | 기본 20·0, limit 1~100 |
+
+조건은 모두 AND로 결합한다. `startedAt DESC NULLS LAST, callSessionSeq DESC`로 정렬한다.
+PBX 시작 시각이 아직 없으면 AI 분석의 시작 시각, 그것도 없으면 통화 수신 이벤트 시각을 사용한다.
+기간 필터·정렬·응답 `startedAt`은 모두 이 우선순위를 사용한다. 세 시각이 모두 없는 과거 통화만 기간 검색에서 제외하고 기간 조건 없는 목록의 마지막에 표시한다.
+`endedAt`은 PBX 종료 우선, 없으면 AI 분석의 종료 시각이며 둘 다 없으면 null이다. PBX 시각이 나중에 도착하면 같은 통화 번호에서 우선 적용하므로 표시 시각·기간·순서가 보정될 수 있다.
+AI 시각은 아래 analysis에도 원본 그대로 제공한다. 이 조회는 DB의 PBX 시작·종료 값을 AI 시각으로 덮어쓰지 않는다.
+q의 이름·발신번호 조건만 OR이며 다른 조건은 AND다. 빈 q는 조건을 적용하지 않는다. NUL·반복 query는 400이다.
+분석 필터는 해당 분석이 있는 통화만 선택한다. 존재하지 않는 버전 번호 필터는 빈 목록이며 404가 아니다.
+042부터 대표 분류 `result` 필터를 제공하지 않는다. 기존 `?result=...` 요청은 지원하지 않는 필드이므로 `400 INVALID_REQUEST`다.
+
+응답 항목:
+
+| 필드 | 의미 |
+| --- | --- |
+| `callSessionSeq`, `providerCallId` | 내부 통화 번호와 OpenAI 통화 식별자 |
+| `callerPhoneNumber` | 발신번호, 미확인 시 null |
+| `orderSeq` | 연결 주문 번호, 없으면 null. 주문 내용은 기존 주문 상세 API에서 조회 |
+| `orderStatus`, `orderTotalAmount` | 연결 주문의 현재 결제·접수 상태와 미취소 상세 합계. 주문 없으면 null |
+| `startedAt`, `endedAt` | 위 우선순위의 표시 시각. 사용할 시각이 모두 없으면 null |
+| `customerSeq`, `customerName` | 연결 고객 번호와 현재 이름. 미확인은 null |
+| `analysis` | 아래 분석 객체. 분석을 수신하지 않았으면 null |
+| `analysisStatus` | COMPLETED=정상 분석 저장, FAILED=정상 분석 없이 AI 최종 실패 수신, EXPIRED=둘 다 없이 PBX 종료 후 10분 또는 종료 미확인 통화 등록 후 2시간 경과, 그 외 PENDING. 등록 시각이 없으면 수신 시각 사용 |
+| `recordedAt` | 최초 녹취 참조의 DB 저장 시각. 녹취가 없으면 null이며 실제 통화 시작 시각과 다름 |
+
+analysisStatus는 목록·상세 data.call·홈 recentCalls에 같은 기준으로 제공한다. EXPIRED는 2026-11-09 후속 작업 계약이며 프론트 타입·표시는 [최신 연동 명세](../../backend/docs/call-analysis-status-frontend-integration.md)를 따른다.
+
+고객은 연결 주문의 customer_seq를 우선하고 없으면 통화 발신번호와 고객 전화번호의 정확한 일치로 연결한다.
+탈퇴 고객의 과거 통화를 숨기지 않으며 고객 이름 변경은 다음 조회·검색에 반영된다. 고객의 다른 전화번호로 통화 발신번호를 바꾸지 않는다.
+
+통화·상담 상태에 연결된 주문의 결제 대기·디버 접수·취소 상태를 함께 제공한다. 결제 상태는 [주문 결제 계약](order-billing.md)을 따른다.
+
+조건에 맞는 결과가 없으면 `200 { "data": [], "hasNext": false, "total_count": 0 }`다.
+잘못된 날짜·역전된 기간·중복 query·지원하지 않는 필드는 `400 INVALID_REQUEST`다.
+
+## GET /api/calls/{id} — 통화 상세 조회
+
+`id`는 `call_session_seq`다. 응답의 `data`는 `{ call, analysis, recordings, aiActionCount }`다.
+`aiActionCount`는 현재 수집된 AI 동작 전체 건수이며 `/actions`의 페이지 크기와 별개다. 수집 기록이 없으면 0이다.
+
+통화 목록·AI 분석·발화·처리 기록 조회는 S3 업로드를 기다리지 않는다. 아직 녹취가 없으면 `recordings: []`로 먼저 응답한다. AI 데이터와 PBX 시각·녹취는 기존 통화 번호에 나중에 연결되며 다음 조회에 반영된다. 파일 업로드 실패·지연을 이유로 이미 수집한 통화·분석을 목록에서 숨기지 않는다.
+열려 있는 화면의 자동 갱신과 재생 URL 보존은 [프론트 연동 명세](call-history-refresh-frontend.md)를 따른다. 백엔드 변경·검증 기록은 [작업 인계](../../backend/docs/recording-independent-calls.md)에 정리했다.
+
+`call`은 목록의 기본 정보·고객 필드이며 analysis는 data.analysis로 분리한다. 목록에서는 각 항목의 analysis에 같은 분석 객체를 제공한다.
+`recordings`는 아래 필드를 가진 배열이며 `recordingSeq` 오름차순이다.
+
+| 필드 | 의미 |
+| --- | --- |
+| `recordingSeq`, `createdAt` | 녹취 번호와 DB 저장 시각 |
+| `url` | 최대 5분 유효한 S3 재생 URL. 발급 실패 시 null |
+| `expiresAt` | URL 만료 시각. 발급 실패 시 null |
+| `playbackError` | 성공 시 null, 실패 시 NOT_FOUND 또는 DEPENDENCY_UNAVAILABLE |
+
+해당 통화에 연결된 녹취만 읽고 S3 객체를 확인해 URL을 발급한다. `objectKey`는 별도 필드로 노출하지 않는다.
+녹취 하나의 발급이 실패해도 통화 정보와 다른 녹취를 반환한다. 이 경우 HTTP 200이며 해당 항목에 오류를 표시한다.
+
+통화 자체가 없으면 `404 NOT_FOUND`다. 통화는 있지만 녹취가 아직 없으면 `200`과 빈 배열을 반환한다.
+연결 주문의 내용은 `GET /api/orders/{orderSeq}`로 조회한다.
+
+### 저장된 통화 분석
+
+관리자 상세와 목록은 같은 저장 원본을 읽는다. AI 서버를 호출하지 않으며 AI_INSIGHTS_TOKEN 미설정도 조회를 막지 않는다.
+통화가 있고 분석이 없으면 HTTP 200과 analysis=null이다. 분석 미수신을 불만 없음·되묻기 0·성공으로 추정하지 않는다.
+
+| analysis 필드 | 의미 |
+| --- | --- |
+| `aiPersonaVersionSeq` | 실제 사용 버전 DB 번호 또는 null |
+| `personaName`, `personaVersion` | 실제 사용 버전의 이름·버전 숫자. 미확인은 각각 null이며 현재 ACTIVE나 최신 버전으로 대신하지 않음 |
+| `isNewCustomer` | AI가 보낸 신규 true / 기존 false. 미수집 null |
+| `registeredParcelCount` | AI가 보낸 접수 확정 배송 상세 수. 결제 대기 포함. 미수집 null |
+| `faqAnswerCount` | AI가 보낸 FAQ 답변 건수. 미수집 null |
+| `orderLookupCount` | AI가 보낸 접수 내역 조회·안내 건수. 미수집 null |
+| `cancelledParcelCount` | AI가 보낸 취소 완료 배송 상세 수. 미수집 null |
+| `hasHandoffRequest` | AI가 보낸 상담원 연결 요구 여부. 연결 성공과 별개. 미수집 null |
+| `aiStartedAt`, `aiEndedAt` | AI 측정 시작·종료 원본. PBX 시각과 별도로 저장·반환 |
+| `repeatQuestionCount` | 0 이상 횟수 또는 미측정 null |
+| `hasComplaint` | 불만 확인 true, 없음 확인 false, 미판정 null |
+| `complaints` | 저장 순서대로 불만 최대 20개. type·evidenceText·offsetSeconds·utteranceOrders |
+| `analysedAt` | 분석 저장 시각. 통화 시각과 별개 |
+
+```json
+{
+  "aiPersonaVersionSeq": 7,
+  "personaName": "빠른 접수형",
+  "personaVersion": 6,
+  "isNewCustomer": false,
+  "registeredParcelCount": 3,
+  "faqAnswerCount": 2,
+  "orderLookupCount": 1,
+  "cancelledParcelCount": 1,
+  "hasHandoffRequest": true,
+  "aiStartedAt": "2026-10-31T01:00:00.000Z",
+  "aiEndedAt": "2026-10-31T01:03:40.000Z",
+  "repeatQuestionCount": 2,
+  "hasComplaint": true,
+  "complaints": [
+    {
+      "type": "REPEATED_QUESTION",
+      "evidenceText": "반복해서 묻자 불편함을 표현함",
+      "offsetSeconds": 31,
+      "utteranceOrders": [3, 4, 5, 6]
+    }
+  ],
+  "analysedAt": "2026-10-31T01:03:42.000Z"
+}
+```
+
+041·042 적용 후 새 요약 6개는 목록 각 항목의 `analysis`, 상세 `data.analysis`에 동일하게 반환하며 `analysis.result`는 반환하지 않는다. 상세의 통화 기본 정보는 기존 `data.call`을 유지하며 새 필드를 그 안에 중복 추가하지 않는다. 분석이 없으면 analysis=null, 과거 분석에 새 값이 없으면 각 필드가 null이다. [분석 수집 계약](call-analysis.md)을 따른다.
+프론트는 true/false를 신규/기존 또는 요청 있음/없음으로 표시하고, 건수는 0을 포함해 `N건`으로 표시한다. null은 미확인으로 구분하며 0·false로 대체하지 않는다. 고객·주문 상태가 나중에 바뀌어도 저장된 통화 요약은 바뀌지 않는다. 페르소나 이름·버전은 기존 불변 버전을 JOIN해 제공한다.
+불만 유형·근거 원문·정수 초 위치·발화 순번은 저장값 그대로 제공한다. 아직 수집되지 않은 발화를 만들어 채우지 않는다.
+050부터 기존 불만 유형을 유지하면서 INFORMATION_RECOGNITION_ERROR·INTENT_RECOGNITION_ERROR·UNSUPPORTED_ANSWER·INTERRUPTION·DISSATISFACTION_EXPRESSION을 추가한다. 전체 10개 코드는 [AI 대시보드 명세](../../backend/docs/ai-dashboard-ai-integration.md#불편-표현-유형), 별도 집계 GET 4개와 현재/직전 활성 버전 비교는 [프론트 대시보드 명세](../../backend/docs/ai-dashboard-frontend-integration.md)를 따른다. 목록·상세 응답 구조는 동일하며 대시보드 필드를 analysis 안에 추가하지 않는다.
+프론트는 같은 통화의 스크립트에서 실제 존재하는 utteranceOrder만 강조하고, 늦은 발화 수신 후 다시 조회하면 연결할 수 있다.
+hash·프롬프트·AI 서비스 토큰은 반환하지 않는다. 근거·고객 이름·검색어를 일반 HTTP 로그에 복사하지 않는다.
+
+041은 요약 컬럼 6개를 추가하고 042는 result를 삭제한다. 047은 저장 경로가 없는 end_reason과 handoff_requests를 제거한다. 목록·상세에서 endReason·handoff를 반환하지 않으며 endReason·handoffStatus 필터는 400이다. 상담원 연결 요구 여부는 analysis.hasHandoffRequest로 조회한다. 주문의 orderStatus와 통화·분석·녹취 경로는 유지한다.
+목록의 total_count로 검색 총건수를 제공한다. 프론트는 ceil(total_count/limit)으로 숫자 페이지 수를 계산한다.
+담당 2용 통계 뷰 두 개도 별도 작업이며 이 API에서 평균·비율을 집계하지 않는다.
+
+## GET /api/calls/{id}/transcript — 통화 대화 내용 조회
+
+`id`는 `call_session_seq`, 선택 query는 `limit`·`offset`이다.
+응답은 `{ data: Utterance[], hasNext, total_count }`이며 `utteranceOrder` 오름차순이다.
+발화 구간별 `callUtteranceSeq`, `utteranceOrder`, `speaker`(CUSTOMER/AI),
+`utteranceText`, `lastSentenceSeq`, `receivedAt`, `offsetSeconds`를 반환한다.
+
+누적 대화 원문은 줄바꿈을 포함해 그대로 제공한다. `receivedAt`은 최초 구간 수신 시각이며,
+녹취의 재생 위치나 실제 발화 시작 시각을 뜻하지 않는다.
+`offsetSeconds`는 AI 통화 시작부터 정수 초이며 이벤트 미수집·위치 미확인이면 null이다. receivedAt으로 위치를 추정하지 않는다.
+AI 동작은 `GET /api/calls/{id}/actions`, 주문·FAQ 처리 결과는 `GET /api/calls/{id}/processing-results`로 별도 조회한다. [분리 조회 계약](call-events-read-spec.md)을 따른다.
+통화가 없으면 404, 저장된 발화가 없거나 마지막 페이지 이후이면 빈 목록이다.
+빈 목록은 STT 기록이 없다는 뜻이며 통화가 무음이었거나 인식에 성공했다는 뜻이 아니다.
+
+## 통화 상세의 녹취 재생 정보
+
+`GET /api/calls/{id}` 한 번으로 통화 정보와 녹취 재생 URL을 받는다.
+관리자 세션 확인 → 통화와 연결 녹취 조회 → 기존 S3 객체 존재 확인 → 임시 GET URL 서명 순서로 처리한다.
+별도 `GET /api/recordings/{id}/url` API는 제거했다. 새 버킷·업로드 API·토큰 테이블은 만들지 않는다.
+
+통화 상세 `data.recordings` 예시:
+
+```json
+[
+  {
+    "recordingSeq": 7,
+    "createdAt": "2026-10-28T01:04:00.000Z",
+    "url": "https://dva-d109-storage.s3.ap-northeast-2.amazonaws.com/recordings/example?X-Amz-Algorithm=AWS4-HMAC-SHA256&...",
+    "expiresAt": "2026-10-28T01:09:00.000Z",
+    "playbackError": null
+  }
+]
+```
+
+예시 URL은 실행용이 아니다. 실제 발급 URL을 프론트의 오디오 재생 주소로 사용한다.
+최대 5분 유효하며, 임시 AWS 자격 증명이 먼저 만료되면 URL 만료도 그 시각에 맞춘다.
+만료 후 통화 상세를 다시 조회해 새 URL을 받는다. S3 객체 삭제나 권한 철회가 있으면 만료 전에도 재생이 중단될 수 있다.
+발급된 URL은 소지자가 만료 전까지 접근할 수 있으므로 공유·로그·장기 저장을 피한다.
+발급 후 관리자 로그아웃만으로 기존 S3 URL이 즉시 폐기되지는 않는다.
+
+기존 `AWS_REGION`, `S3_RECORDINGS_BUCKET`, AWS 자격 증명 설정을 그대로 사용한다.
+IAM에는 해당 녹취 객체의 `s3:GetObject` 권한이 필요하다. 버킷은 비공개로 유지한다.
+일반 오디오 태그로 URL을 재생할 수 있으며, 프론트에서 fetch·오디오 분석을 사용하면 버킷 CORS 설정이 별도로 필요할 수 있다.
+설정 위치는 [기존 S3 연결 문서](recording-s3-setup.md)를 참고한다.
+서명은 [AWS 공식 SDK](https://docs.aws.amazon.com/AWSJavaScriptSDK/v3/latest/Package/-aws-sdk-s3-request-presigner/)를 사용한다.
+
+| `playbackError` | 조건 |
+| --- | --- |
+| null | URL 발급 성공 |
+| `NOT_FOUND` | S3가 파일 미존재(404)를 확인 |
+| `DEPENDENCY_UNAVAILABLE` | 버킷 미설정, S3 접근 거부·장애·타임아웃, 자격 증명·서명 실패 |
+
+S3의 403은 파일 미존재로 단정하지 않는다. 실패 항목은 `url`·`expiresAt`이 null이며 DB 녹취 기록은 유지한다.
+통화 자체가 없는 경우의 HTTP 404와 녹취 파일만 없는 경우의 `playbackError: NOT_FOUND`를 구분한다.
+`objectKey`를 별도 응답 필드로 제공하지 않으며, 서명된 재생 URL에는 S3 객체 경로가 포함된다.
+
+## 확인 방법
+
+1. Swagger에서 기존 로그인 API로 로그인한다. 태그는 `Calls`다.
+2. 통화 목록에서 `callSessionSeq`를 선택하고 상세의 연결 주문·녹취 목록·재생 URL을 확인한다.
+3. 발화 조회에서 화자·문장·발화 순서를 확인한다. STT 미수집 통화는 빈 목록이다.
+4. 상세의 `recordings[].url`로 오디오를 재생한다. 만료 후에는 상세를 다시 조회하고, URL이 null이면 `playbackError`를 확인한다.
+
+자동 검증은 격리 PostgreSQL의 저장 데이터, 로컬 모의 S3와 실제 AWS SDK 서명,
+관리자 세션 및 실제 Nginx 경유를 사용한다. 운영 AWS 버킷의 실제 녹취 재생은 별도 확인 대상이다.
+
+## 수집 상태와 범위
+
+- 통화 식별자가 포함된 고객 컨텍스트나 AI 결과에서 통화 행을 만들고 수신 이벤트 시각으로 먼저 조회한다. AI 분석을 받으면 AI 시작·종료도 조회에 사용하며, PBX 웹훅 매칭 후에는 실제 PBX 시작·종료가 우선한다. S3 업로드 완료 여부로 통화 행의 노출을 제한하지 않는다.
+  `endedAt: null`은 종료 정보가 아직 없다는 뜻이며 현재 통화 중이라고 단정할 수 없다.
+- 주문 상태를 통화 종료 사유로 바꾸어 반환하지 않는다.
+- 완결된 발화는 [EVT-01](call-events.md)로 수집해 기존 전사 조회에서 읽는다. 조회 API가 STT를 생성하거나 수집 완료를 보장하지 않는다. 실제 상담원 연결 결과 수집은 후속 범위다.
+- `customerSeq` 검색은 원본 API 명세대로 보류한다. 직접 고객-통화 관계가 없어 주문 없는 고객 통화를 완전하게 검색할 수 없다. 전달하면 400이다.
+- 실제 상담원 연결 시각은 현 스키마에 없으므로 제공하지 않는다. 수집 계약·저장 구조 확정이 별도로 필요하다.
+- 실시간 통화 추적, 상담원 연결 제어, STT 생성, 별도 상담원 이력 API, 관리 메모·콜백은 이번 조회 범위에 포함하지 않는다.
+
+
+모든 목록 응답의 최상위 total_count는 필수인 0 이상 정수이며 같은 검색·필터·권한 범위의 전체 결과 수다. limit·offset 적용 전 COUNT(*)를 목록 데이터와 같은 SQL 스냅샷에서 계산한다. 검색 결과 없음은 0이며 offset이 전체 건수를 넘어 data가 비어도 total_count는 유지한다. 기존 hasNext는 유지한다.
+
+### 고객 불만의 책임·강도
+
+analysis.complaints에는 target·level·referenceOnly가 추가된다. target은 DISSATISFACTION_EXPRESSION에서 ai_service·price_policy·delivery_other이며 level은 explicit·mild다. 기존 미상 값과 다른 유형은 null이다. UNSUPPORTED_ANSWER의 referenceOnly는 true이고 AI 품질 비율에서 제외한다. 목록의 hasComplaint 필터는 저장된 전체 판정을 계속 사용한다.

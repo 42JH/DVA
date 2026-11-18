@@ -1,0 +1,48 @@
+import { CallEventsReadController } from './call-events-read.controller';
+import { OrderReferenceScopeController } from './order-reference-scope.controller';
+import { OrderReferenceScopeService } from './order-reference-scope.service';
+import { CallEventsService } from './call-events.service';
+import { CallEventsRepository } from './call-events.repository';
+import { CallEventsController } from './call-events.controller';
+import { CustomersModule } from '../customers/customers.module';
+import { Module } from '@nestjs/common';
+import { DatabaseModule } from '../database/database.module';
+import { AuditModule } from '../audit/audit.module';
+import { CallInsightsController } from './call-insights.controller';
+import { CallInsightsGuard } from './call-insights.guard';
+import { CallInsightsService } from './call-insights.service';
+import { CallInsightsRepository } from './call-insights.repository';
+import { CallDashboardMetricsController } from './call-dashboard-metrics.controller';
+import { CallDashboardMetricsService } from './call-dashboard-metrics.service';
+import { CallDashboardMetricsRepository } from './call-dashboard-metrics.repository';
+import { ComplaintFaqClient } from './complaints/complaint-faq.client';
+import { ComplaintJudgeRepository } from './complaints/complaint-judge.repository';
+import { ComplaintJudgeWorker } from './complaints/complaint-judge.worker';
+import { ComplaintModelClient } from './complaints/complaint-model.client';
+
+@Module({
+  imports: [DatabaseModule, AuditModule, CustomersModule],
+  controllers: [
+    OrderReferenceScopeController,
+    CallEventsController,
+    CallInsightsController,
+    CallDashboardMetricsController,
+    CallEventsReadController,
+  ],
+  exports: [CallInsightsGuard],
+  providers: [
+    ComplaintFaqClient,
+    ComplaintJudgeRepository,
+    ComplaintJudgeWorker,
+    ComplaintModelClient,
+    OrderReferenceScopeService,
+    CallEventsService,
+    CallEventsRepository,
+    CallInsightsGuard,
+    CallInsightsService,
+    CallInsightsRepository,
+    CallDashboardMetricsService,
+    CallDashboardMetricsRepository,
+  ],
+})
+export class CallInsightsModule {}

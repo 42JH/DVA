@@ -1,0 +1,81 @@
+# 복잡도 전후 — ESLint complexity(15 초과) · max-lines-per-function(120줄 초과) · no-nested-ternary, mock · 테스트 제외
+
+## 전 (정리 전, !702 머지 시점)
+복잡도 15 초과 함수 43개 · 120줄 초과 함수 16개 · 겹친 삼항 104곳
+ 114  usePersonaPage  src/features/persona/hooks/usePersonaPage.ts:127
+  89  useOrderForm  src/features/order/hooks/useOrderForm.ts:97
+  66  useCallDetail  src/features/call/hooks/useCallDetail.ts:97
+  60  useMemberForm  src/features/company/hooks/useMemberForm.ts:23
+  42  useCompanyDetail  src/features/company/hooks/useCompanyDetail.ts:45
+  34  WaybillPanel  src/features/order/components/Waybill.tsx:11
+  33  ApplyBand  src/features/persona/components/ApplyBand.tsx:17
+  33  mutationFn  src/features/order/hooks/useOrderForm.ts:265
+  33  (이름 없는 함수)  src/features/company/csvMembers.ts:198
+  31  Card  src/features/persona/components/PersonaCard.tsx:68
+  31  useWaybill  src/features/order/hooks/useWaybill.ts:40
+  31  useMemberCsv  src/features/company/hooks/useMemberCsv.ts:30
+  30  useScenarioDetail  src/features/persona/hooks/useScenarioDetail.ts:28
+  30  buildOrderPatch  src/features/order/api/orderPatch.ts:34
+  30  useCustomer  src/features/customer/hooks/useCustomers.ts:134
+
+## 후
+복잡도 15 초과 함수 43개 · 120줄 초과 함수 16개 · 겹친 삼항 84곳
+  89  useOrderForm  src/features/order/hooks/useOrderForm.ts:100
+  86  usePersonaPage  src/features/persona/hooks/usePersonaPage.ts:161
+  60  useMemberForm  src/features/company/hooks/useMemberForm.ts:23
+  58  useCallDetail  src/features/call/hooks/useCallDetail.ts:109
+  41  useCompanyDetail  src/features/company/hooks/useCompanyDetail.ts:45
+  34  WaybillPanel  src/features/order/components/Waybill.tsx:11
+  33  ApplyBand  src/features/persona/components/ApplyBand.tsx:17
+  33  mutationFn  src/features/order/hooks/useOrderForm.ts:268
+  33  (이름 없는 함수)  src/features/company/csvMembers.ts:198
+  31  Card  src/features/persona/components/PersonaCard.tsx:68
+  31  useWaybill  src/features/order/hooks/useWaybill.ts:40
+  31  useMemberCsv  src/features/company/hooks/useMemberCsv.ts:30
+  30  useScenarioDetail  src/features/persona/hooks/useScenarioDetail.ts:28
+  30  buildOrderPatch  src/features/order/api/orderPatch.ts:34
+  30  useCustomer  src/features/customer/hooks/useCustomers.ts:134
+
+## 2차 — 훅 나누기 (11/14). 재는 법: npx eslint -c eslint.metrics.mjs src -f json > m.json ; python metrics.py m.json · node ternaries.cjs <frontend>
+
+### 전
+복잡도 15 초과 함수 43개 · 120줄 초과 함수 16개 · 400줄 초과 파일 4개 · 겹친 삼항 82곳
+  89  useOrderForm  features/order/hooks/useOrderForm.ts:100
+  86  usePersonaPage  features/persona/hooks/usePersonaPage.ts:160
+  60  useMemberForm  features/company/hooks/useMemberForm.ts:23
+  50  useCallDetail  features/call/hooks/useCallDetail.ts:109
+  41  useCompanyDetail  features/company/hooks/useCompanyDetail.ts:45
+  34  WaybillPanel  features/order/components/Waybill.tsx:11
+  33  mutationFn  features/order/hooks/useOrderForm.ts:268
+  33  ApplyBand  features/persona/components/ApplyBand.tsx:17
+  33  (이름 없는 함수)  features/company/csvMembers.ts:191
+  31  useWaybill  features/order/hooks/useWaybill.ts:40
+  31  useMemberCsv  features/company/hooks/useMemberCsv.ts:30
+  31  Card  features/persona/components/PersonaCard.tsx:68
+  30  useScenarioDetail  features/persona/hooks/useScenarioDetail.ts:28
+  30  buildOrderPatch  features/order/api/orderPatch.ts:34
+  28  useCustomer  features/customer/hooks/useCustomers.ts:133
+  27  request  shared/api/client.ts:45
+겹친 삼항 73묶음 — else로 2단 37 · 3단 이상 9 · 참 쪽에 겹침 27 · 서로 물고 도는 import 4곳
+
+### 후
+복잡도 15 초과 함수 44개 · 120줄 초과 함수 12개 · 400줄 초과 파일 0개 · 겹친 삼항 47곳
+  49  usePersonaPage  features/persona/hooks/usePersonaPage.ts:55
+  42  useOrderForm  features/order/hooks/useOrderForm.ts:88
+  38  useCallDetail  features/call/hooks/useCallDetail.ts:22
+  34  WaybillPanel  features/order/components/Waybill.tsx:11
+  33  (이름 없는 함수)  features/company/csvMembers.ts:191
+  31  Card  features/persona/components/PersonaCard.tsx:68
+  30  buildOrderPatch  features/order/api/orderPatch.ts:34
+  27  useWaybill  features/order/hooks/useWaybill.ts:50
+  27  useScenarioDetail  features/persona/hooks/useScenarioDetail.ts:35
+  27  request  shared/api/client.ts:45
+  26  useToday  app/home/useToday.ts:35
+  26  useCustomer  features/customer/hooks/useCustomers.ts:139
+  23  useScenarioCall  features/persona/hooks/useScenarioDetail.ts:143
+  23  useOrders  features/order/hooks/useOrders.ts:61
+  23  useMemberForm  features/company/hooks/useMemberForm.ts:64
+  23  useMemberCsv  features/company/hooks/useMemberCsv.ts:30
+겹친 삼항 57묶음 — else로 2단 36 · 3단 이상 0 · 참 쪽에 겹침 21 · 서로 물고 도는 import 0곳
+
+복잡도 30 이상 함수 14 → 7개 · 40 이상 5 → 2개 · 가장 큰 값 89 → 49 · 15를 넘는 만큼의 합 553 → 361

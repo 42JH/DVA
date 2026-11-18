@@ -1,0 +1,93 @@
+# GPT-Live 세션 설정 (spec/gpt-live-session.md)
+# 키 이름·구조는 API SessionConfig와 같다. 통화가 올 때마다(accept 직전) 읽는다.
+# 서버가 바꿔 넣는 것: instructions_file → instructions(끝에 통화 정보 덧붙임),
+#   backend.instructions_file → instructions, 함수 도구 이름 → 설명·strict 스키마,
+#   accept 본문의 type = "live". audio.format은 SIP에서 빼고 보낸다.
+
+# 필수. 통화 중 변경 불가
+model = "gpt-live-1"
+
+# 음성 모델 지시문(최대 16,384토큰). prompts 디렉터리 기준 파일 이름. 통화 중 변경 불가
+instructions_file = "voice.md"
+
+# 녹음 보관(켜면 30일). 개인정보라 끈다. 기본 false
+store = false
+
+# 시작 전 메시지(최대 128개, 8,192토큰). role = developer·user·assistant. 통화 중 변경 불가
+[[input]]
+type = "message"
+role = "developer"
+content = [{ type = "input_text", text = "전화가 방금 연결됐습니다. 지금 바로 인사하세요." }]
+
+[audio.output]
+# 내장 31개(alloy ash ballad beacon bossa brise cedar cinder coral delta echo flitz gleam harema
+# juni marin meridian nira noeul nuri quartz ripple sage shida shimmer sillage stone tempo verse
+# vesper willow) 또는 { id = "voice_..." }. 기본 marin. 통화 중 변경 불가
+voice = "noeul"
+# audio.format: WebSocket 전용. SIP는 협상하므로 넣지 않는다(넣어도 서버가 뺀다)
+# format = { type = "audio/pcm", rate = 24000 }
+
+[delegation]
+# client: 서버가 SDK로 도구 선택을 한 번 실행하고 Live에 결과를 직접 전달. 통화 중 type 변경 불가
+# responses: Live 쪽 백엔드 모델이 도구를 고르고 서버가 실행(function_call_output). 아래 [backend]가 그 모델 설정
+# 2026-10-28 실제 통화에서 client 위임이 한 번도 생기지 않아 responses로 되돌림(docs/WORKLOG.md)
+type = "responses"
+acknowledgement_delay_ms = 800
+
+# 서버 전용 설정. Live API 본문에서는 제거한다.
+[backend]
+# 백엔드 Responses 모델(필수). GPT-Live 위임에서 쓸 수 있는 모델 목록은 미확인 — 실제 통화 전 확인
+model = "gpt-6-luna"
+instructions_file = "backend.md"
+# auto · none · required, 또는 { type = "function", name = "..." }
+tool_choice = "auto"
+# 한 통화 안의 도구는 순서대로 처리한다(spec/concurrency.md)
+parallel_tool_calls = false
+max_output_tokens = 1024
+# service_tier: auto · default · flex · priority · ultrafast · fast_tier_temp_pilot
+# service_tier = "auto"
+
+[backend.reasoning]
+# none · minimal · low · medium · high · xhigh(모델마다 다름). 높을수록 도구 결과가 늦다
+effort = "low"
+# summary: concise · detailed · auto
+# summary = "auto"
+
+[backend.text]
+# 백엔드 글 길이(음성과 무관): low · medium · high
+verbosity = "low"
+
+# 백엔드 도구: function(이 서버가 실행) · web_search. 함수는 이름만 적으면 코드에서 설명·스키마를 채운다.
+# 여기 없는 도구는 모델이 쓸 수 없다. 백엔드는 값 기록·주소록 찾기·택배 조회·FAQ 검색과, 음성 모델이 알아들은
+# 고객 답(answer)·업무 바꾸기(switch_task)를 보고한다. 확인 단계(담기·결제·취소·상담원 연결)의 동의는 이 보고와 서버 판별이
+# 둘 다 같을 때만 처리한다(두 열쇠, spec/flow.md).
+# cancel_order는 고객의 "예"를 확정 지연 뒤에 서버만 부른다. modify_order는 수정 보류(LANGGRAPH_REBUILD §5.4)로 쓰지 않는다.
+[[backend.tools]]
+type = "function"
+name = "get_state"
+[[backend.tools]]
+type = "function"
+name = "record_order"
+[[backend.tools]]
+type = "function"
+name = "match_pins"
+[[backend.tools]]
+type = "function"
+name = "lookup_orders"
+[[backend.tools]]
+type = "function"
+name = "answer"
+[[backend.tools]]
+type = "function"
+name = "switch_task"
+
+# decisions 위임·트리거는 쓰지 않는다(참고용)
+# [[triggers]]
+# type = "decisions"
+# event_type = "input_transcript.delta"
+# decisions = { ... }
+# client.data_channel.*: 브라우저 WebRTC 전용, SIP에는 해당 없음
+
+[[backend.tools]]
+type = "function"
+name = "search_manual"

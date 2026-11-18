@@ -1,0 +1,712 @@
+Project dva_monolith {
+  database_type: 'PostgreSQL'
+  Note: '2026-11-08 / 056 분석 실패 수신 시각 및 055 배송 초안·통화 완료 신호 반영. 신규 초안의 모든 seq는 논리 참조이며 관계선을 만들지 않는다. 다른 필드는 기존 문서 범위이며 최신 컬럼·개수·제약은 backend/migrations와 infra/database/verify.sql을 기준으로 한다.'
+}
+
+// 시각화용 DBML. 배포 원본은 backend/migrations/*.sql. 함수·트리거·특수 인덱스는 SQL을 따른다.
+// 042까지의 구현 스키마를 표시한다. 실제 운영 DB 적용 여부와는 별개다.
+// 기존 031~040의 녹취 처리권·등록일·결제수단 미정·빈 주문 결과·페르소나 초안·통화 고객 연결을 포함한다.
+// 041은 AI 통화 요약 6개 컬럼을 추가한다. 실제 사용 페르소나 버전도 AI가 전달한다.
+// 042는 대표 분류 result를 삭제하고 기존 분석의 재전송 해시를 갱신한다.
+// 무료 dbdiagram에서도 사용할 수 있도록 모듈별 주석 구간과 테이블 배치로 구분한다.
+// 관리자·역사 청구 기업/부서·원본 PIN 출처는 논리 참조이므로 관계선을 추가하지 않는다.
+
+// Module customer: 고객·기업·부서·구성원 및 주소록
+Table customers {
+  customer_seq integer [pk, increment, not null, note: '행의 고유 기본키']
+  name text [not null, note: '이름 또는 표시명']
+  phone_number text [not null, unique, note: '고객 전화번호. 숫자 문자열로 선행 0 보존']
+  status text [not null, note: '업무 상태']
+  monthly_billing_enabled boolean [not null, default: false, note: '개인 월결제 사용 여부. 기업 소속은 기업 월결제 정책 적용']
+  address_data jsonb [note: '고객의 내 주소. PIN과 독립. 미등록 NULL. 도로명·지번·상세·동·우편번호·위경도']
+  checks {
+    `phone_number ~ '^[0-9]+$'`
+    `status IN ('ACTIVE','WITHDRAWN')`
+    `address_data IS NULL OR valid_customer_address(address_data)`
+  }
+  Note: 'customer / 전화를 거는 개인 고객. 기업 자체를 고객으로 취급하지 않는다.'
+}
+
+Table organizations {
+  organization_seq integer [pk, increment, not null, note: '행의 고유 기본키']
+  name text [not null, note: '이름 또는 표시명']
+  status text [not null, note: '업무 상태']
+  monthly_billing_enabled boolean [not null, default: true, note: '063: 기업 월결제 기본 허용. 기존 비활성 값은 보존']
+  created_at timestamptz [default: `CURRENT_TIMESTAMP`, note: '033: 등록 시각. 과거 생성 감사 근거가 없으면 NULL']
+  checks {
+    `status IN ('ACTIVE','INACTIVE')`
+  }
+  Note: 'customer / 디버 등록 기업 디렉터리. 기업 공유 핀의 제출 기업을 식별한다.'
+}
+
+Table departments {
+  department_seq integer [pk, increment, not null]
+  organization_seq integer [not null, ref: > organizations.organization_seq]
+  name text [not null, note: '앞뒤 공백 없는 1~100자. 같은 기업 안에서 고유']
+  group_billing_enabled boolean [not null, default: false, note: '063: 직원별 설정으로 이관된 이전 정책. 결제 자격에 사용하지 않음']
+  created_at timestamptz [default: `CURRENT_TIMESTAMP`, note: '033: 등록 시각. 과거 생성 감사 근거가 없으면 NULL']
+  checks {
+    `name=btrim(name) AND length(name) BETWEEN 1 AND 100`
+  }
+  indexes {
+    (organization_seq,name) [unique]
+    (department_seq,organization_seq) [unique]
+  }
+  Note: 'customer / 기업별 실제 부서. 구성원의 부서 연결은 선택이다.'
+}
+
+Ref: memberships.(department_seq,organization_seq) > departments.(department_seq,organization_seq)
+
+Table memberships {
+  monthly_billing_enabled boolean [not null, default: true, note: '063: 직원별 기업 월결제 허용']
+  group_billing_enabled boolean [not null, default: false, note: '063: 직원별 기업 카드 허용. 기업 카드 등록도 필수']
+  membership_seq integer [pk, increment, not null, note: '행의 고유 기본키']
+  customer_seq integer [not null, unique, note: '연결 대상 ID']
+  organization_seq integer [not null, note: '연결 대상 ID']
+  department_seq integer [note: '선택 부서. NULL은 부서 없음. 제공 시 기업과 부서를 복합 FK로 검증']
+  employee_no text [not null, note: '기업 내 사번. 선행 0과 영문 보존. 같은 기업·사번 JSON 재등록는 기존 직원 정보 갱신']
+  role text [not null, default: 'MEMBER', note: '역할']
+  status text [not null, note: '업무 상태']
+  checks {
+    `btrim(employee_no)<>''`
+    `role IN ('MEMBER','ORG_ADMIN')`
+    `status IN ('ACTIVE','INACTIVE')`
+  }
+  indexes {
+    (organization_seq,employee_no) [unique]
+  }
+  Note: 'customer / 고객당 소속 최대 1개. MEMBER 일반 직원 / ORG_ADMIN 대표자 표시. 대표자에게 관리자 계정이나 추가 API 권한을 부여하지 않는다. 사번은 기업별 고유. 기존 데이터의 사번 보완 후 NOT NULL 적용. / SQL 인덱스: CREATE INDEX memberships_company_idx ON memberships(organization_seq,customer_seq);'
+}
+
+Table personal_pins {
+  personal_pin_seq integer [pk, increment, not null, note: '행의 고유 기본키']
+  customer_seq integer [not null, note: '연결 대상 ID']
+  label text [note: '주소록 별칭']
+  address_data jsonb [not null, note: '수령인 이름·전화번호·도로명·지번·상세주소·동명·우편번호·위경도를 담은 검증된 주소']
+  search_text text [note: '별칭·수령인·전화번호·주소 등을 결합한 검색용 자동 생성 문자열 / DB 생성 컬럼, 앱에서 직접 저장하지 않음']
+  version integer [not null, default: 1, note: '변경 버전. 동시 수정 검증 또는 버전 관리에 사용']
+  checks {
+    `valid_parcel_address(address_data)`
+    `version > 0`
+  }
+  Note: 'customer / 개인 주소록. 확인된 신규 주소를 고객별로 저장한다. / SQL 인덱스: CREATE INDEX personal_pins_scope_idx ON personal_pins(customer_seq,personal_pin_seq); CREATE UNIQUE INDEX personal_pins_identity_uk ON personal_pins(customer_seq,pin_identity(address_data));'
+}
+
+// End of customer module
+
+// Module order: 주문·개별 배송비·결제 요청·기업 청구 원장·월별 합계
+Table orders {
+  order_seq integer [pk, increment, not null, note: '행의 고유 기본키']
+  creation_request_id uuid [unique, note: '주문 생성 요청 키. 기존 행은 NULL 허용. 같은 키의 재요청은 기존 주문과 현재 버전을 반환']
+  creation_source text [not null, default: 'UNKNOWN', note: '접수 경로: AI / ADMIN(관리자 수기) / UNKNOWN(기존 출처 미확인). 호출 API와 서버 주체로 결정']
+  customer_seq integer [note: '연결 대상 ID']
+  payment_method_type text [note: '037: 미수집 NULL, 기본값 없음. billing 개인 카드 / credit 월결제 / groupBilling 부서 그룹결제']
+  pickup_requested_at timestamptz [note: '결제 완료 시각 + 1시간. 결제 전 null, 재접수 때 유지']
+  status text [not null, default: 'COLLECTING', note: 'COLLECTING 수집 중 / notPaid 결제 대기 / PAID 결제 완료 / SUBMITTING 디버 접수중 / ACCEPTED 디버 접수 완료 / SUBMISSION_FAILED 디버 접수 실패 / CANCELLED 취소됨']
+  total_amount integer [note: '미취소 상세의 배송비 합계. 전체 취소 0원, 수집 중 미확정 NULL']
+  payment_due_at timestamptz [note: '최초 결제 대기 시작 +24시간. 부분 취소 후에도 유지']
+  paid_at timestamptz [note: '결제 완료 시각. 월·그룹결제는 주문 확정 시 기록']
+  billing_organization_seq integer [note: '결제 당시 기업 번호. 삭제 후에도 보존하는 논리 참조']
+  billing_organization_name text [note: '결제 당시 기업명. 기존 행은 021 이관 시 확인 가능한 이름']
+  billing_department_seq integer [note: '결제 당시 부서 번호. 삭제 후에도 보존하는 논리 참조']
+  billing_department_name text [note: '결제 당시 부서명. 기존 행은 021 이관 시 확인 가능한 이름']
+  version integer [not null, default: 1, note: '변경 버전. 동시 수정 검증 또는 버전 관리에 사용']
+  parcel_no text [note: '디버 접수 참고번호. 영문·숫자 8자리, 중복 허용. 내부 배송 추적번호와 별개']
+  dver_received_at timestamptz [note: '디버가 반환한 주문 접수 시각']
+  created_at timestamptz [not null, default: `CURRENT_TIMESTAMP`, note: '행 생성 시각']
+  updated_at timestamptz [not null, default: `CURRENT_TIMESTAMP`, note: '마지막 변경 시각']
+  checks {
+    `creation_source IN ('AI','ADMIN','UNKNOWN')`
+    `payment_method_type IN ('cat','billing','credit','groupBilling')`
+    `payment_method_type IS NOT NULL OR status IN ('COLLECTING','CANCELLED')`
+    `status IN ('COLLECTING','notPaid','PAID','SUBMITTING','ACCEPTED','SUBMISSION_FAILED','CANCELLED')`
+    `version>0`
+    `total_amount>=0`
+    `billing_department_seq IS NULL OR billing_organization_seq IS NOT NULL`
+    `parcel_no ~ '^[A-Za-z0-9]{8}$'`
+    `status NOT IN ('SUBMITTING','ACCEPTED','AUTH_FAILED','REVIEW_REQUIRED') OR pickup_requested_at IS NOT NULL`
+    `(status='ACCEPTED' AND parcel_no IS NOT NULL AND dver_received_at IS NOT NULL) OR (status='CANCELLED' AND ((parcel_no IS NULL AND dver_received_at IS NULL) OR (parcel_no IS NOT NULL AND dver_received_at IS NOT NULL))) OR (status NOT IN ('ACCEPTED','CANCELLED') AND parcel_no IS NULL AND dver_received_at IS NULL)`
+  }
+  Note: 'order / 주문 진행은 status 하나로 관리한다. 개인 카드는 결제를 기다리고 자격 있는 월·그룹결제는 즉시 PAID 처리 후 디버에 전송한다. 200은 ACCEPTED, 400은 SUBMISSION_FAILED. 실패 재접수 시 다시 결제하지 않는다. 확정 후 내용 수정은 불가하며 COLLECTING·notPaid에서만 취소한다. notPaid 24시간 만료는 CANCELLED. 취소된 상세·통화·감사는 보존한다. pickup CHECK의 과거 상태명은 SQL 호환 이력이며 현재 허용 상태는 위 status CHECK를 따른다. / SQL 인덱스: orders_resume_idx, orders_list_idx, pending_orders_expiry_idx.'
+}
+
+
+Table organization_billing_months {
+  organization_seq integer [not null, note: '기업 삭제 후에도 번호를 보존하는 청구 이력 논리 참조']
+  organization_name text [note: '해당 청구 월 생성 당시 기업명. 기업 삭제 후 보존']
+  billing_month date [not null, note: 'KST 월의 1일']
+  monthly_amount bigint [not null, default: 0, note: '월결제 사용액. JS 안전 정수 범위']
+  group_billing_amount bigint [not null, default: 0, note: '그룹결제 사용액. JS 안전 정수 범위']
+  indexes {
+    (organization_seq,billing_month) [pk]
+  }
+  checks {
+    `extract(day FROM billing_month)=1`
+    `monthly_amount BETWEEN 0 AND 9007199254740991`
+    `group_billing_amount BETWEEN 0 AND 9007199254740991`
+  }
+  Note: 'order / 기업별 월결제·그룹결제 사용액을 분리 집계한다. 새 KST 월은 0원으로 시작하고 과거 월은 보존한다. 초기화·증가 모두 SYSTEM 감사 기록.'
+}
+
+Table order_billing_charges {
+  order_seq integer [pk, not null, ref: - orders.order_seq]
+  organization_seq integer [not null, note: '기업 삭제 후에도 번호를 보존하는 청구 이력 논리 참조']
+  billing_month date [not null, note: '결제 완료 시각이 속한 KST 월의 1일']
+  payment_method_type text [not null, note: 'credit / groupBilling']
+  amount integer [not null]
+  occurred_at timestamptz [not null]
+  checks {
+    `extract(day FROM billing_month)=1`
+    `payment_method_type IN ('credit','groupBilling')`
+    `amount>0`
+  }
+  Note: 'order / 기업 월·그룹결제 청구 원장. 결제 완료 트랜잭션에서 주문당 1회 기록. 재접수는 원장을 추가하지 않는다. SQL 인덱스: billing_charge_month_idx(organization_seq,billing_month).'
+}
+
+// Module payment: 개인·기업 등록 카드와 주문 결제 요청 (064)
+Table payment_cards {
+  payment_card_seq integer [pk, increment, not null]
+  customer_seq integer [ref: > customers.customer_seq]
+  organization_seq integer [ref: > organizations.organization_seq]
+  registration_key uuid [unique, not null]
+  request_hash text [not null, note: '멱등 검증용 HMAC. 카드 원문은 저장하지 않음']
+  provider_customer_key uuid [not null]
+  provider_environment text [not null, note: 'test/live']
+  encrypted_billing_key text [note: 'AES-256-GCM 암호화 PG 결제키. 해제 후 PG 폐기 완료 시 제거']
+  issuer_code text
+  masked_number text
+  expiration_year integer [not null]
+  expiration_month integer [not null]
+  status text [not null, default: 'REGISTERING', note: 'REGISTERING/ACTIVE/FAILED']
+  claimed_until timestamptz
+  created_at timestamptz [not null, default: `clock_timestamp()`]
+  updated_at timestamptz [not null, default: `clock_timestamp()`]
+  deleted_at timestamptz
+  Note: '개인 또는 기업 소유 중 하나만 지정. 소유자당 활성 카드 1개 부분 UNIQUE. soft delete 후 5년 폐기. 승인 확인 중인 거래가 끝난 후 PG 키 폐기.'
+}
+
+Table order_payment_requests {
+  payment_request_id uuid [pk, not null, default: `gen_random_uuid()`]
+  payment_card_seq integer [ref: > payment_cards.payment_card_seq, note: '064: NULL이면 기존 링크 결제. FK ON DELETE SET NULL']
+  card_payment_order_id uuid [not null, default: `gen_random_uuid()`, note: '064: 카드 승인 멱등키와 결과 복구용 PG 주문 ID']
+  card_payment_failed boolean [not null, default: false, note: '064: 명시적 승인 거절. 불명확한 응답은 실패로 확정하지 않음']
+  order_seq integer [not null, ref: > orders.order_seq]
+  amount integer [not null, note: '이 요청의 확정 결제 금액(양의 정수 원)']
+  expires_at timestamptz [not null]
+  created_at timestamptz [not null, default: `clock_timestamp()`]
+  approval_started_at timestamptz
+  invalidated_at timestamptz
+  completed_at timestamptz
+  provider_reference text [unique, note: '검증된 결제사 거래 식별자. 성공 시에만 저장']
+  provider_payment_key text [unique, note: '토스 승인 전에 저장. 응답 유실 시 결과 조회에 사용']
+  provider_approved_at timestamptz [note: '검증한 토스 승인 시각']
+  approval_claim_id uuid [note: '외부 승인·조회 처리권']
+  approval_claimed_until timestamptz [note: '프로세스 종료 후 조회 복구 가능한 처리권 만료']
+  notification_status text [not null, default: 'PENDING', note: 'PENDING/SENDING/SENT/FAILED/UNKNOWN']
+  notification_attempted_at timestamptz
+  notification_sent_at timestamptz
+  completion_notification_status text [not null, default: 'WAITING', note: '결제 완료 안내: WAITING/PENDING/SENDING/SENT/FAILED/UNKNOWN. 기존 완료 결제는 023에서 PENDING 이관']
+  completion_notification_attempted_at timestamptz
+  completion_notification_sent_at timestamptz
+  checks {
+    `amount>0`
+    `length(provider_reference) BETWEEN 1 AND 200`
+    `completed_at IS NULL OR (invalidated_at IS NULL AND provider_reference IS NOT NULL)`
+    `provider_reference IS NULL OR completed_at IS NOT NULL`
+    `length(provider_payment_key) BETWEEN 1 AND 200`
+    `(approval_claim_id IS NULL)=(approval_claimed_until IS NULL)`
+    `notification_status IN ('PENDING','SENDING','SENT','FAILED','UNKNOWN')`
+    `completion_notification_status IN ('WAITING','PENDING','SENDING','SENT','FAILED','UNKNOWN')`
+  }
+  Note: 'order / 개인 카드 결제 요청과 요청·완료 안내 발송. 부분 취소는 이전 링크를 닫고 남은 금액의 새 요청·안내를 만든다. 최초 만료를 유지하고 승인·취소를 직렬화한다. 토스 승인 전 결제 키와 45초 처리권을 저장하며 응답 유실은 조회로 복구한다. 결제 완료와 같은 트랜잭션에 완료 안내 대기를 저장하며 디버 결과와 독립 발송한다. UNKNOWN 메시지는 자동 재발송하지 않는다. SQL 부분 인덱스: one_active_order_payment_request, order_payment_notification_pending_idx, order_payment_reconcile_idx, order_payment_completion_pending_idx. 카카오 알림톡은 후속 범위.'
+}
+
+Table order_parcels {
+  order_parcel_seq integer [pk, increment, not null, note: '행의 고유 기본키']
+  status text [not null, default: 'ACTIVE', note: 'ACTIVE: 취소되지 않음 / CANCELLED: 취소. 결제·배송 상태와 별개. 취소 후 복원·주소·물품 수정 불가']
+  order_seq integer [not null, note: '연결 대상 ID']
+  parcel_position integer [not null, note: '한 주문 안에서 택배 상세를 정렬하는 순번']
+  origin_name text [note: '출발지 수령인 이름 복사본']
+  origin_phone_number text [note: '출발지 수령인 전화번호 복사본']
+  origin_road_address text [note: '출발지 도로명 주소 복사본']
+  origin_jibun_address text [note: '출발지 지번 주소 복사본']
+  origin_detail_address text [note: '출발지 상세주소 복사본']
+  origin_dong_name text [note: '출발지 동명 복사본']
+  origin_postal_code text [note: '출발지 우편번호 복사본']
+  origin_latitude "double precision" [note: '출발지 위도 복사본']
+  origin_longitude "double precision" [note: '출발지 경도 복사본']
+  origin_pin_scope text [note: '출발지 원본 핀 종류: PERSONAL / COMPANY']
+  origin_pin_seq integer [note: '출발지 원본 핀 번호. FK 없는 논리 참조']
+  destination_name text [note: '도착지 수령인 이름 복사본']
+  destination_phone_number text [note: '도착지 수령인 전화번호 복사본']
+  destination_road_address text [note: '도착지 도로명 주소 복사본']
+  destination_jibun_address text [note: '도착지 지번 주소 복사본']
+  destination_detail_address text [note: '도착지 상세주소 복사본']
+  destination_dong_name text [note: '도착지 동명 복사본']
+  destination_postal_code text [note: '도착지 우편번호 복사본']
+  destination_latitude "double precision" [note: '도착지 위도 복사본']
+  destination_longitude "double precision" [note: '도착지 경도 복사본']
+  document_count integer [not null, default: 0, note: '서류 수량']
+  small_box_count integer [not null, default: 0, note: '소형 박스 수량']
+  medium_box_count integer [not null, default: 0, note: '중형 박스 수량']
+  big_box_count integer [not null, default: 0, note: '대형 박스 수량']
+  other_item_description text [not null, default: '', note: '기타 물품 설명']
+  client_comment text [not null, default: '', note: '고객 요청 사항']
+  notified_price integer [note: '개별 배송비(원). 양의 정수. 미완료 수집 중에는 null, 취소 후 원래 금액 보존']
+  item_price bigint [note: '물품 가액. 요금과 구분하며 JavaScript 안전 정수 범위까지 허용']
+  indexes {
+    (order_seq,parcel_position) [unique]
+  }
+  checks {
+    `parcel_position>0`
+    `status IN ('ACTIVE','CANCELLED')`
+    `origin_phone_number ~ '^[0-9]+$'`
+    `origin_latitude BETWEEN -90 AND 90`
+    `origin_longitude BETWEEN -180 AND 180`
+    `origin_pin_scope IN ('PERSONAL','COMPANY')`
+    `origin_pin_seq>0`
+    `destination_phone_number ~ '^[0-9]+$'`
+    `destination_latitude BETWEEN -90 AND 90`
+    `destination_longitude BETWEEN -180 AND 180`
+    `document_count>=0`
+    `small_box_count>=0`
+    `medium_box_count>=0`
+    `big_box_count>=0`
+    `notified_price>0`
+    `item_price BETWEEN 0 AND 9007199254740991`
+    `num_nonnulls(origin_pin_scope,origin_pin_seq) IN (0,2)`
+  }
+  Note: 'order / 주문별 택배 상세. 출발지·도착지는 접수 당시 주소 복사본이며 원본 핀 변경에 영향받지 않는다.'
+}
+
+// End of order module
+
+// Module consultation: 통화·발화·녹취·상담원 연결·PBX 수신
+// 055: 모든 번호는 논리 참조. FK/연쇄 삭제 없이 원본 사본과 번호를 보존한다.
+Table order_parcel_drafts {
+  draft_seq integer [pk, increment, not null]
+  call_session_seq integer [note: '논리 참조. AI 통화 번호, 관리자 단독은 NULL']
+  customer_seq integer [note: '논리 참조. 미등록 수집 중 NULL, READY는 활성 고객 필요']
+  caller_phone_number text [note: '최초 발신번호 사본. 원본 통화 삭제 뒤 미등록 이력 범위 확인']
+  created_by_admin_user_seq integer [note: '관리자 생성자 논리 참조']
+  client_parcel_id uuid [not null, note: '통화 내 단건 생성 고정 UUID']
+  creation_payload jsonb [not null, note: '생성 재전송 원문 비교 사본. 일반 응답 미노출']
+  parcel_data jsonb [not null, note: '주소·물품·가액·배송비 독립 사본. 좌표 없음']
+  status text [not null, note: 'READY / EDITING / INCOMPLETE / CONVERTED / CANCELLED / RESUMED']
+  version integer [not null, default: 1, note: '해당 행의 동시 수정 버전']
+  source_draft_seq integer [note: '재개 원본 논리 참조. 원본 폐기 후에도 번호 보존']
+  order_seq integer [note: '변환된 실제 주문 논리 참조']
+  order_parcel_seq integer [note: '변환된 실제 상세 논리 참조']
+  legacy_order_seq integer [note: '055 이관 원본 주문 논리 참조. 중복 조회·재접수 차단']
+  legacy_order_parcel_seq integer [note: '이관 원본 상세 논리 참조. 상세 없으면 NULL']
+  created_at timestamptz [not null, default: `CURRENT_TIMESTAMP`]
+  updated_at timestamptz [not null, default: `CURRENT_TIMESTAMP`]
+  retention_started_at timestamptz [not null, default: `CURRENT_TIMESTAMP`, note: '최초 수집부터 5년. 재개는 원본 기준 상속']
+  deleted_at timestamptz [note: 'soft delete. 보관 시작을 연장하지 않음']
+  indexes {
+    (call_session_seq, client_parcel_id) [unique, note: 'SQL NULLS NOT DISTINCT']
+    source_draft_seq [unique, note: 'SQL 부분 인덱스: NULL 제외']
+    order_parcel_seq [unique, note: 'SQL 부분 인덱스: NULL 제외']
+    (retention_started_at, draft_seq)
+  }
+  checks {
+    `version>0`
+    `status IN ('READY','EDITING','INCOMPLETE','CONVERTED','CANCELLED','RESUMED')`
+    `(status='CONVERTED')=(order_parcel_seq IS NOT NULL) AND (order_seq IS NULL)=(order_parcel_seq IS NULL)`
+  }
+  Note: 'order / 실제 접수는 PBX+AI 완료 후 READY만 변환. 모든 seq는 논리 참조이며 관계선을 만들지 않는다. 이관 원본 NULLS NOT DISTINCT 부분 인덱스·발신번호 검색 인덱스·나머지 양수 및 소유 검증은 055 SQL을 따른다.'
+}
+
+Table call_sessions {
+  call_session_seq integer [pk, increment, not null, note: '행의 고유 기본키']
+  customer_seq integer [note: '040: 확인된 고객 번호 논리 참조. 미등록 NULL, 전화번호 변경 후에도 연결 보존']
+  order_seq integer [note: '연결 대상 ID']
+  provider_call_id text [not null, unique, note: 'OpenAI 통화 세션 ID. PBX recordingId와 별개이며 AI 결과 재전송 시 유지']
+  caller_phone_number text [note: '해당 통화 발신번호. 숫자 문자열, AI 수신 연동 전에는 NULL 가능']
+  incoming_at timestamptz [note: 'OpenAI 수신 이벤트 created_at. PBX 매칭용 기준 시각이며 실제 통화 시작 시각과 별도']
+  started_at timestamptz [note: '종료 결과로 전달받는 실제 통화 시작 시각']
+  ended_at timestamptz [note: '종료 결과로 전달받는 실제 통화 종료 시각']
+  order_intake_enabled boolean [not null, default: true, note: '055 이전 등록 false, 이후 true']
+  order_intake_version integer [not null, default: 1, note: '통화 초안 집합 버전']
+  order_completion_received_at timestamptz [note: 'AI 주문 데이터 전송 완료 수신']
+  order_completion_payload jsonb [note: '확정 본문 재전송 비교 사본']
+  order_finalized_at timestamptz [note: 'PBX 종료와 AI 완료 후 로컬 주문 확정']
+  order_finalization_result jsonb [note: 'orderSeq·draftSeq→orderParcelSeq 논리 참조 결과']
+  order_finalization_error_code text [note: '재처리용 안전한 오류 코드']
+  order_finalization_attempted_at timestamptz [note: '실패 복구 1분 간격 기준']
+  analysis_failed_at timestamptz [note: '056: AI 최종 분석 실패 최초 수신. 정상 분석이 있으면 COMPLETED 우선, 통화 보관 정책 적용']
+  checks {
+    `btrim(provider_call_id)<>''`
+    `(started_at IS NULL AND ended_at IS NULL) OR (started_at IS NOT NULL AND ended_at IS NOT NULL AND ended_at>=started_at)`
+  }
+  Note: 'consultation / 고객 확인 시 provider_call_id로 통화를 생성·재사용하고 call_session_seq를 AI에 반환한다. AI 결과는 같은 통화에 주문을 연결한다. PBX는 발신번호와 incoming_at 허용 구간 내 유일 후보에만 연결한다. 상담 조회는 연결 주문의 상태·총액을 함께 반환하며 별도 결제 상태 컬럼은 만들지 않는다. / SQL 인덱스: calls_order_idx, calls_retention_idx, call_sessions_caller_incoming_idx.'
+}
+
+Table unanswered_questions {
+  unanswered_question_seq integer [pk, increment, not null]
+  event_id uuid [unique, not null]
+  call_session_seq integer [not null]
+  question_text text [note: '최대 1000자. DELETED이면 NULL']
+  occurred_at timestamptz [not null]
+  offset_seconds bigint [note: '0 이상 안전한 정수 초. 미확인은 NULL']
+  status text [not null, default: 'OPEN', note: 'OPEN / REGISTERED / DELETED']
+  reason text [note: 'KB_NO_ANSWER 근거 부족 / KB_UNAVAILABLE 검색 미연결·장애. 과거·미분류는 NULL. status와 독립적']
+  faq_entry_seq integer [note: 'FAQ 삭제 뒤에도 보존하는 논리 참조']
+  payload_hash text [not null]
+  faq_conversion_hash text
+  created_at timestamptz [not null, default: `CURRENT_TIMESTAMP`]
+  registered_at timestamptz
+  deleted_at timestamptz
+  indexes { (unanswered_question_seq, call_session_seq) [unique] }
+  Note: 'UNQ 수집·조회·FAQ 전환. reason 제약은 049, soft delete 상태 조합은 045 SQL을 따른다.'
+}
+Ref: call_sessions.call_session_seq < unanswered_questions.call_session_seq
+
+Table call_insight_events {
+  call_insight_event_seq integer [pk, increment, not null]
+  event_id uuid [unique, not null]
+  call_session_seq integer [not null]
+  event_order integer [not null]
+  kind text [not null, note: 'UTTERANCE / AI_ACTION / BUSINESS_RESULT']
+  occurred_at timestamptz [not null]
+  offset_seconds bigint
+  call_utterance_seq integer [unique]
+  unanswered_question_seq integer
+  payload jsonb [note: '발화 원문은 call_utterances에서 참조. 동작 status 없음']
+  payload_hash text [not null]
+  received_at timestamptz [not null, default: `CURRENT_TIMESTAMP`]
+  indexes { (call_session_seq, event_order) [unique] }
+  Note: '요청당 50개와 누적 개수는 별개. 이벤트·발화·성공 감사는 같은 트랜잭션.'
+}
+Ref: call_sessions.call_session_seq < call_insight_events.call_session_seq
+Ref: call_utterances.call_utterance_seq - call_insight_events.call_utterance_seq
+Ref: unanswered_questions.(unanswered_question_seq, call_session_seq) < call_insight_events.(unanswered_question_seq, call_session_seq)
+
+Table call_analyses {
+  call_session_seq integer [pk, not null, note: '통화당 최종 분석 한 건']
+  ai_persona_version_seq integer [note: 'AI가 통화 시작 때 고정한 실제 사용 버전. 현재 ACTIVE로 대체하지 않으며 미확인 NULL']
+  is_new_customer boolean [note: '041: AI 판정 신규 true / 기존 false. 미수집 NULL']
+  registered_parcel_count integer [note: '041: AI 집계 접수 확정 배송 상세 수. 결제 대기 포함. 미수집 NULL, 없음 0']
+  faq_answer_count integer [note: '041: AI 집계 FAQ 답변 건수. 미수집 NULL, 없음 0']
+  order_lookup_count integer [note: '041: AI 집계 접수 내역 조회·안내 건수. 미수집 NULL, 없음 0']
+  cancelled_parcel_count integer [note: '041: AI 집계 취소 완료 배송 상세 수. 미수집 NULL, 없음 0']
+  has_handoff_request boolean [note: '041: AI 판정 상담원 연결 요구 여부. 연결 성공과 별개. 미수집 NULL']
+  ai_started_at timestamptz [not null, note: 'AI 측정 시작. PBX 원본은 별도 보존']
+  ai_ended_at timestamptz [not null, note: 'AI 측정 종료']
+  repeat_question_count integer [note: '되묻기 횟수. 미측정은 NULL']
+  has_complaint boolean [note: '미판정은 NULL, 확인한 불만 없음은 false']
+  complaints jsonb [not null, note: '유형·근거·정수 초 위치·발화 순번. 최대 20개']
+  payload_hash text [not null, note: '정규화 요청 SHA-256. 동일 통화 재전송 판별']
+  analysed_at timestamptz [not null, default: `CURRENT_TIMESTAMP`]
+  checks {
+    `ai_ended_at>=ai_started_at`
+    `repeat_question_count>=0`
+    `registered_parcel_count>=0`
+    `faq_answer_count>=0`
+    `order_lookup_count>=0`
+    `cancelled_parcel_count>=0`
+  }
+  Note: 'call-insights / 통화당 최종 분석과 AI 요약 한 건. 7개 값은 함께 존재하며 백엔드는 집계하지 않는다. 과거 행의 새 6개 컬럼은 NULL, 시각·FK는 보존한다. 042는 대표 분류 result를 삭제하고 해시를 갱신한다. 생략·NULL 요약은 해시에서 제외한다. 불만·해시 제약은 024, 요약 제약은 041 SQL을 따른다.'
+}
+
+Ref: call_sessions.call_session_seq - call_analyses.call_session_seq
+Ref: ai_persona_versions.ai_persona_version_seq ?< call_analyses.ai_persona_version_seq
+
+Table call_dashboard_metrics {
+  call_session_seq integer [pk, not null, note: '050: 분석과 1:1. 분석 실제 폐기 시 CASCADE']
+  dropoff_stage text [note: 'AI 확정 이탈 단계. NONE 이탈 없음, NULL 미수신. 단계 진입은 저장하지 않음']
+  dropoff_payload_hash text [note: '이탈 항목의 정규화 SHA-256']
+  dropoff_received_at timestamptz [note: '이탈 항목 최초 수신 시각']
+  total_wait_ms bigint [note: 'AI가 겹침을 제외한 총 대기 밀리초. NULL 미수신, 0 측정 후 없음']
+  latency_stats jsonb [note: '최대 7개 고유 처리 유형의 totalLatencyMs/measurementCount. [] 측정 후 없음']
+  response_wait_payload_hash text [note: '대기 항목의 정규화 SHA-256']
+  response_wait_received_at timestamptz [note: '대기 항목 최초 수신 시각']
+  Note: '통화별 이탈·레이턴시 요약. 항목별 독립 원자 저장·동일 재전송 204/변경 409. 부모 통화 soft delete·incoming_at 기준 5년 보관을 따른다. 세부 CHECK와 JSON 검증 함수는 050 SQL 기준.'
+}
+Ref: call_analyses.call_session_seq - call_dashboard_metrics.call_session_seq [delete: cascade]
+
+Table pbx_webhooks.call_ended_events {
+  recording_id varchar(200) [pk, not null, note: 'PBX 녹취 고유 ID. 같은 ID와 같은 본문의 재전송은 한 번만 수신']
+  payload jsonb [not null, note: '정규화한 웹훅 원문. 발신·수신번호, 실제 시각, 재생 시간, 다운로드 URL 포함']
+  received_at timestamptz [not null, default: `CURRENT_TIMESTAMP`]
+  processing_status text [not null, default: 'RECEIVED', note: 'RECEIVED: 대기·매칭 보류 / FAILED: 제한 재시도 또는 운영 확인 / PROCESSED: S3·DB 완료']
+  call_session_seq integer [note: '처음 결정한 통화 연결. 이후 재시도에서 재매칭하지 않음']
+  last_attempt_at timestamptz [note: '공정한 순환 재시도용 마지막 시도 시각']
+  claim_id uuid [note: '031: 현재 녹취 처리권 UUID. 미선점 NULL']
+  claimed_until timestamptz [note: '031: 처리권 만료 시각. claim_id와 함께 NULL 또는 함께 값']
+  attempt_count smallint [not null, default: 0, note: '054: 최초 포함 최대 5회. 매칭 대기·S3 미설정 제외']
+  next_attempt_at timestamptz [note: '054: 1·5·15·30분 재시도 시각. 최초·확인 대기는 NULL']
+  last_error_code text [note: '054: 원문·서명 URL을 포함하지 않는 고정 실패 코드']
+  requires_review boolean [not null, default: false, note: '054: 자동 재시도 중지. 기존 FAILED는 원인 미상 확인 대기로 이행']
+  checks {
+    `jsonb_typeof(payload)='object'`
+    `processing_status IN ('RECEIVED','PROCESSED','FAILED')`
+    `(claim_id IS NULL) = (claimed_until IS NULL)`
+    `attempt_count BETWEEN 0 AND 5`
+  }
+  Note: 'consultation / 별도 스키마의 기존 PBX 수신함. 매칭 후 통화 FK를 저장하고 재시도에서 연결을 바꾸지 않는다. 별도 중복 검증·작업 큐 테이블을 만들지 않는다.'
+}
+
+Ref: call_sessions.call_session_seq ?< pbx_webhooks.call_ended_events.call_session_seq
+
+Table call_utterances {
+  call_utterance_seq integer [pk, increment, not null, note: '행의 고유 기본키']
+  call_session_seq integer [not null, note: '연결 대상 ID']
+  utterance_order integer [not null, note: '통화 안에서 화자 구간을 정렬하는 순번']
+  speaker text [not null, note: '발화자: CUSTOMER / AI']
+  utterance_text text [not null, note: '해당 화자 구간의 대화 평문. 같은 화자의 문장을 줄바꿈 누적']
+  last_sentence_seq integer [not null, note: '마지막 반영 문장 순번. 중복 수신 방지용이며 AI 전달 계약 확정 필요']
+  received_at timestamptz [not null, default: `CURRENT_TIMESTAMP`, note: '이 화자 구간을 최초 수신한 시각. 실제 통화 시작 시각과 다름']
+  indexes {
+    (call_session_seq,utterance_order) [unique]
+  }
+  checks {
+    `utterance_order>0`
+    `speaker IN ('CUSTOMER','AI')`
+    `length(utterance_text)>0`
+    `last_sentence_seq>0`
+  }
+  Note: 'consultation / 통화별 화자 구간. 같은 화자의 문장은 줄바꿈 누적하고 화자 변경 시 새 행을 만든다. 커밋 후 알림 트리거 사용. / SQL 인덱스: CREATE INDEX utterances_pending_retention_idx ON call_utterances(received_at,call_session_seq);'
+}
+
+Table recordings {
+  recording_seq integer [pk, increment, not null, note: '행의 고유 기본키']
+  call_session_seq integer [not null, note: '연결 대상 ID']
+  object_key text [not null, unique, note: '비공개 S3 원본 녹취 객체 경로. 공개 URL 아님']
+  created_at timestamptz [not null, default: `CURRENT_TIMESTAMP`, note: '행 생성 시각']
+  checks {
+    `object_key !~ '(^/|\.\.|://)'`
+  }
+  Note: 'consultation / S3 저장에 성공한 원본 녹취 참조. 삭제 예정은 created_at + 설정된 보관 개월로 계산한다. / SQL 인덱스: CREATE INDEX recordings_call_idx ON recordings(call_session_seq,recording_seq); CREATE INDEX recordings_retention_idx ON recordings(created_at,recording_seq);'
+}
+
+Table empty_ai_order_results {
+  request_id uuid [pk, not null, note: '038: 주문 없는 결과의 재전송 식별자']
+  call_session_seq integer [not null, unique, note: '통화당 최종 결과 한 건. 논리 참조']
+  actor_admin_user_seq integer [note: '요청 작업자 논리 참조. 미확인 NULL']
+  received_at timestamptz [not null, default: `clock_timestamp()`]
+  Note: 'consultation / 주문 정보 없는 미완료·취소 결과는 주문을 생성하지 않고 통화와 재전송 키를 보존한다.'
+}
+
+// End of consultation module
+
+// Module delivery: 디버 접수 이후 배송 진행·상태 변경 이력
+Table shipments {
+  shipment_seq integer [pk, increment, not null, note: '행의 고유 기본키']
+  order_parcel_seq integer [not null, unique, note: '연결 대상 ID']
+  tracking_number text [not null, unique, note: '우리 시스템에서 발급하는 UNIQUE 내부 추적번호. 실제 택배사 운송장과 구분']
+  status text [not null, default: 'notPaid', note: '업무 상태']
+  version integer [not null, default: 1, note: '변경 버전. 동시 수정 검증 또는 버전 관리에 사용']
+  status_changed_at timestamptz [not null, default: `CURRENT_TIMESTAMP`, note: '배송 상태가 마지막으로 변경된 시각']
+  created_at timestamptz [not null, default: `CURRENT_TIMESTAMP`, note: '행 생성 시각']
+  checks {
+    `btrim(tracking_number)<>''`
+    `status IN ('notPaid','paid','received','waiting','sent','canceling','canceled')`
+    `version>0`
+  }
+  Note: 'delivery / 디버 접수 성공 시 미취소 주문 상세당 배송을 최대 1건 생성하고 초기 상태 paid와 이력을 저장한다. 주문의 결제·접수 진행은 orders.status, 이후 배송 진행은 이 테이블에서 관리한다. 내부 tracking_number는 디버 접수 참고번호와 별개다. SQL 기본값 notPaid와 기존 배송 상태 코드는 유지한다.'
+}
+
+Table shipment_status_history {
+  shipment_status_history_seq integer [pk, increment, not null, note: '행의 고유 기본키']
+  shipment_seq integer [not null, note: '연결 대상 ID']
+  request_id uuid [not null, unique, note: '작업을 발생시킨 요청 추적 UUID. 테이블 PK와 별개']
+  from_status text [note: '변경 전 배송 상태. 최초 생성 이력은 NULL']
+  to_status text [not null, note: '변경 후 배송 상태']
+  actor_type text [not null, note: '작업 주체: ADMIN(운영자) / AI / SYSTEM']
+  actor_admin_user_seq integer [note: '관리자 논리 참조. AI·SYSTEM 작업은 NULL. 이름은 감사 로그에 보존']
+  occurred_at timestamptz [not null, default: `CURRENT_TIMESTAMP`, note: '작업 발생 시각']
+  checks {
+    `from_status IN ('notPaid','paid','received','waiting','sent','canceling','canceled')`
+    `to_status IN ('notPaid','paid','received','waiting','sent','canceling','canceled')`
+    `actor_type IN ('ADMIN','AI','SYSTEM')`
+    `(actor_type='ADMIN' AND actor_admin_user_seq IS NOT NULL AND actor_admin_user_seq>0) OR (actor_type IN ('AI','SYSTEM') AND actor_admin_user_seq IS NULL)`
+  }
+  Note: 'delivery / 배송 생성 및 상태 변경 이력. 상태와 이력은 같은 트랜잭션으로 저장. request_id로 재시도 중복 방지. / SQL 인덱스: CREATE INDEX shipment_history_lookup_idx ON shipment_status_history(shipment_seq,occurred_at,shipment_status_history_seq);'
+}
+
+// End of delivery module
+
+// Module operations: 관리자·인증 세션·감사·페르소나 전체 버전·FAQ
+Table admin_users {
+  admin_user_seq integer [pk, increment, not null, note: '행의 고유 기본키']
+  login_id text [not null, unique, note: '관리자 로그인 식별자']
+  name text [not null, note: '가입 시 필수 이름. 공백만인 값 금지']
+  password_hash text [not null, note: '단방향 해시된 비밀번호']
+  role text [not null, note: '역할']
+  status text [not null, note: '업무 상태']
+  created_at timestamptz [not null, default: `CURRENT_TIMESTAMP`, note: '행 생성 시각']
+  last_login_at timestamptz [note: '가장 최근 로그인 성공 시각. 미접속은 NULL']
+  checks {
+    `name ~ '[^[:space:]]'`
+    `role IN ('OPERATOR','SUPERVISOR','SYSTEM_ADMIN')`
+    `status IN ('ACTIVE','PENDING','INACTIVE')`
+  }
+  Note: 'operations / ACTIVE만 로그인 가능. PENDING은 가입 대기, INACTIVE는 비활성. SYSTEM_ADMIN은 삭제 불가. 계정 실제 삭제 시 세션만 함께 삭제하며 이름은 감사 로그에 보존.'
+}
+
+Table admin_sessions {
+  session_token_hash text [pk, not null, note: '랜덤 세션 토큰의 SHA-256 해시. 원문 저장 금지']
+  admin_user_seq integer [not null]
+  created_at timestamptz [not null, default: `CURRENT_TIMESTAMP`]
+  expires_at timestamptz [not null, default: `CURRENT_TIMESTAMP + INTERVAL '9 hours'`]
+  indexes {
+    admin_user_seq
+    expires_at
+  }
+  checks {
+    `session_token_hash ~ '^[0-9a-f]{64}$'`
+    `expires_at > created_at`
+  }
+  Note: 'auth / 고정 9시간 세션. 활동으로 연장하지 않으며 비밀번호 변경 시 대상의 모든 세션 삭제.'
+}
+Ref: admin_sessions.admin_user_seq > admin_users.admin_user_seq [delete: cascade]
+
+Table audit_logs {
+  audit_log_seq integer [pk, increment, not null, note: '행의 고유 기본키']
+  actor_type text [not null, note: '작업 주체: ADMIN(표시값 운영자) / AI / SYSTEM']
+  actor_seq integer [note: 'ADMIN이면 관리자 번호, AI·SYSTEM이면 NULL. 논리 참조']
+  actor_name text [note: '작업 당시 관리자 이름 또는 AI. 기존 식별 불가 기록은 NULL']
+  action text [not null, note: '실행한 작업 코드']
+  target_type text [not null, note: '작업 대상 종류']
+  target_seq integer [note: '작업 대상의 번호. 논리 참조']
+  target_admin_name text [note: 'ADMIN_USER 대상의 당시 이름. 계정 삭제 후에도 보존']
+  request_id uuid [not null, note: '작업을 발생시킨 요청 추적 UUID. 테이블 PK와 별개']
+  result text [not null, note: '작업 결과: SUCCESS / DENIED / FAILED']
+  metadata jsonb [not null, note: '감사에 필요한 추가 작업 정보. JSON 객체']
+  occurred_at timestamptz [not null, default: `CURRENT_TIMESTAMP`, note: '작업 발생 시각']
+  checks {
+    `actor_type IN ('ADMIN','AI','SYSTEM')`
+    `result IN ('SUCCESS','DENIED','FAILED')`
+    `jsonb_typeof(metadata)='object'`
+    `(actor_type='ADMIN' AND actor_seq IS NOT NULL AND actor_seq>0) OR (actor_type IN ('AI','SYSTEM') AND actor_seq IS NULL)`
+  }
+  Note: 'operations / 관리자·AI·서버 작업의 감사 기록. actor_seq와 target_seq는 논리 참조이며 관리자 삭제 후에도 번호·이름을 보존. 기존 로그는 015 migration 당시 확인 가능한 이름만 보완. / SQL 인덱스: CREATE INDEX audits_target_idx ON audit_logs(target_type,target_seq,occurred_at DESC);'
+}
+
+Table ai_personas {
+  ai_persona_seq integer [pk, increment, not null, note: '행의 고유 기본키']
+  code text [not null, unique, note: 'AI 상담 유형의 고유 코드']
+  deleted_at timestamptz [note: '065: 분류 soft delete 시각. ACTIVE 버전이 있는 분류는 삭제 금지']
+  Note: 'operations / 페르소나 식별자. 실제 설정은 전체 버전으로 저장한다.'
+}
+
+Table ai_persona_versions {
+  ai_persona_version_seq integer [pk, increment, not null, note: '전체 설정 버전 식별자']
+  ai_persona_seq integer [not null, note: '연결 대상 ID']
+  version integer [not null, note: '변경 버전. 동시 수정 검증 또는 버전 관리에 사용']
+  name text [not null, note: '이 버전의 표시명']
+  prompt_text text [not null, note: 'AI 상담원에게 제공하는 프롬프트 본문']
+  voice_id text [note: 'AI 지원 음성. NULL은 AI 기본 음성']
+  speaking_rate numeric [note: 'AI 지원 속도. NULL은 기본 속도']
+  turn_wait_level text [not null, note: 'SHORT / NORMAL / LONG. AI 지원 목록으로 검증']
+  status text [not null, default: 'INACTIVE', note: 'ACTIVE / PENDING / INACTIVE. 서비스 전체 ACTIVE·PENDING 각각 최대 1개']
+  deleted_at timestamptz [note: '065: 분류 삭제 시 전체 버전 soft delete. 삭제 버전은 INACTIVE, 과거 통화 참조 보존']
+  created_by_admin_user_seq integer [note: '작성 관리자 논리 참조. 이름은 감사 로그에 보존']
+  created_at timestamptz [not null, default: `CURRENT_TIMESTAMP`, note: '행 생성 시각']
+  application_id uuid [note: '적용 요청 식별자. 같은 버전 재요청도 새 식별자 사용']
+  requested_by_admin_user_seq integer [note: '적용 요청 관리자 논리 참조. 이름은 감사 로그에 보존']
+  requested_at timestamptz [note: '최신 적용 요청 시각']
+  applied_at timestamptz [note: 'AI 적용 확인 시각']
+  previous_active_version_seq integer [note: '050: 마지막 활성화 성공 직전 ACTIVE 버전. 미확인 NULL. 성공 트랜잭션에서 기록']
+  last_notified_at timestamptz [note: 'AI 알림 재시도 시각']
+  apply_error_code text [note: 'AI_UNAVAILABLE / INVALID_CONFIG / UNSUPPORTED_OPTIONS / APPLY_FAILED']
+  indexes {
+    (ai_persona_seq,version) [unique]
+  }
+  checks {
+    `version > 0`
+    `btrim(prompt_text) <> ''`
+    `name ~ '\S'`
+    `voice_id IS NULL OR voice_id ~ '\S'`
+    `status IN ('ACTIVE','PENDING','INACTIVE')`
+    `deleted_at IS NULL OR status='INACTIVE'`
+    `turn_wait_level IN ('SHORT','NORMAL','LONG')`
+    `speaking_rate IS NULL OR (speaking_rate>0 AND speaking_rate<'Infinity'::numeric)`
+    `apply_error_code IN ('AI_UNAVAILABLE','INVALID_CONFIG','UNSUPPORTED_OPTIONS','APPLY_FAILED')`
+    `status<>'ACTIVE' OR (applied_at IS NOT NULL AND apply_error_code IS NULL)`
+    `(application_id IS NULL AND requested_by_admin_user_seq IS NULL AND requested_at IS NULL AND status='INACTIVE') OR (application_id IS NOT NULL AND requested_by_admin_user_seq IS NOT NULL AND requested_at IS NOT NULL)`
+  }
+  Note: 'operations / 이름·프롬프트·음성·속도·대기 설정은 변경 불가. 수정은 새 버전을 추가한다. AI가 통화 0건에서 적용을 확인한 뒤 ACTIVE 전환. SQL의 부분 UNIQUE 인덱스로 ACTIVE·PENDING 각각 1개와 application_id 고유성을 보장한다. 적용 제약·트리거의 배포 원본은 013 migration이다.'
+}
+
+Ref: ai_persona_versions.ai_persona_version_seq < ai_persona_versions.previous_active_version_seq
+
+Table ai_persona_drafts {
+  ai_persona_seq integer [pk, not null, note: '039: 유형당 초안 한 개. 논리 참조']
+  draft_revision uuid [not null]
+  base_version integer [not null]
+  name text [not null]
+  prompt_text text [not null]
+  voice_id text
+  speaking_rate numeric
+  turn_wait_level text [not null]
+  updated_by_admin_user_seq integer [not null, note: '관리자 논리 참조']
+  created_at timestamptz [not null, default: `clock_timestamp()`]
+  updated_at timestamptz [not null, default: `clock_timestamp()`]
+  deleted_at timestamptz [note: '065: 분류 삭제 시 초안도 soft delete']
+  checks {
+    `ai_persona_seq>0`
+    `base_version>0`
+    `name ~ '\S'`
+    `prompt_text ~ '\S'`
+    `voice_id IS NULL OR voice_id ~ '\S'`
+    `speaking_rate IS NULL OR (speaking_rate>0 AND speaking_rate<'Infinity'::numeric)`
+    `turn_wait_level IN ('SHORT','NORMAL','LONG')`
+    `updated_by_admin_user_seq>0`
+  }
+  Note: 'operations / PATCH는 초안 저장, POST versions는 정식 버전 확정, activate는 실제 상담 publish. 통화에는 초안을 사용하지 않는다.'
+}
+
+Table faq_entries {
+  faq_entry_seq integer [pk, increment, not null, note: '행의 고유 기본키']
+  category text [not null, note: '사진 기준 고정 10개 분류. 전체는 저장하지 않으며 AI 응답에는 제공하지 않음']
+  question text [not null, note: 'FAQ 질문']
+  answer text [not null, note: 'FAQ 답변']
+  updated_by_admin_user_seq integer [not null, note: '수정 관리자 논리 참조. 이름은 감사 로그에 보존']
+  created_at timestamptz [not null, default: `CURRENT_TIMESTAMP`, note: '행 생성 시각']
+  updated_at timestamptz [not null, default: `CURRENT_TIMESTAMP`, note: '마지막 변경 시각']
+  checks {
+    `btrim(question)<>''`
+    `btrim(answer)<>''`
+    `category IN ('접수','수거 일정','물품·박스','포장·파손','배송·운송장','주소','변경·취소','요금·결제','이용 안내','기타')`
+  }
+  Note: 'operations / FAQ 단건·복수 추가/삭제와 단건 수정. API·초기 등록은 변경·감사·AI 알림 대기를 함께 커밋한다. 임베딩은 AI 측에서 관리.'
+}
+
+Table faq_change_notifications {
+  faq_change_notification_seq integer [pk, increment, not null]
+  event_id uuid [not null, unique, default: `gen_random_uuid()`, note: '같은 알림 재전송에 유지되는 AI 중복 제거 키']
+  operation text [not null, note: 'INSERT / UPDATE / DELETE. UPDATE는 번호 하나']
+  faq_entry_seqs integer[] [not null, note: 'FAQ 번호 1~100개. 삭제 후에도 보존하는 논리 참조']
+  request_id uuid [not null, note: '원본 FAQ 작업과 SYSTEM 전송 감사의 연결 번호']
+  attempts integer [not null, default: 0]
+  next_attempt_at timestamptz [not null, default: `CURRENT_TIMESTAMP`]
+  claim_id uuid [note: '점유 식별자. 오래된 워커의 완료 저장 방지']
+  claimed_until timestamptz [note: '점유 30초 만료. 중단 시 다른 인스턴스가 복구']
+  sent_at timestamptz [note: 'AI HTTP 202 수신 확인 시각. 검색 데이터 반영 완료와 별개']
+  created_at timestamptz [not null, default: `CURRENT_TIMESTAMP`]
+  checks {
+    `operation IN ('INSERT','UPDATE','DELETE')`
+    `cardinality(faq_entry_seqs) BETWEEN 1 AND 100 AND array_ndims(faq_entry_seqs)=1 AND array_lower(faq_entry_seqs,1)=1 AND array_position(faq_entry_seqs,NULL) IS NULL AND 0<ALL(faq_entry_seqs)`
+    `operation<>'UPDATE' OR cardinality(faq_entry_seqs)=1`
+    `attempts>=0`
+    `(claim_id IS NULL)=(claimed_until IS NULL)`
+    `sent_at IS NULL OR claim_id IS NULL`
+  }
+  Note: 'operations / FAQ 변경과 함께 저장하는 AI 알림 대기. 선행 대기를 추월하지 않고 재시도한다. 미전송 행의 부분 인덱스는 020 SQL을 따른다. 실제 FAQ FK를 두지 않아 삭제 번호가 보존된다.'
+}
+
+// End of operations module
+
+Ref: customers.customer_seq - memberships.customer_seq
+Ref: organizations.organization_seq < memberships.organization_seq
+Ref: customers.customer_seq < personal_pins.customer_seq
+Ref: customers.customer_seq ?< orders.customer_seq
+Ref: orders.order_seq < order_parcels.order_seq
+Ref: orders.order_seq ?< call_sessions.order_seq
+Ref: call_sessions.call_session_seq < call_utterances.call_session_seq
+Ref: call_sessions.call_session_seq < recordings.call_session_seq
+Ref: order_parcels.order_parcel_seq - shipments.order_parcel_seq
+Ref: shipments.shipment_seq < shipment_status_history.shipment_seq
+Ref: ai_personas.ai_persona_seq < ai_persona_versions.ai_persona_seq

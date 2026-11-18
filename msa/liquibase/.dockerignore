@@ -1,0 +1,5 @@
+*
+!Dockerfile
+!ci-command.sh
+!changelog/
+!changelog/**

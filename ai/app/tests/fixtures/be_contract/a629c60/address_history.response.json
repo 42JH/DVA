@@ -1,0 +1,22 @@
+{
+  "data": [
+    {
+      "orderSeq": 101,
+      "orderParcelSeq": 201,
+      "createdAt": "2026-10-20T01:00:00.000Z",
+      "address": {
+        "name": "예시 수령인",
+        "phoneNumber": "01012345678",
+        "roadAddress": "예시로 12",
+        "jibunAddress": "예시동 12",
+        "detailAddress": "101호",
+        "dongName": "예시동",
+        "postalCode": "01234",
+        "latitude": 37.5,
+        "longitude": 127
+      }
+    }
+  ],
+  "hasNext": false,
+  "total_count": 1
+}
