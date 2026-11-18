@@ -1,0 +1,805 @@
+// AI 상담가 통합 QA — 1~10번 흐름을 한 브라우저에서 이어서 누르며 화면을 찍고 상태를 기록
+// 반영 전 시험(TEST_BEFORE_APPLY)을 꺼 둔 동안(11/15~)은 VITE_TEST_BEFORE_APPLY=true로 띄운 가짜 서버에 QA_BASE로 돌림 — 끈 상태는 apply-no-test.cjs
+const { chromium } = require(process.env.PW_CORE ?? 'playwright-core')
+const path = require('path')
+const fs = require('fs')
+const OUT = path.join(__dirname, process.env.SHOT_DIR || 'app')
+fs.mkdirSync(OUT, { recursive: true })
+const BASE = process.env.QA_BASE || 'http://localhost:5174'
+const only = process.argv[2] ? process.argv[2].split(',') : null
+const { STATES, MEASURE } = require('./specs.cjs')
+const app = {}
+const results = []
+const log = (...a) => console.log(...a)
+const check = (ok, what, extra = '') => {
+  results.push({ ok: !!ok, what })
+  log(`${ok ? '  ok  ' : '  FAIL'} ${what}${extra ? ' — ' + extra : ''}`)
+}
+
+;(async () => {
+  const b = await chromium.launch({
+    executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe',
+    ignoreDefaultArgs: ['--hide-scrollbars'],
+  })
+  const ctx = await b.newContext({ viewport: { width: 1440, height: 900 } })
+  const p = await ctx.newPage()
+  const errors = []
+  p.on('pageerror', (e) => errors.push('PAGEERROR ' + e.message))
+  p.on('console', (m) => {
+    if (m.type() === 'error' && !/favicon|Failed to load resource/.test(m.text())) errors.push('CONSOLE ' + m.text().slice(0, 200))
+  })
+  const activates = [] // 통화에 반영 요청이 간 때
+  p.on('request', (r) => {
+    if (r.method() === 'POST' && /\/personas\/\d+\/activate$/.test(r.url())) activates.push(Date.now())
+  })
+  const real = [] // 가짜가 못 받아 실서버로 넘어간 요청
+  p.on('response', (r) => {
+    const u = r.url()
+    if (u.includes('/api/') && (r.status() === 401 || r.status() >= 500)) real.push(`${r.status()} ${r.request().method()} ${u.replace(BASE, '')}`)
+  })
+  // AXE=<axe.min.js 경로> 를 주면 화면을 찍을 때마다 그 상태의 접근성(WCAG A · AA + 권장)을 같이 봄
+  const axeFound = {}
+  const shot = async (name) => {
+    await p.screenshot({ path: path.join(OUT, name + '.png') })
+    if (!process.env.AXE) return
+    if (!(await p.evaluate(() => !!window.axe))) await p.addScriptTag({ path: process.env.AXE })
+    const r = await p.evaluate(() => window.axe.run(document, { runOnly: ['wcag2a', 'wcag2aa', 'wcag21aa', 'best-practice'] }))
+    for (const v of r.violations) {
+      const key = `${v.id} (${v.impact})`
+      axeFound[key] ??= { help: v.help, states: [], sample: v.nodes[0]?.html.replace(/\s+/g, ' ').slice(0, 160), why: v.nodes[0]?.failureSummary?.replace(/\s+/g, ' ').slice(0, 200) }
+      axeFound[key].states.push(`${name}×${v.nodes.length}`)
+    }
+  }
+  const txt = (sel) => p.$eval(sel, (e) => e.innerText.replace(/\s*\n\s*/g, ' | ')).catch(() => '')
+  const band = async () => {
+    const t = await p
+      .$eval('article', (a) => {
+        const n = a.querySelector('header')?.nextElementSibling
+        return n ? n.innerText.replace(/\s*\n\s*/g, ' | ') : ''
+      })
+      .catch(() => '')
+    return t.startsWith('프롬프트') ? '' : t
+  }
+  const head = () => txt('article header')
+  const dlg = () => txt('[role=dialog]')
+  const btns = (scope) =>
+    p.$$eval(`${scope} button`, (xs) =>
+      xs.filter((x) => x.offsetParent !== null).map((x) => (x.innerText.trim() || x.getAttribute('aria-label') || '?') + (x.disabled ? '(off)' : '')),
+    )
+  const click = async (text, scope = '') => {
+    await p.locator(`${scope} button`, { hasText: text }).filter({ visible: true }).last().click()
+    await p.waitForTimeout(500)
+  }
+  const waitBand = async (re, sec = 40) => {
+    let last = null
+    for (let i = 0; i < sec * 4; i++) {
+      const t = await band()
+      if (t !== last) {
+        log('    band:', t.slice(0, 150) || '(없음)')
+        last = t
+      }
+      if (re.test(t)) return true
+      await p.waitForTimeout(250)
+    }
+    log('    TIMEOUT', String(re))
+    return false
+  }
+  const fit = async (label) => {
+    const d = await p.evaluate(() => {
+      const m = document.querySelector('main')
+      return m ? m.scrollHeight - m.clientHeight : null
+    })
+    const bodyScroll = await p.evaluate(() => document.documentElement.scrollHeight - window.innerHeight)
+    check(d === 0 && bodyScroll <= 0, `스크롤 없음 ${label}`, `main ${d}, body ${bodyScroll}`)
+  }
+  const sizes = async (label) => {
+    for (const [w, h] of [[1440, 780], [1920, 950], [1280, 650], [1024, 600]]) {
+      await p.setViewportSize({ width: w, height: h })
+      await p.waitForTimeout(250)
+      await fit(`${label} ${w}x${h}`)
+      const over = await p.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
+      check(over <= 0, `가로 넘침 없음 ${label} ${w}x${h}`, `over ${over}`)
+    }
+    await p.setViewportSize({ width: 1440, height: 900 })
+    await p.waitForTimeout(250)
+  }
+  // 순서는 아래 ORDER — 앞 줄이 만든 상태(버전 번호 홀짝)를 뒤 줄이 이어 씀
+  const secs = {}
+  const section = async (name, fn) => {
+    secs[name] = fn
+  }
+  const ORDER = ['r1', 'r10', 'r1b', 'r34', 'r5', 'r2', 'away', 'r6', 'r6f', 'r7', 'r8']
+  const runAll = async () => {
+    for (const name of ORDER) {
+      if (only && !only.includes(name)) continue
+      log(`\n=== ${name}`)
+      try {
+        await secs[name]()
+      } catch (e) {
+        check(false, `${name} 중단`, String(e).split('\n')[0].slice(0, 300))
+        await shot(`ERR-${name}`).catch(() => {})
+        await p.keyboard.press('Escape').catch(() => {}) // 열린 창이 다음 줄을 막지 않게
+        await p.waitForTimeout(300)
+      }
+    }
+  }
+  const spec = async (state) => {
+    const st = STATES[state]
+    app[state] = await p.evaluate(`(${MEASURE.toString()})(null, ${JSON.stringify(st.probes)}, ${JSON.stringify(st.counts || [])}, 'app')`)
+    const miss = Object.entries(app[state].probes).filter(([, v]) => !v).map(([k]) => k)
+    if (miss.length) log('    (측정 못 찾음:', miss.join(', ') + ')')
+  }
+  // 프롬프트 칸 (11/15) — 보는 동안은 꾸민 글(누르면 그 칸만 입력 칸). 읽기 전용 · 잠긴 상태에는 누를 칸이 없음
+  const VIEW = 'article section div[tabindex="0"]'
+  const openCount = () => p.locator(`${VIEW}, article textarea`).count()
+  const firstText = async () =>
+    (await p.locator(`${VIEW}, article textarea`).first().evaluate((el) => (el.tagName === 'TEXTAREA' ? el.value : el.innerText))).trim()
+  /** 첫 칸(역할)을 눌러 입력 칸으로 */
+  const openFirst = async () => {
+    if (!(await p.locator('article textarea').count())) await p.locator(VIEW).first().click()
+    return p.locator('article textarea').first()
+  }
+  const edit = async (more) => {
+    const ta = await openFirst()
+    await ta.press('Control+End')
+    await ta.type(more)
+  }
+
+  // 로그인
+  await p.goto(BASE + '/login')
+  await p.waitForSelector('input')
+  const ins = await p.$$('input')
+  await ins[0].fill('admin')
+  await ins[1].fill('test1234')
+  await p.keyboard.press('Enter')
+  await p.waitForTimeout(1500)
+  await p.goto(BASE + '/personas')
+  await p.waitForSelector('article header')
+  await p.waitForTimeout(800)
+
+  await section('r1', async () => {
+    // 처음: 빠른 접수형 v7 저장만(반영 전), v6 통화 중
+    log('  head:', await head())
+    log('  band:', await band())
+    log('  buttons:', (await btns('article')).join(', '))
+    await shot('r1-3-unapplied')
+    await spec('unapplied')
+    check(/반영 전/.test(await band()), '처음 화면에 반영 전 띠')
+    await fit('반영 전 1440x900')
+    // 토글
+    await p.getByRole('tab', { name: '통화에 쓰는 내용' }).click().catch(async () => click('통화에 쓰는 내용', 'article'))
+    await p.waitForTimeout(400)
+    check((await openCount()) === 0, '통화에 쓰는 내용은 읽기만(누를 칸 없음)')
+    await shot('r1-3b-callview')
+    // 새로고침해도 보던 쪽(통화에 쓰는 내용) 그대로
+    await p.reload()
+    await p.waitForSelector('article header')
+    await p.waitForTimeout(1000)
+    check((await p.locator('[aria-label="보는 내용"] [aria-selected="true"]').innerText().catch(() => '')) === '통화에 쓰는 내용', '새로고침해도 토글(통화에 쓰는 내용) 그대로')
+    await p.getByRole('tab', { name: '고친 내용' }).click().catch(async () => click('고친 내용', 'article'))
+    await p.waitForTimeout(400)
+    check((await openCount()) > 0, '고친 내용으로 돌아오면 고칠 수 있는 칸')
+    // 확인 창
+    await click('통화에 반영', 'article')
+    log('  dialog:', await dlg())
+    await shot('r1-4-test-confirm')
+    log('  dialog buttons:', (await btns('[role=dialog]')).join(', '))
+    await p.keyboard.press('Escape')
+    await p.waitForTimeout(300)
+    check((await p.locator('[role=dialog]').count()) === 0, 'Esc로 확인 창 닫힘')
+    await click('통화에 반영', 'article')
+    await click('취소', '[role=dialog]')
+    check((await p.locator('[role=dialog]').count()) === 0, '[취소]로 확인 창 닫힘')
+    check(/반영 전/.test(await band()), '취소 뒤 그대로 반영 전')
+    await click('통화에 반영', 'article')
+    await click('시험하고 반영', '[role=dialog]')
+    await waitBand(/시나리오 [3-6] \/ 10/, 30)
+    await shot('r1-5-testing')
+    await spec('testing')
+    log('  head(testing):', await head())
+    log('  buttons(testing):', (await btns('article')).join(', '))
+    check((await openCount()) === 0, '시험 중 입력 칸 막힘')
+    check(await p.locator('article header button', { hasText: '수정 기록 보기' }).isDisabled(), '시험 중 수정 기록 보기 막힘')
+    check(await p.locator('button[aria-label="이름 바꾸기"]').isDisabled(), '시험 중 이름 연필 막힘')
+    check((await p.locator('article header button', { hasText: '시나리오 시험' }).count()) === 0, '시험 중 머리 줄 [시나리오 시험] 없음')
+    // 시험 중 새로고침 — 띠가 그대로, 끝나면 저절로 반영
+    await p.reload()
+    await p.waitForSelector('article header')
+    await p.waitForTimeout(1200)
+    check(/시험 중/.test(await band()), '시험 중 새로고침해도 시험 중 띠', await band())
+    await waitBand(/반영 중/, 40)
+    await shot('r1-6-applying')
+    await spec('applying')
+    log('  head(applying):', await head())
+    log('  buttons(applying):', (await btns('article')).join(', '))
+    check((await openCount()) === 0, '반영 중 입력 칸 막힘')
+    await waitBand(/^$/, 20)
+    await p.waitForTimeout(600)
+    await shot('r1-1-live')
+    await spec('live')
+    log('  head(live):', await head())
+    log('  buttons(live):', (await btns('article')).join(', '))
+    check(/통화에 사용 중/.test(await head()), '반영 뒤 통화에 사용 중')
+    check((await band()) === '', '반영 뒤 띠 없음')
+    log('  topbar:', await txt('body > div header, #root header').then((t) => t.slice(0, 120)))
+    log('  localStorage applyAfterTest:', await p.evaluate(() => localStorage.getItem('personas:applyAfterTest')))
+    await sizes('사용 중 상담가')
+  })
+
+  await section('r10', async () => {
+    const pos = () =>
+      p.evaluate(() => {
+        const h = document.querySelector('article header')
+        const name = h.querySelector('h2:not(.sr-only), input')
+        const meta = h.querySelector('button.underline')?.getBoundingClientRect()
+        const r = name.getBoundingClientRect()
+        const cs = getComputedStyle(name)
+        return { tag: name.tagName, x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height), font: cs.fontSize + ' ' + cs.fontWeight, metaY: meta ? Math.round(meta.y) : null, headH: Math.round(h.getBoundingClientRect().height) }
+      })
+    const before = await pos()
+    log('  before:', JSON.stringify(before))
+    await p.locator('button[aria-label="이름 바꾸기"]').click()
+    await p.waitForTimeout(300)
+    const during = await pos()
+    log('  during:', JSON.stringify(during))
+    await shot('r10-2-renaming')
+    await spec('renaming')
+    check(during.font === '20px 700' && during.w === 280 && during.x === before.x, '이름 칸이 시안 크기(280, 글씨 20 굵게)이고 이름 자리에서 열림', JSON.stringify(during))
+    check(during.metaY === before.metaY && during.headH === before.headH, '칸이 열려도 아래 줄이 안 밀림', `metaY ${before.metaY}→${during.metaY}, headH ${before.headH}→${during.headH}`)
+    await p.keyboard.type(' X')
+    await p.keyboard.press('Escape')
+    await p.waitForTimeout(300)
+    check((await p.locator('article header h2').innerText()) === '빠른 접수형', 'Esc = 원래 이름')
+    await p.locator('button[aria-label="이름 바꾸기"]').click()
+    await p.keyboard.type(' Y')
+    await p.locator('h3', { hasText: '프롬프트' }).click()
+    await p.waitForTimeout(300)
+    check((await p.locator('article header h2').innerText()) === '빠른 접수형', '칸 밖 클릭 = 원래 이름')
+    await p.locator('button[aria-label="이름 바꾸기"]').click()
+    await p.keyboard.press('Control+A')
+    await p.keyboard.press('Delete')
+    await p.keyboard.press('Enter')
+    await p.waitForTimeout(400)
+    check((await p.locator('article header h2').innerText()) === '빠른 접수형', '빈 이름 Enter = 원래 이름')
+    await p.locator('button[aria-label="이름 바꾸기"]').click()
+    await p.keyboard.press('Control+A')
+    await p.keyboard.type('빠른 접수형 둘')
+    await p.keyboard.press('Enter')
+    await p.waitForTimeout(1500)
+    log('  head(after rename):', await head())
+    log('  band(after rename):', await band())
+    log('  tabs:', await txt('[role=tablist]'))
+    check((await p.locator('article header h2').innerText()) === '빠른 접수형 둘', 'Enter = 새 이름 저장')
+    check(!/반영 전/.test(await band()), '이름만 바꾸면 반영 전 띠가 안 생김', await band())
+    await waitBand(/^$/, 15)
+    await p.waitForTimeout(500)
+    await shot('r10-3-renamed')
+    check((await band()) === '' && /통화에 사용 중/.test(await head()), '이름 바꾼 뒤 띠 없이 통화에 사용 중', await head())
+    log('  topbar:', (await txt('main header, header')).slice(0, 80))
+    // 원래 이름으로 (다음 시험이 홀수 버전이 되게 한 번 더 저장되는 것도 겸함)
+    await p.locator('button[aria-label="이름 바꾸기"]').click().catch(() => log('  (이름 연필 없음)'))
+    await p.keyboard.press('Control+A')
+    await p.keyboard.type('빠른 접수형')
+    await p.keyboard.press('Enter')
+    await p.waitForTimeout(1500)
+    await waitBand(/^$/, 15)
+    log('  head(after rename back):', await head())
+    log('  band(after rename back):', await band())
+    check((await band()) === '', '이름을 되돌려도 띠 없음')
+    // 9번: 이름만 바꾼 뒤에도 [시나리오 시험]에 통화에 쓰는 내용의 결과가 보임 (이름 바꾸기 전 시험 결과를 이어 씀)
+    await click('시나리오 시험', 'article header')
+    await p.waitForTimeout(1200)
+    const top = (await txt('main')).slice(0, 220)
+    log('  result(after rename):', top)
+    check(/전체 \| 10 \| 통과 \| 10/.test(top) && !/시험하지 않았습니다/.test(top), '이름만 바꾼 뒤에도 시험 결과가 그대로 보임', top.slice(0, 120))
+    await p.locator('tbody tr').first().click()
+    await p.waitForTimeout(1200)
+    log('  detail(after rename):', (await txt('main article')).slice(0, 160))
+    check(/통과/.test(await txt('main article > div:first-child')) && (await p.locator('[aria-label="통화 대화"]').count()) === 1, '상세에서도 그 통화 기록이 보임')
+    await p.goBack()
+    await p.waitForTimeout(600)
+    await p.goBack()
+    await p.waitForSelector('article header')
+    await p.waitForTimeout(800)
+  })
+
+  await section('r5', async () => {
+    // 앞에서 고친 내용(v10)이 통화에 들어가 있음 → 예전 날짜(10월 29일 = v7)는 역할 칸이 다름
+    await p.locator('article header button', { hasText: '수정 기록 보기' }).click()
+    await p.waitForTimeout(600)
+    const rows = p.locator('[role=dialog] ol button')
+    const n = await rows.count()
+    log('  history rows:', n)
+    for (let i = 0; i < n; i++) {
+      await rows.nth(i).click()
+      await p.waitForTimeout(200)
+      log(`   row${i}:`, (await rows.nth(i).innerText()).replace(/\n/g, ' | '), '→', (await txt('[role=dialog] section')).slice(0, 200), '| load:', await p.locator('[role=dialog] button', { hasText: '이 내용 불러오기' }).count())
+    }
+    await p.locator('[role=dialog] ol button', { hasText: '10월 29일' }).click()
+    await p.waitForTimeout(300)
+    await shot('r5-2-history')
+    await spec('history')
+    check(/다른 항목 2개/.test(await dlg()) && /목소리/.test(await txt('[role=dialog] section')), '수정 기록 창에 목소리 차이도 보임', (await txt('[role=dialog] section')).slice(0, 160))
+    log('  modal buttons:', (await btns('[role=dialog]')).join(', '))
+    // 불러오기 = 칸에 채우기만 (11/15 사용자: 누르자마자 저장한 것처럼 수정 기록에 뜸) — 기록은 [저장]을 눌러야 남음
+    const nRows = n
+    const band0 = await band()
+    const text0 = await firstText()
+    const saves = []
+    const onReq = (r) => r.method() !== 'GET' && r.url().includes('/api/personas') && saves.push(`${r.method()} ${r.url().replace(BASE, '')}`)
+    p.on('request', onReq)
+    await click('이 내용 불러오기', '[role=dialog]')
+    await p.waitForTimeout(800)
+    check((await p.locator('[role=dialog]').count()) === 0, '불러오면 창 닫힘')
+    check(saves.length === 0, '불러오기만으로는 저장 요청 없음', saves.join(', '))
+    check((await firstText()) === '택배 접수와 수거 일정 확인을 돕는 AI 상담원', '불러온 내용이 칸에', await firstText())
+    check(/취소/.test(await head()) && /저장/.test(await head()) && (await band()) === band0, '불러온 뒤 [취소][저장], 띠는 그대로', await band())
+    // [취소] → 처음 내용, 기록 줄 수 그대로
+    await click('취소', 'article header')
+    await p.waitForTimeout(400)
+    if (await p.locator('[role=dialog]').count()) await p.locator('[role=dialog] button').last().click()
+    await p.waitForTimeout(400)
+    await p.locator('article header button', { hasText: '수정 기록 보기' }).click()
+    await p.waitForTimeout(500)
+    check((await firstText()) === text0 && (await p.locator('[role=dialog] ol button').count()) === nRows, '불러온 뒤 [취소]하면 처음 내용 · 기록 줄 수 그대로', `${nRows} → ${await p.locator('[role=dialog] ol button').count()}`)
+    // 다시 불러와 [저장] → 그때 기록이 남고 반영 전 띠
+    await p.locator('[role=dialog] ol button', { hasText: '10월 29일' }).click()
+    await p.waitForTimeout(300)
+    await click('이 내용 불러오기', '[role=dialog]')
+    await p.waitForTimeout(500)
+    await click('저장', 'article header')
+    await p.waitForTimeout(1500)
+    p.off('request', onReq)
+    log('  band(after load + save):', await band())
+    await shot('r5-3-unapplied')
+    check(saves.length >= 1 && /반영 전/.test(await band()), '[저장]을 눌러야 저장 · 반영 전 띠', saves.join(', '))
+    check((await firstText()) === '택배 접수와 수거 일정 확인을 돕는 AI 상담원', '저장한 내용이 칸에', await firstText())
+    await p.locator('article header button', { hasText: '수정 기록 보기' }).click()
+    await p.waitForTimeout(500)
+    check((await p.locator('[role=dialog] ol button').count()) === nRows + 1, '저장하면 기록이 한 줄 늘어남', `${nRows} → ${await p.locator('[role=dialog] ol button').count()}`)
+    await p.keyboard.press('Escape')
+    await p.waitForTimeout(300)
+    // 새로고침해도 창 · 고른 날짜 그대로 (가짜 상담가 자료는 처음으로 돌아가지만 10월 1일은 처음 자료에도 있음)
+    await p.locator('article header button', { hasText: '수정 기록 보기' }).click()
+    await p.waitForTimeout(400)
+    await p.locator('[role=dialog] ol button', { hasText: '10월 1일' }).click()
+    await p.waitForTimeout(300)
+    await p.reload()
+    await p.waitForSelector('article header')
+    await p.waitForTimeout(1200)
+    check((await p.locator('[role=dialog]').count()) === 1, '새로고침해도 수정 기록 창이 열려 있음')
+    check(/10월 1일/.test(await p.locator('[role=dialog] ol button[aria-current]').innerText().catch(() => '')), '새로고침해도 고른 날짜 그대로')
+    await p.keyboard.press('Escape')
+    await p.waitForTimeout(300)
+    check((await p.locator('[role=dialog]').count()) === 0, 'Esc로 수정 기록 창 닫힘')
+    // 새로고침해도 가짜 상담가 자료가 남음 (세션 저장소) — 불러온 내용이 그대로 반영 전
+    log('  (새로고침 뒤) band:', await band())
+    check(/반영 전/.test(await band()) && (await firstText()) === '택배 접수와 수거 일정 확인을 돕는 AI 상담원', '새로고침해도 저장한 내용 · 반영 전 띠 그대로')
+    // 시험 화면에서 따로 전체 시험(모두 통과) → 띠의 [통화에 반영]은 시험 없이 바로 묻는 창
+    const headNo = await p.evaluate(() => JSON.parse(sessionStorage.getItem('mock:personas')).personas.find((x) => x.aiPersonaSeq === 1).head)
+    await p.goto(`${BASE}/personas/1/tests/${headNo}`)
+    await p.waitForSelector('main table')
+    await p.waitForTimeout(800)
+    log('  test page(before):', (await txt('main')).slice(0, 120))
+    await click('전체 10개 시험', 'main')
+    await click('시험 시작', '[role=dialog]')
+    for (let i = 0; i < 80 && !/전체 \| 10 \| 통과 \| 10/.test(await txt('main')); i++) await p.waitForTimeout(500)
+    log('  test page(after):', (await txt('main')).slice(0, 120))
+    await p.locator('a[aria-label="AI 상담가로"], header a, header button').first().click()
+    await p.waitForSelector('article header')
+    await p.waitForTimeout(1000)
+    log('  band(시험 화면에서 통과 뒤):', await band())
+    check(/반영 전/.test(await band()), '시험 화면에서 따로 통과해도 저절로 반영되지 않음(띠는 반영 전)')
+    await click('통화에 반영', 'article')
+    log('  dialog(시험 끝난 내용 반영):', await dlg())
+    check(/^통화에 반영할까요\?/.test(await dlg()) && !/버전/.test(await dlg()), '이미 통과한 내용 반영 창에 버전이라는 말 없음', await dlg())
+    await shot('x-apply-passed-dialog')
+    await click('취소', '[role=dialog]')
+    // 2번 줄 준비: 아직 시험 안 한 고친 내용
+    await edit(' 고침3')
+    await click('저장', 'article header')
+    await p.waitForTimeout(1500)
+    log('  band(2번 준비):', await band())
+  })
+
+  await section('r34', async () => {
+    // 짝수 버전이어야 실패가 남 — 띠가 없으면 한 번 고쳐 저장
+    log('  band(start):', await band())
+    await click('통화에 반영', 'article')
+    log('  dialog:', await dlg())
+    await click('시험하고 반영', '[role=dialog]')
+    await waitBand(/시나리오 [1-4] \/ 10/, 20)
+    check(/목소리 \| 남성 1/.test(await head()), '시험 중 머리 줄에 고친 내용의 목소리 이름(남성 1)', await head())
+    const ok = await waitBand(/확인 필요|반영 중/, 45)
+    if (!/확인 필요/.test(await band())) {
+      log('  (모두 통과해 반영됨 → 한 번 더 고쳐 짝수 버전으로)')
+      await waitBand(/^$/, 20)
+      await edit(' 고침')
+      await click('저장', 'article header')
+      await p.waitForTimeout(1500)
+      await click('통화에 반영', 'article')
+      await click('시험하고 반영', '[role=dialog]')
+      await waitBand(/확인 필요/, 45)
+    }
+    await p.waitForTimeout(400)
+    await shot('r3-2-review')
+    await spec('review')
+    log('  head(review):', await head())
+    log('  buttons(review):', (await btns('article')).join(', '))
+    check((await openCount()) > 0, '확인 필요에서는 입력 칸 열림')
+    await fit('확인 필요 1440x900')
+    await click('실패한 시나리오 보기', 'article')
+    await p.waitForTimeout(1200)
+    log('  url:', p.url().replace(BASE, ''))
+    await shot('r3-3-result')
+    await spec('result')
+    log('  result top:', (await txt('main')).slice(0, 500))
+    await fit('시험 결과 1440x900')
+    await sizes('시험 결과')
+    // 새로고침 · 실패 줄 → 상세
+    const failRow = p.locator('tbody tr').filter({ has: p.locator('td:nth-child(4)', { hasText: /^실패$/ }) }).first()
+    log('  fail row:', (await failRow.innerText()).replace(/\s+/g, ' '))
+    await failRow.click()
+    await p.waitForTimeout(1500)
+    log('  url:', p.url().replace(BASE, ''))
+    await shot('r3-4-detail')
+    await spec('detail')
+    log('  detail top:', (await txt('main')).slice(0, 700))
+    await fit('시험 상세 1440x900')
+    await sizes('시험 상세')
+    const detailUrl = p.url()
+    await p.goBack()
+    await p.waitForTimeout(800)
+    check(/\/tests\/\d+$/.test(p.url()), '상세에서 뒤로 = 결과 화면', p.url().replace(BASE, ''))
+    await p.goBack()
+    await p.waitForTimeout(1000)
+    check(/\/personas$/.test(p.url()) && /확인 필요/.test(await band()), '결과에서 뒤로 = 확인 필요 띠 그대로', (await band()).slice(0, 60))
+    await click('확인하고 반영', 'article')
+    log('  dialog:', await dlg())
+    await shot('r4-2-review-confirm')
+    await click('취소', '[role=dialog]')
+    check(/확인 필요/.test(await band()), '취소 뒤 확인 필요 그대로')
+    await click('확인하고 반영', 'article')
+    await click('반영', '[role=dialog]')
+    await waitBand(/반영 중/, 10)
+    await shot('r4-3-applying')
+    await waitBand(/^$/, 20)
+    check(/통화에 사용 중/.test(await head()) && (await band()) === '', '확인하고 반영 뒤 사용 중 · 띠 없음')
+    globalThis.detailUrl = detailUrl
+  })
+
+  await section('r1b', async () => {
+    // 보는 모양 ↔ 입력 칸 (11/15, 피그마 2409:2521): 보는 동안은 꾸민 글, 누른 칸만 글자 그대로
+    const views = p.locator(VIEW)
+    const nView = await views.count()
+    check(nView === 6 && (await p.locator('article textarea').count()) === 0, '보는 동안은 입력 칸 없이 꾸민 글 여섯 칸', `보는 칸 ${nView}`)
+    const top0 = await views.first().evaluate((el) => el.getBoundingClientRect().top)
+    const ta0 = await openFirst()
+    check((await p.locator('article textarea').count()) === 1 && (await views.count()) === nView - 1, '누른 칸만 입력 칸')
+    check(await ta0.evaluate((el) => document.activeElement === el && el.selectionStart === el.value.length), '누르면 바로 칠 수 있음 (초점 · 커서는 글 끝)')
+    check(Math.abs((await ta0.evaluate((el) => el.getBoundingClientRect().top)) - top0) < 1, '누를 때 첫 줄 자리가 안 움직임')
+    const was = await ta0.inputValue()
+    await ta0.type(' **굵게**')
+    await p.keyboard.press('Tab')
+    await p.waitForTimeout(200)
+    check((await p.locator('article label:has(textarea) span').first().innerText()) === '성격', 'Tab으로 다음 칸이 입력 칸')
+    await p.locator('article h3').first().click()
+    await p.waitForTimeout(200)
+    check(
+      (await p.locator('article textarea').count()) === 0 &&
+        (await views.first().locator('strong').allInnerTexts()).join() === '굵게' &&
+        !(await views.first().innerText()).includes('*'),
+      '칸 밖을 누르면 다시 보는 모양 — **굵게**는 굵은 글로, 별표는 안 보임',
+    )
+    // 고치던 칸에서 다른 칸을 바로 누름 — 역할이 입력 칸인 동안 보는 칸의 둘째가 발화 톤
+    await openFirst()
+    await views.nth(1).click()
+    await p.waitForTimeout(200)
+    check(
+      (await p.locator('article textarea').count()) === 1 &&
+        (await p.locator('article label:has(textarea) span').first().innerText()) === '발화 톤' &&
+        (await p.locator('article textarea').evaluate((el) => document.activeElement === el)),
+      '고치던 칸에서 다른 칸을 누르면 그 칸만 입력 칸',
+    )
+    // 긴 글을 내려 보다가 눌러도 보던 자리 그대로 (초점을 줄 때 브라우저가 칸 첫 줄로 끌어올리지 않게)
+    await views.first().click()
+    await p.locator('article textarea').fill(Array.from({ length: 60 }, (_, i) => `- ${i + 1}번째 줄`).join('\n'))
+    await p.locator('article h3').first().click()
+    await p.waitForTimeout(200)
+    const box = p.locator('article h3').first().locator('..') // 프롬프트 스크롤 상자
+    await box.evaluate((el) => (el.scrollTop = 400))
+    const bb = await box.boundingBox()
+    await p.mouse.click(bb.x + 120, bb.y + bb.height / 2)
+    await p.waitForTimeout(200)
+    const top1 = await box.evaluate((el) => el.scrollTop)
+    check(top1 === 400 && (await p.locator('article textarea').count()) === 1, '내려 보다가 눌러도 보던 자리 그대로', `scrollTop 400 → ${top1}`)
+    await (await openFirst()).fill(was) // 원래 글로 (아래 점검은 여기서 이어 침)
+    await box.evaluate((el) => (el.scrollTop = 0))
+    // 고치는 중 · 나가기 확인
+    await edit(' 고침')
+    await p.waitForTimeout(300)
+    await shot('r1-2-editing')
+    await spec('editing')
+    log('  head(editing):', await head())
+    log('  buttons(editing):', (await btns('article header')).join(', '))
+    check(/취소/.test(await head()) && /저장/.test(await head()), '고치기 시작하면 [취소][저장]')
+    check((await p.locator('button[aria-label="이름 바꾸기"]').count()) === 0, '고치는 중 이름 연필 없음')
+    check(await p.locator('article header button', { hasText: '수정 기록 보기' }).isDisabled(), '고치는 중 수정 기록 보기 막힘')
+    await p.getByRole('tab', { name: /친절형/ }).click()
+    await p.waitForTimeout(400)
+    log('  leave dialog:', await dlg())
+    await shot('x-leave-confirm')
+    check(/저장하지 않고/.test(await dlg()), '고친 채 다른 탭 = 나가기 확인')
+    await click('취소', '[role=dialog]').catch(async () => p.keyboard.press('Escape'))
+    await p.waitForTimeout(300)
+    check((await firstText()).endsWith('고침'), '확인 창을 닫으면 고친 글 그대로')
+    // 사이드바 이동도 막힘
+    await p.locator('nav a', { hasText: '주문' }).first().click()
+    await p.waitForTimeout(400)
+    check(/저장하지 않고/.test(await dlg()), '고친 채 다른 메뉴 = 나가기 확인', p.url().replace(BASE, ''))
+    await p.keyboard.press('Escape')
+    await p.waitForTimeout(300)
+    // [취소] → 확인 → 버림
+    await click('취소', 'article header')
+    log('  cancel dialog:', await dlg())
+    await click('나가기', '[role=dialog]')
+    await p.waitForTimeout(400)
+    check(!(await firstText()).endsWith('고침'), '[취소] → [나가기] = 고친 글 버림')
+    // 빈 칸 저장 막힘
+    const ta = await openFirst()
+    const keep = await ta.inputValue()
+    await ta.fill('')
+    await p.waitForTimeout(300)
+    log('  empty notice:', await txt('article header [role=alert]'))
+    check(await p.locator('article header button', { hasText: '저장' }).isDisabled(), '빈 칸이면 [저장] 꺼짐')
+    await shot('x-empty-notice')
+    await ta.fill('택배 접수와 조회를 돕는 AI 상담원')
+    await p.locator('article header select').selectOption({ label: '남성 1' })
+    await click('저장', 'article header')
+    await p.waitForTimeout(1500)
+    log('  band(after save):', await band())
+    check(/반영 전/.test(await band()), '저장하면 반영 전 띠')
+    check(!/취소/.test(await head()), '저장 뒤 [취소][저장] 사라짐', await head())
+  })
+
+  await section('r2', async () => {
+    await click('통화에 반영', 'article')
+    await click('시험하고 반영', '[role=dialog]')
+    await waitBand(/시나리오 [2-4] \/ 10/, 30)
+    await click('시험 중단', 'article')
+    log('  dialog(band stop):', await dlg())
+    await shot('r2-3b-stop-confirm-band')
+    await click('취소', '[role=dialog]')
+    check(/시험 중/.test(await band()), '중단 취소 = 그대로 시험 중')
+    await click('진행 보기', 'article')
+    await p.waitForTimeout(1200)
+    await shot('r2-2-test-page-running')
+    await spec('running')
+    log('  test page:', (await txt('main')).slice(0, 400))
+    await click('시험 중단', 'main')
+    log('  dialog(page stop):', await dlg())
+    await shot('r2-3-stop-confirm')
+    await click('중단', '[role=dialog]')
+    await p.waitForTimeout(1500)
+    await shot('r2-3c-test-page-stopped')
+    log('  test page(stopped):', (await txt('main')).slice(0, 400))
+    log('  buttons:', (await btns('main')).join(', '))
+    await p.goBack()
+    await p.waitForTimeout(1200)
+    log('  url:', p.url().replace(BASE, ''))
+    await waitBand(/시험 중단/, 8)
+    await shot('r2-4-stopped')
+    await spec('stopped')
+    log('  head(stopped):', await head())
+    log('  buttons(stopped):', (await btns('article')).join(', '))
+    check((await openCount()) > 0, '시험 중단 뒤 입력 칸 다시 열림')
+    await click('다시 시험하고 반영', 'article')
+    log('  dialog(retest):', await dlg())
+    await shot('r2-5-retest-confirm')
+    await click('시험하고 반영', '[role=dialog]')
+    await waitBand(/시험 중/, 8)
+    const ok = await waitBand(/반영 중|확인 필요/, 45)
+    log('  after retest:', await band())
+    await waitBand(/^$|확인 필요/, 20)
+  })
+
+  await section('away', async () => {
+    // 2번 끝(확인 필요나 사용 중) → 다시 고쳐 저장 = 홀수 버전(모두 통과)
+    if (/시험 중/.test(await band())) await waitBand(/확인 필요|^$/, 45)
+    await edit(' 고침4')
+    await click('저장', 'article header')
+    await p.waitForTimeout(1500)
+    log('  band:', await band())
+    await click('통화에 반영', 'article')
+    log('  dialog:', await dlg())
+    await click('시험하고 반영', '[role=dialog]')
+    await waitBand(/시험 중/, 10)
+    const before = activates.length
+    await p.locator('nav a', { hasText: '주문' }).first().click()
+    await p.waitForTimeout(800)
+    log('  url(away):', p.url().replace(BASE, ''))
+    for (let i = 0; i < 60 && activates.length === before; i++) await p.waitForTimeout(500)
+    check(activates.length > before && /\/orders/.test(p.url()), '다른 메뉴(주문)에 있는 동안 모두 통과 → 반영 요청이 감', `요청 ${activates.length - before}번, 지금 ${p.url().replace(BASE, '')}`)
+    await p.locator('nav a', { hasText: 'AI 상담가' }).first().click()
+    await p.waitForSelector('article header')
+    await p.waitForTimeout(800)
+    log('  band(back):', await band())
+    await waitBand(/^$/, 20)
+    check(/통화에 사용 중/.test(await head()) && (await band()) === '', '돌아오면 반영이 끝나 있음(띠 없음)')
+    check(activates.length === before + 1, '반영 요청은 한 번만', `${activates.length - before}번`)
+  })
+
+  await section('r6', async () => {
+    await p.getByRole('tab', { name: /친절형/ }).click()
+    await p.waitForTimeout(900)
+    await shot('r6-2-unused')
+    await spec('unused')
+    log('  head(unused):', await head())
+    log('  band(unused):', await band())
+    log('  buttons(unused):', (await btns('article header')).join(', '))
+    // 새로고침해도 친절형 그대로
+    await p.reload()
+    await p.waitForSelector('article header')
+    await p.waitForTimeout(1000)
+    check(/친절형/.test(await p.locator('article header h2').innerText()), '새로고침해도 고른 상담가(친절형) 그대로')
+    await click('통화에 사용하기', 'article header')
+    log('  dialog:', await dlg())
+    await shot('r6-3-test-confirm')
+    await click('시험 시작', '[role=dialog]')
+    await waitBand(/시나리오 [3-6] \/ 10/, 30)
+    await shot('r6-4-testing')
+    await spec('testing2')
+    log('  head(testing):', await head())
+    log('  buttons(testing):', (await btns('article')).join(', '))
+    await waitBand(/시험 통과/, 40)
+    await p.waitForTimeout(400)
+    await shot('r6-5-passed')
+    await spec('passed')
+    log('  head(passed):', await head())
+    log('  buttons(passed):', (await btns('article')).join(', '))
+    await p.waitForTimeout(6000)
+    check(/시험 통과/.test(await band()), '통과해도 저절로 바뀌지 않음(6초 뒤에도 시험 통과)')
+    await click('결과 보기', 'article')
+    await p.waitForTimeout(1200)
+    await shot('r6-5b-result')
+    log('  result top:', (await txt('main')).slice(0, 300))
+    await p.goBack()
+    await p.waitForTimeout(1000)
+    check(/시험 통과/.test(await band()), '결과에서 돌아와도 시험 통과 띠')
+    await click('통화에 사용하기', 'article')
+    log('  dialog:', await dlg())
+    await shot('r6-6-use-confirm')
+    await click('사용하기', '[role=dialog]')
+    await waitBand(/들어가는 중|반영 중/, 10)
+    await shot('r6-7-applying')
+    await spec('applying2')
+    log('  head(applying):', await head())
+    await waitBand(/^$/, 20)
+    await p.waitForTimeout(800)
+    log('  head(end):', await head())
+    log('  tabs:', await txt('[role=tablist]'))
+    check(/통화에 사용 중/.test(await head()), '친절형이 통화에 사용 중')
+    await shot('r6-8-switched')
+  })
+
+  await section('r6f', async () => {
+    // 6번의 실패 · 중단 (시안에 없어 4번 · 2번 띠를 그대로 씀). 지금 친절형이 통화 중, 빠른 접수형은 안 쓰는 상담가
+    await p.getByRole('tab', { name: /빠른 접수형/ }).click()
+    await p.waitForTimeout(900)
+    log('  head:', await head())
+    log('  band:', await band())
+    const startTest = async () => {
+      await click('통화에 사용하기', 'article header')
+      log('  dialog:', await dlg())
+      await click('시험 시작', '[role=dialog]')
+    }
+    const again = async (more) => {
+      await edit(more)
+      await click('저장', 'article header')
+      await p.waitForTimeout(1500)
+    }
+    if ((await band()) !== '') await again(' 다시') // 전에 돌린 결과 띠가 남아 있으면 새 내용으로
+    await startTest()
+    await waitBand(/시험 통과|확인 필요/, 45)
+    if (!/확인 필요/.test(await band())) {
+      await again(' 한 번 더') // 짝수 버전이어야 실패가 남
+      await startTest()
+      await waitBand(/확인 필요/, 45)
+    }
+    await p.waitForTimeout(400)
+    await shot('r6f-1-review')
+    log('  head(review):', await head())
+    log('  buttons(review):', (await btns('article')).join(', '))
+    check(/확인하고 사용하기/.test(await band()) && !/확인하고 반영/.test(await band()), '안 쓰는 상담가의 확인 필요 띠는 [확인하고 사용하기]')
+    await click('확인하고 사용하기', 'article')
+    log('  dialog(review):', await dlg())
+    await shot('r6f-2-review-confirm')
+    check(/실패한 시나리오 2개가 있습니다\. 빠른 접수형을 통화에 사용할까요\?/.test(await dlg()) && /친절형 대신 빠른 접수형이 응대/.test(await dlg()), '실패 이름과 바꾸기 안내가 같이 나오는 사용 확인 창')
+    await click('취소', '[role=dialog]')
+    // 중단
+    await again(' 중단용')
+    await startTest()
+    await waitBand(/시나리오 [2-4] \/ 10/, 30)
+    await click('시험 중단', 'article')
+    await click('중단', '[role=dialog]')
+    await waitBand(/시험 중단/, 10)
+    await shot('r6f-3-stopped')
+    log('  buttons(stopped):', (await btns('article')).join(', '))
+    check(/다시 시험/.test(await band()) && !/다시 시험하고 반영/.test(await band()), '안 쓰는 상담가의 시험 중단 띠는 [다시 시험]')
+    await click('다시 시험', 'article')
+    log('  dialog(retest):', await dlg())
+    check(/통화에 쓰기 전에 빠른 접수형을 시험할까요\?/.test(await dlg()) && /남은 시나리오 \d+개/.test(await dlg()), '다시 시험 확인 창은 남은 것만')
+    await click('취소', '[role=dialog]')
+    await p.getByRole('tab', { name: /친절형/ }).click()
+    await p.waitForTimeout(800)
+  })
+
+  await section('r7', async () => {
+    await click('상담가 등록', 'main')
+    await p.waitForTimeout(500)
+    await shot('r7-2-add')
+    await spec('add')
+    log('  form:', (await txt('form')).slice(0, 300))
+    check(await p.locator('form button', { hasText: '등록' }).isDisabled(), '이름이 없으면 [등록] 꺼짐')
+    await fit('상담가 등록 1440x900')
+    await sizes('상담가 등록')
+    await p.locator('form input').first().fill('꼼꼼 확인형')
+    await click('등록', 'form header')
+    await p.waitForTimeout(400)
+    log('  notice(empty sections):', await txt('form [role=alert]'))
+    await shot('r7-2b-empty-notice')
+    const tas = p.locator('form textarea')
+    const n = await tas.count()
+    for (let i = 0; i < n; i++) await tas.nth(i).fill(`내용 ${i + 1}`)
+    await p.locator('form select').selectOption({ index: 2 }).catch(() => log('  (목소리 선택 실패)'))
+    // 쓰던 채 탭 누르면 확인
+    await p.getByRole('tab', { name: /빠른 접수형/ }).click()
+    await p.waitForTimeout(400)
+    check(/저장하지 않고/.test(await dlg()), '등록 중 다른 탭 = 나가기 확인')
+    await p.keyboard.press('Escape')
+    await p.waitForTimeout(300)
+    await click('등록', 'form header')
+    await p.waitForTimeout(1800)
+    await shot('r7-3-unused')
+    log('  head(new):', await head())
+    log('  tabs:', await txt('[role=tablist]'))
+    log('  buttons(new):', (await btns('article header')).join(', '))
+    check(/꼼꼼 확인형/.test(await head()), '등록 뒤 새 상담가가 골라짐')
+  })
+
+  await section('r8', async () => {
+    await click('삭제', 'article header')
+    log('  dialog:', await dlg())
+    await shot('r8-3-delete-confirm')
+    await click('취소', '[role=dialog]')
+    check(/꼼꼼 확인형/.test(await head()), '삭제 취소 = 그대로')
+    await click('삭제', 'article header')
+    await click('삭제', '[role=dialog]')
+    await p.waitForTimeout(1500)
+    log('  head(after delete):', await head())
+    log('  tabs:', await txt('[role=tablist]'))
+    await shot('r8-4-after-delete')
+    check(!/꼼꼼 확인형/.test(await txt('[role=tablist]')), '삭제 뒤 탭에서 사라짐')
+    check(/통화에 사용 중/.test(await head()), '삭제 뒤 통화에 사용 중인 상담가로')
+  })
+
+  await runAll()
+  fs.writeFileSync(path.join(__dirname, process.env.APP_OUT || (only ? 'app-part.json' : 'app.json')), JSON.stringify(app, null, 1))
+  if (process.env.AXE) {
+    log('\n=== 접근성 (axe) — 상태별')
+    const keys = Object.keys(axeFound)
+    if (!keys.length) log('  걸린 것 없음')
+    for (const k of keys) log(`  ${k}: ${axeFound[k].help}\n    상태: ${axeFound[k].states.join(', ')}\n    예: ${axeFound[k].sample}\n    까닭: ${axeFound[k].why}`)
+  }
+  log('\n=== 끝')
+  log('실서버로 넘어간 요청(401/5xx):', real.length ? real.join(' ; ') : '없음')
+  log('콘솔/페이지 오류:', errors.length ? [...new Set(errors)].join(' ; ') : '없음')
+  const bad = results.filter((r) => !r.ok)
+  log(`점검 ${results.length}개 중 실패 ${bad.length}개`)
+  for (const r of bad) log('  FAIL', r.what)
+  await b.close()
+})().catch((e) => {
+  console.error(e)
+  process.exit(1)
+})
+

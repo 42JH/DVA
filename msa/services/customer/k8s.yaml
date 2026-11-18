@@ -1,0 +1,173 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: customer
+  namespace: dva
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  minReadySeconds: 10
+  progressDeadlineSeconds: 180
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: dva-customer
+  template:
+    metadata:
+      labels:
+        app: dva-customer
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 40
+      containers:
+        - name: customer
+          image: docker.io/library/dva-customer:RELEASE_TAG
+          imagePullPolicy: Never
+          ports:
+            - name: http
+              containerPort: 3001
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: PORT
+              value: "3001"
+            - name: SECURITY_LOG_HMAC_KEY
+              valueFrom:
+                secretKeyRef: {name: msa-security-logs, key: hmac-key}
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef: {name: customer-db, key: PGHOST}
+            - name: DB_PORT
+              valueFrom:
+                secretKeyRef: {name: customer-db, key: PGPORT}
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef: {name: customer-db, key: PGUSER}
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: customer-db, key: PGPASSWORD}
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef: {name: customer-db, key: PGDATABASE}
+            - name: OPERATIONS_URL
+              value: "http://operations:3005"
+            - name: CUSTOMER_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef: {name: msa-customer-auth, key: customer-token}
+            - name: ORDER_URL
+              value: http://order:3002
+            - name: CONSULTATION_URL
+              value: http://consultation:3004
+            - name: CONSULTATION_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef: {name: msa-consultation-auth, key: consultation-token}
+            - name: AI_BUSINESS_TOKEN
+              valueFrom:
+                secretKeyRef: {name: msa-ai-business, key: AI_BUSINESS_TOKEN, optional: true}
+            - name: CORS_ORIGINS
+              value: "https://13.209.59.180,https://k15d109.p.ssafy.io"
+            - name: SWAGGER_ENABLED
+              value: "true"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          startupProbe:
+            httpGet:
+              path: /customer/health
+              port: http
+            periodSeconds: 2
+            timeoutSeconds: 2
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /customer/health/ready
+              port: http
+            periodSeconds: 3
+            timeoutSeconds: 2
+            failureThreshold: 2
+          livenessProbe:
+            httpGet:
+              path: /customer/health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sh", "-c", "sleep 10"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: customer
+  namespace: dva
+spec:
+  type: ClusterIP
+  selector:
+    app: dva-customer
+  ports:
+    - name: http
+      port: 3001
+      targetPort: http
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: customer
+  namespace: dva
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.tls.certresolver: letsencrypt
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: k15d109.p.ssafy.io
+      http:
+        paths:
+          - path: /api/customers
+            pathType: Prefix
+            backend:
+              service:
+                name: customer
+                port: {number: 3001}
+          - path: /api/pins
+            pathType: Prefix
+            backend:
+              service:
+                name: customer
+                port: {number: 3001}
+          - path: /api/companies
+            pathType: Prefix
+            backend:
+              service:
+                name: customer
+                port: {number: 3001}
+          - path: /api/departments
+            pathType: Prefix
+            backend:
+              service:
+                name: customer
+                port: {number: 3001}
+          - path: /api/members
+            pathType: Prefix
+            backend:
+              service:
+                name: customer
+                port: {number: 3001}
+          - path: /customer
+            pathType: Prefix
+            backend:
+              service:
+                name: customer
+                port:
+                  number: 3001

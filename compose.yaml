@@ -41,14 +41,34 @@ services:
     expose:
       - "3000"
     environment:
-      NODE_ENV: production
+      NODE_ENV: development
       PORT: "3000"
+      AUTH_PROXY_HOPS: "1"
+      SECURITY_LOG_HMAC_KEY: ${SECURITY_LOG_HMAC_KEY:-}
       DB_HOST: db
       DB_PORT: "5432"
       DB_USER: ${DB_USER:?Set DB_USER in .env}
       DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
       DB_NAME: ${DB_NAME:?Set DB_NAME in .env}
       AI_AGENT_URL: http://ai:8000
+      AI_BUSINESS_TOKEN: ${AI_BUSINESS_TOKEN:-}
+      AI_PERSONA_TOKEN: ${AI_PERSONA_TOKEN:-}
+      AI_FAQ_TOKEN: ${AI_FAQ_TOKEN:-}
+      AI_INSIGHTS_TOKEN: ${AI_INSIGHTS_TOKEN:-}
+      CALL_ANALYSIS_OPENAI_API_KEY: ${CALL_ANALYSIS_OPENAI_API_KEY:-}
+      CALL_ANALYSIS_CONCURRENCY: ${CALL_ANALYSIS_CONCURRENCY:-2}
+      DVER_API_URL: ${DVER_API_URL:-https://public-n8n.dvercorp.co.kr:47514/webhook/parcel}
+      DVER_API_KEY: ${DVER_API_KEY:-}
+      AWS_REGION: ${AWS_REGION:-ap-northeast-2}
+      S3_RECORDINGS_BUCKET: ${S3_RECORDINGS_BUCKET:-}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+      RECORDING_ALLOWED_HOSTS: ${RECORDING_ALLOWED_HOSTS:-dvercorp-aicc-connect-dev-recordings.s3.ap-northeast-2.amazonaws.com}
+      RECORDING_MATCH_WINDOW_SECONDS: ${RECORDING_MATCH_WINDOW_SECONDS:-30}
+      PBX_WEBHOOK_TOKEN: ${PBX_WEBHOOK_TOKEN:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+      SWAGGER_ENABLED: ${SWAGGER_ENABLED:-true}
     networks:
       - web_net
       - ai_net

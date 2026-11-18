@@ -1,0 +1,118 @@
+# Operations 서비스
+
+관리자 인증·계정 관리·감사 조회와 페르소나 초안·버전·AI 적용을 담당한다. `backend/`의 동일 API·DTO·권한·SQL·트랜잭션 흐름을 이식했다. 프론트·AI의 요청 형식은 변경하지 않는다. Redis나 추가 브로커는 사용하지 않는다.
+
+관련 작업: [S15P31D109-160](https://ssafy.atlassian.net/browse/S15P31D109-160). 전체 순서는 [동등성 계획](../../../docs/msa-parity-plan.md)을 따른다. customer의 세션 인증과 쓰기 감사 이벤트를 연결했으며, 나머지 서비스의 감사·5년 보존 워커는 후속 작업이다.
+
+## 실행
+
+Node.js 24에서 `npm ci` 후 DB_HOST·DB_PORT·DB_USER·DB_PASSWORD·DB_NAME과 CORS_ORIGINS를 설정하고 `npm run start:dev`를 실행한다. 개발 환경만 `.env.development`/`.env`를 읽으며 production/test는 프로세스 환경만 사용한다. PowerShell에서 npm.ps1이 차단되면 `npm.cmd`를 사용한다.
+
+- 기본 포트: `3005` (`PORT`로 변경 가능)
+- Health: http://localhost:3005/operations/health
+- DB readiness: http://localhost:3005/operations/health/ready
+- Swagger: http://localhost:3005/operations/docs
+- OpenAPI: http://localhost:3005/operations/docs-json
+
+Health는 HTTP 프로세스 상태이며 readiness는 DB 접속 상태를 확인한다. 시작 시 인증·감사 준비 스키마가 없으면 기동에 실패한다. DDL은 앱에서 실행하지 않으며 Liquibase operations `007`까지 먼저 적용한다. 이름 없는 구버전 관리자 데이터가 있으면 임의의 이름을 채우지 않고 마이그레이션을 중단한다.
+
+customer의 CUSTOMER_UPDATED·PERSONAL_PIN_CREATED/UPDATED 감사도 같은 준비/확정/중단 경로로 받는다. 고객과 PIN에 대한 감사 권한은 customer 토큰에만 추가하며 consultation은 기존 CALL_STARTED/AI·ADMIN/SUCCESS 범위를 유지한다. PIN 주소나 전화번호는 감사 metadata에 저장하지 않는다.
+
+## 동일한 외부 API
+
+- `POST /api/auth/login`, `POST /api/auth/signup`, `POST /api/auth/logout`
+- `GET /api/auth/me`, `PATCH /api/auth/password`
+- `GET /api/admins`, `PATCH /api/admins/:id`, `DELETE /api/admins/:id`, `PATCH /api/admins/:id/password`
+- `GET /api/audit-logs`, `GET /api/audit-logs/:id`
+
+9시간 고정 세션은 SHA-256 해시만 DB에 저장한다. 쿠키는 `dva_session`, HttpOnly·SameSite=Lax·Path=/api이며 production에서는 Secure를 사용한다. 상태/권한은 매 요청 DB에서 읽는다. 상태 변경·비밀번호 변경/초기화·삭제 시 세션 폐기와 감사 기록을 같은 트랜잭션에서 처리한다. 인증·DTO·업무 실패 감사도 원본과 동일하게 기록한다. 429 제한 거절은 DB 감사에서 제외한다.
+
+API는 공통 `/api` 응답/에러 envelope·페이지네이션·요청 ID·Origin 검사·no-store를 유지한다. OpenAPI는 `/api/docs-json`과 기존 `/operations/docs-json` 모두 제공한다. 허용 Origin은 정확한 origin 목록으로 설정하며 와일드카드를 받지 않는다. SWAGGER_ENABLED 기본값은 기존 operations와 동일하게 true이다.
+
+최초 SYSTEM_ADMIN 생성은 Liquibase 적용 후 `node scripts/bootstrap-admin.cjs <loginId> <name>`에 비밀번호를 stdin으로 전달한다. 원본처럼 기존 SYSTEM_ADMIN이 있으면 거절하며 비밀번호를 인자/로그에 넣지 않는다.
+
+## 관리자 인증 제한
+
+최신 backend처럼 가입은 IP별 10분 5회·24시간 20회, 로그인은 ID별 15분 내 비밀번호 실패 5회 후 5분 차단을 적용한다. 비밀번호 해시/검증 업무는 프로세스당 2개 슬롯을 공유하며 대기열 없이 429/Retry-After로 거절한다. 가입/새 비밀번호는 256자, 가입 이름은 50자 상한이며 기존 로그인/현재 비밀번호는 자르지 않는다.
+
+기본 AUTH_PROXY_HOPS=0은 socket 주소만 사용한다. 1/2는 신뢰할 수 있는 프록시가 덮어쓴 X-Forwarded-For 끝부분만 사용하므로 공개 사용자가 operations에 직접 도달할 수 없는 구성에서만 설정한다. 기존 배포는 1 replica이며 카운터는 원본처럼 프로세스 메모리다. 재시작/다중 replica의 공유 제한과 원본 Nginx의 로그인 IP 정책은 이번 Nest 동등성 검증 범위 밖이다. Redis/새 프록시 앱은 추가하지 않는다.
+
+## 페르소나·AI 적용 API
+
+원본 페르소나 10개·FAQ 6개 선언을 포함해 공개 업무 API는 27개다.
+
+- `GET/POST /api/personas`, `GET/PATCH /api/personas/:id`
+- `GET/POST /api/personas/:id/versions`, `POST /api/personas/:id/activate`
+- `GET /api/ai/options`, `GET /api/ai/config`, `POST /api/ai/config/apply-result`
+
+목록·상세·이력은 모든 ACTIVE 관리자, 설정 변경·publish·지원 옵션은 SUPERVISOR/SYSTEM_ADMIN에게 허용한다. 초안은 유형별 한 개이며 확인한 HEAD와 draftRevision으로 충돌을 검사한다. 확정은 새 INACTIVE 버전을 만들며 publish·AI의 APPLIED 확인 전까지 기존 ACTIVE를 유지한다. AI runtime 조회/회신은 별도 AI_PERSONA_TOKEN을 확인하고 stale 관리자 쿠키를 AI로 강등하지 않는다. SYSTEM_ADMIN은 runtime 조회만 세션으로 호출할 수 있다.
+
+AI_AGENT_URL과 AI_PERSONA_TOKEN은 기존 AI와 같은 값을 사용한다. 둘 다 설정한 경우 원본 옵션 조회·2초 timeout·리다이렉트 거절과 5초 알림 워커/30초 claim 간격을 사용한다. 알림은 `/internal/persona/refresh`에 버전 번호와 applicationId만 보내며 ACK만으로 ACTIVE가 되지 않는다. 실패·재시작에도 대기를 유지한다. 설정을 생략해도 기존 인증/감사는 기동하며 AI 연동이 필요한 요청은 503이다.
+
+배포는 선택 Secret `dva/msa-ai-persona`의 `AI_AGENT_URL`, `AI_PERSONA_TOKEN` 키를 참조한다. Secret/키가 없으면 해당 환경 변수를 생략한다. 토큰을 임의 생성·교체하지 않으며 실제 AI의 동일 토큰/주소 설정이 필요하다. Secret 값은 저장소·MR·로그에 넣지 않는다.
+
+operations 007은 기존 MSA identity/prompt를 `legacy_ai_personas`, `legacy_ai_prompt_versions`로 행·ID·시각·설정 그대로 보존한다. `activate_ai_prompt`도 이 보관 테이블에서 계속 동작한다. 과거 버전의 전체 설정 스냅샷은 알 수 없어 새 이력으로 꾸미거나 자동 publish하지 않는다. 새 API의 이력·초안과 ACTIVE/PENDING은 처음에는 비어 있다. 실제 구 설정 이관은 검증된 전체 스냅샷을 준비한 별도 작업이다. [계획·검증·제한](../../../docs/msa-personas-plan.md)을 따른다.
+
+## FAQ·AI 변경 알림
+
+원본 `GET/POST/DELETE /api/faqs`, `GET/PATCH /api/faqs/:id`, `GET /api/ai/faqs`를 제공한다. 관리자 읽기·쓰기는 모든 ACTIVE 역할에 허용한다. AI 목록은 원본 MVP 메타데이터를 유지하며 쿠키가 있으면 세션을 검증하며 쓰기는 원본처럼 Origin도 검증한다. AI 응답에는 분류·관리자 번호를 추가하지 않는다. 등록/수정/삭제의 업무·감사·알림 대기는 같은 operations 트랜잭션이다. 단건 등록의 Location, NFC·공백·대소문자 중복과 soft delete 후 질문 재사용도 원본을 따른다.
+
+상세의 최근 질문은 operations 스냅샷에서 발생 시각·번호 내림차순 최대 10개를 조회한다. consultation의 비공개 `/internal/faq-call-sources`에 `FaqCallSourcesRequested` 조회 이벤트를 보내 원본 이벤트의 현재 통화 링크만 확인한다. 인증은 기존 CONSULTATION_AUTH_TOKEN을 사용한다. 원본 삭제·통화 soft delete/5년 만료이면 사례는 유지하고 callSessionSeq는 null이다. peer 실패를 빈 사례/없는 통화로 위장하지 않는다. AI 이벤트 수집·사례 생성과 전체 보관 워커는 후속 단계다.
+
+알림은 원본 AI_AGENT_URL의 `/internal/faqs/refresh`로 AI_FAQ_TOKEN Bearer와 eventId/operation/faqEntrySeqs만 전송한다. 202만 ACK로 인정하고 2초 timeout·리다이렉트 거절·5초 워커·30초 claim·지수 재시도·선행 대기 순서를 유지한다. 토큰이 없으면 쓰기와 대기 저장은 계속하고 전송만 비활성이다. 원본과 같은 토큰/URL을 기존 선택 Secret `msa-ai-persona`의 AI_FAQ_TOKEN/AI_AGENT_URL로 주입하며 새 토큰을 만들지 않는다. FAQ 전송만 설정해도 페르소나 토큰은 필수가 아니다.
+
+`node dist/faqs/bootstrap-faq.js <활성 관리자 로그인 ID>`는 이미지의 원본 32개 FAQ 데이터를 원자적으로 초기 등록한다. FAQ가 한 건이라도 존재하면 건너뛰고 기존 데이터를 덮어쓰지 않는다. 앱보다 operations 009와 consultation 006을 먼저 적용한다. 실제 운영·AI 연결과 상세 사례 생성은 [계획 문서](../../../docs/msa-faqs-plan.md)의 범위와 구분한다.
+
+## 서비스 내부 인증
+
+`POST /internal/auth/session`은 서비스 Bearer `CUSTOMER_AUTH_TOKEN` 또는 `CONSULTATION_AUTH_TOKEN`과 본문 `{ "sessionToken": "기존 64자 세션 토큰" }`을 받아 기존 AuthService로 현재 세션·권한을 확인한다. 비밀번호·세션 해시를 반환하지 않으며 공개 Swagger·Ingress에서 제외한다. 서비스 토큰만으로 기존 관리자 API에 접근할 수 없다. 두 서비스 토큰을 모두 생략하면 이 내부 경로는 거절하고 기존 공개 인증은 유지한다.
+
+배포 스크립트는 `dva/msa-customer-auth` Secret의 `customer-token`을 최초 한 번 생성하고 기존 값은 바꾸지 않는다. customer와 operations가 이 Secret을 공유한다. customer readiness가 새 내부 경로를 요구하므로 두 서비스가 선택되면 operations를 먼저 배포한다.
+
+consultation은 별도 `dva/msa-consultation-auth` Secret의 `consultation-token`을 공유한다. 두 토큰은 세션 확인과 각 소유 서비스의 이벤트/역방향 조회 인증에 사용하며 customer·consultation은 operations 이후 배포한다. 세션/관리자를 다른 DB에 복제하지 않는다. 서비스 토큰으로 공개 관리자 API에 접근할 수 없다.
+
+`POST /internal/events`는 source별 CUSTOMER_AUTH_TOKEN/CONSULTATION_AUTH_TOKEN을 검증하고 허용 action·target을 분리한다. customer는 기존 감사 범위를, consultation은 CALL_STARTED·CALL_SESSION·SUCCESS·AI/ADMIN만 사용한다. 준비 테이블도 customer/consultation별로 분리해 한 서비스의 확정/중단으로 다른 서비스 감사를 조작할 수 없다. inbox·감사 확정은 함께 COMMIT하며 공개 Swagger/Ingress에서는 제외한다. 감사 조회는 각 소유 서비스의 `/internal/audit/flush`에 결정을 확인하며 진행 중 업무 잠금을 강제로 해제하지 않는다. CUSTOMER_URL=`http://customer:3001`, CONSULTATION_URL=`http://consultation:3004`이며 자격정보·경로·query 없는 정확한 HTTP(S) origin만 허용한다. [고객 확인·통화 등록 계획](../../../docs/msa-caller-context-plan.md)에 장애 검증을 기록한다.
+
+## 빌드와 자동 배포
+
+저장소 루트에서 `docker build -t dva-operations:local -f msa/services/operations/Dockerfile msa`를 실행한다. Docker 빌드에서 ESLint·단위·E2E·TypeScript 검사를 실행하고, 운영 이미지는 개발 의존성 없이 node 사용자로 구동한다.
+
+공통 Jenkins 파이프라인이 서비스 폴더를 자동 선택한다. develop-backend 병합 후 테스트·이미지 빌드·패키징·k3s 배포를 수행한다. 정상 배포된 다른 서비스와 변경 없는 DB는 생략한다. 배포 이력이 없거나 실패한 서비스는 재선택될 수 있다.
+
+k8s.yaml은 dva 네임스페이스의 기존 `operations-db` Secret(PGHOST/PGPORT/PGUSER/PGPASSWORD/PGDATABASE)을 사용한다. Traefik websecure/letsencrypt에서 `/operations`와 `/api/auth`, `/api/admins`, `/api/audit-logs`, `/api/personas`, `/api/ai/options`, `/api/ai/config`를 이 서비스로 라우팅한다. 현재 문서에 있는 프론트 주소와 MSA 주소를 CORS_ORIGINS로 허용한다. 프론트의 API base host 전환은 별도이며 이 MR에서 프론트/AI를 수정하지 않는다. 병합 후 운영 확인 주소:
+
+- https://k15d109.p.ssafy.io/operations/health
+- https://k15d109.p.ssafy.io/operations/docs
+- https://k15d109.p.ssafy.io/operations/docs-json
+
+새 Pod 준비 전 기존 Pod를 유지한다(maxUnavailable=0, maxSurge=1). readiness·종료 유예와 기존 공통 실패 복구를 사용한다. 최초 배포에는 이전 버전이 없으며, 단일 노드 장애까지 무중단을 보장하지 않는다. 두 서비스 배포는 하나의 트랜잭션이 아니므로 뒤 서비스가 실패해도 먼저 성공한 서비스는 유지하고 재실행 시 미배포 서비스만 선택한다.
+
+## 검증
+
+```bash
+# 저장소 루트, 호스트 DB 포트를 열지 않는 임시 Docker DB
+python msa/parity/verify-operations.py
+# 선택 실행: 운영 kubeconfig 없이 임시 k3s + PostgreSQL로 배포/복구 검사
+python msa/deploy/tests/integration_app_rollout.py --service operations --image dva-operations:local
+```
+
+검증기는 고정 원본의 인증·페르소나·FAQ 회귀를 operations checks 이미지에서 실행한다. 인증 테스트가 참조하는 customer 컨트롤러는 실제 customer production 이미지의 컴파일 결과로 공급하며 운영 이미지에는 합치지 않는다. 원본에서만 따로 실행하던 회귀와 environment 단위 검사의 재실행은 제거했다. 인증 bootstrap의 빈 관리자 DB 전제 때문에 인증과 페르소나 suite는 별도 프로세스에서 순서대로 실행한다. operations는 실제 Liquibase 스키마를 사용한다. 이어 양쪽 production 이미지에 같은 요청을 보내 제한·슬롯·감사, 응답·쿠키 속성·관리자·세션 데이터를 비교한다. 무작위 토큰·생성 시각은 형식/9시간 TTL/해시 저장을 먼저 검증하고 비교에서 정규화한다. 현재 업무 회귀는 163개이며 [정리 결과](../../../docs/msa-test-prune-results.md)에 전체 집계와 제거 근거가 있다. 다른 서비스의 테이블이나 전체 업무 동등성을 검증한 결과로 확대하지 않는다.
+
+로그/보고서는 `msa/liquibase/verification-logs/operations/`에 남는다. Jenkins는 operations가 빌드 대상으로 선택되면 이 검증을 통과한 뒤에만 앱 배포를 진행한다. 운영 Webhook 배포·외부 HTTPS·다른 서비스 연동은 별도 확인한다.
+
+페르소나 비교는 실제 production 이미지의 동일 요청 77건·10개 선언/21개 참조 스키마와 전체 설정·초안·감사 행을 대조한다. 실제 5초 워커의 AI HTTP 전송과 production 앱 SIGKILL/재시작 후 동일 publish UUID 복구도 확인한다. UUID는 응답/DB/후속 요청 관계를, 시각은 범위를 확인한다. lastNotifiedAt의 비동기 관측은 실제 전송·DB claim/오류가 수렴한 뒤 검증한다. [검증 기록과 범위](../../../docs/msa-personas-plan.md)에 원본 suite·DB/배포 회귀와 미검증 사항을 구분했다.
+
+2026-11-05 customer 쓰기 연결 후 재검증: 원본 인증 40개를 양쪽에 실행해 통과했고 operations 설정 2개, 단위 1개, E2E 6개, production HTTP·DB 비교와 실제 배포 probe도 통과했다. 별도 customer 비교에서 준비·확정·중단·중복·변조·지연·SIGKILL 복구를 확인했다. 임시 k3s 최초 배포·교체·실패 복구 중 operations HTTP 450건의 실패는 0건이었다. DB 전체 228단계와 Linux 배포 회귀 54개도 통과했다. 운영 Jenkins·공개 HTTPS·자동 업무/보관 워커·전체 95개 API는 미검증이다.
+
+## 원본 인증 보안 기록
+
+production은 SECURITY_LOG_HMAC_KEY(64자리 hex)를 필수로 검증한다. 배포기가 공유 `msa-security-logs` Secret의 hmac-key를 최초 생성하고 기존 값은 그대로 사용한다. 잘못된 기존 키는 출력·교체하지 않고 거절한다. 원본처럼 인증 실패/로그인 성공의 안전한 사유와 HMAC 키만 출력하며 계정명·IP·비밀번호·토큰을 기록하지 않는다. 업무 API·감사와 내부 오류 응답은 유지한다. [최신 기준 및 검증](../../../docs/msa-faqs-plan.md)을 따른다.
+
+
+consultation의 미답변 수집·삭제와 통화 삭제는 기존 감사 준비/확정/중단 이벤트를 사용한다. 수신 허용 목록에는 UNANSWERED_QUESTION_RECORDED·UNANSWERED_QUESTION_DELETED·CALL_DELETED와 해당 대상만 추가한다. 수집 성공은 AI, 삭제 성공은 ADMIN이며 customer 토큰/이벤트로 이 동작을 대신할 수 없다. [통화 콘텐츠 계획](../../../docs/msa-call-content-plan.md)에 원본 대조·위조 입력·장애/종료 복구 범위를 기록한다. operations를 consultation보다 먼저 배포하는 기존 순서는 유지한다.
+
+## 주문 삭제 감사 연결
+
+[주문 삭제 이식](../../../docs/msa-order-deletion-plan.md)은 기존 영속 감사 수신기에 `order` source와 `ORDER_DELETED`/`ORDER`만 추가한다. 성공은 ADMIN과 실제 대상 ID를 요구하고 다른 action·target·AI 성공·추가 metadata를 거절한다. 별도 `order_audit_preparations`는 Liquibase 010으로 추가하며 기존 준비/감사 행은 보존한다. `ORDER_URL`은 선택 설정이고 배포 manifest는 `http://order:3002`를 주입한다. 기존 CUSTOMER_AUTH_TOKEN으로 `/internal/audit/flush`를 호출하며 현재 승인된 토큰 종류를 늘리지 않는다.
+
+주문 감사는 기존 준비·로컬 outbox 커밋·operations 확정/ACK와 중복 방지를 따른다. 1초 복구 루프와 감사 조회가 order의 생산자 잠금/커밋 증명을 확인한다. customer/consultation의 action/자격 증명/참조 처리 규칙은 유지한다. 운영 앱보다 010 DB 적용을 먼저 완료해야 한다.

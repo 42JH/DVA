@@ -1,0 +1,10 @@
+# Copy to the server-only /srv/dva-payment-test/settings; never commit actual values.
+# Keep the existing payment-channel webhook in this file. Do not use the monitoring webhook.
+MATTERMOST_WEBHOOK_URL=https://mattermost.example/hooks/REPLACE
+PAYMENT_TEST_ENABLED=true
+PAYMENT_TEST_PUBLIC_URL=https://13.209.59.180/payment-test
+# Use the matching documented V2 widget test pair, not API individual-integration keys.
+TOSS_TEST_CLIENT_KEY=REPLACE_WITH_DOCUMENTATION_TEST_GCK
+TOSS_TEST_SECRET_KEY=REPLACE_WITH_DOCUMENTATION_TEST_GSK
+# Generate on server: openssl rand -hex 32
+PAYMENT_TEST_OPERATOR_TOKEN=REPLACE_WITH_RANDOM_OPERATOR_TOKEN

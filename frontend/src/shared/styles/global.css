@@ -1,0 +1,291 @@
+@import 'tailwindcss';
+
+thead th {
+  text-align: center;
+}
+
+/* 스크롤 상자는 막대 자리를 늘 비워 둠 — 페이지를 넘기며 행 수가 바뀔 때 막대가 생겼다 없어지면서
+   내용 폭이 흔들리던 것 (11/11 미답변 표). 화면 전체에 같은 규칙 */
+.overflow-auto,
+.overflow-y-auto {
+  scrollbar-gutter: stable;
+}
+
+@layer base {
+  tbody td {
+    text-align: center;
+  }
+}
+
+@layer components {
+  .ops-table {
+    width: 100%;
+    flex-shrink: 0;
+    table-layout: fixed;
+    border-collapse: collapse;
+    font-size: 14px;
+  }
+
+  .ops-table thead {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: #e8eff8;
+  }
+
+  .ops-table thead::after {
+    content: '';
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    height: 1px;
+    background: #c5d6ec;
+    pointer-events: none;
+  }
+
+  .ops-table th {
+    height: 36px;
+    padding: 0;
+    color: #000;
+    font-size: 14px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .ops-table tbody {
+    color: #333;
+  }
+
+  .ops-table td {
+    height: 44px;
+    padding: 0 15px;
+  }
+
+  .ops-table tr > :not(:last-child) {
+    border-right: 1px solid #c5d6ec;
+  }
+
+  .ops-table tbody tr > td {
+    border-bottom: 1px dashed #c5d6ec;
+  }
+
+  /* 상자가 스크롤될 만큼 가득 차면 마지막 행 테두리는 숨김 (상자 테두리와 겹치지 않게) */
+  [data-scrollable] .ops-table tbody tr:last-child > td {
+    border-bottom: 0;
+  }
+
+  .ops-table tbody tr:nth-child(even) {
+    background-color: color-mix(in srgb, var(--color-ops-route-soft) 40%, transparent);
+  }
+
+  /* 마우스를 올린 줄 — 짝수 줄 바탕과 같으면 올렸는지 모름(11/09) → 한 단계 진하게. 고른 줄은 아래 색이 이김 */
+  .ops-table tbody tr:hover {
+    background-color: color-mix(in srgb, var(--color-ops-route) 12%, white);
+  }
+
+  .ops-table tbody tr[aria-selected='true'] {
+    background-color: var(--color-ops-route-soft);
+  }
+}
+
+/* 디자인 토큰 — 와이어프레임 v2 값 (임시). 디자인이 확정되면 값만 바꾼다, 이름은 유지.
+   @theme 안의 변수는 Tailwind 유틸리티가 됨: --color-action → bg-action · text-action · border-action,
+   --text-title → text-title, --font-sans → font-sans */
+@theme {
+  --color-*: initial; /* Tailwind 기본 팔레트 끔 — 토큰에 있는 색만 쓴다 */
+  --color-white: #ffffff;
+  --color-black: #000000;
+  --color-transparent: transparent;
+
+  --color-brand: #2ea3ff; /* 로고 */
+  --color-action: #1c477f; /* 주 버튼 · 선택 · 링크 */
+  --color-action-soft: #ecf2fa;
+  --color-danger: #c62f35;
+  --color-ink: #2b2f36; /* 본문 글자 */
+  --color-sub: #5f6b7a; /* 보조 글자 */
+  --color-muted: #8a95a2; /* 흐린 글자 · 비활성 */
+  --color-line: #dde3ea; /* 구분선 · 테두리 */
+  --color-bg: #f2f6fa; /* 호버 · 옅은 바탕 */
+  --color-surface: #ffffff;
+  /* 04 통화 목록 상담 유형 칩 바탕 (Figma '통화' 11/04) — 글자는 ink */
+  --color-kind-cancel: #fff0f1; /* 취소 */
+  --color-kind-faq: #cbdcff; /* FAQ */
+
+  /* 글자 — 줄 간격 140% · 자간 -2.5% (text-* 유틸리티마다 line-height 포함) */
+  --font-sans:
+    'Pretendard Variable', 'Pretendard', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif; /* 웹폰트(index.html) 이름이 'Pretendard Variable' — 안 깔린 PC도 같은 글꼴 (11/02) */
+  --text-title: 24px; /* 화면 제목 700 (11/02: +4 되돌림 — 현업 피드백 '폰트 큼') */
+  --text-title--line-height: 1.4;
+  --text-card: 20px; /* 카드 제목 700 */
+  --text-card--line-height: 1.4;
+  --text-strong: 18px; /* 핵심 값 600 */
+  --text-strong--line-height: 1.4;
+  --text-body: 16px; /* 본문 400 */
+  --text-body--line-height: 1.4;
+  --text-label: 14px; /* 보조 500 */
+  --text-label--line-height: 1.4;
+  --text-caption: 13px; /* 캡션 500 */
+  --text-caption--line-height: 1.4;
+
+  --tracking-tight: -0.025em;
+
+  --spacing-content: 32px; /* p-content */
+
+  /* 새 디자인 화면(11/04~, FAQ부터)은 스크롤 없이 한 화면에 (사용자: 1440 노트북 · 1920 PC 모두). 이름의 숫자 = 디자인 px
+     900 높이 화면에서 디자인 값(1dvh = 9px) → 낮은 화면에선 줄고(clamp 아래 값까지), 높은 화면에선 글자는 디자인 값에서 멈추고 간격만 1.2배까지
+     예: text-v24 · gap-v28 · pt-v76 · h-v76 */
+  --text-v24: clamp(18px, 2.667dvh, 24px);
+  --text-v24--line-height: 1.4;
+  --spacing-v24: clamp(
+    8px,
+    calc(4.667dvh - 18px),
+    29px
+  ); /* 줄 사이는 더 빨리 줄어듦 — 1366×768 노트북(화면 ~650)에서도 분류 10줄이 들어가게 */
+  --spacing-v28: clamp(10px, calc(5.333dvh - 20px), 34px);
+  --spacing-v76: clamp(24px, 8.444dvh, 91px);
+  /* 02 대시보드 (카드 네 장이 780 높이 노트북에도 들어가게 — 큰 숫자 · 카드 안팎 간격) */
+  --text-v30: clamp(24px, 3.333dvh, 30px);
+  --text-v30--line-height: 1.2;
+  --spacing-v8: clamp(4px, calc(1.333dvh - 4px), 10px);
+  --spacing-v16: clamp(8px, calc(2.667dvh - 8px), 19px);
+
+  /* 움직임 (11/01 영상 예시): 페이지가 바뀌면 본문이 떠오르고, 모달은 배경이 어두워지며 창이 살짝 커지면서 뜸
+     등장은 전부 backwards(끝나면 애니메이션이 빠짐) — transform 애니메이션이 both/forwards 로 남아 있으면 그 요소가 fixed 자손의 기준이 되어 모달 배경이 스크롤과 함께 밀림(11/01 버그)
+     쓰는 곳: app/AppLayout(animate-page-in) · shared/ui/Modal(animate-dim-in · animate-pop-in). 늘 motion-safe: 와 같이 (움직임 줄이기 설정이면 안 움직임) */
+  --animate-page-in: page-in 0.25s ease-out backwards;
+  --animate-dim-in: dim-in 0.2s ease-out backwards;
+  /* 02 통계 그래프가 뜰 때 (11/05 사용자): 막대는 바닥에서 자라고, 도넛은 12시부터 한 바퀴 한 번에 채워지고(11/13), 값 글자는 그 뒤에 나타남 */
+  --animate-bar-grow: bar-grow 0.6s cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
+  --animate-donut-in: donut-in 0.9s cubic-bezier(0.4, 0, 0.2, 1) backwards;
+  --animate-label-in: dim-in 0.3s ease-out 0.45s backwards;
+  @keyframes bar-grow {
+    from {
+      transform: scaleY(0);
+    }
+  }
+  @keyframes donut-in {
+    from {
+      stroke-dasharray: 0 999;
+    }
+  }
+  --animate-pop-in: pop-in 0.2s ease-out backwards;
+  /* 라이브 점 (상단바 'AI 상담가 · 접수 중', 11/04 사용자: 깜빡깜빡). motion-safe: 와 같이 — 움직임 줄이기 설정이면 안 깜빡임 */
+  --animate-blink: blink 1.4s ease-in-out infinite;
+  @keyframes blink {
+    50% {
+      opacity: 0.25;
+    }
+  }
+  /* 퇴장 (shared/lib/useExitGhost 가 복제본에 붙임) */
+  --animate-dim-out: dim-out 0.15s ease-in forwards;
+  --animate-pop-out: pop-out 0.15s ease-in forwards;
+  @keyframes dim-out {
+    to {
+      opacity: 0;
+    }
+  }
+  @keyframes pop-out {
+    to {
+      opacity: 0;
+      transform: scale(0.96);
+    }
+  }
+  @keyframes page-in {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+  }
+  @keyframes dim-in {
+    from {
+      opacity: 0;
+    }
+  }
+  @keyframes pop-in {
+    from {
+      opacity: 0;
+      transform: scale(0.96);
+    }
+  }
+}
+
+@layer base {
+  /* 좁은 창(1280 미만 ~ 최소 1024): 표의 고정 열 폭을 3/4로 — 글 열(나머지)이 눌려 줄바꿈 · 잘림이 나지 않게 (11/05 반응형)
+     버튼 열처럼 줄면 안 되는 열은 폭을 글자('170px')로 줘서 안 줄임 (shared/ui/Table) */
+  :root {
+    --col-scale: 1;
+  }
+  @media (width < 1280px) {
+    :root {
+      --col-scale: 0.75;
+    }
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    /* 최소 지원 1024 × 600 (11/05 사용자: 웹 평균 최소 — PC 창을 줄인 정도까지). 그보다 작으면 배치는 그대로, 창이 스크롤 */
+    min-width: 1024px;
+    min-height: 600px;
+    font-size: var(--text-body);
+    line-height: 1.4;
+    letter-spacing: var(--tracking-tight);
+    color: var(--color-ink);
+    background: var(--color-surface);
+  }
+
+  /* Tailwind v4는 버튼의 손가락 커서를 기본에서 뺐음 → 누를 수 있는 것 전부에 한 번에 (화면마다 cursor-pointer를 붙이지 않게)
+     비활성 버튼은 기본 화살표 그대로 — 눌러도 아무 일 없다는 뜻 (10/30 사용자: 버튼에 마우스를 대면 손 모양) */
+  button:not(:disabled),
+  [role='button']:not([aria-disabled='true']),
+  [role='tab'],
+  [role='radio'],
+  [role='checkbox'],
+  a[href],
+  select:not(:disabled),
+  summary {
+    cursor: pointer;
+  }
+}
+
+/* 운영 콘솔 색 · 표 — text-ops-ink · bg-ops-paper 처럼 */
+@theme {
+  --color-ops-ink: #1d2433; /* 글자 */
+  --color-ops-sub: #5b6475; /* 보조 글자 */
+  --color-ops-faint: #636d7f; /* 흐린 글자 · 미완료 — 흰 바탕 5.22 · 회색 바탕 4.83 · 회색 칩 4.57:1 (11/12 접근성: 흰 바탕만 보고 고른 #6b7487이 회색 줄 위 4.34) */
+  --color-ops-paper: #f5f6f8; /* 바탕 */
+  --color-ops-line: #e3e6eb; /* 선 */
+  --color-ops-route: #1a62d6; /* 선택 · 링크 · 진행 중 — 연한 파랑 바탕 4.95:1 (전 #1f6feb 4.11:1) */
+  --color-ops-route-soft: #eaf2fe;
+  --color-ops-wait: #9a5c00; /* 결제 대기 · 입력 필요 — 연한 주황 바탕 4.93 · 흰 바탕 5.38:1 (11/12 접근성: #a86400은 연한 주황 칩 위 4.29) */
+  --color-ops-wait-soft: #fff4e0;
+  --color-ops-done: #107a50; /* 완료 — 연한 초록 바탕 4.80:1 (전 #138a5b 3.91:1) */
+  --color-ops-done-soft: #e7f6ef;
+  --color-ops-stop: #c73434; /* 실패 · 불만 — 연한 빨강 바탕 4.63:1 (11/12 접근성, 전 #d93b3b 3.96:1) */
+  --color-ops-stop-soft: #fdecec;
+  --color-ops-cancel: #7c3aed; /* 취소 */
+  --color-ops-cancel-soft: #f3e8ff;
+  --color-ops-idle-soft: #eef0f3; /* 미완료 · 분석 전 바탕 */
+  --animate-panel-in: panel-in 0.18s ease-out backwards; /* 오른쪽 상세 패널이 열릴 때 */
+  --animate-load-bar: load-bar 1.2s ease-out infinite; /* 화면 코드를 받는 동안 위쪽 막대 */
+  @keyframes panel-in {
+    from {
+      opacity: 0;
+      transform: translateX(12px);
+    }
+  }
+  @keyframes load-bar {
+    from {
+      transform: scaleX(0);
+    }
+    to {
+      transform: scaleX(1);
+      opacity: 0.3;
+    }
+  }
+}

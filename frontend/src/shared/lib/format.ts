@@ -1,0 +1,75 @@
+// 날짜 · 번호 표시 규칙 (와이어프레임 10/23 결정 #7)
+// 목록의 활동 시각 = 'MM.DD HH:MM' · 오래 남는 날짜(등록일 · 가입 신청일 · 버전 생성일) = 'YYYY.MM.DD'
+// 서버는 ISO 8601(타임존 포함), 화면은 Asia/Seoul
+// 10/30 연도 규칙 (모든 페이지): 올해면 연도 생략, 다른 해(작년 포함)면 'YYYY.MM.DD' → 새 목록은 fmtListTime
+import { ymd, type Ymd } from './dateRange'
+
+const two = (n: number) => String(n).padStart(2, '0')
+
+/** 날짜만 '11월 4일' (03 주문 11/06 시안 — 머리줄 날짜 · 날이 바뀌는 줄 왼쪽). 요일 없음, 'YYYY-MM-DD' 그대로 읽음(시간대 무관) */
+export const fmtMonthDay = (day: Ymd) =>
+  `${Number(day.slice(5, 7))}월 ${Number(day.slice(8, 10))}일`
+
+/** 표 줄 앞 시각 '오후 3:02' — 날은 머리줄 · 표 왼쪽 날짜가 보여 줌 (11/06 시안 03 주문 · 04 통화 · 09 미답변 같은 형식) */
+export const fmtTime = (iso: string) =>
+  new Date(iso).toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit' })
+
+/** 목록 시각 칸 (10/30 연도 규칙): 올해면 ['10.20 14:33'] 한 줄, 다른 해면 ['2025.12.29', '13:40'] 날짜 위 · 시각 아래 두 줄 (칸 폭 그대로) */
+export function fmtListTime(iso: string, now = new Date()): [string] | [string, string] {
+  const d = new Date(iso)
+  const hm = `${two(d.getHours())}:${two(d.getMinutes())}`
+  return d.getFullYear() === now.getFullYear()
+    ? [`${two(d.getMonth() + 1)}-${two(d.getDate())} ${hm}`]
+    : [fmtDate(iso), hm]
+}
+
+export function fmtDateTime(iso: string): string {
+  const d = new Date(iso)
+  return `${two(d.getMonth() + 1)}-${two(d.getDate())} ${two(d.getHours())}:${two(d.getMinutes())}`
+}
+
+export function fmtDate(iso: string): string {
+  const d = new Date(iso)
+  return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}`
+}
+
+/** 초 → '3분 40초', 한 시간부터 '1시간 5분 03초' (04 통화 시간 · 02 평균 · CSV) */
+export function fmtDuration(seconds: number): string {
+  const h = Math.floor(seconds / 3600)
+  return `${h ? `${h}시간 ` : ''}${Math.floor(seconds / 60) % 60}분 ${two(seconds % 60)}초`
+}
+
+/** 초 → '03:40', 한 시간부터 '1:05:03' (06 통화 안 시각 · 재생 바) */
+export function fmtClock(seconds: number): string {
+  const h = Math.floor(seconds / 3600)
+  return `${h ? `${h}:` : ''}${two(Math.floor(seconds / 60) % 60)}:${two(seconds % 60)}`
+}
+
+/** 숫자 문자열 전화번호 → 010-1234-5678 (명세서: 전달 · 저장은 숫자만) */
+export function fmtPhone(digits: string): string {
+  const d = digits.replace(/\D/g, '')
+  // 서울 02는 지역번호가 2자리라 따로 끊음 (02-123-4567 · 02-1234-5678)
+  if (/^02\d{7,8}$/.test(d)) return `02-${d.slice(2, -4)}-${d.slice(-4)}`
+  if (d.length === 11) return `${d.slice(0, 3)}-${d.slice(3, 7)}-${d.slice(7)}`
+  if (d.length === 10) return `${d.slice(0, 3)}-${d.slice(3, 6)}-${d.slice(6)}`
+  return digits
+}
+
+/** '오늘' · '어제' · '11월 9일' · 다른 해 '2025년 11월 9일' */
+function dayLabel(d: Date, now: Date): string {
+  const day = ymd(d)
+  if (day === ymd(now)) return '오늘'
+  if (day === ymd(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1))) return '어제'
+  return d.getFullYear() === now.getFullYear()
+    ? fmtMonthDay(day)
+    : `${d.getFullYear()}년 ${fmtMonthDay(day)}`
+}
+
+/** 버전 기록 시각 (07 AI 상담가 11/11, Notion 버전 기록처럼) — '오늘 오후 3:07' · '어제 오전 9:41' · '11월 9일 오후 3:07' · 다른 해 '2025년 12월 29일 오후 1:40' */
+export function fmtVersionTime(iso: string, now = new Date()): string {
+  const d = new Date(iso)
+  const date = dayLabel(d, now)
+  // 오전/오후는 직접 — toLocaleTimeString은 한국어 데이터가 없는 환경(Node 등)에서 'PM'을 줌
+  const h = d.getHours()
+  return `${date} ${h < 12 ? '오전' : '오후'} ${h % 12 || 12}:${two(d.getMinutes())}`
+}

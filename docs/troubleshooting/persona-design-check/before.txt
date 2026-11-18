@@ -1,0 +1,196 @@
+
+## live (시안 → 화면) 다른 곳 21
+  ct(바깥 여백) [빠른 접수형사용 중친절형정|빠른 접수형사용 중친절형상]: lh normal→22.4, bB 1 solid #eef0f3→-, pad 16 24 24 24→16 24 16 24
+  탭 줄 [빠른 접수형사용 중친절형정|빠른 접수형사용 중친절형상]: lh normal→22.4, gap 4→8
+  탭(고른 것) [빠른 접수형사용 중|빠른 접수형사용 중]: w 135→131, right 1073→1077, lh normal→18.2, shadow #e3e6eb 0px 0px 0px 1px→none 0px 0px 0px 0px, none 0px 0px 0
+  탭(안 고른 것) [친절형|친절형]: x 371→367, right 1011→1016, lh normal→18.2
+  탭 안 사용 중 뱃지 [사용 중|사용 중]: right 1085→1089, lh normal→16.8
+  [상담가 등록] [상담가 등록|상담가 등록]: x 1283→1313, right 52→24, lh normal→13, bT 1 solid #8fb6f5→-, bB 1 solid #8fb6f5→-, bL 1 solid #8fb6f5→-, shadow -→none 0px 0px 0px 0px, none 0px 0px 0
+  카드 [빠른 접수형통화에 사용 중|빠른 접수형통화에 사용 중]: h 755→764, lh normal→22.4
+  머리 줄 [빠른 접수형통화에 사용 중|빠른 접수형통화에 사용 중]: lh normal→22.4, gap 8→16
+  이름 글자 [빠른 접수형통화에 사용 중|빠른 접수형]: lh normal→30.8, gap 10→-
+  연필 단추 [|]: y 141→144, w 32→24, h 32→24, right 1043→1053, fs 22→16, fw 700→400, lh normal→22.4, color #636d7f→#5b6475, radius 6→4, pad 0 0 0 0→4 4 4 4
+  연필 그림 [|]: x 373→367, right 1051→1057, fs 22→16, fw 700→400, lh normal→22.4, color #636d7f→#5b6475
+  목소리 칸 [목소리 기본 음성|목소리기본 음성여성 1남성]: w 130→122, right 1049→1057, lh 13→18.2, bg none→#ffffff, bT 1 solid #c5ccd6→1 solid #e3e6eb, bB 1 solid #c5ccd6→1 solid #e3e6eb, bL 1 solid #c5ccd6→1 solid #e3e6eb, pad 0 10 0 10→0 4 0 10
+  저장 시각 [10월 29일 오전 10:|10월 29일 오전 10:]: x 405→399, w 164→190, right 872→852, fs 15→14, lh normal→19.6
+  수정 기록 보기 [수정 기록 보기|수정 기록 보기]: x 582→604, w 80→76, h 16→20, right 778→760, lh normal→19.6
+  통화에 사용 중 뱃지 [통화에 사용 중|통화에 사용 중]: x 407→395, w 80→77, right 953→968, lh normal→16.8
+  [시나리오 시험] [시나리오 시험|시나리오 시험]: x 1291→1295, w 97→92, lh normal→13, bT 1 solid #c5ccd6→-, bB 1 solid #c5ccd6→-, bL 1 solid #c5ccd6→-, gap -→6, shadow -→none 0px 0px 0px 0px, none 0px 0px 0
+  프롬프트 바깥 [프롬프트역할택배 접수 서비|프롬프트역할택배 접수를 돕]: h 646→654, lh normal→22.4, pad 0 32 0 32→24 32 24 32
+  프롬프트 제목 [프롬프트|프롬프트]: y 246→253, w 59→1108, h 20→24, right 1116→67, lh normal→23.8
+  프롬프트 상자 [역할택배 접수 서비스의 A|역할택배 접수를 돕는 AI]: y 274→285, w 1118→1108, h 796→506, right 57→67, lh normal→22.4, bT 1 solid #c5ccd6→1 solid #e3e6eb, bB 1 solid #c5ccd6→1 solid #e3e6eb, bL 1 solid #c5ccd6→1 solid #e3e6eb
+  회색 제목 줄 [역할|역할]: y 275→286, w 1116→1106, right 58→68, fs 14→13, lh normal→18.2
+  프롬프트 글 [택배 접수 서비스의 AI |택배 접수를 돕는 AI 상]: y 304→321, w 1116→1106, h 342→48, right 58→68, fs 15→14, lh 24.8→24, bg none→#ffffff, pad 10 12 10 12→12 12 12 12, shadow -→none 0px 0px 0px 0px, none 0px 0px 0
+
+## unapplied (시안 → 화면) 다른 곳 11
+  띠 [반영 전고친 내용11월 1|반영 전고친 내용10월 2]: lh normal→22.4, bg #fff9ef→#fff4e0, bB 1 solid #f3e2c2→1 solid oklab(0.53292 0.0484532 0.108392 / 0.2)
+  띠 뱃지 [반영 전|반영 전]: lh normal→16.8
+  띠 제목 [고친 내용|고친 내용]: w 59→53, right 1062→1069, fs 16→15, lh normal→21
+  띠 흐린 글 [11월 12일 오후 3:2|10월 29일 오전 10:]: x 390→383, w 142→175, right 908→882, fs 14→13, lh normal→18.2, color #636d7f→#5b6475
+  [통화에 반영] [통화에 반영|통화에 반영]: x 1302→1306, w 85→81, lh normal→13, bT 1 solid #8fb6f5→-, bB 1 solid #8fb6f5→-, bL 1 solid #8fb6f5→-, gap -→6, shadow -→none 0px 0px 0px 0px, none 0px 0px 0
+  토글 줄 [고친 내용통화에 쓰는 내용|고친 내용통화에 쓰는 내용]: h 65→57, lh normal→22.4, gap 4→-
+  토글 받침 [고친 내용통화에 쓰는 내용|고친 내용통화에 쓰는 내용]: w 193→1126, h 40→32, right 986→53, lh normal→22.4, bg #eef0f3→none, radius 8→0, pad 4 4 4 4→0 0 0 0
+  토글(고른 것) [고친 내용|고친 내용]: x 265→261, y 301→298, right 1103→1109, lh normal→18.2, gap 4→6, shadow #e3e6eb 0px 0px 0px 1px→none 0px 0px 0px 0px, none 0px 0px 0
+  토글(안 고른 것) [통화에 쓰는 내용|통화에 쓰는 내용]: x 341→335, y 301→298, w 109→105, right 990→1000, lh normal→18.2, gap 4→6
+  프롬프트 제목 [프롬프트|프롬프트]: w 59→1108, h 20→24, right 1116→67, lh normal→23.8
+  머리 줄 단추 수: 시안 0개 → 화면 1개
+
+## editing (시안 → 화면) 다른 곳 3
+  [취소] [취소|취소]: x 1282→1288, lh normal→13, bT 1 solid #c5ccd6→-, bB 1 solid #c5ccd6→-, bL 1 solid #c5ccd6→-, gap -→6, shadow -→none 0px 0px 0px 0px, none 0px 0px 0
+  [저장] [저장|저장]: lh normal→13, bT 1 solid none→-, bB 1 solid none→-, bL 1 solid none→-, gap -→6
+  프롬프트 상자(초점) [역할택배 접수 서비스의 A|역할택배 접수를 돕는 AI]: y 274→399, w 1118→1108, h 796→506, right 57→67, lh normal→22.4, shadow #eaf2fe 0px 0px 0px 3px→-
+
+## testing (시안 → 화면) 다른 곳 13
+  띠 [시험 중통화에 반영하기 전|시험 중통화에 반영하기 전]: lh normal→22.4, bg #fff9ef→#fff4e0, bB 1 solid #f3e2c2→1 solid oklab(0.53292 0.0484532 0.108392 / 0.2)
+  띠 뱃지 [시험 중|시험 중]: lh normal→16.8
+  띠 제목 [통화에 반영하기 전 시험|통화에 반영하기 전 시험]: w 149→135, right 972→988, fs 16→15, lh normal→21
+  띠 진행 글 [시나리오 4 / 10|시나리오 4 / 10]: x 480→464, w 87→76, right 873→899, fs 14→13, lh normal→18.2, color #636d7f→#5b6475
+  진행 막대 [|]: x 579→553, right 701→727, lh normal→22.4, bg #eef0f3→none, radius 3→33554400
+  통과 n [통과 3|통과 4]: x 751→725, w 36→32, right 652→683, fs 14→13, lh normal→18.2, color #636d7f→#5b6475
+  실패 n [실패 1|실패 0]: x 800→769, right 607→639, fs 14→13, lh normal→18.2, color #c73434→#5b6475
+  [진행 보기] [진행 보기|진행 보기]: x 1227→1239, w 74→70, right 139→131, lh normal→13, bT 1 solid #c5ccd6→-, bB 1 solid #c5ccd6→-, bL 1 solid #c5ccd6→-, gap -→6, shadow -→none 0px 0px 0px 0px, none 0px 0px 0
+  [시험 중단] [시험 중단|시험 중단]: x 1313→1317, w 74→70, lh normal→13, bT 1 solid #ec9c9c→-, bB 1 solid #ec9c9c→-, bL 1 solid #ec9c9c→-, gap -→6, shadow -→none 0px 0px 0px 0px, none 0px 0px 0
+  목소리 칸(막힘) [목소리 기본 음성|목소리 기본 음성]: w 130→125, right 1049→1054, lh 13→18.2, color #5b6475→#636d7f, bg none→#f5f6f8, bT 1 solid #c5ccd6→1 solid #e3e6eb, bB 1 solid #c5ccd6→1 solid #e3e6eb, bL 1 solid #c5ccd6→1 solid #e3e6eb, pad 0 10 0 10→0 8 0 10, op 0.4→1
+  수정 기록 보기(막힘) [수정 기록 보기|수정 기록 보기]: x 582→591, w 80→76, h 16→20, right 778→772, lh normal→19.6, color #5b6475→#636d7f, op 0.4→1
+  프롬프트 상자(막힘) [역할택배 접수 서비스의 A|역할택배 접수를 돕는 AI]: y 331→342, w 1118→1108, h 796→482, right 57→67, lh normal→22.4
+  프롬프트 글(막힘) [택배 접수 서비스의 AI |택배 접수를 돕는 AI 상]: y 361→374, w 1116→1106, h 342→48, right 58→68, fs 15→14, lh 24.8→24, color #5b6475→#1d2433, bg #f5f6f8→none, pad 10 12 10 12→12 12 12 12
+
+## applying (시안 → 화면) 다른 곳 5
+  띠 [반영 중고친 내용11월 1|반영 중고친 내용10월 2]: lh normal→22.4, bg #fff9ef→#fff4e0, bB 1 solid #f3e2c2→1 solid oklab(0.53292 0.0484532 0.108392 / 0.2)
+  띠 뱃지 [반영 중|반영 중]: lh normal→16.8
+  띠 제목 [고친 내용|고친 내용]: w 59→53, right 1062→1069, fs 16→15, lh normal→21
+  띠 흐린 글 1 [11월 12일 오후 3:2|10월 29일 오전 10:]: x 390→383, w 142→317, right 908→741, fs 14→13, lh normal→18.2, color #636d7f→#5b6475
+  띠 흐린 글 수: 시안 2개 → 화면 1개
+
+## review (시안 → 화면) 다른 곳 11
+  띠 [확인 필요시나리오 2개 실|확인 필요시나리오 2개 실]: lh normal→22.4, bg #fff9ef→#fff4e0, bB 1 solid #f3e2c2→1 solid oklab(0.53292 0.0484532 0.108392 / 0.2)
+  띠 뱃지 [확인 필요|확인 필요]: lh normal→16.8
+  띠 제목 [시나리오 2개 실패|시나리오 2개 실패]: w 114→103, right 997→1010, fs 16→15, lh normal→21
+  띠 흐린 글 [11월 13일 오후 4:1|오늘 오후 8:24 시험]: x 455→442, w 140→99, right 844→899, fs 14→13, lh normal→18.2, color #636d7f→#5b6475
+  [실패한 시나리오 보기] [실패한 시나리오 보기|실패한 시나리오 보기]: x 1145→1160, w 133→127, right 162→153, lh normal→13, bT 1 solid #c5ccd6→-, bB 1 solid #c5ccd6→-, bL 1 solid #c5ccd6→-, gap -→6, shadow -→none 0px 0px 0px 0px, none 0px 0px 0
+  [확인하고 반영] [확인하고 반영|확인하고 반영]: x 1291→1295, w 97→92, lh normal→13, bT 1 solid #8fb6f5→-, bB 1 solid #8fb6f5→-, bL 1 solid #8fb6f5→-, gap -→6, shadow -→none 0px 0px 0px 0px, none 0px 0px 0
+  토글 줄 [고친 내용통화에 쓰는 내용|고친 내용통화에 쓰는 내용]: h 65→57, lh normal→22.4, gap 4→-
+  토글 받침 [고친 내용통화에 쓰는 내용|고친 내용통화에 쓰는 내용]: w 193→1126, h 40→32, right 986→53, lh normal→22.4, bg #eef0f3→none, radius 8→0, pad 4 4 4 4→0 0 0 0
+  토글(고른 것) [고친 내용|고친 내용]: x 265→261, y 301→298, right 1103→1109, lh normal→18.2, gap 4→6, shadow #e3e6eb 0px 0px 0px 1px→none 0px 0px 0px 0px, none 0px 0px 0
+  토글(안 고른 것) [통화에 쓰는 내용|통화에 쓰는 내용]: x 341→335, y 301→298, w 109→105, right 990→1000, lh normal→18.2, gap 4→6
+  머리 줄 단추 수: 시안 0개 → 화면 1개
+
+## stopped (시안 → 화면) 다른 곳 10
+  띠 [시험 중단시나리오 4 / |시험 중단시나리오 4 / ]: lh normal→22.4, bg #fff9ef→#fff4e0, bB 1 solid #f3e2c2→1 solid oklab(0.53292 0.0484532 0.108392 / 0.2)
+  띠 뱃지 [시험 중단|시험 중단]: lh normal→16.8
+  띠 제목 [시나리오 4 / 10에서 |시나리오 4 / 10에서 ]: w 160→144, right 951→969, fs 16→15, lh normal→21
+  [지금까지 결과 보기] [지금까지 결과 보기|지금까지 결과 보기]: x 1131→1147, w 122→116, right 187→177, lh normal→13, bT 1 solid #c5ccd6→-, bB 1 solid #c5ccd6→-, bL 1 solid #c5ccd6→-, gap -→6, shadow -→none 0px 0px 0px 0px, none 0px 0px 0
+  [다시 시험하고 반영] [다시 시험하고 반영|다시 시험하고 반영]: x 1265→1271, w 122→116, lh normal→13, bT 1 solid #8fb6f5→-, bB 1 solid #8fb6f5→-, bL 1 solid #8fb6f5→-, gap -→6, shadow -→none 0px 0px 0px 0px, none 0px 0px 0
+  토글 줄 [고친 내용통화에 쓰는 내용|고친 내용통화에 쓰는 내용]: h 65→57, lh normal→22.4, gap 4→-
+  토글 받침 [고친 내용통화에 쓰는 내용|고친 내용통화에 쓰는 내용]: w 193→1126, h 40→32, right 986→53, lh normal→22.4, bg #eef0f3→none, radius 8→0, pad 4 4 4 4→0 0 0 0
+  토글(고른 것) [고친 내용|고친 내용]: x 265→261, y 301→298, right 1103→1109, lh normal→18.2, gap 4→6, shadow #e3e6eb 0px 0px 0px 1px→none 0px 0px 0px 0px, none 0px 0px 0
+  토글(안 고른 것) [통화에 쓰는 내용|통화에 쓰는 내용]: x 341→335, y 301→298, w 109→105, right 990→1000, lh normal→18.2, gap 4→6
+  머리 줄 단추 수: 시안 0개 → 화면 1개
+
+## unused (시안 → 화면) 다른 곳 3
+  [삭제] [삭제|삭제]: x 1118→1131, right 273→263, lh normal→13, bT 1 solid #ec9c9c→-, bB 1 solid #ec9c9c→-, bL 1 solid #ec9c9c→-, gap -→6, shadow -→none 0px 0px 0px 0px, none 0px 0px 0
+  [시나리오 시험] [시나리오 시험|시나리오 시험]: x 1175→1185, w 97→92, right 169→164, lh normal→13, bT 1 solid #c5ccd6→-, bB 1 solid #c5ccd6→-, bL 1 solid #c5ccd6→-, gap -→6, shadow -→none 0px 0px 0px 0px, none 0px 0px 0
+  [통화에 사용하기] [통화에 사용하기|통화에 사용하기]: x 1279→1284, w 108→103, lh normal→13, bT 1 solid #8fb6f5→-, bB 1 solid #8fb6f5→-, bL 1 solid #8fb6f5→-, gap -→6, shadow -→none 0px 0px 0px 0px, none 0px 0px 0
+
+## testing2 (시안 → 화면) 다른 곳 1
+  띠 제목 [통화에 쓰기 전 시험|통화에 쓰기 전 시험]: w 122→110, right 999→1013, fs 16→15, lh normal→21
+
+## passed (시안 → 화면) 다른 곳 6
+  띠 [시험 통과시나리오 10개 |시험 통과시나리오 10개 ]: lh normal→22.4, bg #f1faf5→#e7f6ef, bB 1 solid #cde9da→1 solid oklab(0.513326 -0.104846 0.038503 / 0.2)
+  띠 뱃지 [시험 통과|시험 통과]: lh normal→16.8
+  띠 제목 [시나리오 10개 모두 통과|시나리오 10개 모두 통과]: w 154→138, right 957→974, fs 16→15, lh normal→21
+  띠 흐린 글 [11월 13일 오후 4:3|오늘 오후 8:26 시험]: x 495→478, w 143→99, right 802→863, fs 14→13, lh normal→18.2, color #636d7f→#5b6475
+  [결과 보기] [결과 보기|결과 보기]: x 1193→1206, w 74→70, right 173→164, lh normal→13, bT 1 solid #c5ccd6→-, bB 1 solid #c5ccd6→-, bL 1 solid #c5ccd6→-, gap -→6, shadow -→none 0px 0px 0px 0px, none 0px 0px 0
+  띠 [통화에 사용하기] [통화에 사용하기|통화에 사용하기]: x 1279→1284, w 108→103, lh normal→13, bT 1 solid #8fb6f5→-, bB 1 solid #8fb6f5→-, bL 1 solid #8fb6f5→-, gap -→6, shadow -→none 0px 0px 0px 0px, none 0px 0px 0
+
+## applying2 (시안 → 화면) 다른 곳 4
+  띠 [반영 중통화에 들어가는 중|반영 중통화에 들어가는 중]: lh normal→22.4, bg #fff9ef→#fff4e0, bB 1 solid #f3e2c2→1 solid oklab(0.53292 0.0484532 0.108392 / 0.2)
+  띠 뱃지 [반영 중|반영 중]: lh normal→16.8
+  띠 제목 [통화에 들어가는 중|통화에 들어가는 중]: w 118→107, right 1003→1016, fs 16→15, lh normal→21
+  띠 흐린 글 [AI 확인이 끝나면 다음 |AI 확인이 끝나면 다음 ]: x 449→436, w 288→255, right 703→748, fs 14→13, lh normal→18.2, color #636d7f→#5b6475
+
+## renaming (시안 → 화면) 다른 곳 3
+  이름 입력 칸 [빠른 접수형|]: x 261→253, w 280→160, h 40→31, right 899→1027, fs 20→22, lh normal→30.8, bg none→#ffffff, bT 1 solid #1a62d6→-, bB 1 solid #1a62d6→-, bL 1 solid #1a62d6→-, pad 0 12 0 12→0 8 0 8, shadow #eaf2fe 0px 0px 0px 3px→none 0px 0px 0px 0px, none 0px 0px 0
+  목소리 칸 [목소리 기본 음성|목소리기본 음성여성 1남성]: y 187→180, w 130→122, right 1049→1057, lh 13→18.2, bg none→#ffffff, bT 1 solid #c5ccd6→1 solid #e3e6eb, bB 1 solid #c5ccd6→1 solid #e3e6eb, bL 1 solid #c5ccd6→1 solid #e3e6eb, pad 0 10 0 10→0 4 0 10
+  프롬프트 제목 [프롬프트|프롬프트]: w 59→1108, h 20→24, right 1116→67, lh normal→23.8
+
+## add (시안 → 화면) 다른 곳 12
+  머리 줄 [새 상담가취소등록|새 상담가취소등록]: lh normal→22.4
+  제목 글자 [새 상담가|새 상담가]: lh normal→30.8, gap 10→-
+  [취소] [취소|취소]: x 1282→1288, lh normal→13, bT 1 solid #c5ccd6→-, bB 1 solid #c5ccd6→-, bL 1 solid #c5ccd6→-, gap -→6, shadow -→none 0px 0px 0px 0px, none 0px 0px 0
+  [등록] [등록|등록]: lh normal→13, bT 1 solid none→-, bB 1 solid none→-, bL 1 solid none→-, gap -→6, op 1→0.4
+  이름 · 목소리 줄 [이름예: 꼼꼼 확인형목소리|이름목소리기본 음성여성 1]: y 212→194, h 67→98, lh normal→22.4, bB -→1 solid #e3e6eb, pad 0 0 0 0→20 0 20 0
+  이름표 [이름|이름]: w 551→543, right 624→632, fs 13→12, fw 600→500, lh normal→16.8
+  이름 칸 [예: 꼼꼼 확인형|]: x 265→277, y 235→243, w 551→519, h 36→20, right 624→644, fw 700→400, lh 22.4→19.6, color #8a95a2→#1d2433, bg #f5f6f8→none, bT 1 solid #e3e6eb→-, bB 1 solid #e3e6eb→-, bL 1 solid #c5ccd6→-, radius 6→0, pad 6 12 6 12→0 0 0 0
+  목소리 칸 [기본 음성|기본 음성여성 1남성 1]: x 832→824, w 320→326, h 44→36, fs 15→14, lh 24→19.6, bg none→#ffffff, bT 1 solid #c5ccd6→-, bB 1 solid #c5ccd6→-, bL 1 solid #c5ccd6→-, pad 9 12 9 12→0 36 0 12, shadow -→none 0px 0px 0px 0px, none 0px 0px 0
+  프롬프트 제목 [프롬프트|프롬프트]: w 59→1108, h 20→24, right 1116→67, lh normal→23.8
+  프롬프트 상자 [역할내용을 입력하세요성격내|역할성격발화 톤발화 속도맞]: y 344→348, w 1118→1108, h 450→506, right 57→67, lh normal→22.4, bT 1 solid #c5ccd6→1 solid #e3e6eb, bB 1 solid #c5ccd6→1 solid #e3e6eb, bL 1 solid #c5ccd6→1 solid #e3e6eb
+  회색 제목 줄 [역할|역할]: y 345→349, w 1116→1106, right 58→68, fs 14→13, lh normal→18.2
+  프롬프트 글 [내용을 입력하세요|]: y 374→384, w 1116→1106, h 45→48, right 58→68, fs 15→14, lh 24.8→24, color #8a95a2→#1d2433, bg none→#ffffff, pad 10 12 10 12→12 12 12 12, shadow -→none 0px 0px 0px 0px, none 0px 0px 0
+
+## history (시안 → 화면) 다른 곳 18
+  창 [수정 기록✕ 11월 12일|수정 기록오늘 오후 8:2]: x 220→240, y 115→138, w 1000→960, h 670→624, right 220→240, lh normal→22.4, radius 14→8, shadow -→none 0px 0px 0px 0px, none 0px 0px 0
+  창 머리 [수정 기록✕|수정 기록]: x 220→240, y 115→138, w 1000→960, h 65→57, right 220→240, lh normal→22.4, pad 20 28 20 28→12 24 12 24, gap -→8
+  창 제목 [수정 기록|수정 기록]: x 248→264, y 135→155, w 931→57, right 261→1119, fs 20→16, lh normal→22.4
+  목록 [11월 12일 오후 3:2|오늘 오후 8:24김관리통]: x 220→264, y 180→215, w 300→240, h 540→470, right 920→936, lh normal→22.4, pad 8 8 8 8→0 16 0 0, gap -→4
+  목록 줄 [11월 12일 오후 3:2|오늘 오후 8:24김관리통]: x 228→264, y 188→215, w 283→223, h 75→67, right 929→953, lh normal→22.4, pad 14 16 14 16→10 12 10 12, gap 10→-
+  목록 줄(고른 것) [10월 21일 오후 2:0|10월 29일 오전 10:]: x 228→264, y 338→420, w 283→223, h 69→63, right 929→953, lh normal→22.4, pad 14 16 14 16→10 12 10 12, gap 10→-
+  목록 날짜 [11월 12일 오후 3:2|오늘 오후 8:24]: x 244→276, y 202→225, w 251→199, right 945→965, fs 16→15, lh normal→21
+  목록 사람 [김관리|김관리통화에 사용 중]: x 244→276, y 230→250, w 36→199, h 16→22, right 1160→965, fs 14→13, lh normal→18.2, color #636d7f→#5b6475, gap -→8
+  오른쪽 칸 [10월 21일 오후 2:0|10월 29일 오전 10:]: x 520→528, y 180→215, w 700→638, h 540→470, right 220→274, lh normal→22.4, pad 0 32 0 32→0 0 0 0
+  오른쪽 제목 [10월 21일 오후 2:0|10월 29일 오전 10:]: x 552→528, y 180→215, h 44→21, right 252→274, fs 17→15, lh normal→21, pad 20 0 4 0→0 0 0 0, gap 12→8
+  오른쪽 흐린 글 [통화에 쓰는 내용과 다른 |통화에 쓰는 내용과 다른 ]: x 742→697, y 203→217, w 183→160, right 514→583, fs 14→13, lh normal→18.2, color #636d7f→#5b6475
+  항목 제목 [성격|역할]: x 552→528, y 244→252, right 252→274, fs 17→14, lh normal→19.6
+  항목 글 [친절하고 차분합니다.밝고 |택배 접수빠진 말: 와 조]: x 552→528, y 274→280, h 54→24, right 252→274, fs 16→14, lh 27.2→24
+  뺀 말 [친절하고 차분합니다.|빠진 말: 와 조회]: x 552→578, y 278→284, w 133→38, h 19→16, right 755→824, fs 16→14, lh 27.2→24, color #8a95a2→#1d2433
+  더한 말: 화면에서 못 찾음
+  아래 줄 [취소이 내용 불러오기|취소이 내용 불러오기]: x 220→240, y 720→705, w 1000→960, h 65→57, right 220→240, lh normal→22.4, pad 16 28 16 28→12 24 12 24
+  [취소] [취소|취소]: x 1025→1017, y 737→718, right 367→377, lh normal→13, bT 1 solid #c5ccd6→-, bB 1 solid #c5ccd6→-, bL 1 solid #c5ccd6→-, gap -→6, shadow -→none 0px 0px 0px 0px, none 0px 0px 0
+  [이 내용 불러오기] [이 내용 불러오기|이 내용 불러오기]: x 1081→1071, y 737→718, w 111→105, right 248→264, lh normal→13, bT 1 solid none→-, bB 1 solid none→-, bL 1 solid none→-, gap -→6
+
+## result (시안 → 화면) 다른 곳 18
+  바깥 여백 [전체10통과7실패2연결 실|전체10통과7실패2연결 실]: lh normal→22.4, bB 1 solid #eef0f3→-, pad 16 24 24 24→16 24 16 24
+  숫자 줄 [전체10통과7실패2연결 실|전체10통과7실패2연결 실]: h 46→64, lh normal→22.4, gap 8→40
+  숫자 이름 [전체|전체]: y 72→77, w 27→36, h 15→18, right 1181→1172, fw 500→400, lh normal→18.2
+  숫자 [10|10]: y 89→95, w 27→36, h 29→36, right 1181→1172, fs 24→28, lh normal→36
+  통과 숫자 [7|7]: x 295→308, y 89→95, h 29→36, right 1122→1110, fs 24→28, lh normal→36
+  [남은 n개 시험] [남은 1개 시험|남은 1개 시험]: x 1211→1222, y 79→88, w 94→89, right 135→129, lh normal→13, bT 1 solid #c5ccd6→-, bB 1 solid #c5ccd6→-, bL 1 solid #c5ccd6→-, gap -→6, shadow -→none 0px 0px 0px 0px, none 0px 0px 0
+  [전체 n개 시험] [전체 10개 시험|전체 10개 시험]: x 1313→1319, y 79→88, w 103→97, lh normal→13, bT 1 solid #8fb6f5→-, bB 1 solid #8fb6f5→-, bL 1 solid #8fb6f5→-, gap -→6, shadow -→none 0px 0px 0px 0px, none 0px 0px 0
+  표 상자 [업무시나리오통화에 쓰는 내|업무시나리오통화에 쓰는 내]: y 134→152, h 741→732, lh normal→22.4
+  표 머리 칸 [업무|업무]: y 135→153, w 120→128, right 1087→1079, lh normal→19.6, bB 1 solid #c5d6ec→-
+  표 머리 칸 2 [시나리오|시나리오]: x 353→361, y 135→153, w 482→460, right 605→619, lh normal→19.6, bB 1 solid #c5d6ec→-
+  표 머리 칸 3 [통화에 쓰는 내용 10월 |통화에 쓰는 내용 10월 ]: x 835→821, y 135→153, right 385→399, lh normal→19.6, bB 1 solid #c5d6ec→-
+  표 머리 칸 5 [변화|변화]: x 1275→1261, y 135→153, w 140→144, right 25→35, lh normal→19.6, bB 1 solid #c5d6ec→-
+  표 머리 날짜 [10월 1일|10월 29일]: x 970→950, y 145→162, w 48→56, right 422→434, lh normal→19.6
+  표 칸(업무) [접수|접수]: y 171→189, w 120→128, right 1087→1079, lh normal→19.6
+  표 칸(시나리오) [신규 고객 기본 접수|신규 고객 기본 접수]: x 353→361, y 171→189, w 482→460, right 605→619, lh normal→19.6
+  표 칸(결과) [통과|통과]: x 835→821, y 171→189, right 385→399, lh normal→19.6
+  결과 뱃지 [통과|통과]: x 929→915, y 182→200, right 479→493, lh normal→16.8
+  표 둘째 줄 [등록 고객, 주소록 1건 |등록 고객, 주소록 1건 ]: y 215→233, w 1182→1172, right 25→35, lh normal→19.6, bg #f7fafe→#eaf2fe
+
+## running (시안 → 화면) 다른 곳 6
+  진행 이름 [진행|진행]: y 72→77, w 63→76, h 15→18, right 1145→1132, fw 500→400, lh normal→18.2
+  진행 숫자 [4 / 10|2 / 10]: y 89→95, w 63→76, h 29→36, right 1145→1132, fs 24→28, lh normal→36
+  진행 막대 [|]: y 91→109, lh normal→22.4, bg #eef0f3→none, radius 4→33554400
+  통과 n [통과 3|통과 2]: x 631→636, y 87→104, h 16→20, right 773→769, lh normal→19.6, color #636d7f→#5b6475
+  실패 n [실패 0|실패 0]: x 675→683, y 87→104, h 16→20, right 729→723, lh normal→19.6
+  [시험 중단] [시험 중단|시험 중단]: x 1342→1346, y 79→88, w 74→70, lh normal→13, bT 1 solid #ec9c9c→-, bB 1 solid #ec9c9c→-, bL 1 solid #ec9c9c→-, gap -→6, shadow -→none 0px 0px 0px 0px, none 0px 0px 0
+
+## detail (시안 → 화면) 다른 곳 15
+  바깥 여백 [고친 내용 11월 12일 |고친 내용11월 13일실패]: lh normal→22.4, bB 1 solid #eef0f3→-, pad 16 24 24 24→16 24 16 24, gap 16→-
+  카드 [고친 내용 11월 12일 |고친 내용11월 13일실패]: h 803→812, lh normal→22.4, radius 12→8
+  탭 줄 [고친 내용 11월 12일 |고친 내용11월 13일실패]: lh normal→22.4, pad 12 28 12 28→12 24 12 24, gap 4→16
+  탭 받침 [고친 내용 11월 12일 |고친 내용11월 13일실패]: x 261→257, w 459→447, right 720→736, lh normal→22.4, bg #eef0f3→#f5f6f8, gap 4→-
+  탭(고른 것) [고친 내용 11월 12일 |고친 내용11월 13일실패]: x 265→261, w 171→162, right 1004→1017, lh normal→18.2, gap 4→6, shadow #e3e6eb 0px 0px 0px 1px→none 0px 0px 0px 0px, none 0px 0px 0
+  탭(안 고른 것) [통화에 쓰는 내용 10월 |통화에 쓰는 내용10월 2]: x 440→427, right 797→812, lh normal→18.2, gap 4→6
+  탭 날짜 [11월 12일|11월 13일]: x 333→325, h 15→18, right 1057→1067, lh normal→18.2, color #636d7f→#5b6475
+  시험 시각 [오늘 오후 1:41 시험,|오늘 오후 8:24 시험,]: x 1194→1214, w 193→177, right 53→49, fs 14→13, lh normal→18.2, color #636d7f→#5b6475
+  대화 칸 [AI 상담가안녕하세요, 김|고객여보세요?00:20AI]: w 712→662, h 679→689, right 495→545, lh normal→22.4, bg none→#ffffff, pad 8 16 8 16→16 16 16 16, gap -→2
+  결과표 칸 [고객 대본 완료|고객 대본 완료]: x 961→920, w 122→138, h 43→144, right 357→382, fs 14→13, lh normal→18.2, color #333333→#1d2433, bB 1 dashed #c5d6ec→-, pad 10 12 10 12→8 12 8 12
+  결과표 제목 [결과표|결과표통과 7, 실패 7,]: x 961→920, w 41→38, right 438→482, fs 16→15, lh normal→21
+  결과표 흐린 글 [통과 4, 실패 1|통과 7, 실패 7, 채점]: x 1012→966, w 77→130, right 351→344, fs 14→13, lh normal→18.2, color #636d7f→#5b6475
+  결과표 머리 칸 [항목|항목]: x 961→920, w 122→138, right 357→382, fs 14→13, lh normal→18.2, color #000000→#1d2433, bB 1 solid #c5d6ec→-, pad 0 0 0 15→0 12 0 12
+  판정 뱃지 [통과|실패]: x 1347→1327, y 230→227, right 60→81, lh normal→16.8, color #107a50→#c73434, bg #e7f6ef→#fdecec
+  재생 줄 [▶00:2701:32|00:0002:52]: y 817→827, lh normal→22.4, bg none→#ffffff, pad 12 24 12 24→0 24 0 24, gap 14→12
+
+다른 항목 합계 160

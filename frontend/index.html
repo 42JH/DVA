@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DVA 관리자</title>
+    <!-- 관리자 화면이라 검색에 안 잡히게 (11/12 Lighthouse SEO). public/robots.txt와 같은 뜻 -->
+    <meta name="robots" content="noindex, nofollow" />
+    <!-- Pretendard 웹폰트 (11/02 현업 피드백: 글꼴이 안 깔린 PC는 맑은 고딕으로 보였음). 동적 서브셋 = 쓰는 글자 범위만 받음 -->
+    <!-- 글꼴 CSS가 그리기를 막는 동안(약 220ms) 연결을 먼저 열어 둠 (11/12 Lighthouse) -->
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css"
+      crossorigin="anonymous"
+    />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

@@ -1,0 +1,10 @@
+version: 1
+name: dver-test
+slug: dver-test
+protocol: http
+port: 4502
+interceptRequests: true
+scenarios:
+  - name: default
+    path: ./default.js
+    default: true

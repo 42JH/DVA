@@ -1,0 +1,175 @@
+// 03 주문 내역 Model — 주문 목록 · 주문 추가 · 수정. React를 모르는 데이터 층
+// 목록 GET /admin/orders · 추가 POST /admin/orders · 수정 PATCH /orders/{id} — 모두 실서버 (연동 상세명세 4장, 11/01)
+// 11/04 디자인: 고른 날짜에서 시작하는 무한 스크롤 — 하루씩 받음 (shared/lib/useDayFeed가 아래 두 함수로)
+import { queryOptions } from '@tanstack/react-query'
+import { api, ApiError, type ApiItem } from '@/shared/api/client'
+import { buildCreateOrder } from './orderCreate'
+import type { CustomerPatch, OrderPatch } from './orderPatch'
+import type { OrderInput, PartyInput } from './orderInput'
+import type { PaymentMethod } from '@/shared/order/orderApi'
+import type { OrderGroup } from '@/shared/order/labels'
+
+export type { OrderDetail, Party, PaymentMethod } from '@/shared/order/orderApi'
+
+/** 실제 주문 상태 8개 — 정의는 shared/order/orderDto (통화 상세 등 다른 기능도 씀) */
+import type { OrderStatusDto } from '@/shared/order/orderDto'
+export type OrderStatus = OrderStatusDto
+
+/** '주문 상태' 고르기 = 서버 statusGroup (11/11): 결제 완료 = PAID · SUBMITTING · SUBMITTING_FAILED(재시도 중), 접수 완료 = ACCEPTED, 접수 실패 = SUBMISSION_FAILED */
+export type StatusGroup = 'ALL' | OrderGroup
+
+/** OrderListParty — 수집 중이면 칸마다 null일 수 있음 */
+interface ListParty {
+  name: string | null
+  phoneNumber: string | null // 숫자만, 앞 0 보존
+  roadAddress: string | null
+  jibunAddress: string | null
+  detailAddress: string | null
+}
+
+/** OrderListParcel — 배송 상세 하나 = 보내는 분 1 + 받는 분 1 (화면 한 줄, 11/01 결정) */
+export interface ListParcel {
+  orderParcelSeq: number
+  status: 'ACTIVE' | 'CANCELLED' // 상세 취소 여부 (결제 · 접수 완료와 무관)
+  origin: ListParty
+  destination: ListParty
+  documentCount: number
+  smallBoxCount: number
+  mediumBoxCount: number
+  bigBoxCount: number
+  otherItemDescription: string // 없으면 ''
+}
+
+/** AdminOrderListItem — 주문 하나. 금액 · 결제 수단 · 좌표는 목록에 없음(상세에서) */
+export interface OrderListItem {
+  orderSeq: number
+  status: OrderStatus
+  createdAt: string // 주문 생성 시각 (화면 '접수 시각')
+  pickupRequestedAt: string | null
+  parcels: ListParcel[] // 상세 순번대로, 취소된 상세도 포함
+  // 미완료 초안 줄이면 초안 번호 (백엔드 057 · 058 — 전체 목록에 초안이 섞여 옴, orderSeq는 예약번호). 실제 주문 · 배포 전은 없음 · null
+  draftSeq?: number | null
+}
+
+export const orderQueries = {
+  all: () => ['orders'] as const, // shared/order의 상세와 같은 뿌리 → 수정 · 추가 후 invalidate 한 번에 목록 · 상세 모두 갱신
+  // 보내는 분(= 주문 고객) 결제 자격 — 주문을 보내면 같은 뿌리라 함께 새로 받음 (월결제을 켠 뒤 등)
+  payContext: (phone: string) =>
+    queryOptions({
+      queryKey: [...orderQueries.all(), 'pay-context', phone],
+      queryFn: ({ signal }) => fetchPayContext(phone, signal),
+      staleTime: 60_000,
+    }),
+}
+
+// ---------- 결제 자격 (11/10) ----------
+// 서버 규칙 (customers.repository availablePaymentMethods · order-payments eligibility):
+// 개인카드 = 늘 · 월결제 = 개인 고객은 고객 설정, 기업 소속은 기업 설정 · 그룹카드 = 기업 소속 + 부서 설정. 접수 때 서버가 다시 확인(아니면 403)
+const PAY_FROM_DTO: Record<'billing' | 'credit' | 'groupBilling', PaymentMethod> = {
+  billing: 'PERSONAL_CARD',
+  credit: 'MONTHLY',
+  groupBilling: 'GROUP_CARD',
+}
+interface PayContextDto {
+  customer: { customerSeq: number; name: string } | null
+  membership: { status: string } | null
+  organization: { name: string } | null
+  availablePaymentMethods: (keyof typeof PAY_FROM_DTO)[]
+}
+export interface PayContext {
+  customerSeq: number | null // null = 처음 보는 번호 (주문 때 서버가 고객을 만듦)
+  // 기업 소속(멤버십이 있으면 비활성이어도)이면 기업 이름 — 서버는 소속이 있으면 고객의 월결제 설정을 안 봄
+  company: string | null
+  available: PaymentMethod[]
+}
+/** POST /customers/context (전화번호만 → 통화 · 감사 기록 안 남김) */
+async function fetchPayContext(phone: string, signal?: AbortSignal): Promise<PayContext> {
+  const { data } = await api.post<ApiItem<PayContextDto>>('/customers/context', {
+    body: { phoneNumber: phone },
+    signal,
+  })
+  return {
+    customerSeq: data.customer?.customerSeq ?? null,
+    company: data.membership ? (data.organization?.name ?? '') : null,
+    available: data.availablePaymentMethods.map((m) => PAY_FROM_DTO[m]),
+  }
+}
+
+/** 개인 고객에게 월결제 추가 — 주문을 보내기 전에 (서버가 접수 순간 자격을 확인). 고객 번호를 돌려줌
+ * 기존 고객 = PATCH /customers/{id} · 처음 보는 번호 = POST /customers(주소 필수)로 월결제 켠 채 생성
+ * 그 사이 같은 번호가 등록됐으면(409) 다시 찾아 PATCH. 주문이 나중에 실패해도 월결제은 켜진 채 남음 (11/10 결정) */
+export async function addMonthly(customerSeq: number | null, sender: PartyInput): Promise<number> {
+  const patch = (id: number) =>
+    api.patch(`/customers/${id}`, { body: { monthlyBillingEnabled: true } }).then(() => id)
+  if (customerSeq) return patch(customerSeq)
+  try {
+    const { data } = await api.post<ApiItem<{ customerSeq: number }>>('/customers', {
+      body: {
+        name: sender.name,
+        phoneNumber: sender.phoneNumber,
+        address: {
+          roadAddress: sender.roadAddress,
+          detailAddress: sender.detailAddress ?? '',
+          jibunAddress: sender.picked?.jibunAddress ?? '',
+          dongName: sender.picked?.dongName ?? '',
+          postalCode: sender.picked?.postalCode ?? '',
+        },
+        monthlyBillingEnabled: true,
+      },
+    })
+    return data.customerSeq
+  } catch (e) {
+    if (!(e instanceof ApiError && e.code === 'DUPLICATE_RESOURCE')) throw e
+    const again = (await fetchPayContext(sender.phoneNumber)).customerSeq
+    if (!again) throw e
+    return patch(again)
+  }
+}
+
+// ---------- 주문 추가 · 수정 ----------
+/** 주문 추가(수기 접수) 본문 */
+/** 주소 검색으로 고른 주소의 나머지 칸 — 서버 주소는 지번 · 동 이름 · 우편번호 · 좌표가 필수 (명세 4.4) */
+export { BOX_TYPES } from './orderInput'
+export type { BoxKey, OrderInput, PartyInput, PickedAddress } from './orderInput'
+
+/** 주문 추가(수기 접수) — POST /admin/orders (연동 상세명세 4.4). 본문은 buildCreateOrder
+ * 멱등키: 한 번의 접수 의도에 UUID 하나, 재시도에도 같은 키 → 같은 키 재요청은 새 주문을 만들지 않고 처음 결과를 돌려줌
+ * 201이어도 결제 대기 · 접수 실패일 수 있음, 202는 처리 중 → 목록 태그로 보임 */
+export const createOrder = (
+  input: OrderInput,
+  shippingFee: number,
+  idempotencyKey: string,
+  customerSeq?: number, // 월결제을 먼저 켠 고객 — 없으면 이름 · 전화로 서버가 찾거나 만듦
+): Promise<ApiItem<{ orderSeq: number; status: OrderStatus }>> =>
+  api.post('/admin/orders', {
+    body: buildCreateOrder(input, shippingFee, customerSeq),
+    idempotencyKey,
+  })
+
+/** 주문 수정 — PATCH /orders/{id} (연동 상세명세 4.3). 본문은 buildOrderPatch(바뀐 칸만 + expectedVersion)
+ * 성공 200 { data: { version } } → 화면은 상세를 다시 받음. 버전이 낡았으면 409 VERSION_CONFLICT (자동 덮어쓰기 금지) */
+export const saveOrder = (
+  orderSeq: number,
+  patch: OrderPatch,
+): Promise<ApiItem<{ version: number }>> => api.patch(`/orders/${orderSeq}`, { body: patch })
+
+/** 고객정보에도 저장 — PATCH /customers/{customerSeq}, 204 본문 없음. 주문 PATCH가 성공한 뒤에만 (별도 트랜잭션) */
+export const patchCustomer = (customerSeq: number, body: CustomerPatch): Promise<void> =>
+  api.patch(`/customers/${customerSeq}`, { body })
+
+/** 주문 전체 취소 — POST /orders/{id}/cancel, 본문 없음 · 204. 결제 전(COLLECTING · notPaid)만 (명세 4.5) */
+export const cancelOrder = (orderSeq: number): Promise<void> =>
+  api.post(`/orders/${orderSeq}/cancel`)
+
+/** 디버 재접수 — POST /admin/orders/{id}/retry, 본문 없음. 다시 결제하지 않음. 응답 status로 결과 확인
+ * 주의(백엔드): 디버 접수는 됐는데 DB 저장만 실패했을 수 있음 → 확인 창에서 디버 쪽을 먼저 확인하라고 안내 */
+export const retryOrder = (orderSeq: number): Promise<ApiItem<{ status: OrderStatus }>> =>
+  api.post(`/admin/orders/${orderSeq}/retry`)
+
+/** 접수 중단 주문 최종 접수 — POST /orders/{id}/submit { expectedVersion }. 200 = 결과(ACCEPTED만 접수 완료), 202 = 처리 중
+ * expectedVersion은 직전 PATCH 응답의 version (프론트에서 +1 하지 않음) */
+export const submitOrder = (
+  orderSeq: number,
+  expectedVersion: number,
+): Promise<ApiItem<{ status: OrderStatus }>> =>
+  api.post(`/orders/${orderSeq}/submit`, { body: { expectedVersion } })

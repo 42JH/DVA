@@ -1,0 +1,11 @@
+/            API 요청 33 | 미완료 건수 요청 2 /api/parcel-drafts?status=INCOMPLETE&limit=11 /api/parcel-drafts?status=INCOMPLETE&limit=11
+/orders      API 요청 17 | 미완료 건수 요청 2 /api/parcel-drafts?from=2026-11-08T00%3A00%3A00%2B09%3A00&limit=1&offset=0&status=INCOMPLETE /api/parcel-drafts?from=2026-11-08T00%3A00%3A00%2B09%3A00&limit=1&offset=0&status=INCOMPLETE
+/calls       API 요청 14 | 미완료 건수 요청 0 
+/customers   API 요청 61 | 미완료 건수 요청 0 
+/companies   API 요청 11 | 미완료 건수 요청 0 
+/faqs        API 요청 11 | 미완료 건수 요청 0 
+/unanswered  API 요청 11 | 미완료 건수 요청 0 
+/personas    API 요청 15 | 미완료 건수 요청 0 
+/stats       API 요청 19 | 미완료 건수 요청 0 
+/admins      API 요청 17 | 미완료 건수 요청 0 
+합계: API 요청 209 | 미완료 건수 요청 4

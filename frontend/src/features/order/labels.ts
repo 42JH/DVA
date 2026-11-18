@@ -1,0 +1,25 @@
+/** 주문 추가 · 수정 서버 오류 → 누구나 이해할 수 있는 설명 (서버 문구 · 코드를 그대로 보이지 않음, 11/01 기업관리와 같은 기준) */
+export function orderErrorText(e: unknown, action: '접수' | '저장' | '취소'): string {
+  const status = (e as { status?: number })?.status
+  const code = (e as { code?: string })?.code
+  if (code === 'REQUEST_IN_PROGRESS' || status === 409)
+    return '같은 요청을 처리하는 중이에요. 잠시 뒤 목록에서 확인해 주세요.'
+  switch (status) {
+    case 0:
+      return '서버에 연결하지 못했어요. 목록에서 들어갔는지 먼저 확인한 뒤 다시 시도해 주세요.'
+    case 400:
+      return `입력한 내용의 형식이 맞지 않아 ${action}하지 못했습니다. 칸을 다시 확인해 주세요.`
+    case 401:
+      return '로그인이 끝났어요. 다시 로그인해 주세요.'
+    case 403:
+      return `결제 자격이나 권한이 없어 ${action}하지 못했습니다. 월결제와 그룹결제는 기업이나 부서 자격이 필요해요.`
+    case 404:
+      return '주문이나 고객을 찾을 수 없습니다. 목록을 새로고침해 주세요.'
+    case 422:
+      return `주소, 물품, 금액 조건이 맞지 않아 ${action}하지 못했습니다. 칸을 다시 확인해 주세요.`
+    case 503:
+      return `디버 접수 설정 문제로 ${action}하지 못했습니다. 백엔드 담당자에게 알려 주세요.`
+    default:
+      return `서버에 잠시 문제가 있어 ${action}하지 못했습니다. 잠시 뒤 다시 시도해 주세요.`
+  }
+}
