@@ -18,11 +18,8 @@ import {
 export type { TestItem, VersionTest }
 
 /** 화면을 켜는 스위치 — 늘 켜짐(가짜 모드 · 실제 백엔드 · 배포 모두. 백엔드 중계가 모든 서버에 있음, 11/12)
- *  끄려면 VITE_SCENARIO_TEST=false → 화면과 [통화에 사용하기] 관문이 함께 사라짐 */
+ *  끄려면 VITE_SCENARIO_TEST=false → 화면과 반영 전 시험 관문([통화에 반영] · [통화에 사용하기])이 함께 사라짐 */
 export const SCENARIO_TEST = import.meta.env.VITE_SCENARIO_TEST !== 'false'
-/** 반영 전 시험 — 꺼 두면 [통화에 반영] · [통화에 사용하기]가 시험 없이 바로 확인 창 (시나리오 시험 화면은 그대로)
- *  11/15 사용자: 지금은 임시로 시험 없이 반영. ponytail: 임시 스위치 — 다시 켜려면 VITE_TEST_BEFORE_APPLY=true (또는 기본값을 true로) */
-export const TEST_BEFORE_APPLY = SCENARIO_TEST && import.meta.env.VITE_TEST_BEFORE_APPLY === 'true'
 
 export interface Scenario {
   id: string // 'A1' — AI 파트 문서의 번호

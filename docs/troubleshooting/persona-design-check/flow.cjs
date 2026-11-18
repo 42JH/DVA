@@ -1,5 +1,4 @@
 // AI 상담가 통합 QA — 1~10번 흐름을 한 브라우저에서 이어서 누르며 화면을 찍고 상태를 기록
-// 반영 전 시험(TEST_BEFORE_APPLY)을 꺼 둔 동안(11/15~)은 VITE_TEST_BEFORE_APPLY=true로 띄운 가짜 서버에 QA_BASE로 돌림 — 끈 상태는 apply-no-test.cjs
 const { chromium } = require(process.env.PW_CORE ?? 'playwright-core')
 const path = require('path')
 const fs = require('fs')
