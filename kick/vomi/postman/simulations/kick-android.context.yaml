@@ -1,0 +1,124 @@
+purpose:
+  stands_in_for: Kick account, friend, call-control, SSE and PCM HTTP endpoints from the Android handoff.
+  unblocks: Running the Android Retrofit and SSE clients locally without real account tokens or paid synthesis.
+assumptions:
+  - id: android-handoff-shapes
+    status: supported
+    claim: The live Kick endpoints return the DTO and SSE shapes in docs/kick-android-api.md.
+    reason: A live test of the two dedicated accounts confirmed the documented account, friend, voice, call, SSE and join shapes. This does not establish every error case or Android media behavior.
+    verification: On 2026-11-13 both replacement tokens authenticated; both accounts listed each other as friends and voice READY. A call transitioned REQUESTED to ACCEPTED to ENDED, both join credentials were issued, and both SSE snapshots matched the expected state. Both short speech requests returned HTTP 200 audio/pcm, 43096 bytes each, even length and no WAV header. Earlier credentials had returned 401; the replacement resolved authentication.
+    source: docs/kick-android-api.md; feature/android-live-call:core/network/src/main/kotlin/com/ssafy/vomi/core/network/kick/KickApi.kt
+    updated_at: '2026-11-13'
+  - id: android-http-client-local
+    status: supported
+    claim: The Android Retrofit and SSE clients handle the fixture's paths, DTOs, PCM response, authentication failure and HTML server failure in the scenarios exercised.
+    reason: The actual clients executed against the local Postman simulation; no HTTP client was replaced with a stub.
+    verification: Four KickApiContractTest tests passed with zero skips. The simulation recorded 13 requests covering account, friends, voice, duplicate call request, accept, join, speech, end, call lookup, SSE, HTTP 401 and HTML 503. This supports the caller behavior under those fixture responses and not arbitrary provider behavior.
+    source: feature/android-live-call:core/network/src/test/kotlin/com/ssafy/vomi/core/network/kick/KickApiContractTest.kt; postman/mocks/kick/default.js
+    updated_at: '2026-11-13'
+  - id: transport-not-mocked
+    status: unknown
+    claim: Two Android devices can join LiveKit and exchange microphone audio and PCM speech.
+    reason: This simulation does not implement LiveKit, audio hardware, Android permissions or real TTS.
+    verification: Requires two devices and their separate test tokens.
+    source: feature/android-live-call:core/rtc/src/main/kotlin/com/ssafy/vomi/core/rtc/LiveKitRtcGateway.kt
+    updated_at: '2026-11-13'
+  - id: current-client-http-contract
+    status: supported
+    claim: The new Service and Client split sends the handoff request shapes and handles the fixture responses in the scenarios exercised.
+    reason: Nine RemainingApiContractTest tests passed over real local HTTP, without replacing Retrofit or OkHttp. This supports the clients under the local model, rather than independent guarantees about the provider.
+    verification: On 2026-11-13 the local Postman simulation recorded public signup and health without session auth; bodyless friend PUT with encoded ID; multipart voice upload; call creation with reused requestId; active snapshot; all four lowercase actions; join; push PUT and body-carrying DELETE with 204; SSE; PCM; and HTTP 400, 401, 403, 404, 409 and HTML 503. All nine tests ran with zero skips. The same run passed all 42 selected Android JVM tests, debug assembly, and app/network/data lint with zero errors. Signup, voice upload, speech, push and call writes in this run reached only the local simulation.
+    source: docs/kick-android-api.md; core/network/src/test/kotlin/com/ssafy/vomi/core/network/RemainingApiContractTest.kt; postman/mocks/kick/default.js
+    updated_at: '2026-11-13'
+  - id: current-client-live-read-only
+    status: supported
+    claim: The current clients can read account, friend, voice, active-call and SSE snapshots for both dedicated live test accounts.
+    reason: AuthRepositoryLiveTest exercised the common NetworkModule configuration with each real test account token and retained account-specific responses.
+    verification: On 2026-11-13 the opt-in test passed both account selections, automatic authentication, peer friend lookup, known voice status, active accountId, first SSE snapshot, and HTTP 401 after logout. No live account creation, voice upload/synthesis, push mutation or call state change was made in this work. Historical write validation above used the earlier test branch and does not validate the new write clients.
+    source: core/data/src/test/kotlin/com/ssafy/vomi/core/data/repository/AuthRepositoryLiveTest.kt
+    updated_at: '2026-11-13'
+  - id: current-stream-cancellation
+    status: supported
+    claim: Cancelling the current SSE collection closes its HTTP connection without replacing normal cancellation with a socket error in the tested scenario.
+    reason: An actual local socket stayed open after its snapshot, and the test observed peer disconnect after Flow.first cancelled collection.
+    verification: Four CallEventsClientTest tests passed, covering socket closure plus BOM, CRLF, comments, multiline call data, ignored event types, incomplete trailing data and malformed JSON. Cancellation-induced socket read failures are sent to the already-closed channel instead of thrown by a child coroutine. The streaming client has no whole-call or read timeout; consumers must cancel or close streaming bodies and decide reconnection policy.
+    source: core/network/src/main/kotlin/com/ssafy/vomi/core/network/service/call/CallEventsClient.kt; core/network/src/test/kotlin/com/ssafy/vomi/core/network/service/call/CallEventsClientTest.kt
+    updated_at: '2026-11-13'
+  - id: owner-mock-and-unverified-writes
+    status: unknown
+    claim: The new write clients match all real-provider success and error responses for signup, voice upload, speech and push mutation.
+    reason: These writes were verified against the handoff-derived local fixture only. No owner-published mock was discovered; this CLI version reports postman status as unsupported, and the prior local fixture was reused without introducing a workspace binding.
+    verification: Local mock requests and outcomes were checked. The actual provider responses for these new write clients remain for a coordinated live integration test; paid speech and registered voice profiles were left unchanged. Subsequent call mutation evidence is recorded under call-signaling-repositories below.
+    source: docs/kick-android-api.md; postman/mocks/kick/default.js; core/network/src/test/kotlin/com/ssafy/vomi/core/network/RemainingApiContractTest.kt
+    updated_at: '2026-11-13'
+  - id: call-signaling-repositories
+    status: supported
+    claim: Two current CallRepository instances observe incoming calls and reconcile accept/end, reject and cancel through HTTP and SSE in the tested local and dedicated live environments.
+    reason: The same repository implementation and Retrofit/SSE clients passed the opt-in integration scenarios against the Postman fixture and the real backend. This does not establish device UI, LiveKit media or FCM behavior.
+    verification: On 2026-11-13 UTC both integration tests ran with zero failures or skips. Each environment exercised three calls: A requested B, B accepted and A ended; B rejected a new request; A cancelled another request. Both repositories received the requested/accepted/inactive states. Only dedicated test accounts were used, and their live active-call endpoints were subsequently confirmed null. No LiveKit join, microphone, voice registration, speech synthesis or push-token mutation was called. The fixture supports two bearer identities and optional held SSE; tests use separate mock sessions. CLI 1.76 initially crashed when a streamed proxy response was reset by cancellation; the fixture now ends held streams via a local control route before closing the clients. The final parallel run passed 69 local tests, with the two live tests opted out because each had already passed in separate live runs, and all five selected lint tasks reported zero errors. The final UI build and call tests passed after adding creation-in-flight control guards. No Android device was attached, so device UI interaction remains unverified. A later read-only authentication check had one transient Network failure and passed on isolated rerun; health and both active-call endpoints also returned HTTP 200.
+    source: core/data/src/test/kotlin/com/ssafy/vomi/core/data/repository/CallSignalingIntegrationTest.kt; postman/mocks/kick/default.js; docs/kick-android-api.md
+    updated_at: '2026-11-14'
+  - id: persisted-auth-and-app-owned-signaling
+    status: unknown
+    claim: Proto DataStore session restoration and app-owned SSE lifecycle preserve runtime authentication and signaling behavior after the repository refactor.
+    reason: The user requested no test execution. Previous runtime evidence above predates this refactor; it does not validate this new ownership arrangement.
+    verification: Added a persistent token-pair/string-user-ID schema, AuthState initialization and restoration, a separate UserRepository, and shared CallSessionStore. CallRepository owns shared callState and an internal CallSessionStore, automatically merging API/SSE results and handling transient retries and recovery through cold Flows, without AuthRepository or ApplicationScope dependencies. MainActivityViewModel coordinates authentication and foreground collection through observeCalls().asResult(), with no direct Store dependency; MainActivity forwards lifecycle state and creates VomiAppState for navigation/UI from supplied authentication and call state. AuthRepository.login now delegates to an AuthDataSource interface, with MockAuthDataSource supplied by AuthModule; the public credential contract has no TestAccount parameter and raw login network errors reach asResult in LoginViewModel. Existing test sources were adapted but not executed. Debug app assembly passed; no server or device requests were made for this refactor.
+    source: core/datastore/src/main/kotlin/com/ssafy/vomi/core/datastore/auth/AuthSessionDataSource.kt; core/data/src/main/kotlin/com/ssafy/vomi/core/data/repository/AuthRepositoryImpl.kt; app/src/main/kotlin/com/ssafy/vomi/MainActivityViewModel.kt; app/src/main/kotlin/com/ssafy/vomi/ui/VomiAppState.kt
+    updated_at: '2026-11-14'
+  - id: foreground-livekit-audio
+    status: unknown
+    claim: Accepted calls can join the same LiveKit room and exchange audio with SDK-backed microphone controls while the app is foregrounded.
+    reason: The user requested no test execution. No server joins, device microphone access or two-device audio checks were performed.
+    verification: Added an isolated core:rtc client, repository-owned join/media state, foreground collection, runtime microphone permission UI, actual microphone confirmation and room cleanup. Debug app compilation is the available verification; runtime success is not established.
+    source: core/rtc/src/main/kotlin/com/ssafy/vomi/core/rtc/LiveKitRtcClient.kt; core/data/src/main/kotlin/com/ssafy/vomi/core/data/repository/CallRepositoryImpl.kt; feature/call/impl/src/main/kotlin/com/ssafy/vomi/feature/call/impl/CallScreen.kt
+    updated_at: '2026-11-17'
+
+  - id: in-call-on-device-captions
+    status: unknown
+    claim: Each foreground app can transcribe its published microphone PCM on device and share interim and final captions with its authenticated LiveKit call peer in the existing screening UI.
+    reason: No test, device capture, model download, server join or two-device check was executed. Android 13+ and a Korean on-device recognizer supporting injected PCM are required; API availability alone does not establish support.
+    verification: Removed standalone speech navigation. Added local RTC audio sinks, nonblocking PCM input, peer-addressed reliable caption packets with participant/call/revision checks, repository-owned transcript state, microphone stop/finalization and foreground/auth lifecycle cleanup. Runtime behavior and device recognition quality remain unverified. Build/static verification only; no backend HTTP contract was changed.
+    source: core/rtc/src/main/kotlin/com/ssafy/vomi/core/rtc/LiveKitRtcClient.kt; core/speech/src/main/kotlin/com/ssafy/vomi/core/speech/AndroidOnDeviceSpeechClient.kt; core/data/src/main/kotlin/com/ssafy/vomi/core/data/repository/SpeechRepositoryImpl.kt; feature/call/impl/src/main/kotlin/com/ssafy/vomi/feature/call/impl/CallScreen.kt
+    updated_at: '2026-11-17'
+
+  - id: in-call-gemini-nano-recommendations
+    status: unknown
+    claim: A supported foreground device can use Gemini Nano through AICore to stream complete reply candidates for the latest remote call caption into inline recommendation cards below the source conversation turn.
+    reason: No device model check, model download, inference, live call or tests were executed. Dependency resolution and compilation do not establish device compatibility, candidate quality or latency.
+    verification: Added an isolated core:ai ML Kit Prompt adapter, existing-DataModule repository binding, bounded speaker-labelled context, streaming JSON preview parsing with stable candidate IDs/slots and completion guards, Result-based call UI state, foreground ownership, stale-result guards and model readiness/download/error controls. Inline cards reveal graphemes progressively and accept only fully displayed completed candidates. Device gestures and visual pacing remain unverified. No backend endpoint or HTTP contract changed. At that verification point text-to-audio sending was still gated; the later server-tts-call-streaming entry records the subsequent implementation and its unverified runtime scope.
+    source: core/ai/src/main/kotlin/com/ssafy/vomi/core/ai/GeminiNanoReplyRecommendationClient.kt; core/data/src/main/kotlin/com/ssafy/vomi/core/data/repository/ReplySuggestionRepositoryImpl.kt; feature/call/impl/src/main/kotlin/com/ssafy/vomi/feature/call/impl/CallViewModel.kt
+    updated_at: '2026-11-17'
+
+  - id: server-tts-call-streaming
+    status: unknown
+    claim: Foreground connected devices can send user-selected or typed text, synthesize it through the existing HTTP PCM endpoint and stream the resulting speech to the call peer for playback.
+    reason: Server source and the Android handoff define the contract, but no HTTP TTS request, simulation, test, device call or playback was executed for this change. Compilation does not establish runtime audio delivery or cancellation behavior.
+    verification: Read develop-backend commit 1305e36d handoff and voice controller. Added peer-addressed text and PCM LiveKit streams, body-close-on-cancel handling, sequential 50-grapheme HTTP requests inside one message audio stream, PCM16 playback, shared STT/text transcript, explicit delivery states and manual retry. Removed the constant false TTS UI gate and local fake-send mutations. Existing mocks and prior evidence were preserved. SDK code and app compilation plus static source inspection are the available checks; runtime support, voice readiness and two-device audio remain unresolved.
+    source: docs/kick-android-api.md; core/data/src/main/kotlin/com/ssafy/vomi/core/data/repository/CallRepositoryImpl.kt; core/data/src/main/kotlin/com/ssafy/vomi/core/data/call/ServerSpeechStream.kt; core/rtc/src/main/kotlin/com/ssafy/vomi/core/rtc/RtcTextStreams.kt; core/rtc/src/main/kotlin/com/ssafy/vomi/core/rtc/PcmSpeechPlayer.kt
+    updated_at: '2026-11-17'
+
+  - id: tts-playback-progress
+    status: unknown
+    claim: Incoming typed messages reveal text with estimated playback progress, and outgoing typed messages dim their unspoken suffix using peer playback acknowledgements.
+    reason: No device, HTTP TTS request, test, simulation or audio playback was executed. The raw PCM endpoint has no character timestamps; glyph positions are interpolated within buffered synthesis segments, not phoneme-aligned.
+    verification: Added known-length PCM segments with unchanged raw audio payload, AudioTrack playback-head progress, versioned peer-validated reliable acknowledgements, retry ownership and interruption handling. UI distinguishes transmission from playback completion. First audio latency can increase because each existing synthesis segment is buffered before publishing. Both peers need the updated protocol for two-sided progress. Compilation and static review do not establish runtime synchronization.
+    source: core/rtc/src/main/kotlin/com/ssafy/vomi/core/rtc/SpeechPlaybackProtocol.kt; core/rtc/src/main/kotlin/com/ssafy/vomi/core/rtc/PcmSpeechPlayer.kt; core/rtc/src/main/kotlin/com/ssafy/vomi/core/rtc/RtcTextStreams.kt; feature/call/impl/src/main/kotlin/com/ssafy/vomi/feature/call/impl/component/CallMessageText.kt
+    updated_at: '2026-11-17'
+
+fingerprints:
+  - id: initial-android-handoff
+    date: '2026-11-13'
+    commit: af3ae6c9
+    cli: '1.76.0'
+  - id: service-client-api-split
+    date: '2026-11-13'
+    commit: f367c5de (dirty worktree; implementation in this task)
+    cli: '1.76.0'
+  - id: call-signaling-ui
+    date: '2026-11-14'
+    commit: 37bf3ca9 (dirty worktree; signaling implementation in this task)
+    cli: '1.76.0'
+  - id: datastore-auth-refactor
+    date: '2026-11-14'
+    commit: ab69acb3 (dirty worktree; persistence and ownership refactor)
+    cli: 'not invoked for this refactor'

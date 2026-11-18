@@ -1,0 +1,7 @@
+simulation: kick-android
+routing: path
+mocks:
+  - name: kick
+    routeKey: kick
+    origin: 3.37.162.168
+    path: postman/mocks/kick
