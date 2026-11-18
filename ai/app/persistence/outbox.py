@@ -1,0 +1,201 @@
+"""아웃박스(SQLite, call-lifecycle.md §7): 통화 결과·인사이트를 전송 전에 영속하고 재시작에도 같은 키·같은 본문으로 다시 보낸다.
+
+- call_results: 통화당 1행. Idempotency-Key(UUID)와 본문은 처음 만든 뒤 바꾸지 않는다(spec/ai-integration-current.md §3).
+  status: PENDING(전송 전·중) · SENT_UNCERTAIN(응답 불확실, 재시작 때 같은 키로 재확인) · DONE(응답 받음) · FAILED(재시도 안 함)
+- insights: 통화당 1행. 이벤트(eventId 고정)·분석·미답변 본문과 진행 상태. 같은 eventId 재전송은 BE가 204로 받는다.
+신규 의존성 없음(표준 sqlite3). 호출은 짧은 쓰기라 asyncio.to_thread로 이벤트 루프를 막지 않는다.
+"""
+
+import json
+import sqlite3
+import threading
+import time
+from pathlib import Path
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS call_results(
+  session_id TEXT PRIMARY KEY, idempotency_key TEXT NOT NULL, body_json TEXT NOT NULL,
+  status TEXT NOT NULL, last_data_json TEXT, attempts INTEGER NOT NULL DEFAULT 0, updated_at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS intake_steps(
+  id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, call_seq INTEGER NOT NULL,
+  parcel_id TEXT, action TEXT NOT NULL, payload TEXT NOT NULL, request TEXT, result TEXT);
+CREATE INDEX IF NOT EXISTS intake_steps_session ON intake_steps(session_id, id);
+CREATE TABLE IF NOT EXISTS insights(
+  session_id TEXT PRIMARY KEY, call_session_seq INTEGER NOT NULL, payload_json TEXT NOT NULL,
+  status TEXT NOT NULL, progress_json TEXT NOT NULL DEFAULT '{}', updated_at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS review_jobs(
+  session_id TEXT PRIMARY KEY, call_session_seq INTEGER NOT NULL, input_json TEXT NOT NULL,
+  status TEXT NOT NULL, result_json TEXT, prepared_json TEXT, error TEXT,
+  attempts INTEGER NOT NULL DEFAULT 0, updated_at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS review_attempts(
+  attempt_id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, attempt_number INTEGER NOT NULL,
+  result_json TEXT, error TEXT, created_at REAL NOT NULL);
+"""
+
+
+class Outbox:
+    def __init__(self, path: Path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self.db = sqlite3.connect(path, check_same_thread=False, isolation_level=None)
+        self.db.execute("PRAGMA journal_mode=WAL")
+        self.db.executescript(SCHEMA)
+        self.lock = threading.Lock()
+
+    def close(self) -> None:
+        self.db.close()
+
+    # --- 통화 결과 ---
+    def result(self, session_id: str) -> dict | None:
+        with self.lock:
+            row = self.db.execute("SELECT idempotency_key, body_json, status, last_data_json, attempts, updated_at "
+                                  "FROM call_results WHERE session_id=?", (session_id,)).fetchone()
+        if not row:
+            return None
+        return {"session_id": session_id, "key": row[0], "body": json.loads(row[1]), "status": row[2],
+                "data": json.loads(row[3]) if row[3] else None, "attempts": row[4], "updated_at": row[5]}
+
+    def create_result(self, session_id: str, key: str, body: dict) -> dict:
+        """처음이면 저장(전송 전에 커밋), 이미 있으면 기존 행(키·본문 불변)."""
+        with self.lock:
+            self.db.execute("INSERT OR IGNORE INTO call_results(session_id, idempotency_key, body_json, status, updated_at) "
+                            "VALUES(?,?,?,?,?)", (session_id, key, json.dumps(body, ensure_ascii=False), "PENDING",
+                                                  time.time()))
+        return self.result(session_id)
+
+    def update_result(self, session_id: str, status: str, data: dict | None = None) -> None:
+        with self.lock:
+            self.db.execute("UPDATE call_results SET status=?, last_data_json=COALESCE(?, last_data_json), "
+                            "attempts=attempts+1, updated_at=? WHERE session_id=?",
+                            (status, json.dumps(data, ensure_ascii=False) if data is not None else None, time.time(),
+                             session_id))
+
+    def unfinished_results(self) -> list[dict]:
+        with self.lock:
+            ids = [r[0] for r in self.db.execute(
+                "SELECT session_id FROM call_results WHERE status IN ('PENDING','SENT_UNCERTAIN')")]
+        return [self.result(i) for i in ids]
+
+    def add_intake_step(self, session_id: str, call_seq: int, parcel_id: str | None, action: str, payload: dict) -> int:
+        with self.lock:
+            body = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+            last = self.db.execute("SELECT id,action,payload FROM intake_steps WHERE session_id=? AND parcel_id IS ? "
+                                   "ORDER BY id DESC LIMIT 1", (session_id, parcel_id)).fetchone()
+            if last and last[1:] == (action, body):
+                return last[0]
+            return self.db.execute("INSERT INTO intake_steps(session_id,call_seq,parcel_id,action,payload) VALUES(?,?,?,?,?)",
+                                   (session_id, call_seq, parcel_id, action, body)).lastrowid
+
+    def intake_steps(self, session_id: str) -> list[dict]:
+        with self.lock:
+            rows = self.db.execute("SELECT id,call_seq,parcel_id,action,payload,request,result FROM intake_steps "
+                                   "WHERE session_id=? ORDER BY id", (session_id,)).fetchall()
+        return [{"id": i, "call_seq": seq, "parcel_id": pid, "action": action, "payload": json.loads(payload),
+                 "request": json.loads(request) if request else None, "result": json.loads(result) if result else None}
+                for i, seq, pid, action, payload, request, result in rows]
+
+    def intake_request(self, step: int, body: dict) -> None:
+        with self.lock:
+            self.db.execute("UPDATE intake_steps SET request=? WHERE id=? AND request IS NULL",
+                            (json.dumps(body, ensure_ascii=False), step))
+
+    def intake_result(self, step: int, result: dict) -> None:
+        with self.lock:
+            self.db.execute("UPDATE intake_steps SET result=? WHERE id=?", (json.dumps(result, ensure_ascii=False), step))
+
+    def unfinished_intakes(self) -> list[str]:
+        with self.lock:
+            return [row[0] for row in self.db.execute("SELECT DISTINCT session_id FROM intake_steps WHERE result IS NULL")]
+
+    def has_pending_drafts(self, session_id: str) -> bool:
+        with self.lock:
+            return self.db.execute("SELECT 1 FROM intake_steps WHERE session_id=? AND action!='COMPLETE' "
+                                   "AND result IS NULL LIMIT 1", (session_id,)).fetchone() is not None
+
+    # --- 인사이트 ---
+    def insight(self, session_id: str) -> dict | None:
+        with self.lock:
+            row = self.db.execute("SELECT call_session_seq, payload_json, status, progress_json FROM insights "
+                                  "WHERE session_id=?", (session_id,)).fetchone()
+        if not row:
+            return None
+        return {"session_id": session_id, "call_session_seq": row[0], "payload": json.loads(row[1]),
+                "status": row[2], "progress": json.loads(row[3])}
+
+    def create_insight(self, session_id: str, call_session_seq: int, payload: dict) -> dict:
+        with self.lock:
+            self.db.execute("INSERT OR IGNORE INTO insights(session_id, call_session_seq, payload_json, status, updated_at) "
+                            "VALUES(?,?,?,?,?)", (session_id, call_session_seq,
+                                                  json.dumps(payload, ensure_ascii=False), "PENDING", time.time()))
+        return self.insight(session_id)
+
+    def update_insight(self, session_id: str, status: str, progress: dict) -> None:
+        with self.lock:
+            self.db.execute("UPDATE insights SET status=?, progress_json=?, updated_at=? WHERE session_id=?",
+                            (status, json.dumps(progress, ensure_ascii=False), time.time(), session_id))
+
+    def unfinished_insights(self) -> list[dict]:
+        with self.lock:
+            ids = [r[0] for r in self.db.execute("SELECT session_id FROM insights WHERE status='PENDING'")]
+        return [self.insight(i) for i in ids]
+
+    # --- 통화 종료 후 미답변 검토: 원본 입력·확정 판정은 재시작에도 유지 ---
+    def review(self, session_id: str) -> dict | None:
+        with self.lock:
+            row = self.db.execute(
+                "SELECT call_session_seq,input_json,status,result_json,prepared_json,error,attempts "
+                "FROM review_jobs WHERE session_id=?", (session_id,)).fetchone()
+        if not row:
+            return None
+        return {"session_id": session_id, "call_session_seq": row[0], "input": json.loads(row[1]),
+                "status": row[2], "result": json.loads(row[3]) if row[3] else None,
+                "prepared": json.loads(row[4]) if row[4] else None, "error": row[5], "attempts": row[6]}
+
+    def create_review(self, session_id: str, seq: int, data: dict) -> dict:
+        with self.lock:
+            self.db.execute("INSERT OR IGNORE INTO review_jobs "
+                            "(session_id,call_session_seq,input_json,status,updated_at) VALUES(?,?,?,?,?)",
+                            (session_id, seq, json.dumps(data, ensure_ascii=False), "PENDING", time.time()))
+        return self.review(session_id)
+
+    def begin_review(self, session_id: str) -> None:
+        with self.lock:
+            self.db.execute("UPDATE review_jobs SET attempts=attempts+1,updated_at=? "
+                            "WHERE session_id=? AND status='PENDING'", (time.time(), session_id))
+
+    def complete_review(self, session_id: str, result: dict, prepared: dict) -> None:
+        """판정과 전송 예정 본문을 원자적으로 고정한다. READY 이후 재판정 금지."""
+        with self.lock:
+            self.db.execute("UPDATE review_jobs SET result_json=?,prepared_json=?,status='READY',error=NULL,updated_at=? "
+                            "WHERE session_id=? AND status='PENDING'",
+                            (json.dumps(result, ensure_ascii=False), json.dumps(prepared, ensure_ascii=False),
+                             time.time(), session_id))
+
+    def update_review(self, session_id: str, status: str, error: str | None = None) -> None:
+        with self.lock:
+            self.db.execute("UPDATE review_jobs SET status=?,error=?,updated_at=? WHERE session_id=?",
+                            (status, error, time.time(), session_id))
+
+    def unfinished_reviews(self) -> list[dict]:
+        with self.lock:
+            ids = [r[0] for r in self.db.execute("SELECT session_id FROM review_jobs WHERE status IN ('PENDING','READY')")]
+        return [self.review(i) for i in ids]
+
+    def fail_review(self, session_id: str, error: str, prepared: dict) -> None:
+        """판정 실패를 유지하며 검증되지 않은 값을 제외한 최종 전송 본문만 한 번 고정."""
+        with self.lock:
+            self.db.execute("UPDATE review_jobs SET status='FAILED',error=?,prepared_json=COALESCE(prepared_json,?), "
+                            "updated_at=? WHERE session_id=? AND status='PENDING'",
+                            (error, json.dumps(prepared, ensure_ascii=False), time.time(), session_id))
+
+    def record_review_attempt(self, session_id: str, number: int, result: dict | None, error: str | None) -> None:
+        """판정 원문·세부 오류는 일반 로그가 아니라 기존 보호된 Outbox 안에 보관한다."""
+        with self.lock:
+            self.db.execute("INSERT INTO review_attempts(session_id,attempt_number,result_json,error,created_at) "
+                            "VALUES(?,?,?,?,?)", (session_id, number,
+                             json.dumps(result, ensure_ascii=False) if result is not None else None, error, time.time()))
+
+    def review_attempts(self, session_id: str) -> list[dict]:
+        with self.lock:
+            rows = self.db.execute("SELECT attempt_number,result_json,error FROM review_attempts "
+                                   "WHERE session_id=? ORDER BY attempt_id", (session_id,)).fetchall()
+        return [{"attempt": r[0], "result": json.loads(r[1]) if r[1] else None, "error": r[2]} for r in rows]

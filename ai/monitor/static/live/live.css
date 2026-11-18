@@ -1,0 +1,72 @@
+:root {
+  --page: #f5f5f5;
+  --bubble: #fff;
+  --text: #111;
+  --character-h: 62vh;
+  --tail-room: 9vh; /* 말풍선 아래 꼬리 점 자리 */
+  /* 말풍선이 쓸 수 있는 최대 높이: 화면에서 캐릭터와 꼬리 자리를 뺀 나머지 */
+  --bubble-max: calc(100vh - var(--character-h) - var(--tail-room) - 1vh);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  height: 100vh;
+  overflow: hidden;
+  /* 이미지 위쪽이 투명이라 그 자리는 --page 색이 보인다.
+     원본 너비(1920px)보다 창이 좁으면 줄이지 않고 가운데 기준으로 양옆을 자른다 */
+  background: var(--page) url("/monitor/live/background.png") bottom center / max(100%, 1920px) auto no-repeat;
+  color: var(--text);
+  font: clamp(14px, 2.2vh, 24px)/1.5 system-ui, sans-serif; /* 1080px 높이에서 24px */
+}
+
+.stage {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end; /* 캐릭터를 화면 아래에 붙인다 */
+}
+
+.bubble {
+  position: relative;
+  width: min(840px, 90vw);
+  /* min-height가 max-height보다 우선하므로, 최소 높이도 최대 높이를 넘지 않게 해야 화면 위로 튀어나가지 않는다 */
+  min-height: min(320px, var(--bubble-max));
+  max-height: var(--bubble-max);
+  margin-bottom: var(--tail-room);
+  padding: clamp(12px, 3.7vh, 40px) clamp(20px, 5.2vh, 56px);
+  border-radius: clamp(20px, 5.2vh, 56px);
+  background: var(--bubble);
+  display: flex;
+  flex-direction: column;
+  justify-content: center; /* 글이 짧아도 말풍선 가운데에 */
+  text-align: center;
+}
+
+.bubble[hidden] { display: none; }
+
+/* 스크롤은 말풍선이 아니라 목록에: 말풍선에 overflow를 걸면 바깥의 꼬리 점이 잘린다 */
+.bubble ul { margin: 0; padding: 0; list-style: none; min-height: 0; overflow: auto; font-size: 1.35em; font-weight: 700; }
+.bubble li + li { margin-top: 0.4em; }
+
+/* 생각 꼬리: 큰 점(span)이 말풍선 아래에 반쯤 걸치고 → 작은 점(::before), 캐릭터 머리 쪽으로 */
+.tail,
+.tail::before {
+  position: absolute;
+  border-radius: 50%;
+  background: var(--bubble);
+}
+
+/* 1080px 높이에서 큰 점 80px · 작은 점 40px이 되도록 vh로 */
+.tail { left: 20%; bottom: -4vh; width: 7.4vh; height: 7.4vh; }
+.tail::before { content: ""; left: 7.4vh; top: 7.9vh; width: 3.7vh; height: 3.7vh; }
+
+.character {
+  height: var(--character-h);
+  width: auto;
+  max-width: 90vw;
+  object-fit: contain;
+  object-position: bottom; /* 프레임 크기가 달라도 발밑을 맞춘다 */
+}

@@ -1,0 +1,18 @@
+[Unit]
+Description=디버 Qwen GPU 리랭커
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/dvr-reranker/runtime.conf
+
+[Service]
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=180
+TimeoutStopSec=30
+ExecStartPre=-/usr/bin/docker rm -f dvr-reranker
+ExecStart=/usr/bin/docker run --rm --name dvr-reranker --gpus all --init --shm-size=1g --cap-drop=ALL --security-opt=no-new-privileges --read-only --tmpfs /tmp:rw,noexec,nosuid,size=256m --publish 127.0.0.1:8001:8001 --env-file /etc/dvr-reranker/runtime.conf --volume /opt/dvr-reranker/models:/models:ro dvr-reranker:local
+ExecStop=/usr/bin/docker stop --time 20 dvr-reranker
+
+[Install]
+WantedBy=multi-user.target

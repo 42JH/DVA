@@ -1,0 +1,5 @@
+# torch는 Docker 베이스 이미지의 2.7.1+cu128을 재사용한다.
+transformers==4.52.4
+fastapi==0.151.0
+uvicorn==0.54.0
+huggingface-hub==0.36.0

@@ -1,0 +1,15 @@
+{
+  "data": {
+    "orderSeq": 123,
+    "version": 4,
+    "status": "ACCEPTED",
+    "callSessionSeq": 7,
+    "parcelNo": "TEST0057",
+    "totalAmount": 3500,
+    "paymentDueAt": null,
+    "paymentRequest": null
+  },
+  "meta": {
+    "requestId": "요청 추적 UUID"
+  }
+}

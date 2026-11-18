@@ -1,0 +1,16 @@
+# 개발 PC 전용(원본 ai/compose.qdrant-dashboard.yaml): Qdrant 대시보드·API를 로컬(127.0.0.1)에서만 연다. 운영 서버에서는 쓰지 않는다.
+#   docker compose -f compose.yaml -f compose.qdrant-dashboard.yaml up -d
+#   → http://127.0.0.1:6333/dashboard (API 키 = .env의 QDRANT_API_KEY)
+# 호스트에서 색인 스크립트(scripts/index_markdown.py, 원본 RAG)를 돌릴 때도 이 포트를 쓴다(QDRANT_URL=http://127.0.0.1:6333).
+# rag_net은 internal이라 포트를 낼 수 없어서, 포트용 네트워크를 하나 더 붙인다.
+services:
+  qdrant:
+    ports:
+      - "127.0.0.1:6333:6333"
+    networks:
+      - rag_net
+      - qdrant_dev
+
+networks:
+  qdrant_dev:
+    driver: bridge
