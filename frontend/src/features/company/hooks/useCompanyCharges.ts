@@ -1,4 +1,4 @@
-// 08 기업 상세의 달 · 청구액 카드 · 청구 내역 탭 (11/11 재설계). 기업은 월결제 고정
+// 08 기업 상세의 달 · 청구액 카드 · 청구 내역 탭. 기업은 월결제 고정
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { addMonths, todayYmd } from '@/shared/lib/dateRange'
 import { companyQueries } from '@/features/company/api/companyApi'

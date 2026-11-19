@@ -68,7 +68,7 @@ export function useAdminList(size = PAGE_SIZE) {
   const qc = useQueryClient()
   const [confirming, setConfirming] = useState<Confirming>(null)
 
-  // 검색 (이름 · 아이디, 지금 탭 안에서) — 서버 q (11/08). 칠 때마다 묻지 않게 잠깐 기다림
+  // 검색 (이름 · 아이디, 지금 탭 안에서) — 서버 q. 칠 때마다 묻지 않게 잠깐 기다림
   const q = useDebounced(params.q.trim().normalize('NFC').slice(0, 100))
   const list = useQuery(
     adminQueries.list({ status: tab, limit: size, offset: (page - 1) * size, q: q || undefined }),
@@ -95,7 +95,7 @@ export function useAdminList(size = PAGE_SIZE) {
     onError: () => setConfirming(null), // 창을 닫고 표 위 한 줄로 오류
   })
 
-  // 본인 줄은 안 보임 (11/02 사용자 — 본인에게 할 수 있는 일이 없음, 내 정보는 11 화면)
+  // 본인 줄은 안 보임 (본인에게 할 수 있는 일이 없음, 내 정보는 11 화면)
   // shortcut: 서버에 '나 빼고' 조건이 없어 받은 쪽에서 거름 → 내가 있는 쪽만 한 줄 적게 보임. 서버가 제외 조건을 주면 그걸로
   const rows: AdminRow[] = (list.data?.data ?? [])
     .filter((a) => a.adminUserSeq !== me?.adminUserSeq)
@@ -128,7 +128,7 @@ export function useAdminList(size = PAGE_SIZE) {
     rows,
     isLoading: list.isPending,
     loadError: list.error?.message ?? null,
-    // 활성화 탭 = 나를 뺀 수 (탭 숫자와 같게). 검색 결과에 내가 없으면 빼지 않음 (11/09 검수: 2명인데 '1명'으로)
+    // 활성화 탭 = 나를 뺀 수 (탭 숫자와 같게). 검색 결과에 내가 없으면 빼지 않음 (2명인데 '1명'으로)
     total:
       !q ||
       [me?.name, me?.loginId].some((s) =>

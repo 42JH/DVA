@@ -125,7 +125,7 @@ export const dashboardQueries = {
         ).data,
       placeholderData: keepPreviousData, // 탭을 바꾸는 동안 이전 탭 카드가 흐리게 남음 (깜빡임 없게)
     }),
-  /** 판정에 불만 · 오류가 있는 통화 전부 — 서버 통계는 AI 응대 오류와 AI 응대 불만을 합친 비율 하나라서(11/11),
+  /** 판정에 불만 · 오류가 있는 통화 전부 — 서버 통계는 AI 응대 오류와 AI 응대 불만을 합친 비율 하나라서,
    *  고객 불만(대상별) · AI 응대 오류를 따로 세려고 목록을 받아 화면에서 셈. 통계 API처럼 기간 없이 전체
    *  ponytail: 최대 2,000통화(FETCH_ALL_MAX) — 넘으면 카드에 '최근 2,000통화 기준'. 서버가 두 집계를 주면 이걸 지움 */
   complainedCalls: () =>

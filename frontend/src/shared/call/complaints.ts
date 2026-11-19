@@ -1,5 +1,5 @@
 // 통화 판정 결과 나누기 (Jira 148, 11/11 백엔드 !476): 고객 불만 · AI 응대 오류만 보임
-// 최신 판정본 기준만 (11/11 사용자: 과거 판정은 무시) — 대상(target) 없는 고객 불만 · 옛 유형(되묻기 반복 등) · 근거 없는 답변은 화면에서 뺌(서버 저장은 그대로)
+// 최신 판정본 기준만 (과거 판정은 무시) — 대상(target) 없는 고객 불만 · 옛 유형(되묻기 반복 등) · 근거 없는 답변은 화면에서 뺌(서버 저장은 그대로)
 // 통화 목록 · 상세, 통계, 홈이 같은 기준으로 씀
 import type { ComplaintLevel, ComplaintTarget, ComplaintType } from './callDto'
 
@@ -15,7 +15,7 @@ export const AI_ERROR_TYPES = [
 export const TARGETS = ['ai_service', 'price_policy', 'delivery_other'] as const
 export const TARGET_LABEL: Record<ComplaintTarget, string> = {
   ai_service: 'AI 상담가 불만', // 11/11: 'AI 응대'가 AI 응대 오류로 읽혀서 끝에 '불만'을 붙임
-  price_policy: '정책 불만', // 규칙 · 요금 · 업무 범위 자체가 불만 (11/11: '요금 정책'은 요금만으로 읽혀 조회 범위 · 금지 물품 거절 등이 어색)
+  price_policy: '정책 불만', // 규칙 · 요금 · 업무 범위 자체가 불만 ('요금 정책'은 요금만으로 읽혀 조회 범위 · 금지 물품 거절 등이 어색)
   delivery_other: '배송 불만',
 }
 export const LEVEL_TEXT: Record<ComplaintLevel, string> = {

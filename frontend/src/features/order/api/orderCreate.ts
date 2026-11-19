@@ -1,5 +1,5 @@
 // 03 주문 추가(수기 접수) — 창 입력 → POST /admin/orders 본문 (연동 상세명세 4.4). React · 네트워크를 모르는 순수 함수
-// 수기 접수 = 주문자 1 + 받는 분 1 → 배송 상세 하나, 총액 = 그 배송비 (11/01 결정). 주문자 = 보내는 분
+// 수기 접수 = 주문자 1 + 받는 분 1 → 배송 상세 하나, 총액 = 그 배송비. 주문자 = 보내는 분
 import type { PaymentMethodDto } from '@/shared/order/orderDto'
 import type { OrderInput, PartyInput } from './orderInput'
 

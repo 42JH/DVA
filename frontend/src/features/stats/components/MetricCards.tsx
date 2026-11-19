@@ -217,18 +217,18 @@ export function RegistrationCard({ c }: { c: CardState<RegistrationView> }) {
 }
 
 /** 불편 유형 범례 줄 칸: 이름 | 통화 수 58 | 구성비 65
- *  좁은 창(1280 미만)에선 통화 수 칸을 빼고 이름을 넓힘 — 이름이 '정보 …'로 잘려 무슨 유형인지 몰라서 (11/05 반응형. 수는 표 위 '불편 139'와 구성비로) */
+ *  좁은 창(1280 미만)에선 통화 수 칸을 빼고 이름을 넓힘 — 이름이 '정보 …'로 잘려 무슨 유형인지 몰라서 (반응형. 수는 표 위 '불편 139'와 구성비로) */
 const LEGEND =
   'grid grid-cols-[minmax(0,1fr)_65px] xl:grid-cols-[minmax(0,1fr)_58px_65px] items-center gap-2 px-[9px]'
 const COUNT = 'hidden text-right xl:block'
 
-/** §4 [AI 응대 오류 | 고객 불만] 탭 (11/11) — 두 탭 값을 한 번에 받아 그려서 탭을 넘겨도 기다림 없음. 메인은 늘 전체 고객 */
+/** §4 [AI 응대 오류 | 고객 불만] 탭 — 두 탭 값을 한 번에 받아 그려서 탭을 넘겨도 기다림 없음. 메인은 늘 전체 고객 */
 export function ComplaintCard({ c }: { c: CardState<ComplaintView> }) {
   const [tab, setTab] = useState('ai')
   return (
     <Card
       title={
-        // 흰 카드 위라 회색 바탕을 깔아 고른 탭(흰 칸)이 보이게 (11/11 사용자: 가시성)
+        // 흰 카드 위라 회색 바탕을 깔아 고른 탭(흰 칸)이 보이게 (가시성)
         <div className="rounded-lg bg-ops-idle-soft p-0.5">
           <Segments
             label="AI 응대 품질"
@@ -257,7 +257,7 @@ export function ComplaintCard({ c }: { c: CardState<ComplaintView> }) {
                 {/* 탭마다 새로 그려 한 바퀴 채우기를 다시 (가림막 하나라 그대로 두면 처음 한 번만 돎) */}
                 <Donut key={tab} slices={v.slices} total={v.total} />
               </div>
-              {/* 범례 머리 줄 · 아래 설명은 뺌 (11/11 사용자: 설명이 너무 많음) */}
+              {/* 범례 머리 줄 · 아래 설명은 뺌 (설명이 너무 많음) */}
               <div className="flex min-h-0 [scrollbar-width:thin] flex-col justify-center overflow-y-auto">
                 {v.slices.map((s) => (
                   <div

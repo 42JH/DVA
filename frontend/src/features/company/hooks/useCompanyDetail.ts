@@ -34,7 +34,7 @@ type Modal =
   | { kind: 'deleteDept'; dept: Department }
   | null
 
-/** 08 기업 상세 훅 (11/11 재설계) — 청구액(달) · 부서 · 사원 탭 · 청구 내역 탭 · 창 */
+/** 08 기업 상세 훅 — 청구액(달) · 부서 · 사원 탭 · 청구 내역 탭 · 창 */
 export function useCompanyDetail(id: number, size = PAGE_SIZE) {
   const list = useListParams(COMPANY_PARAMS)
   const { params, page, set } = list

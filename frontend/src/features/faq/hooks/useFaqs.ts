@@ -48,7 +48,7 @@ export function useFaqs() {
 /** 펼친 FAQ의 최근 고객 질문 사례 (최대 10, 최신순) — 누르면 그 통화. enabled=false면 요청 안 함 */
 export function useExamples(id: number, enabled = true) {
   const q = useQuery({ ...faqQueries.detail(id), enabled })
-  // 최근 5개만 (11/09 사용자) — 서버 순서에 기대지 않고 최근 것부터
+  // 최근 5개만 — 서버 순서에 기대지 않고 최근 것부터
   return [...(q.data?.recentQuestions ?? [])]
     .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt))
     .slice(0, 5)

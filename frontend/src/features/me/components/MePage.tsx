@@ -1,4 +1,4 @@
-// 내 정보 (11/06) — 계정(아이디 · 이름 · 권한)과 비밀번호 변경. 규칙 · 저장은 기존 usePasswordChange 그대로
+// 내 정보 — 계정(아이디 · 이름 · 권한)과 비밀번호 변경. 규칙 · 저장은 기존 usePasswordChange 그대로
 // 11/09: 가운데 좁은 기둥 → 화면 폭을 채우는 카드 두 장 (1280 이상 나란히, 아래는 위아래). 로그아웃은 사이드바 아래 버튼으로만
 import type { ReactNode } from 'react'
 import { useSession } from '@/shared/auth/useSession'

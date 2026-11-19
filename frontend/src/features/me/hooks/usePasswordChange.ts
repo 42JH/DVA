@@ -10,7 +10,7 @@ const MIN_PASSWORD = 6 // 명세 API-05: 새 비밀번호 최소 6자 (회원가
 const EMPTY: PasswordChangeBody = { currentPassword: '', newPassword: '', newPasswordConfirm: '' }
 
 /** 11 내 정보 — 비밀번호 변경 훅. 입력 3칸 · 칸별 오류 · 확인 창 · 제출
- * 성공하면 서버가 내 모든 세션을 끊으므로(204) 로그인 표시 · 캐시를 지우고 바로 로그인 화면 (11/01 결정: 저장 전 확인 창으로 미리 알림) */
+ * 성공하면 서버가 내 모든 세션을 끊으므로(204) 로그인 표시 · 캐시를 지우고 바로 로그인 화면 (저장 전 확인 창으로 미리 알림) */
 export function usePasswordChange() {
   const [form, setForm] = useState(EMPTY)
   const [confirming, setConfirming] = useState(false) // '다시 로그인해야 합니다' 확인 창

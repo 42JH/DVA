@@ -1,4 +1,4 @@
-// 주문 상세 — 03 주문 내역(팀원) · 06 통화 상세 '주문 보기'가 같이 씀 (10/30 공통으로 올림, shared/auth와 같은 예외)
+// 주문 상세 — 03 주문 내역(팀원) · 06 통화 상세 '주문 보기'가 같이 씀 (공통으로 올림, shared/auth와 같은 예외)
 // GET /orders/{id} (연동 상세명세 10/31 §4.2) → orderDto.toOrderDetail, 관련 통화는 GET /calls?orderSeq (§2 03_주문상세_전화)
 // api 역할: React를 모른다. 화면용 값은 useOrderDetail.ts
 import { queryOptions } from '@tanstack/react-query'

@@ -14,7 +14,7 @@ import {
 import { faqResultText, groupActions } from '@/shared/call/actionText'
 import { isCustomerComplaint, splitComplaints, TARGET_LABEL } from '@/shared/call/complaints'
 
-/** 스크립트 한 줄 (말만 — AI 동작은 오른쪽 처리 내용으로, 10/30). onClick = 이 말부터 듣기 (11/01, 시각을 모르면 없음) */
+/** 스크립트 한 줄 (말만 — AI 동작은 오른쪽 처리 내용으로, 10/30). onClick = 이 말부터 듣기 (시각을 모르면 없음) */
 interface ScriptLine {
   key: number // 발화 순번 (= 서버 order)
   atSec: number | null
@@ -22,7 +22,7 @@ interface ScriptLine {
   who: 'AI' | '고객'
   text: string
   onClick?: () => void
-  complaint?: string // 고객 불만인 고객 말 — 그 문장만 칠하고 아래에 대상 (11/11)
+  complaint?: string // 고객 불만인 고객 말 — 그 문장만 칠하고 아래에 대상
 }
 /** 연속 구간: AI 응대 오류면 주황 줄로 묶음 */
 interface ScriptSegment {
@@ -39,7 +39,7 @@ interface ActionView {
   onClick?: () => void
 }
 
-/** 고객 말의 서버 시각(offsetSeconds)은 음성 인식이 끝난 뒤 찍혀서 실제 말보다 늦음 — 빨리 말하면 그 말을 놓침 (11/01 사용자, 실서버 녹취)
+/** 고객 말의 서버 시각(offsetSeconds)은 음성 인식이 끝난 뒤 찍혀서 실제 말보다 늦음 — 빨리 말하면 그 말을 놓침 (, 실서버 녹취)
  *  → 듣기 · 강조는 이만큼 앞에서부터. 앞 말의 시각보다 앞으로는 안 감. AI 말은 TTS 시작 시각이라 그대로 정확
  *  ponytail: 눈대중 2초 — AI팀이 발화 시작 시각을 주면(A9) 0으로 */
 const CUSTOMER_LEAD_SEC = 2
@@ -48,7 +48,7 @@ export function withLead(utterances: Utterance[]): Timed[] {
   return utterances.map((u, i) => {
     if (u.atSec === null || u.speaker !== 'CUSTOMER') return { ...u, labelSec: u.atSec }
     const prev = utterances.slice(0, i).findLast((p) => p.atSec !== null)?.atSec ?? 0
-    // 앞 말 시작까지 당기면 두 줄 시각이 같아져 앞 줄이 하이라이트 · ⏮로 못 감(11/05 실서버 'AI 00:51' · '고객 네 00:52') → 앞 말과의 중간까지만
+    // 앞 말 시작까지 당기면 두 줄 시각이 같아져 앞 줄이 하이라이트 · ⏮로 못 감 (실서버 'AI 00:51' · '고객 네 00:52') → 앞 말과의 중간까지만
     const lead = Math.max(u.atSec - CUSTOMER_LEAD_SEC, (prev + u.atSec) / 2)
     return { ...u, atSec: Math.max(prev, lead), labelSec: u.atSec }
   })
@@ -134,7 +134,7 @@ export const faqResultTimes = (results: CallDetail['results']) =>
     ),
   )
 
-/** 재생 바의 고객 불만(빨강) · AI 응대 오류(주황) 시각 눈금 (11/11). 누르면 그 말로. 길이를 모르면 없음
+/** 재생 바의 고객 불만(빨강) · AI 응대 오류(주황) 시각 눈금. 누르면 그 말로. 길이를 모르면 없음
  *  shift = 녹취가 통화 시작보다 늦게 시작한 만큼(초) */
 export function marksOf(
   complaints: Complaint[],
@@ -159,8 +159,8 @@ export function marksOf(
   })
 }
 
-/** AI 동작 기록 — 짚은 말이 부른 동작은 같이 하이라이트 (11/05 사용자: AI 동작 로그에도 그 부분 하이라이트)
- *  글은 화면 말로 정제(actionText — 실패 코드 · 주문 상태 · '기록: n개 항목'), 연달아 나온 '기록'은 한 줄로 합침 (11/05 사용자) */
+/** AI 동작 기록 — 짚은 말이 부른 동작은 같이 하이라이트 (AI 동작 로그에도 그 부분 하이라이트)
+ *  글은 화면 말로 정제(actionText — 실패 코드 · 주문 상태 · '기록: n개 항목'), 연달아 나온 '기록'은 한 줄로 합침 */
 export function actionViews(
   actions: AiAction[],
   says: Timed[],
@@ -174,7 +174,7 @@ export function actionViews(
     const sec = head.atSec
     const by = (a: (typeof all)[number]) =>
       a.atSec === null ? null : (utteranceForAction(says, a.atSec, a.text)?.order ?? null)
-    // FAQ 검색 = AI 요약 그대로(검색 후보를 찾았다는 뜻 — '답을 찾음' 아님) + 최종 결과 '· 근거 있음 / 근거 부족 / 서버 에러' (11/05 AI팀)
+    // FAQ 검색 = AI 요약 그대로(검색 후보를 찾았다는 뜻 — '답을 찾음' 아님) + 최종 결과 '· 근거 있음 / 근거 부족 / 서버 에러' (AI팀)
     const result = head.kind === 'FAQ_SEARCH' && sec !== null ? x.faqResultAt.get(sec) : undefined
     return {
       key: head.order,

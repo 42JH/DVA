@@ -1,6 +1,6 @@
-// 수기 주문 보내는 분 · 받는 분 추천 (11/09 사용자)
+// 수기 주문 보내는 분 · 받는 분 추천
 // 보내는 분 = 전체 고객(이름 일부 · 번호 4자리 이상 일부), 받는 분 = 그 고객의 개인 주소록(이름 · 번호 일부, 칸을 누르면 바로) + 전체 고객
-// 받는 분은 같은 회사뿐 아니라 다른 기업 사람일 수 있음 (11/11 사용자 — 기업 공유 주소록은 11/01에 없어짐)
+// 받는 분은 같은 회사뿐 아니라 다른 기업 사람일 수 있음 (기업 공유 주소록은 11/01에 없어짐)
 import { useQueries, useQuery } from '@tanstack/react-query'
 import { customerQueries, type Address } from '@/shared/customer/customerApi'
 import { useDebounced } from '@/shared/lib/useDebounced'
@@ -35,7 +35,7 @@ export function useCustomerSuggest(
   // 추천에서 보내는 분을 고르면 번호가 채워지니 같은 길로 연결됨
   const owner =
     byPhone.data?.data.find((c) => c.phoneNumber === sender.phone)?.customerSeq ?? orderCustomerSeq
-  // 빈 칸이면 주소록을 넉넉히 받아 '최근에 보낸 순'으로 정렬한 뒤 앞 10건만 (11/11 사용자 — 저장 순서라 자주 보내는 사람이 묻힘)
+  // 빈 칸이면 주소록을 넉넉히 받아 '최근에 보낸 순'으로 정렬한 뒤 앞 10건만 (저장 순서라 자주 보내는 사람이 묻힘)
   const browse = (t: string) => (t.trim() ? 5 : 100)
   const pinsByName = useQuery({
     ...customerQueries.pins(owner ?? 0, receiverName, browse(receiverName)),

@@ -270,7 +270,7 @@ function ItemStepper({ it, bad = false }: { it: Item; bad?: boolean }) {
         >
           −
         </Step>
-        {/* 숫자를 바로 쳐도 됨 (11/09 사용자) — 0 ~ 최대로 맞춤, ↑ ↓도 한 개씩 */}
+        {/* 숫자를 바로 쳐도 됨 — 0 ~ 최대로 맞춤, ↑ ↓도 한 개씩 */}
         <input
           inputMode="numeric"
           aria-label={`${it.label} 개수`}
@@ -319,7 +319,7 @@ function Pickup({ f }: { f: OrderForm }) {
   )
 }
 
-/** 결제 방식 — 미완료 주문이 아니면 잠김. 고객이 못 쓰는 칩은 꺼짐 · 개인 고객 월결제은 물어보고 추가 (11/10) */
+/** 결제 방식 — 미완료 주문이 아니면 잠김. 고객이 못 쓰는 칩은 꺼짐 · 개인 고객 월결제은 물어보고 추가 */
 function Payment({ f }: { f: OrderForm }) {
   if (f.paymentLocked)
     return <TextInput label="결제 방식" value={f.paymentText} onChange={() => {}} readOnly />
@@ -350,7 +350,7 @@ function Payment({ f }: { f: OrderForm }) {
 
 /** 물품 가액 — 구간 고르기. 고르면 그 구간의 가장 큰 금액이 들어감. 이미 있는 금액(AI 접수)은 그 구간으로 보이고, 안 고치면 그대로 */
 function PriceBand({ f, error }: { f: OrderForm; error?: string }) {
-  // 범위 밖 금액(0 · 1억 초과)은 '구간 선택'으로 — 보이는 구간을 다시 골라도 안 바뀌어 고칠 수 없던 것 (11/09 검수)
+  // 범위 밖 금액(0 · 1억 초과)은 '구간 선택'으로 — 보이는 구간을 다시 골라도 안 바뀌어 고칠 수 없던 것
   const n = Number(f.declaredValue)
   const v = f.priceInRange ? String(priceBand(n).max) : ''
   return (

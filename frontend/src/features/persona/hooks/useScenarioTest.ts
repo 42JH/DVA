@@ -103,7 +103,7 @@ export function useScenarioTestPage(personaSeq: number, version: number) {
 export function useScenarioTest(me: TestTarget, dateOf: (version: number) => string) {
   const d = useTestData()
   const qc = useQueryClient()
-  // 시험은 실제 통화라 요금이 듦 → 누르면 한 번 묻고 시작 (11/12 사용자: 실수로 눌러도 바로 걸리면 안 됨)
+  // 시험은 실제 통화라 요금이 듦 → 누르면 한 번 묻고 시작 (실수로 눌러도 바로 걸리면 안 됨)
   const [asking, setAsking] = useState<{ title: string; scenarios?: string[] } | null>(null)
   const testsKey = scenarioTestQueries.tests().queryKey
   const start = useMutation({

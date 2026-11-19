@@ -17,7 +17,7 @@ import {
 } from '@/shared/order/labels'
 import { itemsText, STATUS_LOOK, won } from '@/shared/order/look'
 
-// [디버에 다시 접수] 응답 상태 → 안내 (11/10). 성공(ACCEPTED)은 뱃지 · 버튼이 바뀌어 안내 없음
+// [디버에 다시 접수] 응답 상태 → 안내. 성공(ACCEPTED)은 뱃지 · 버튼이 바뀌어 안내 없음
 // SUBMITTING = 서버가 결과 저장에 실패 — 디버엔 접수됐을 수 있어 바로 다시 누르지 않게 (order-submission.service finishSubmission)
 const RETRY_NOTICE: Partial<Record<OrderStatus, { text: string; tone: 'stop' | 'wait' }>> = {
   SUBMISSION_FAILED: {

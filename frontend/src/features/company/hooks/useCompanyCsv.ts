@@ -15,7 +15,7 @@ type Picked =
   | { kind: 'ok'; file: File; members: CsvMember[] }
   | { kind: 'bad'; file: File; errors: string[]; more: number }
 
-/** 08 CSV로 기업 등록 훅 (11/11) — 파일 첫 칸이 기업명, 한 파일 = 한 기업(검사는 csvMembers)
+/** 08 CSV로 기업 등록 훅 — 파일 첫 칸이 기업명, 한 파일 = 한 기업(검사는 csvMembers)
  * POST /companies 한 번(기업 · 부서 · 사원이 한 트랜잭션이라 전부 되거나 전부 안 됨)
  * 주소는 아직 등록 API에 칸이 없어 등록 뒤 사원마다 저장(saveMemberAddresses, shortcut) */
 export function useCompanyCsv(onDone: () => void) {

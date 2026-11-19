@@ -66,7 +66,7 @@ export function useCustomers() {
     queryKey: ['screen', 'customers', query, size, page],
     queryFn: ({ signal }) =>
       api.get<ApiList<CustomerDto>>('/customers', {
-        query: { ...query, status: 'ACTIVE', limit: size, offset: (page - 1) * size }, // 탈퇴 고객은 목록에서 뺌 (11/10)
+        query: { ...query, status: 'ACTIVE', limit: size, offset: (page - 1) * size }, // 탈퇴 고객은 목록에서 뺌
         signal,
       }),
     placeholderData: keepPreviousData,

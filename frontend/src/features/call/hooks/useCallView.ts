@@ -49,7 +49,7 @@ export function useCallView(callId: number) {
     persona: call.persona ? `${call.persona.name} v${call.persona.version}` : '',
     kinds: callKinds(call.counts),
     analyzed: call.counts !== null,
-    // 판정: 고객 불만(대상 · 강도 · 고객이 한 말)과 AI 응대 오류로 나눔 (11/11). 시각을 누르면 그 말로
+    // 판정: 고객 불만(대상 · 강도 · 고객이 한 말)과 AI 응대 오류로 나눔. 시각을 누르면 그 말로
     judging: call.counts !== null && call.hasComplaint === null, // 분석 뒤 불만 판정이 아직
     customer: split.customer.map((c) => ({
       label: TARGET_LABEL[c.target],

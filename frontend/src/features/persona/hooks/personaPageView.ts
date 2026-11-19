@@ -14,13 +14,13 @@ interface PersonaItem {
   selected: boolean
   inUse: boolean // '통화에 사용 중' 태그
   applying: string | null // '적용 대기' — 통화에 쓰려고 AI 확인을 기다리는 중
-  canUse: boolean // [통화에 사용하기] — 통화에 안 쓰는 상담가만. 사용 중 상담가의 새 버전은 버전 기록의 [통화에 반영하기] (11/13)
+  canUse: boolean // [통화에 사용하기] — 통화에 안 쓰는 상담가만. 사용 중 상담가의 새 버전은 버전 기록의 [통화에 반영하기]
   deletable: boolean // [삭제] 버튼 — 관리 권한 + 통화에 사용 중도 적용 대기도 아닐 때만
 }
 
 type Badge = { label: string; tone: Tone }
 
-/** 버전 기록 한 줄 (11/11 — Notion 버전 기록처럼 저장 시각 + 수정한 사람) */
+/** 버전 기록 한 줄 (Notion 버전 기록처럼 저장 시각 + 수정한 사람) */
 interface HistoryRow {
   version: number
   time: string // '오늘 오후 3:07'
@@ -92,7 +92,7 @@ const statusBadges = (v: PersonaVersion) => {
   if (v.status === 'PENDING') b.push(VERSION_BADGE.PENDING)
   return b
 }
-/** 수정 기록 창 왼쪽 — 날짜별 목록 (11/13 새 안 5번, 피그마 2368:6500). 남은 초안은 기록이 아님 — 고쳐서 [저장]하면 버전이 됨 */
+/** 수정 기록 창 왼쪽 — 날짜별 목록 (새 안 5번, 피그마 2368:6500). 남은 초안은 기록이 아님 — 고쳐서 [저장]하면 버전이 됨 */
 export function historyRows(
   all: PersonaVersion[],
   x: { head: PersonaVersion | null; picked: PersonaVersion | null; unapplied: boolean },
@@ -152,7 +152,7 @@ export function promptView(
   }
 }
 
-/** 띠 — 반영 전 · 시험 중 · 반영 중 (11/13 새 안 1번). shown = 고친 내용(반영 중이면 그 버전, 아니면 현재 버전) */
+/** 띠 — 반영 전 · 시험 중 · 반영 중 (새 안 1번). shown = 고친 내용(반영 중이면 그 버전, 아니면 현재 버전) */
 export function bandView(
   step: BandStep,
   shown: PersonaVersion | null,

@@ -251,7 +251,7 @@ const thisMonth = () => {
 const summary = (o: Org) => ({
   ...o,
   memberCount: memberCount(o.organizationSeq),
-  // 목록용으로 백엔드에 요청한 칸 (11/11)
+  // 목록용으로 백엔드에 요청한 칸
   departmentCount: depts.filter((d) => d.organizationSeq === o.organizationSeq).length,
   managerNames: active(o.organizationSeq)
     .filter((m) => m.membership.role === 'ORG_ADMIN')
@@ -375,7 +375,7 @@ export const companyHandlers = [
     return created({ organizationSeq: id })
   }),
   // 월 사용액 (API-34, month 'YYYY-MM' · 생략 = 이번 달). 가짜 금액은 기업 번호로 고정
-  // 이 처리가 없으면 목업에서 진짜 서버로 넘어가 401 → 로그아웃돼 기업 상세를 못 봤음 (11/11 QA)
+  // 이 처리가 없으면 목업에서 진짜 서버로 넘어가 401 → 로그아웃돼 기업 상세를 못 봤음 (QA)
   http.get(`${API_BASE_URL}/companies/:id/billing`, ({ params, request }) => {
     const o = orgOf(params.id)
     if (!o) return notFound()

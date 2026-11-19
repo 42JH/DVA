@@ -36,7 +36,7 @@ export function callStateOf(
   all: PersonaVersion[],
   head: PersonaVersion | null,
 ) {
-  // 반영 전 띠 (11/13 새 안 1번) — 사용 중 상담가의 현재 버전이 아직 통화에 안 쓰일 때
+  // 반영 전 띠 (새 안 1번) — 사용 중 상담가의 현재 버전이 아직 통화에 안 쓰일 때
   const unapplied = !!persona && newerThanCall(persona)
   // 토글 '통화에 쓰는 내용' — 그 버전을 못 찾으면(목록 밖) 토글 없음
   const callVersion = unapplied
@@ -66,7 +66,7 @@ export function callStateOf(
   }
 }
 
-/** [수정]은 늘 맨 위에서 시작 — 남은 초안이 있으면 그 내용, 없으면 현재 버전 (11/02 결정). latest = 버전 기록의 맨 위
+/** [수정]은 늘 맨 위에서 시작 — 남은 초안이 있으면 그 내용, 없으면 현재 버전. latest = 버전 기록의 맨 위
  *  저장 직후 목록(현재 버전 번호)이 버전 기록보다 먼저 오면 옛 글로 입력 칸이 새로 떠 '고치는 중'처럼 보였음
  *  → 버전 기록이 따라올 때까지 입력 칸을 띄우지 않음 (남은 초안이 있으면 맨 위가 초안이라 비교 안 함) */
 export function editTargetOf(

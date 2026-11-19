@@ -30,7 +30,7 @@ export const router = createBrowserRouter([
       },
       { path: '/pending', element: <PendingPage /> }, // 승인 대기 (가입 직후 · RequireAuth가 PENDING 계정을 여기로)
       // /inactive(비활성화 안내)는 보류 — 계정 비활성화 API가 없어 도달 경로 없음 (연동 상세명세 §10, BE 요청 B2)
-      // 운영 콘솔 (11/06 v2로 만든 화면) — 11/09부터 기본 주소. 옛 화면 주소는 없앰
+      // 운영 콘솔 (v2로 만든 화면) — 11/09부터 기본 주소. 옛 화면 주소는 없앰
       {
         path: '/',
         element: (

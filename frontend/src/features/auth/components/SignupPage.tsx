@@ -4,7 +4,7 @@ import { useSignup } from '@/features/auth/hooks/useSignup'
 import { AuthField } from './AuthField'
 import { AuthError, AuthFooter, AuthLayout } from './AuthLayout'
 
-// 00 회원가입 (디자인/목업 '00_회원가입' 10/30) — 이름 · 아이디 · 비밀번호 · 비밀번호 확인 (10/30 사용자: 이름 먼저). 다 맞아야 [회원가입]이 켜짐
+// 00 회원가입 (디자인/목업 '00_회원가입' 10/30) — 이름 · 아이디 · 비밀번호 · 비밀번호 확인 (이름 먼저). 다 맞아야 [회원가입]이 켜짐
 // 신청 = OPERATOR · PENDING (서버가 고정) → 승인 대기 화면
 export function SignupPage() {
   const vm = useSignup()

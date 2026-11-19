@@ -1,4 +1,4 @@
-// 수기 주문 배송비 — 박스는 개수 × 단가, 서류는 몇 장이든 한 번 (11/09 사용자). 그 합 (11/06). 서버에 견적 API가 없어 화면이 계산 (orderFee.test.ts)
+// 수기 주문 배송비 — 박스는 개수 × 단가, 서류는 몇 장이든 한 번. 그 합. 서버에 견적 API가 없어 화면이 계산 (orderFee.test.ts)
 import type { BoxKey } from './orderInput'
 
 // 단가 = AI 전화 접수 요금표와 같게 (ai/app/domain/fare.py, 10/31 결정 · 11/09 사용자: 화면이 AI에 맞춤)
@@ -11,7 +11,7 @@ const UNIT_PRICE: Record<BoxKey, number> = {
   big: 7_150,
 }
 
-const JEJU_EXTRA = 3_000 // 보내는 분 · 받는 분 중 하나라도 제주면 주문당 한 번 (11/06)
+const JEJU_EXTRA = 3_000 // 보내는 분 · 받는 분 중 하나라도 제주면 주문당 한 번
 
 // 도로명 주소 첫머리 '제주특별자치도 …' — 새로 검색한 주소 · 수정 창의 옛 주소 둘 다 이 글자로 옴
 export const isJeju = (roadAddress: string) => roadAddress.trim().startsWith('제주')

@@ -33,7 +33,7 @@ function waitSeries(d: ResponseWait): Series {
     headline: one(perCall(d.totalWaitMs)),
     sub: `전체 통화시간의 ${pctText(d.waitRatePercent)}, ${num(d.measuredCallCount)}통화`,
     values,
-    labels: values.map(two), // 막대 위 초는 두 자리 — 0.04초가 '0.0'으로 보이지 않게 (11/05 사용자)
+    labels: values.map(two), // 막대 위 초는 두 자리 — 0.04초가 '0.0'으로 보이지 않게
   }
 }
 

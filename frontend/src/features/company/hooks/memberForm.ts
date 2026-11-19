@@ -50,7 +50,7 @@ export function memberChecks(
     address,
     infoChanged,
     changed: infoChanged || roleChanged || address !== null, // 주소 · 상세주소만 바꿔도 저장
-    // 추가에서 이미 있는 사번 → 서버는 새로 만들지 않고 그 사원을 덮어씀 → 막고 [수정]으로 안내 (11/01 결정)
+    // 추가에서 이미 있는 사번 → 서버는 새로 만들지 않고 그 사원을 덮어씀 → 막고 [수정]으로 안내
     sameNo: target ? undefined : all.find((m) => m.membership.employeeNo === no),
     // 같은 기업의 다른 사원이 쓰는 번호 → 서버가 전체 거절 → 미리 알림
     samePhone: all.find(
@@ -59,10 +59,10 @@ export function memberChecks(
         m.membership.membershipSeq !== target?.membership.membershipSeq,
     ),
     detailWithoutRoad: detail !== '' && road === '', // 상세주소만 있으면 저장할 주소가 없음
-    // 주소 필수 — CSV 추가와 같은 규칙 · 상단바 사원 검색(DIR-01)이 주소 있는 사원만 찾음 (11/06).
+    // 주소 필수 — CSV 추가와 같은 규칙 · 상단바 사원 검색(DIR-01)이 주소 있는 사원만 찾음.
     // 수정에서 원래 주소가 있으면 road가 그 주소라 통과, 없으면 새로 골라야 함
     noAddress: road === '',
-    // 기업마다 담당자 1명 이상 (11/11 사용자) — 마지막 담당자를 사원으로 내리지 못하게
+    // 기업마다 담당자 1명 이상 — 마지막 담당자를 사원으로 내리지 못하게
     lastManager:
       target?.membership.role === 'ORG_ADMIN' &&
       form.role === 'MEMBER' &&
@@ -85,7 +85,7 @@ export const memberErrors = (c: MemberChecks, phone: string) => ({
   role: c.lastManager ? '기업마다 담당자가 1명 이상 있어야 합니다.' : undefined,
 })
 
-/** 보낼 수 있나 — 수정에서 아무것도 안 바꿨으면 [저장] 꺼짐 (11/01 결정) */
+/** 보낼 수 있나 — 수정에서 아무것도 안 바꿨으면 [저장] 꺼짐 */
 export const memberReady = (c: MemberChecks) =>
   c.no !== '' &&
   c.name !== '' &&

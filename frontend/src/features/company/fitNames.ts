@@ -1,4 +1,4 @@
-// 담당자 이름을 칸 폭에 맞게 — 들어가는 만큼 이름, 넘치면 끝에 '외 n명' (11/11 사용자: '…'로 자르지 않음, 인원 제한 없음)
+// 담당자 이름을 칸 폭에 맞게 — 들어가는 만큼 이름, 넘치면 끝에 '외 n명' ('…'로 자르지 않음, 인원 제한 없음)
 // 글자 폭은 canvas로 잼 (표 글꼴 14px Pretendard). 칸 폭은 화면이 바뀌면 ResizeObserver로 다시
 import { useLayoutEffect, useRef, useState } from 'react'
 

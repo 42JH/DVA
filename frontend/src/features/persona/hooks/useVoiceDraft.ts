@@ -2,7 +2,7 @@ import { useState } from 'react'
 import type { VoiceSettings } from '@/features/persona/api/personaApi'
 import { useVoiceOptions } from '@/features/persona/hooks/useVoiceOptions'
 
-/** 음성 드롭다운 값 — 상담가 등록 · 수정 화면 공용 (11/11)
+/** 음성 드롭다운 값 — 상담가 등록 · 수정 화면 공용
  * 저장 버튼 없이 고르는 즉시 작성 중 값에 반영 → 화면 [저장] · [등록]으로 같이 보냄 */
 export function useVoiceDraft(initial: VoiceSettings) {
   const options = useVoiceOptions()

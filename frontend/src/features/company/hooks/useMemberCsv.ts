@@ -25,8 +25,8 @@ type Picked =
   | { kind: 'bad'; file: File; errors: string[]; more: number }
 
 /** 08 CSV로 사원 추가 훅 (기존 기업) — 파일 → 검사 → 기존 사원과 비교한 미리 보기 → [등록]
- * 같은 사번은 서버가 덮어씀 → '신규 · 바뀜 · 변경 없음'을 먼저 보여 줌 (11/01 결정 B). 변경 없는 줄은 보내지 않음
- * 등록 (11/01): 없는 부서 만들기 → 사원 등록 한 번(담당자 role · departmentSeq 포함) → 주소가 새로 · 바뀐 사원만 주소 저장 */
+ * 같은 사번은 서버가 덮어씀 → '신규 · 바뀜 · 변경 없음'을 먼저 보여 줌 (B). 변경 없는 줄은 보내지 않음
+ * 등록: 없는 부서 만들기 → 사원 등록 한 번(담당자 role · departmentSeq 포함) → 주소가 새로 · 바뀐 사원만 주소 저장 */
 export function useMemberCsv(companyId: number, onDone: () => void) {
   const qc = useQueryClient()
   const [picked, setPicked] = useState<Picked>({ kind: 'none' })
@@ -42,7 +42,7 @@ export function useMemberCsv(companyId: number, onDone: () => void) {
 
   const reg = useMutation({
     mutationFn: async (p: CsvPreview) => {
-      // 1) 없는 부서 이름 → 새 부서 (11/01 결정). 사원 등록과 묶이지 않아, 여기서 실패하면 앞에서 만든 부서는 남음
+      // 1) 없는 부서 이름 → 새 부서. 사원 등록과 묶이지 않아, 여기서 실패하면 앞에서 만든 부서는 남음
       const seqOf = new Map(deps.data?.map((d) => [d.name, d.departmentSeq]))
       for (const name of new Set(toSend.flatMap((r) => (r.department ? [r.department] : []))))
         if (!seqOf.has(name)) seqOf.set(name, await createDepartment(companyId, name))

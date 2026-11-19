@@ -1,7 +1,7 @@
 // 08 기업관리 — 코드 → 화면 문구
 import type { Member } from '@/features/company/api/companyApi'
 
-// ORG_ADMIN = 기업의 연락 창구 '담당자'(권한 없음 · 여러 명 · 1명 이상). '관리자'는 콘솔 로그인 계정과 섞여서 안 씀 (11/11 사용자)
+// ORG_ADMIN = 기업의 연락 창구 '담당자'(권한 없음 · 여러 명 · 1명 이상). '관리자'는 콘솔 로그인 계정과 섞여서 안 씀
 export const MEMBER_ROLE: Record<Member['membership']['role'], string> = {
   MEMBER: '사원',
   ORG_ADMIN: '담당자',
@@ -16,7 +16,7 @@ export const MEMBER_REASON: Record<string, string> = {
   DUPLICATE_ITEM: '같은 사번이나 전화번호가 두 번 들어 있습니다.',
 }
 
-/** 서버 오류 → 누구나 이해할 수 있는 설명 (11/01 결정: 서버 문구를 그대로 보이지 않음)
+/** 서버 오류 → 누구나 이해할 수 있는 설명 (서버 문구를 그대로 보이지 않음)
  * 상태 코드별로 '무슨 일인지 + 어떻게 하면 되는지'. 행 단위 오류(CSV)는 csvMembers.serverRowErrors가 따로 */
 export function errorText(e: unknown, action: '등록' | '저장' | '삭제'): string {
   const status = (e as { status?: number })?.status

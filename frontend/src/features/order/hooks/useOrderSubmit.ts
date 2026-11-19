@@ -59,7 +59,7 @@ export function useOrderSubmit(p: {
       return
     }
     await qc.invalidateQueries({ queryKey: orderQueries.all() }) // 다 끝난 뒤에 — 먼저 하면 새 버전으로 창이 다시 채워짐
-    void qc.invalidateQueries({ queryKey: ['screen'] }) // 목록 줄 · 탭 건수도 (11/09 검수: 수정해도 목록이 옛 값)
+    void qc.invalidateQueries({ queryKey: ['screen'] }) // 목록 줄 · 탭 건수도 (수정해도 목록이 옛 값)
     p.onDone(submitNotice.current, madeOrder.current)
   }
 
@@ -70,7 +70,7 @@ export function useOrderSubmit(p: {
     return sent.current.key
   }
   /** 배송 초안(미완료, 055): 채운 내용으로 새 초안을 만들어 바로 접수. 같은 본문을 다시 보내면 같은 키 → 서버가 같은 초안을 돌려줌
-   * 키는 초안 본문(수거 · 결제 빼고)으로만 — 접수만 실패해 수거 시각 · 결제만 고쳐 다시 눌러도 같은 초안으로 접수 (11/09 검수) */
+   * 키는 초안 본문(수거 · 결제 빼고)으로만 — 접수만 실패해 수거 시각 · 결제만 고쳐 다시 눌러도 같은 초안으로 접수 */
   const sendDraft = async (draft: OrderDetail, body: OrderInput) => {
     const key = keyFor(
       JSON.stringify([{ ...body, pickupAt: null, paymentMethod: null }, p.shippingFee]),
@@ -79,7 +79,7 @@ export function useOrderSubmit(p: {
     madeOrder.current = r.orderSeq
     submitNotice.current = submitResultText(r.status)
   }
-  /** 수정 저장. 접수 중단이면 저장한 새 버전으로 최종 접수 — 실패해도 저장은 유지, 이유를 들고 상세로 (11/01 결정) */
+  /** 수정 저장. 접수 중단이면 저장한 새 버전으로 최종 접수 — 실패해도 저장은 유지, 이유를 들고 상세로 */
   const saveEdit = async (o: OrderDetail) => {
     let version = o.version ?? 0
     if (p.patch) version = (await saveOrder(o.orderSeq, p.patch)).data.version
@@ -124,7 +124,7 @@ export function useOrderSubmit(p: {
       if (!order) {
         const key = keyFor(JSON.stringify([body, p.shippingFee]))
         await createOrder(body, p.shippingFee, key, newCustomer) // 초안 · 수정은 고객이 이미 있거나 customerFor가 방금 만든 고객을 찾음
-        // 서버가 받는 분을 주문 고객 주소록에 자동 등록(11/09 백엔드) → 다음 주문 추천에 바로 뜨게
+        // 서버가 받는 분을 주문 고객 주소록에 자동 등록 (백엔드) → 다음 주문 추천에 바로 뜨게
         void qc.invalidateQueries({ queryKey: customerQueries.all() })
         return 'ok'
       }
@@ -134,7 +134,7 @@ export function useOrderSubmit(p: {
     },
     onSuccess: (result) => {
       if (result === 'ok') {
-        setFinished(true) // 목록을 새로 받는 동안 [저장]을 또 누르면 옛 버전으로 다시 보내 409가 남 (11/09 검수)
+        setFinished(true) // 목록을 새로 받는 동안 [저장]을 또 누르면 옛 버전으로 다시 보내 409가 남
         void finish()
       }
     },

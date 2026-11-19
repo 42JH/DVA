@@ -45,7 +45,7 @@ function confirmErrorText(error: unknown, kind: NonNullable<Confirming>['kind'] 
     : conflictText
 }
 
-/** 07 AI 상담가 훅 (11/13 새 안 — 저장 = 새 버전)
+/** 07 AI 상담가 훅 (새 안 — 저장 = 새 버전)
  * 카드 = 위 탭에서 고른 상담가의 현재 버전(그 자리에서 고침). 사용 중 상담가의 새 버전이 통화에 안 쓰이면 반영 전 띠
  * 수정 기록 창: 고른 날짜 내용을 통화에 쓰는 내용과 비교 · [이 내용 불러오기](카드 칸에 채움 — 저장은 [저장])
  * 통화 상담가 바꾸기 · 새 버전 반영은 확인 창으로만. 시나리오 시험은 따로 화면 */
@@ -64,7 +64,7 @@ export function usePersonaPage() {
   const [adding, setAdding] = useState(false)
   const qc = useQueryClient()
   const options = useVoiceOptions() // 다시 쓰기에서 속도를 AI 지원 범위로 맞춰 보낼 때
-  // 추가 · 수정 · 사용하기 · 삭제는 모든 관리자(OPERATOR · SYSTEM_ADMIN) — 11/11 백엔드 권한 이분화 (11/02 'OPERATOR는 보기만'을 뒤집음)
+  // 추가 · 수정 · 사용하기 · 삭제는 모든 관리자(OPERATOR · SYSTEM_ADMIN) — 11/11 백엔드 권한 이분화 ('OPERATOR는 보기만'을 뒤집음)
   // 내 정보를 불러오기 전(role undefined)에는 숨김
   const { role } = useSession()
   const canManage = role !== undefined
@@ -85,7 +85,7 @@ export function usePersonaPage() {
   const all = versions.data ?? [] // 높은 번호가 위 (personaMap이 정렬). 남은 초안이 있으면 맨 위
   const latest = all[0] ?? null // 수정의 시작점 — 남은 초안이 있으면 초안
   const head = all.find((v) => v.isHead) ?? latest // 현재 버전
-  const viewing = head // 카드는 늘 현재 버전 — 지난 버전은 수정 기록 창 안에서만 (11/13 새 안)
+  const viewing = head // 카드는 늘 현재 버전 — 지난 버전은 수정 기록 창 안에서만
   const picked = historyOpen ? (all.find((v) => v.version === version) ?? head) : null
   const inUse = list.find((p) => p.inUse) ?? null
   // 목소리 값 → 이름 ('' = 기본 음성, AI 목록에 없으면 값 그대로)
@@ -192,7 +192,7 @@ export function usePersonaPage() {
 
   return {
     isLoading: personas.isPending, // 처음 들어올 때만 화면 전체
-    // 상담가를 바꿀 때 버전을 받는 동안은 가운데만 — 오른쪽 카드가 다시 그려지면 스크롤이 맨 위로 감 (11/10)
+    // 상담가를 바꿀 때 버전을 받는 동안은 가운데만 — 오른쪽 카드가 다시 그려지면 스크롤이 맨 위로 감
     promptLoading,
     error: personas.error || versions.error ? '불러오지 못했습니다. 다시 시도해 주세요.' : null,
 
@@ -206,7 +206,7 @@ export function usePersonaPage() {
           })
         : null,
 
-    // 수정 기록 창 (11/13 새 안 5번, 피그마 2368:6500) — 왼쪽 날짜별 목록, 오른쪽은 통화에 쓰는 내용과 다른 칸만
+    // 수정 기록 창 (새 안 5번, 피그마 2368:6500) — 왼쪽 날짜별 목록, 오른쪽은 통화에 쓰는 내용과 다른 칸만
     historyOpen,
     history: historyRows(all, { head, picked, unapplied }),
     picked:
@@ -224,7 +224,7 @@ export function usePersonaPage() {
       setVersion(null)
       setShowCall(false)
     },
-    // 띠 — 반영 전 · 시험 중 · 반영 중 (11/13 새 안 1번). 고친 내용 = 반영 중이면 그 버전, 아니면 현재 버전
+    // 띠 — 반영 전 · 시험 중 · 반영 중 (새 안 1번). 고친 내용 = 반영 중이면 그 버전, 아니면 현재 버전
     band: bandView(step, applyingVersion ?? head, {
       switchTo: switching && persona ? persona.name : null,
       canApply: canManage,
@@ -296,7 +296,7 @@ export function usePersonaPage() {
         : null,
 
     editTarget,
-    // 저장하면 새로 생긴 현재 버전(고친 내용)을 보여 줌. 반영은 띠의 [통화에 반영]으로 (11/13 새 안 — 저장 직후 확인 창 없음)
+    // 저장하면 새로 생긴 현재 버전(고친 내용)을 보여 줌. 반영은 띠의 [통화에 반영]으로 (새 안 — 저장 직후 확인 창 없음)
     finishEdit: () => {
       setVersion(null)
       setShowCall(false)
@@ -304,7 +304,7 @@ export function usePersonaPage() {
 
     // 통화에 사용 중인 상담가는 늘 맨 위 (나머지는 서버가 준 순서 그대로)
     personas: items,
-    // 머리 줄 (11/13 새 안 — 이름 · 배지 · 목소리 · [삭제] · [통화에 사용하기]는 탭에서 고른 상담가 것)
+    // 머리 줄 (새 안 — 이름 · 배지 · 목소리 · [삭제] · [통화에 사용하기]는 탭에서 고른 상담가 것)
     current: items.find((p) => p.selected) ?? null,
     selectPersona: (seq: number) => {
       setPersonaSeq(seq)

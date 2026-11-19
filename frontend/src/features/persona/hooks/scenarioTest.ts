@@ -11,7 +11,7 @@ type Key = { personaSeq: number; version: number }
 const same = (a: Key, b: Key | null) =>
   !!b && a.personaSeq === b.personaSeq && a.version === b.version
 
-/** 버전을 부르는 말 (11/13 새 안 — 화면에 '버전'이라는 말 없음). 시험 결과 위 줄 · 표 머리 · 상세 탭이 같이 씀
+/** 버전을 부르는 말 (새 안 — 화면에 '버전'이라는 말 없음). 시험 결과 위 줄 · 표 머리 · 상세 탭이 같이 씀
  *  통화에 쓰는 버전 = '통화에 쓰는 내용', 사용 중 상담가의 최신 = '고친 내용', 그 상담가의 더 옛 버전 = '이전 내용', 다른 상담가 = 그 이름 */
 export function sideLabel(me: Key & { isHead: boolean }, active: Key | null, name: string) {
   if (same(me, active)) return '통화에 쓰는 내용'
@@ -143,7 +143,7 @@ export function failLine(c: Check, lines: Line[], script: string[]): number | nu
   return null
 }
 
-/** 판정기가 주는 대본 진행 항목 이름. 판정기 문구는 그대로 두고 화면에서만 바꿈(11/13) — 이미 저장된 결과도 같은 이름으로 보이게 */
+/** 판정기가 주는 대본 진행 항목 이름. 판정기 문구는 그대로 두고 화면에서만 바꿈 — 이미 저장된 결과도 같은 이름으로 보이게 */
 const SCRIPT_CHECK = '대본 진행'
 /** '말하지 못한 발화: [4, 5]' → [4, 5] (대본 번호는 1부터) */
 const unsaid = (actual: unknown): number[] =>

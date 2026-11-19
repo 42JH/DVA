@@ -83,7 +83,7 @@ export function useUnansweredList() {
     clearCall: () => set({ call: '' }), // ✕ → 전체 미답변으로
     rows,
     count: hit.length, // 검색 중엔 결과 수
-    // 서버가 오래된 것부터 주고 2,000개까지만 받음 → 그 뒤(최신) 질문은 목록에 없음. 넘으면 서버 쪽 넘김으로 바꿔야 함 (11/02)
+    // 서버가 오래된 것부터 주고 2,000개까지만 받음 → 그 뒤(최신) 질문은 목록에 없음. 넘으면 서버 쪽 넘김으로 바꿔야 함
     listNote: capped
       ? `오래된 ${FETCH_ALL_MAX.toLocaleString('ko-KR')}개만 표시됩니다 (전체 ${(total.data ?? 0).toLocaleString('ko-KR')}개)`
       : null,
@@ -91,7 +91,7 @@ export function useUnansweredList() {
     listError: list.error?.message ?? null,
 
     modal,
-    // [FAQ 등록] = 이 화면에서 바로 창으로 (11/11 — FAQ 화면으로 넘어갔다 오던 것). 질문 칸은 고객이 한 말, 저장하면 이 질문이 처리됨(API-27)
+    // [FAQ 등록] = 이 화면에서 바로 창으로 (FAQ 화면으로 넘어갔다 오던 것). 질문 칸은 고객이 한 말, 저장하면 이 질문이 처리됨(API-27)
     openAdd: (u: UnansweredQuestion) => setModal({ kind: 'faq', item: u }),
     openDelete: (u: UnansweredQuestion) => {
       remove.reset()

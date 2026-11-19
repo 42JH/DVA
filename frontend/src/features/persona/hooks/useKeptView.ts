@@ -38,7 +38,7 @@ export function useKeptView() {
   const { key, state } = useLocation()
   const [back] = useState(() => (SCENARIO_TEST ? (kept(key) ?? fromTest(state)) : null))
   const [personaSeq, setPersonaSeq] = useState<number | null>(back?.personaSeq ?? null) // null = 통화에 사용 중인 상담가
-  const [historyOpen, setHistoryOpen] = useState(back?.historyOpen ?? false) // 수정 기록 창 (11/13 새 안 5번)
+  const [historyOpen, setHistoryOpen] = useState(back?.historyOpen ?? false) // 수정 기록 창 (새 안 5번)
   const [version, setVersion] = useState<number | null>(back?.version ?? null) // 창에서 고른 버전 (null = 현재 버전)
   const [showCall, setShowCall] = useState(back?.showCall ?? false) // 반영 전 띠의 토글 — true = 통화에 쓰는 내용
   useEffect(() => {

@@ -1,4 +1,4 @@
-// 기업 목록 (11/11 재설계) — 통화 목록과 같은 표 · 줄을 누르면 기업 상세. 칸: 기업 · 담당자 · 사원 · 부서 · 이번 달 청구액 · 등록
+// 기업 목록 — 통화 목록과 같은 표 · 줄을 누르면 기업 상세. 칸: 기업 · 담당자 · 사원 · 부서 · 이번 달 청구액 · 등록
 // 삭제 · 이름 수정은 상세 화면에서 (줄마다 버튼 · 체크 없음). 정렬은 등록 최신순 고정(서버 기본)
 import { useRef } from 'react'
 import { Link, useNavigate } from 'react-router'
@@ -67,7 +67,7 @@ export function CompaniesPage() {
             </thead>
             <tbody>
               {vm.rows.map((r) => (
-                // 줄 어디를 눌러도 기업 상세로 (11/09 사용자). 이름 칸은 링크라 키보드 · 새 탭도 됨
+                // 줄 어디를 눌러도 기업 상세로. 이름 칸은 링크라 키보드 · 새 탭도 됨
                 <tr
                   key={r.id}
                   onClick={() => navigate(`/companies/${r.id}`)}

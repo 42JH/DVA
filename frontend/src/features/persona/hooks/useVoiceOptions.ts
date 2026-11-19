@@ -3,7 +3,7 @@ import type { Option } from '@/shared/ui'
 import { personaQueries } from '@/features/persona/api/personaApi'
 import { DEFAULT_VOICE_LABEL } from '@/features/persona/labels'
 
-/** 음성 고르기 칸의 선택지. 수정 · 추가 화면 공용 — AI가 실제 지원하는 값은 GET /api/ai/options (11/02)
+/** 음성 고르기 칸의 선택지. 수정 · 추가 화면 공용 — AI가 실제 지원하는 값은 GET /api/ai/options
  * 목소리 = AI 목록 — 지금 값이 목록에 없어도(AI가 바뀜) 선택지에 남김
  * 그래도 서버가 422로 거절하면 화면에 어느 칸인지 안내 (labels unsupportedText) */
 export function useVoiceOptions() {

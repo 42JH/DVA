@@ -32,7 +32,7 @@ const PASSWORDS = new Map(ACCOUNTS.map((a) => [a.loginId, 'test1234']))
 // 실서버처럼 쿠키 dva_session = 'mock-<adminUserSeq>' (API 연동 상세명세 1장). 페이지 메모리에 '현재 계정'을 두면 새로고침에 초기화되므로 쿠키에
 // shortcut: 실서버 쿠키는 HttpOnly지만 MSW는 document.cookie에 써서 HttpOnly를 못 붙임(붙이면 브라우저가 버림) — 가짜 전용이라 그대로
 const SESSION_SEC = 9 * 60 * 60 // 세션 9시간 고정
-// Path=/api는 실서버 쿠키와 같게: 다르면 가짜 → 실서버로 바꿀 때 덮어쓰지 못하고 dva_session이 둘 → 서버가 가짜 값을 읽어 401 (10/31 겪음)
+// Path=/api는 실서버 쿠키와 같게: 다르면 가짜 → 실서버로 바꿀 때 덮어쓰지 못하고 dva_session이 둘 → 서버가 가짜 값을 읽어 401 (겪음)
 const sessionCookie = (value: string, maxAge: number) =>
   `dva_session=${value}; Path=/api; Max-Age=${maxAge}; SameSite=Lax`
 const bySession = (cookies: Record<string, string>) =>

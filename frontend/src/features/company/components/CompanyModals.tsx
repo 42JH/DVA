@@ -46,7 +46,7 @@ export function MemberFormModal({
   member: Member | null // null = 추가
   onClose: () => void
   initialDept?: number | null
-  onCsv?: () => void // 추가 창에서 CSV 일괄 등록 창으로 바꿈 (11/11: 화면의 CSV 버튼을 이 창 안으로)
+  onCsv?: () => void // 추가 창에서 CSV 일괄 등록 창으로 바꿈 (화면의 CSV 버튼을 이 창 안으로)
 }) {
   const vm = useMemberForm(companyId, member, onClose, initialDept)
   return (
@@ -208,7 +208,7 @@ export function MemberCsvModal({
   )
 }
 
-/** 올린 파일에서 읽은 사원 — 등록 전에 그대로 확인 (11/09 사용자: 엑셀에서 앞 0이 사라져 보여도 여기선 010-1234-5678)
+/** 올린 파일에서 읽은 사원 — 등록 전에 그대로 확인 (엑셀에서 앞 0이 사라져 보여도 여기선 010-1234-5678)
  *  mark = 사원 추가에서 신규 · 바뀜 · 그대로 */
 function CsvTable({ rows }: { rows: (CsvMember & { mark?: string })[] }) {
   if (!rows.length) return null
