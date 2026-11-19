@@ -3,30 +3,15 @@ import { useState } from 'react'
 import { ApiError } from '@/shared/api/client'
 import { useSession } from '@/shared/auth/useSession'
 import { useShell } from '@/shared/lib/shell'
-import { unsupportedText } from '@/features/persona/labels'
-import { useVoiceOptions } from '@/features/persona/hooks/useVoiceOptions'
-import { useApplyTest } from '@/features/persona/hooks/useApplyTest'
-import { useKeptView } from '@/features/persona/hooks/useKeptView'
-import {
-  bandView,
-  historyRows,
-  personaItems,
-  pickedView,
-  promptView,
-} from '@/features/persona/hooks/personaPageView'
-import { callStateOf, editTargetOf, reuseDiff } from '@/features/persona/hooks/personaVersions'
-import { bandStep, confirmCopy, type Confirming } from '@/features/persona/hooks/personaBand'
-import {
-  SCENARIO_TEST,
-  scenarioTestQueries,
-  stopTest,
-} from '@/features/persona/api/scenarioTestApi'
-import {
-  deletePersona,
-  personaQueries,
-  requestApply,
-  type PersonaVersion,
-} from '@/features/persona/api/personaApi'
+import { unsupportedText } from '../labels'
+import { useVoiceOptions } from './useVoiceOptions'
+import { useApplyTest } from './useApplyTest'
+import { useKeptView } from './useKeptView'
+import { bandView, historyRows, personaItems, pickedView, promptView } from './personaPageView'
+import { callStateOf, editTargetOf, reuseDiff } from './personaVersions'
+import { bandStep, confirmCopy, type Confirming } from './personaBand'
+import { SCENARIO_TEST, scenarioTestQueries, stopTest } from '../api/scenarioTestApi'
+import { deletePersona, personaQueries, requestApply, type PersonaVersion } from '../api/personaApi'
 
 const POLL_MS = 2000 // 적용 대기 중일 때만 다시 받는 간격 (AI 확인으로 서버 상태가 바뀌므로)
 const conflictText =

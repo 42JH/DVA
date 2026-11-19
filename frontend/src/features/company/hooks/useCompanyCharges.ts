@@ -1,7 +1,7 @@
 // 08 기업 상세의 달 · 청구액 카드 · 청구 내역 탭. 기업은 월결제 고정
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { addMonths, todayYmd } from '@/shared/lib/dateRange'
-import { companyQueries } from '@/features/company/api/companyApi'
+import { companyQueries } from '../api/companyApi'
 import type { COMPANY_PARAMS } from './companyView'
 
 const MONTH = /^[1-9]\d{3}-(0[1-9]|1[0-2])$/ // 서버 BillingMonthQueryDto와 같은 형식

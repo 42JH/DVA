@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import type { Option } from '@/shared/ui'
-import { personaQueries } from '@/features/persona/api/personaApi'
-import { DEFAULT_VOICE_LABEL } from '@/features/persona/labels'
+import { personaQueries } from '../api/personaApi'
+import { DEFAULT_VOICE_LABEL } from '../labels'
 
 /** 음성 고르기 칸의 선택지. 수정 · 추가 화면 공용 — AI가 실제 지원하는 값은 GET /api/ai/options
  * 목소리 = AI 목록 — 지금 값이 목록에 없어도(AI가 바뀜) 선택지에 남김

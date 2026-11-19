@@ -3,8 +3,8 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router'
 import { ApiError } from '@/shared/api/client'
 import { clearSession } from '@/shared/auth/session'
-import { changePassword, type PasswordChangeBody } from '@/features/me/api/passwordApi'
-import { PASSWORD_REASON, PASSWORD_REASON_FALLBACK } from '@/features/me/labels'
+import { changePassword, type PasswordChangeBody } from '../api/passwordApi'
+import { PASSWORD_REASON, PASSWORD_REASON_FALLBACK } from '../labels'
 
 const MIN_PASSWORD = 6 // 명세 API-05: 새 비밀번호 최소 6자 (회원가입과 같음)
 const EMPTY: PasswordChangeBody = { currentPassword: '', newPassword: '', newPasswordConfirm: '' }

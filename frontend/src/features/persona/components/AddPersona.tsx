@@ -1,5 +1,5 @@
-import { useAddPersona } from '@/features/persona/hooks/useAddPersona'
-import type { usePersonaPage } from '@/features/persona/hooks/usePersonaPage'
+import { useAddPersona } from '../hooks/useAddPersona'
+import type { usePersonaPage } from '../hooks/usePersonaPage'
 import { PersonaForm } from './PersonaForm'
 import { PersonaTabs } from './PersonaTabs'
 import { VoiceFields } from './VoiceFields'

@@ -15,8 +15,8 @@ import {
   renameDepartment,
   type Department,
   type Member,
-} from '@/features/company/api/companyApi'
-import { errorText } from '@/features/company/labels'
+} from '../api/companyApi'
+import { errorText } from '../labels'
 import { COMPANY_PARAMS, companyFacts, filterMembers, isManager, memberRow } from './companyView'
 import { useCompanyCharges } from './useCompanyCharges'
 

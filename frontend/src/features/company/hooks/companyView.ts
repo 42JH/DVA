@@ -1,7 +1,7 @@
 // 08 기업 상세의 계산 — 주소 쿼리 기본값 · 사원 거르기 · 표 줄 · 위 줄의 사실. React를 모르는 순수 함수 (실행해서 확인: companyView.test.ts)
 import { fmtDate, fmtPhone } from '@/shared/lib/format'
 import { phoneDigits } from '@/shared/lib/search'
-import type { Member } from '@/features/company/api/companyApi'
+import type { Member } from '../api/companyApi'
 
 // t 탭(사원 · 청구) · q 사원 검색 · d 부서('' 전체 · 'none' 부서 없음 · 번호) · r 구분('' 전체 · 'manager')
 // m 달('' 이번 달) · cq 청구 검색 · o 고른 청구 건(주문 번호)

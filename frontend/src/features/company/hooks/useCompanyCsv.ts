@@ -1,13 +1,9 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { ApiError } from '@/shared/api/client'
-import {
-  companyQueries,
-  createCompany,
-  saveMemberAddresses,
-} from '@/features/company/api/companyApi'
-import { readMembersFile, serverRowErrors, type CsvMember } from '@/features/company/csvMembers'
-import { errorText } from '@/features/company/labels'
+import { companyQueries, createCompany, saveMemberAddresses } from '../api/companyApi'
+import { readMembersFile, serverRowErrors, type CsvMember } from '../csvMembers'
+import { errorText } from '../labels'
 
 /** 파일 상태 — 아직 없음 / 읽음(사원 목록) / 틀림(처음 3줄 + 나머지 건수) */
 type Picked =

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router'
 import { Button } from '@/shared/ui'
-import { useLogin } from '@/features/auth/hooks/useLogin'
+import { useLogin } from '../hooks/useLogin'
 import { AuthField } from './AuthField'
 import { AuthError, AuthFooter, AuthLayout } from './AuthLayout'
 

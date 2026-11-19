@@ -1,5 +1,5 @@
-import type { EditTarget } from '@/features/persona/hooks/usePromptEditor'
-import { useRenamePersona } from '@/features/persona/hooks/useRenamePersona'
+import type { EditTarget } from '../hooks/usePromptEditor'
+import { useRenamePersona } from '../hooks/useRenamePersona'
 import { Icon } from '@/shared/ui'
 
 // 머리 줄 이름 + 연필 (새 안 10번, 피그마 2384:2) — 누르면 이름 자리만 입력 칸

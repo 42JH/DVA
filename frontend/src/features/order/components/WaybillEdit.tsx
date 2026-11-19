@@ -1,7 +1,7 @@
 // 주문 수정 — 상세 패널 안에서 그 자리에 고침 (모달 대신). 칸은 주문 추가와 같은 OrderFields
 // 기업 피드백: 조회 · 수정 칸을 같게(가격 · 배송비 둘 다), 칸마다 바로 검증. 저장 · 접수 규칙은 기존 useOrderForm 그대로
-import { useOrderForm } from '@/features/order/hooks/useOrderForm'
-import { useOrderToEdit } from '@/features/order/hooks/useOrderToEdit'
+import { useOrderForm } from '../hooks/useOrderForm'
+import { useOrderToEdit } from '../hooks/useOrderToEdit'
 import { Btn } from '@/shared/ui'
 import { OrderFields } from './OrderFields'
 

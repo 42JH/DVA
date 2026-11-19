@@ -1,7 +1,7 @@
 // 06 통화 상세의 계산 — 대본 줄 묶음 · 지금 짚은 줄 · 재생 바 눈금 · AI 동작 줄. React를 모르는 순수 함수 (실행해서 확인: callScript.test.ts)
 // 상태(짚은 줄 · 재생 위치)와 조회는 useCallDetail
 import { fmtClock } from '@/shared/lib/format'
-import { COMPLAINT_LABEL } from '@/features/call/labels'
+import { COMPLAINT_LABEL } from '../labels'
 import {
   utteranceAt,
   utteranceForAction,

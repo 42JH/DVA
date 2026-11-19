@@ -1,5 +1,5 @@
 // 시나리오 시험 결과 읽기 (순수 함수, scenarioTest.test.ts) — 표의 칸 · 변화 · [통화에 사용하기] 관문
-import type { Check, Scenario, TestItem, VersionTest } from '@/features/persona/api/scenarioTestApi'
+import type { Check, Scenario, TestItem, VersionTest } from '../api/scenarioTestApi'
 
 /** 표의 한 칸: 통과 · 실패 · 연결 실패 · 시험 중 · 대기 · 결과 없음 */
 export type Cell = 'pass' | 'fail' | 'error' | 'running' | 'queued' | 'none'

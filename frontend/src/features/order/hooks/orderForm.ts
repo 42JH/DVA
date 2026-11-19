@@ -10,9 +10,9 @@ import type {
   PayContext,
   PaymentMethod,
   PickedAddress,
-} from '@/features/order/api/orderApi'
-import { BOX_TYPES, type BoxKey } from '@/features/order/api/orderInput'
-import { orderErrorText } from '@/features/order/labels'
+} from '../api/orderApi'
+import { BOX_TYPES, type BoxKey } from '../api/orderInput'
+import { orderErrorText } from '../labels'
 import {
   MAX_BOXES,
   MAX_DOCUMENTS,
@@ -20,8 +20,8 @@ import {
   pickupOk,
   pickupRange,
   priceOk,
-} from '@/features/order/api/orderLimits'
-import { isJeju, shippingFeeOf } from '@/features/order/api/orderFee'
+} from '../api/orderLimits'
+import { isJeju, shippingFeeOf } from '../api/orderFee'
 
 export type Side = 'sender' | 'receiver'
 /** 입력 중인 칸 그대로 (전부 글자). 보낼 때 Party로 바꿈 */

@@ -1,6 +1,6 @@
 import { Icon } from '@/shared/ui'
 import { Label } from '@/shared/ui/Field'
-import type { useVoiceDraft } from '@/features/persona/hooks/useVoiceDraft'
+import type { useVoiceDraft } from '../hooks/useVoiceDraft'
 
 // 카드 머리 줄의 목소리 칸 모양 (시안: 높이 28 · 테두리 #c5ccd6 · 옆 10) — 고를 수 있을 때(VoiceFields)와 못 고를 때(PersonaCard)가 같이 씀
 export const VOICE_BOX =

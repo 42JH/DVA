@@ -1,5 +1,5 @@
 import { useId, type ReactNode } from 'react'
-import { axisTicks } from '@/features/stats/format'
+import { axisTicks } from '../format'
 
 // 02 대시보드 그래프 — 라이브러리 없이 (Figma 'AI 상담 성능' · '통계 · 그래프 보기' 11/04)
 // 크기는 남는 높이를 따라감 (780 높이 노트북 ~ 1920 PC 한 화면)

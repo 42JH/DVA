@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
-import type { usePersonaPage } from '@/features/persona/hooks/usePersonaPage'
-import type { usePromptEditor } from '@/features/persona/hooks/usePromptEditor'
+import type { usePersonaPage } from '../hooks/usePersonaPage'
+import type { usePromptEditor } from '../hooks/usePromptEditor'
 import { Badge, Btn } from '@/shared/ui'
 import { Modal } from '@/shared/ui/Modal'
 

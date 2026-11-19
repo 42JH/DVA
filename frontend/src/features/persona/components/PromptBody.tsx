@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import type { usePersonaPage } from '@/features/persona/hooks/usePersonaPage'
-import type { usePromptEditor } from '@/features/persona/hooks/usePromptEditor'
+import type { usePersonaPage } from '../hooks/usePersonaPage'
+import type { usePromptEditor } from '../hooks/usePromptEditor'
 import { TextAreaInput } from '@/shared/ui/Field'
 import { Markdown } from '@/shared/ui/Markdown'
 

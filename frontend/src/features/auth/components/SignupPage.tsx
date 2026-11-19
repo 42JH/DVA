@@ -1,6 +1,6 @@
 import { Link } from 'react-router'
 import { Button } from '@/shared/ui'
-import { useSignup } from '@/features/auth/hooks/useSignup'
+import { useSignup } from '../hooks/useSignup'
 import { AuthField } from './AuthField'
 import { AuthError, AuthFooter, AuthLayout } from './AuthLayout'
 

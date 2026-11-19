@@ -1,8 +1,8 @@
 import type { ReactNode } from 'react'
-import box from '@/features/auth/assets/illust-box.webp'
-import phone from '@/features/auth/assets/illust-phone.webp'
-import truck from '@/features/auth/assets/illust-truck.webp'
-import logo from '@/features/auth/assets/logo.svg'
+import box from '../assets/illust-box.webp'
+import phone from '../assets/illust-phone.webp'
+import truck from '../assets/illust-truck.webp'
+import logo from '../assets/logo.svg'
 
 // 00 네 화면 공통 틀 (디자인/목업 '00_로그인' 10/30) — 왼쪽 576 그림 판 + 오른쪽 가운데 440 칸(아이콘 · 제목 · 설명 · 내용)
 // 그림 판은 디자인 좌표(576×1024) 그대로 두고 세로 가운데 — 화면이 1024보다 낮으면 위아래가 같이 잘림. 로고만 판 위에 고정

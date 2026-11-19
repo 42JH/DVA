@@ -1,6 +1,6 @@
-import type { CustomerType } from '@/features/stats/api/dashboardApi'
-import { useDashboardGraph, type GraphKind } from '@/features/stats/hooks/useDashboardGraph'
-import { CUSTOMER_LABEL } from '@/features/stats/labels'
+import type { CustomerType } from '../api/dashboardApi'
+import { useDashboardGraph, type GraphKind } from '../hooks/useDashboardGraph'
+import { CUSTOMER_LABEL } from '../labels'
 import { GroupedBars } from './Charts'
 
 // 02 대시보드 '그래프 보기' (Figma '통계 · 응답 대기에 쓰인 통화시간' · '통계 · 단계별 이탈률' 11/05)

@@ -2,7 +2,7 @@
 // 11/09: 가운데 좁은 기둥 → 화면 폭을 채우는 카드 두 장 (1280 이상 나란히, 아래는 위아래). 로그아웃은 사이드바 아래 버튼으로만
 import type { ReactNode } from 'react'
 import { useSession } from '@/shared/auth/useSession'
-import { usePasswordChange } from '@/features/me/hooks/usePasswordChange'
+import { usePasswordChange } from '../hooks/usePasswordChange'
 import { PageHead } from '@/shared/ui'
 import { Btn } from '@/shared/ui'
 import { Confirm } from '@/shared/ui/Modal'

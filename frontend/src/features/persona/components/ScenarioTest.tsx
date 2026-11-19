@@ -7,13 +7,13 @@ import { useState, type ReactNode } from 'react'
 import { Link, Navigate, useNavigate, useParams } from 'react-router'
 import { Badge, Btn, PageHead } from '@/shared/ui'
 import { Confirm } from '@/shared/ui/Modal'
-import type { Cell } from '@/features/persona/hooks/scenarioTest'
+import type { Cell } from '../hooks/scenarioTest'
 import {
   SCENARIO_TEST,
   useScenarioTest,
   useScenarioTestPage,
   type TestTarget,
-} from '@/features/persona/hooks/useScenarioTest'
+} from '../hooks/useScenarioTest'
 
 export function ScenarioTestPage() {
   const { personaSeq, version } = useParams()

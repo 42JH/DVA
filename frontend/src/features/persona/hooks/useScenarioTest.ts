@@ -2,13 +2,8 @@ import { useMutation, usePrefetchQuery, useQuery, useQueryClient } from '@tansta
 import { useState } from 'react'
 import { fmtMonthDay, fmtVersionTime } from '@/shared/lib/format'
 import { ymd } from '@/shared/lib/dateRange'
-import { personaQueries, type PersonaVersion } from '@/features/persona/api/personaApi'
-import {
-  SCENARIO_TEST,
-  scenarioTestQueries,
-  startTest,
-  stopTest,
-} from '@/features/persona/api/scenarioTestApi'
+import { personaQueries, type PersonaVersion } from '../api/personaApi'
+import { SCENARIO_TEST, scenarioTestQueries, startTest, stopTest } from '../api/scenarioTestApi'
 import { restOf, rowsOf, sideLabel, testOf, withActiveTests } from './scenarioTest'
 
 export { SCENARIO_TEST } // 화면(components)은 api를 직접 부르지 않아 여기서 내보냄

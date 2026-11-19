@@ -4,7 +4,7 @@ import { pageCount, pageSlice } from '@/shared/api/paging'
 import { fmtDate } from '@/shared/lib/format'
 import { useListParams } from '@/shared/lib/useListParams'
 import { matchKo } from '@/shared/lib/search'
-import { companyQueries } from '@/features/company/api/companyApi'
+import { companyQueries } from '../api/companyApi'
 
 const PAGE_SIZE = 10 // 디자인: 한 쪽 10곳
 const DEFAULTS = { q: '' }

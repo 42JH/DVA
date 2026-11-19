@@ -1,4 +1,4 @@
-import type { usePersonaPage } from '@/features/persona/hooks/usePersonaPage'
+import type { usePersonaPage } from '../hooks/usePersonaPage'
 import { Badge, Btn, Icon, Segments } from '@/shared/ui'
 
 type Vm = ReturnType<typeof usePersonaPage>

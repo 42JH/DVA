@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useSyncExternalStore } from 'react'
-import { personaQueries, requestApply } from '@/features/persona/api/personaApi'
-import { SCENARIO_TEST, scenarioTestQueries } from '@/features/persona/api/scenarioTestApi'
+import { personaQueries, requestApply } from '../api/personaApi'
+import { SCENARIO_TEST, scenarioTestQueries } from '../api/scenarioTestApi'
 import { pledgeStep } from './applyPledge'
 import { pledges } from './pledgeStore'
 

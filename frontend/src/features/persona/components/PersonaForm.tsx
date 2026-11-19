@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import { Btn } from '@/shared/ui'
 import { TextInput } from '@/shared/ui/Field'
 import { Confirm } from '@/shared/ui/Modal'
-import type { useAddPersona } from '@/features/persona/hooks/useAddPersona'
+import type { useAddPersona } from '../hooks/useAddPersona'
 import { PromptBody } from './PromptBody'
 
 type FormVm = Pick<

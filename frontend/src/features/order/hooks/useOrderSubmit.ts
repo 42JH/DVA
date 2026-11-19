@@ -14,10 +14,10 @@ import {
   type OrderInput,
   type Party,
   type PartyInput,
-} from '@/features/order/api/orderApi'
-import { orderErrorText } from '@/features/order/labels'
-import { submitDraft } from '@/features/order/api/draftApi'
-import type { CustomerPatch, OrderPatch } from '@/features/order/api/orderPatch'
+} from '../api/orderApi'
+import { orderErrorText } from '../labels'
+import { submitDraft } from '../api/draftApi'
+import type { CustomerPatch, OrderPatch } from '../api/orderPatch'
 import { customerQueries } from '@/shared/customer/customerApi'
 import { submitResultText } from './orderForm'
 

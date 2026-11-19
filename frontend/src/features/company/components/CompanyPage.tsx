@@ -2,7 +2,7 @@
 // 청구액 카드(달 이동) · 왼쪽 부서(사원 거르기 · 추가 · 이름 변경 · 삭제) · 오른쪽 탭: 사원 / 청구 내역(+ 고른 건 상세)
 // 기업은 월결제 고정(기업 간 배송) → 결제 설정 없음. 숨긴 버튼 · 설명 문구 없음
 import { useParams } from 'react-router'
-import { useCompanyDetail } from '@/features/company/hooks/useCompanyDetail'
+import { useCompanyDetail } from '../hooks/useCompanyDetail'
 import { PageHead } from '@/shared/ui'
 import { Btn, Icon, Segments } from '@/shared/ui'
 import { SearchBox } from '@/shared/ui/ListFrame'

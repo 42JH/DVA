@@ -2,7 +2,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { PAYMENT_METHOD_LABEL } from '@/shared/order/labels'
-import { orderQueries, type OrderDetail, type PaymentMethod } from '@/features/order/api/orderApi'
+import { orderQueries, type OrderDetail, type PaymentMethod } from '../api/orderApi'
 import { paymentChoices, phoneOk } from './orderForm'
 
 export function useOrderPayment(order: OrderDetail | undefined, senderPhone: string) {

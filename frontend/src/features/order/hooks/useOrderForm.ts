@@ -1,16 +1,10 @@
 import { useReducer, useState } from 'react'
 import { ApiError } from '@/shared/api/client'
 import type { SearchedAddress } from '@/shared/ui'
-import { BOX_TYPES, type BoxKey, type OrderDetail } from '@/features/order/api/orderApi'
-import { orderErrorText } from '@/features/order/labels'
-import {
-  MAX_BOXES,
-  MAX_DOCUMENTS,
-  kstLocal,
-  pickupRange,
-  priceOk,
-} from '@/features/order/api/orderLimits'
-import { buildCustomerPatch, buildOrderPatch, submitMissing } from '@/features/order/api/orderPatch'
+import { BOX_TYPES, type BoxKey, type OrderDetail } from '../api/orderApi'
+import { orderErrorText } from '../labels'
+import { MAX_BOXES, MAX_DOCUMENTS, kstLocal, pickupRange, priceOk } from '../api/orderLimits'
+import { buildCustomerPatch, buildOrderPatch, submitMissing } from '../api/orderPatch'
 import { useCustomerSuggest, type Suggestion } from './useCustomerSuggest'
 import {
   digits,

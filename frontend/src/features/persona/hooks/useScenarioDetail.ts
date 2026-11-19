@@ -6,12 +6,8 @@ import { ymd } from '@/shared/lib/dateRange'
 import { STATUS_LOOK } from '@/shared/order/look'
 import type { PlayerView } from '@/shared/call/CallPlayer'
 import { useRecordingPlayer } from '@/shared/call/useRecordingPlayer'
-import { personaQueries } from '@/features/persona/api/personaApi'
-import {
-  scenarioTestQueries,
-  type Check,
-  type VersionTest,
-} from '@/features/persona/api/scenarioTestApi'
+import { personaQueries } from '../api/personaApi'
+import { scenarioTestQueries, type Check, type VersionTest } from '../api/scenarioTestApi'
 import { cellOf, failLine, shownCheck, sideLabel, withActiveTests, type Cell } from './scenarioTest'
 import { talksOf } from './useScenarioTest'
 

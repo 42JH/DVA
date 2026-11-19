@@ -1,5 +1,5 @@
 // '모두 통과하면 반영' 약속을 어떻게 할지 — 순수 함수 (applyPledge.test.ts). 약속 저장은 pledgeStore, 지켜보기는 useApplyAfterTest
-import type { Scenario, VersionTest } from '@/features/persona/api/scenarioTestApi'
+import type { Scenario, VersionTest } from '../api/scenarioTestApi'
 import type { Pledge } from './pledgeStore'
 import { rowsOf, testOf } from './scenarioTest'
 

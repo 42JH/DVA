@@ -5,13 +5,9 @@ import { ymd } from '@/shared/lib/dateRange'
 import { fmtListTime, fmtPhone, fmtTime } from '@/shared/lib/format'
 import { matchKo, phoneDigits } from '@/shared/lib/search'
 import { useListParams } from '@/shared/lib/useListParams'
-import {
-  deleteUnanswered,
-  unansweredQueries,
-  type UnansweredQuestion,
-} from '@/features/faq/api/unansweredApi'
+import { deleteUnanswered, unansweredQueries, type UnansweredQuestion } from '../api/unansweredApi'
 
-export type { UnansweredQuestion } from '@/features/faq/api/unansweredApi'
+export type { UnansweredQuestion } from '../api/unansweredApi'
 
 /** 목록 한 줄 = 질문 + 화면용 글 (시각 '오후 3:02' · 하이픈 전화번호) */
 export type UnansweredRow = UnansweredQuestion & { time: string; phone: string }

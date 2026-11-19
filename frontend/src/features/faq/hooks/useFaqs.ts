@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useDeferredValue, useState } from 'react'
 import { matchKo } from '@/shared/lib/search'
 import { useListParams } from '@/shared/lib/useListParams'
-import { FAQ_CATEGORIES, faqQueries, type Faq, type FaqCategory } from '@/features/faq/api/faqApi'
+import { FAQ_CATEGORIES, faqQueries, type Faq, type FaqCategory } from '../api/faqApi'
 import { dateTime } from '@/shared/lib/when'
 
 const DEFAULTS = { q: '', cat: '', open: '' }

@@ -4,8 +4,8 @@
 //   담당자 'Y'(여러 명) · 주소는 카카오 검색 결과의 칸을 그대로
 // 서버에 파일을 보내지 않고 JSON으로 바꿔 보냄 (명세 7장: CSV API 없음). 행 번호는 머리줄 = 1행
 import { parseCsv } from '@/shared/lib/csv'
-import type { Member, MemberInput } from '@/features/company/api/companyApi'
-import { MEMBER_REASON } from '@/features/company/labels'
+import type { Member, MemberInput } from './api/companyApi'
+import { MEMBER_REASON } from './labels'
 
 const CSV_HEADER = [
   '사번',

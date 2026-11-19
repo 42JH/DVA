@@ -8,7 +8,7 @@ import type {
   DropOffView,
   RegistrationView,
   WaitView,
-} from '@/features/stats/hooks/useDashboard'
+} from '../hooks/useDashboard'
 import { BarChart, Donut } from './Charts'
 
 // 02 대시보드 카드 네 장 (Figma 'AI 상담 성능' 11/04~05 — 카드 모서리 12 · 선 1 · 안쪽 18/20/16) · 숫자 · 열은 연동 명세 기준

@@ -2,8 +2,8 @@
 // 삭제 · 이름 수정은 상세 화면에서 (줄마다 버튼 · 체크 없음). 정렬은 등록 최신순 고정(서버 기본)
 import { useRef } from 'react'
 import { Link, useNavigate } from 'react-router'
-import { useCompanyList } from '@/features/company/hooks/useCompanyList'
-import { useFitNames } from '@/features/company/fitNames'
+import { useCompanyList } from '../hooks/useCompanyList'
+import { useFitNames } from '../fitNames'
 import { PageHead } from '@/shared/ui'
 import { Btn, Icon } from '@/shared/ui'
 import { SearchBox, SkeletonRows } from '@/shared/ui/ListFrame'

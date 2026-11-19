@@ -1,7 +1,7 @@
 // 통화 상세 오른쪽 — 운영팀용 정보(고객 · 이 통화의 주문 · 처리 결과 · 불만). 왼쪽 대화는 CallPage
 import { useRef, type ReactNode } from 'react'
 import { Link } from 'react-router'
-import { useCallOrder } from '@/features/call/hooks/useCallOrder'
+import { useCallOrder } from '../hooks/useCallOrder'
 import { orderNo, priceBand } from '@/shared/order/labels'
 import { fmtPhone } from '@/shared/lib/format'
 import { Badge } from '@/shared/ui'

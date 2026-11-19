@@ -7,12 +7,8 @@ import { Badge, PageHead, Segments } from '@/shared/ui'
 import { Talk } from '@/shared/call/AiSteps'
 import { Player } from '@/shared/call/Player'
 import { useFollowScroll } from '@/shared/call/useFollowScroll'
-import { SCENARIO_TEST } from '@/features/persona/hooks/useScenarioTest'
-import {
-  useScenarioCall,
-  useScenarioDetail,
-  useScenarioScript,
-} from '@/features/persona/hooks/useScenarioDetail'
+import { SCENARIO_TEST } from '../hooks/useScenarioTest'
+import { useScenarioCall, useScenarioDetail, useScenarioScript } from '../hooks/useScenarioDetail'
 import { Result } from './ScenarioTest'
 
 export function ScenarioDetailPage() {

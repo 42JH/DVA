@@ -1,10 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { personaQueries, requestApply } from '@/features/persona/api/personaApi'
-import {
-  SCENARIO_TEST,
-  scenarioTestQueries,
-  startTest,
-} from '@/features/persona/api/scenarioTestApi'
+import { personaQueries, requestApply } from '../api/personaApi'
+import { SCENARIO_TEST, scenarioTestQueries, startTest } from '../api/scenarioTestApi'
 import { pledges } from './pledgeStore'
 import { restOf, rowsOf, testOf } from './scenarioTest'
 

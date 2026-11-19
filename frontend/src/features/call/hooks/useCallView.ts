@@ -8,7 +8,7 @@ import { reasonTag } from '@/shared/lib/unansweredReason'
 import { orderNo } from '@/shared/order/labels'
 import { callQueries } from '@/shared/call/callApi'
 import { toCallDetail, type Complaint } from '@/shared/call/callDto'
-import { COMPLAINT_LABEL } from '@/features/call/labels'
+import { COMPLAINT_LABEL } from '../labels'
 import { useCallDetail } from './useCallDetail'
 import { callState, memberOf } from '../callState'
 

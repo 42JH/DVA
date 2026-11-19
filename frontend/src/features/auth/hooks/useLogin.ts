@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 import { ApiError } from '@/shared/api/client'
-import { login } from '@/features/auth/api/loginApi'
+import { login } from '../api/loginApi'
 
 /** 00 로그인 훅 — 입력값 · 제출 · 오류 문구 */
 export function useLogin() {

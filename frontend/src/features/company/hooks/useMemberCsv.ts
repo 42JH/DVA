@@ -7,15 +7,15 @@ import {
   companyQueries,
   createDepartment,
   saveMemberAddresses,
-} from '@/features/company/api/companyApi'
+} from '../api/companyApi'
 import {
   previewAgainst,
   readMembersFile,
   serverRowErrors,
   type CsvMember,
   type CsvPreview,
-} from '@/features/company/csvMembers'
-import { errorText } from '@/features/company/labels'
+} from '../csvMembers'
+import { errorText } from '../labels'
 
 const SHOW_CHANGES = 5 // 바뀌는 사람은 처음 5명까지, 나머지는 '외 n명'
 

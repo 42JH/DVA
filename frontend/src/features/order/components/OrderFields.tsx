@@ -1,12 +1,12 @@
 // 주문 칸 — 주문 추가 창 · 상세 패널 수정이 같이 씀. 칸 구성은 상세와 같음: 보내는 분 · 받는 분 · 물품 · 물품 가액 · 배송비 · 결제 방식 · 수거 희망 · 요청 사항
 // 주소 칸을 누르면 칸 자리에 주소 검색이 펼쳐짐 (고르면 돌아옴). 규칙은 기존 useOrderForm 그대로
 import type { ReactNode } from 'react'
-import type { useOrderForm } from '@/features/order/hooks/useOrderForm'
+import type { useOrderForm } from '../hooks/useOrderForm'
 import { fmtPhone } from '@/shared/lib/format'
 import { PRICE_BANDS, priceBand } from '@/shared/order/labels'
 import { AddressPicker } from '@/shared/ui/AddressPicker'
 import { AddressButton, Choice, Err, Label, SuggestInput, TextInput } from '@/shared/ui/Field'
-import type { Suggestion } from '@/features/order/hooks/useCustomerSuggest'
+import type { Suggestion } from '../hooks/useCustomerSuggest'
 import { Confirm } from '@/shared/ui/Modal'
 
 type OrderForm = ReturnType<typeof useOrderForm>

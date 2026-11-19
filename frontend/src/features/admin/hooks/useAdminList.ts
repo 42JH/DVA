@@ -12,8 +12,8 @@ import {
   resetAdminPassword,
   type Admin,
   type AdminStatus,
-} from '@/features/admin/api/adminApi'
-import { ADMIN_TABS, ROLE_LABEL } from '@/features/admin/labels'
+} from '../api/adminApi'
+import { ADMIN_TABS, ROLE_LABEL } from '../labels'
 
 const PAGE_SIZE = 11 // 디자인: 한 쪽 11명
 const DEFAULTS: { tab: AdminStatus; q: string } = { tab: 'ACTIVE', q: '' } // 첫 화면 = '관리자' 탭 (맨 앞 탭)

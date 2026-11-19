@@ -1,8 +1,8 @@
 // 08 사원 추가 · 수정 창의 계산 — 같은 사번 · 같은 번호 · 마지막 담당자 · 보낼 주소 · 칸 아래 문구
 // React를 모르는 순수 함수 (실행해서 확인: memberForm.test.ts). 상태 · 요청은 useMemberForm
 import type { SearchedAddress } from '@/shared/ui'
-import type { CustomerAddress, Member } from '@/features/company/api/companyApi'
-import { phoneDigits, phoneError } from '@/features/company/csvMembers'
+import type { CustomerAddress, Member } from '../api/companyApi'
+import { phoneDigits, phoneError } from '../csvMembers'
 
 export type Role = Member['membership']['role']
 /** 창의 칸 값 */

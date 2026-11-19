@@ -3,7 +3,7 @@
 // 데이터 · 검색 · 삭제는 기존 useUnansweredList 그대로. [FAQ 등록] = 이 화면의 창에서 고객 말을 채워 등록 (저장하면 처리됨)
 import { useRef, useState } from 'react'
 import { reasonTag } from '@/shared/lib/unansweredReason'
-import { useUnansweredList, type UnansweredRow } from '@/features/faq/hooks/useUnansweredList'
+import { useUnansweredList, type UnansweredRow } from '../hooks/useUnansweredList'
 import { PageHead } from '@/shared/ui'
 import { Badge, Btn, Icon, SortTh } from '@/shared/ui'
 import { SearchBox } from '@/shared/ui/ListFrame'

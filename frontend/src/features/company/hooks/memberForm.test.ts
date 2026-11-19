@@ -1,6 +1,6 @@
 // 실행: npx tsx --tsconfig tsconfig.app.json src/features/company/hooks/memberForm.test.ts  (프레임워크 없이 assert만)
 import assert from 'node:assert/strict'
-import type { Member } from '@/features/company/api/companyApi'
+import type { Member } from '../api/companyApi'
 import { memberChecks, memberErrors, memberReady, type MemberFormValues } from './memberForm'
 
 const member = (

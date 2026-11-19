@@ -1,5 +1,5 @@
 // 08 기업관리 — 코드 → 화면 문구
-import type { Member } from '@/features/company/api/companyApi'
+import type { Member } from './api/companyApi'
 
 // ORG_ADMIN = 기업의 연락 창구 '담당자'(권한 없음 · 여러 명 · 1명 이상). '관리자'는 콘솔 로그인 계정과 섞여서 안 씀
 export const MEMBER_ROLE: Record<Member['membership']['role'], string> = {

@@ -1,7 +1,7 @@
 // AI 상담가의 버전 계산 — 다시 쓸 때 보낼 칸 · 통화에 쓰는 내용과의 관계(반영 전 · 시험할 대상) · 고칠 대상
 // React를 모르는 순수 함수 (실행해서 확인: personaVersions.test.ts). 상태 · 요청은 usePersonaPage
-import { PROMPT_KEYS, type Persona, type PersonaVersion } from '@/features/persona/api/personaMap'
-import type { EditTarget } from '@/features/persona/hooks/usePromptEditor'
+import { PROMPT_KEYS, type Persona, type PersonaVersion } from '../api/personaMap'
+import type { EditTarget } from './usePromptEditor'
 
 /** 다시 쓰기 = 고른 버전(v) 내용으로 저장. 수정의 시작점(latest)과 다른 칸만 보냄 — 수정 [저장]과 같은 규칙. same = 보낼 것이 없음 */
 export function reuseDiff(v: PersonaVersion, latest: PersonaVersion) {

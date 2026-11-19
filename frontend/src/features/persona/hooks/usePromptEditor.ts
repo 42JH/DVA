@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { ApiError } from '@/shared/api/client'
-import { emptyPromptNotice, PROMPT_SECTIONS, unsupportedText } from '@/features/persona/labels'
+import { emptyPromptNotice, PROMPT_SECTIONS, unsupportedText } from '../labels'
 import {
   personaQueries,
   PROMPT_KEYS,
@@ -10,9 +10,9 @@ import {
   type PromptFields,
   type PromptKey,
   type VoiceSettings,
-} from '@/features/persona/api/personaApi'
-import { useVoiceDraft } from '@/features/persona/hooks/useVoiceDraft'
-import { useLeaveGuard } from '@/features/persona/hooks/useLeaveGuard'
+} from '../api/personaApi'
+import { useVoiceDraft } from './useVoiceDraft'
+import { useLeaveGuard } from './useLeaveGuard'
 
 /** 수정 창이 무엇을 고치는지 — 늘 그 페르소나의 최신 버전에서 시작: 초안이 있으면 초안, 없으면 HEAD */
 export interface EditTarget {

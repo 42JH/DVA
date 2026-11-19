@@ -1,6 +1,6 @@
 // 실행: npx tsx src/features/persona/hooks/scenarioTest.test.ts  (프레임워크 없이 assert만)
 import assert from 'node:assert/strict'
-import type { Scenario, TestItem, VersionTest } from '@/features/persona/api/scenarioTestApi'
+import type { Scenario, TestItem, VersionTest } from '../api/scenarioTestApi'
 import {
   baseOf,
   changeOf,

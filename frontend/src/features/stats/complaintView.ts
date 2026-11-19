@@ -1,7 +1,7 @@
 // 통계 §4 [AI 응대 오류 | 고객 불만] 세기 (Jira 148) — React · API를 모르는 계산만 (홈 · 통계가 같이 씀, 테스트가 바로 부름)
-import type { ComplaintCalls } from '@/features/stats/api/dashboardApi'
-import { maxIndex, num, one, pctText } from '@/features/stats/format'
-import { AI_ERROR, COMPLAINT_TARGET } from '@/features/stats/labels'
+import type { ComplaintCalls } from './api/dashboardApi'
+import { maxIndex, num, one, pctText } from './format'
+import { AI_ERROR, COMPLAINT_TARGET } from './labels'
 import { toCallRow, type CallListItemDto } from '@/shared/call/callDto'
 import { AI_ERROR_TYPES, splitComplaints, TARGETS } from '@/shared/call/complaints'
 

@@ -1,11 +1,11 @@
 // AI 상담가 화면에 그릴 값 만들기 — 위 탭 · 프롬프트 카드 · 수정 기록 창 · 띠. 상태 · 요청은 usePersonaPage
 import { fmtVersionTime } from '@/shared/lib/format'
 import type { Tone } from '@/shared/ui'
-import { PROMPT_SECTIONS, VERSION_BADGE } from '@/features/persona/labels'
-import { inlineDiff, type Part } from '@/features/persona/hooks/lineDiff'
-import { nameI, type BandStep } from '@/features/persona/hooks/personaBand'
-import type { useApplyTest } from '@/features/persona/hooks/useApplyTest'
-import type { Persona, PersonaVersion, PromptKey } from '@/features/persona/api/personaMap'
+import { PROMPT_SECTIONS, VERSION_BADGE } from '../labels'
+import { inlineDiff, type Part } from './lineDiff'
+import { nameI, type BandStep } from './personaBand'
+import type { useApplyTest } from './useApplyTest'
+import type { Persona, PersonaVersion, PromptKey } from '../api/personaMap'
 
 /** 오른쪽 상담가 카드 한 장 */
 interface PersonaItem {
