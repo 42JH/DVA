@@ -33,6 +33,44 @@ export function WaybillPanel({
   const [askingRetry, setAskingRetry] = useState(false) // [디버에 다시 접수] 확인 창
   const v = w.view
 
+  let body: ReactNode
+  if (!v)
+    body = w.error ? (
+      <p className="py-10 text-center text-[14px] text-ops-sub">{w.error}</p>
+    ) : (
+      <PanelSkeleton />
+    )
+  else if (editing)
+    // 수정은 그 자리에서 — 상세와 같은 칸, 저장 · 취소하면 상세로
+    body = (
+      <WaybillEdit
+        orderSeq={orderSeq}
+        parcelSeq={parcelSeq}
+        fee={v.fee}
+        onDone={(notice, newOrderSeq) => {
+          setEditing(false)
+          if (newOrderSeq) onMoved(newOrderSeq, notice)
+          else setNotice(notice ?? null)
+        }}
+      />
+    )
+  else
+    body = (
+      <>
+        {notice && (
+          <p
+            role="status"
+            className="mb-3 rounded-md bg-ops-route-soft px-3 py-2 text-[13px] text-ops-route"
+          >
+            {notice}
+          </p>
+        )}
+        {w.missing.size > 0 && <MissingNote w={w} />}
+        <Slip w={w} />
+        <Calls calls={v.calls} openCall={openCall} onOpen={onOpenCall} />
+      </>
+    )
+
   return (
     <aside
       aria-label="주문 상세"
@@ -52,41 +90,7 @@ export function WaybillPanel({
         </button>
       </div>
 
-      <div className="min-h-0 flex-1 [scrollbar-width:thin] overflow-y-auto px-5 py-4">
-        {!v ? (
-          w.error ? (
-            <p className="py-10 text-center text-[14px] text-ops-sub">{w.error}</p>
-          ) : (
-            <PanelSkeleton />
-          )
-        ) : editing ? (
-          // 수정은 그 자리에서 — 상세와 같은 칸, 저장 · 취소하면 상세로
-          <WaybillEdit
-            orderSeq={orderSeq}
-            parcelSeq={parcelSeq}
-            fee={v.fee}
-            onDone={(notice, newOrderSeq) => {
-              setEditing(false)
-              if (newOrderSeq) onMoved(newOrderSeq, notice)
-              else setNotice(notice ?? null)
-            }}
-          />
-        ) : (
-          <>
-            {notice && (
-              <p
-                role="status"
-                className="mb-3 rounded-md bg-ops-route-soft px-3 py-2 text-[13px] text-ops-route"
-              >
-                {notice}
-              </p>
-            )}
-            {w.missing.size > 0 && <MissingNote w={w} />}
-            <Slip w={w} />
-            <Calls calls={v.calls} openCall={openCall} onOpen={onOpenCall} />
-          </>
-        )}
-      </div>
+      <div className="min-h-0 flex-1 [scrollbar-width:thin] overflow-y-auto px-5 py-4">{body}</div>
 
       {v && !editing && (w.canEdit || w.canCancel || w.canRetry) && (
         <div className="flex shrink-0 flex-col gap-2 border-t border-ops-line px-5 py-3">
@@ -285,10 +289,8 @@ function Row({
           <Val missing={missing}>
             <span className="font-normal text-ops-faint">없음</span>
           </Val>
-        ) : missing && typeof children === 'string' ? (
-          <Val missing>{children}</Val>
         ) : (
-          children
+          <Val missing={missing && typeof children === 'string'}>{children}</Val>
         )}
       </dd>
     </>

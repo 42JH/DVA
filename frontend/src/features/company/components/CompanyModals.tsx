@@ -55,26 +55,7 @@ export function MemberFormModal({
       sub={companyName}
       width={560}
       onClose={onClose}
-      footer={
-        vm.searching ? null : vm.addressFailMessage ? (
-          // 사원은 저장됨 — 주소만 다시 보내거나 닫기
-          <>
-            <FootNote error={vm.addressFailMessage} />
-            <Btn onClick={onClose}>닫기</Btn>
-            <Btn kind="primary" disabled={vm.retrying} onClick={vm.retryAddress}>
-              {vm.retrying ? '저장 중…' : '주소 다시 저장'}
-            </Btn>
-          </>
-        ) : (
-          <>
-            <FootNote error={vm.errorMessage} hint={vm.addressHint} />
-            <Btn onClick={onClose}>취소</Btn>
-            <Btn kind="primary" type="submit" form="member-form" disabled={!vm.canSubmit}>
-              {vm.isSubmitting ? '저장 중…' : vm.editing ? '저장' : '추가'}
-            </Btn>
-          </>
-        )
-      }
+      footer={vm.searching ? null : <MemberFooter vm={vm} onClose={onClose} />}
     >
       {vm.searching ? (
         <AddressPicker title="사원 주소 검색" onPick={vm.pickAddress} onClose={vm.closeSearch} />
@@ -336,5 +317,34 @@ export function NameModal({
         <TextInput label={label} value={value} onChange={setValue} />
       </form>
     </Modal>
+  )
+}
+
+/** 사원 창 아래 버튼 — 사원은 저장됐는데 주소만 실패했으면 주소만 다시 보내거나 닫기 */
+function MemberFooter({
+  vm,
+  onClose,
+}: {
+  vm: ReturnType<typeof useMemberForm>
+  onClose: () => void
+}) {
+  if (vm.addressFailMessage)
+    return (
+      <>
+        <FootNote error={vm.addressFailMessage} />
+        <Btn onClick={onClose}>닫기</Btn>
+        <Btn kind="primary" disabled={vm.retrying} onClick={vm.retryAddress}>
+          {vm.retrying ? '저장 중…' : '주소 다시 저장'}
+        </Btn>
+      </>
+    )
+  return (
+    <>
+      <FootNote error={vm.errorMessage} hint={vm.addressHint} />
+      <Btn onClick={onClose}>취소</Btn>
+      <Btn kind="primary" type="submit" form="member-form" disabled={!vm.canSubmit}>
+        {vm.isSubmitting ? '저장 중…' : vm.editing ? '저장' : '추가'}
+      </Btn>
+    </>
   )
 }
