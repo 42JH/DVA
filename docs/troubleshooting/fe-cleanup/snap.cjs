@@ -56,6 +56,8 @@ fs.mkdirSync(OUT, { recursive: true })
   for (const [name, url, button] of [['orders-add', '/orders', /주문 추가/], ['companies-add', '/companies', /CSV로 기업 등록/], ['faqs-add', '/faqs', /FAQ 등록/], ['faqs-edit', '/faqs', /^수정$/], ['unanswered-faq', '/unanswered', /FAQ 등록/], ['personas-add', '/personas', /상담가 등록/]]) {
     await page.goto(BASE + url)
     await page.waitForTimeout(1500)
+    // FAQ 수정은 펼친 뒤에만 보임 (닫힌 답변은 inert)
+    if (name === 'faqs-edit') await page.locator('article button[aria-expanded]').first().click()
     const b = page.getByRole('button', { name: button }).first()
     if (await b.count()) {
       await b.click().catch(() => {})

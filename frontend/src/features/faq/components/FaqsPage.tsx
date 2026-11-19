@@ -11,7 +11,7 @@ import { PageHead } from '@/shared/ui'
 import { Btn, Icon } from '@/shared/ui'
 import { SearchBox } from '@/shared/ui/ListFrame'
 import { useExamples, useFaqs, type FaqsVm } from '../hooks/useFaqs'
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { useKeepScroll } from '@/shared/lib/keepScroll'
 
 /** 2026.11.07 */
@@ -151,25 +151,17 @@ function Item({ f, vm }: { f: Faq; vm: FaqsVm }) {
   )
 }
 
-/** 열고 닫을 때 slide up/down — 내용 높이를 측정해 inline maxHeight로 바로 애니메이션 */
+/** 열고 닫을 때 slide up/down — 줄 높이 0fr ↔ 1fr 전환이라 내용 높이를 JS로 재지 않음 (강제 리플로우 없음)
+ *  내용은 처음 펼칠 때 그림 — 닫힌 FAQ마다 답변 마크다운을 해석하던 것이 화면 열기를 막았음. 닫히면 inert라 Tab이 안 들어감 */
 function Collapsible({ open, children }: { open: boolean; children: ReactNode }) {
-  const ref = useRef<HTMLDivElement>(null)
-  const [h, setH] = useState(0)
-  useEffect(() => {
-    const el = ref.current
-    if (!el) return
-    const update = () => setH(el.scrollHeight)
-    update()
-    const ro = new ResizeObserver(update)
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [children])
+  const [seen, setSeen] = useState(open)
+  if (open && !seen) setSeen(true)
   return (
     <div
-      style={{ maxHeight: open ? h : 0 }}
-      className="overflow-hidden transition-[max-height] duration-200 ease-out"
+      inert={!open}
+      className={`grid transition-[grid-template-rows] duration-200 ease-out ${open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}
     >
-      <div ref={ref}>{children}</div>
+      <div className="min-h-0 overflow-hidden">{seen && children}</div>
     </div>
   )
 }
