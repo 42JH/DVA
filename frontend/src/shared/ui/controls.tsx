@@ -1,6 +1,7 @@
 // 화면 공통 부품 (버튼 · 탭 · 뱃지 · 아이콘 · 정렬 칸 머리). 색은 global.css의 ops-* 토큰
 import type { ButtonHTMLAttributes, ReactNode } from 'react'
 import { ACTION_BADGE_SIZE, BUTTON_LOOK } from './actionBadge'
+import { fmtNum } from '@/shared/lib/format'
 
 export type Tone = 'idle' | 'wait' | 'done' | 'stop' | 'route' | 'cancel'
 
@@ -118,7 +119,7 @@ export function Segments<T extends string>({
               <span
                 className={`min-w-[2ch] tabular-nums ${on ? 'text-ops-sub' : 'text-ops-faint'}`}
               >
-                {it.count?.toLocaleString('ko-KR')}
+                {it.count == null ? null : fmtNum(it.count)}
               </span>
             )}
           </button>

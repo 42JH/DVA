@@ -13,8 +13,8 @@ import { CompanyCsvModal } from './CompanyModals'
 import { Pagination } from '@/shared/ui/Pagination'
 import { usePageSize } from '@/shared/lib/paging'
 import { todayYmd } from '@/shared/lib/dateRange'
-
-const won = (n: number) => `${n.toLocaleString('ko-KR')}원`
+import { fmtNum } from '@/shared/lib/format'
+import { won } from '@/shared/order/look'
 
 export function CompaniesPage() {
   const navigate = useNavigate()
@@ -85,9 +85,7 @@ export function CompaniesPage() {
                   <td className="text-left">
                     <Managers names={r.managers} />
                   </td>
-                  <td className="text-center tabular-nums">
-                    {r.members.toLocaleString('ko-KR')}명
-                  </td>
+                  <td className="text-center tabular-nums">{fmtNum(r.members)}명</td>
                   <td className="text-center tabular-nums">
                     {r.departments === null ? '' : `${r.departments}곳`}
                   </td>

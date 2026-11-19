@@ -8,8 +8,7 @@ import { SkeletonRows } from '@/shared/ui/ListFrame'
 import { useScrollable } from '@/shared/lib/useScrollable'
 import { useKeepScroll } from '@/shared/lib/keepScroll'
 import { fmtDate, fmtDateTime, fmtPhone } from '@/shared/lib/format'
-
-const won = (n: number) => `${n.toLocaleString('ko-KR')}원`
+import { won } from '@/shared/order/look'
 
 type VM = ReturnType<typeof useCompanyDetail>
 

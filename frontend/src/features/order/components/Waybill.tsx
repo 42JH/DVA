@@ -29,8 +29,6 @@ export function WaybillPanel({
   useEscape(onClose)
   const [editing, setEditing] = useState(false)
   const [notice, setNotice] = useState<string | null>(initialNotice) // 미완료 주문 접수 결과
-  const [asking, setAsking] = useState(false)
-  const [askingRetry, setAskingRetry] = useState(false) // [디버에 다시 접수] 확인 창
   const v = w.view
 
   let body: ReactNode
@@ -92,11 +90,23 @@ export function WaybillPanel({
 
       <div className="min-h-0 flex-1 [scrollbar-width:thin] overflow-y-auto px-5 py-4">{body}</div>
 
-      {v && !editing && (w.canEdit || w.canCancel || w.canRetry) && (
+      {v && !editing && <Actions w={w} onEdit={() => setEditing(true)} onClose={onClose} />}
+    </aside>
+  )
+}
+
+/** 아래 버튼 줄 [수정] [디버에 다시 접수] [삭제 · 주문 취소] + 확인 창 둘 */
+function Actions({ w, onEdit, onClose }: { w: Waybill; onEdit: () => void; onClose: () => void }) {
+  const v = w.view!
+  const [asking, setAsking] = useState(false)
+  const [askingRetry, setAskingRetry] = useState(false) // [디버에 다시 접수] 확인 창
+  return (
+    <>
+      {(w.canEdit || w.canCancel || w.canRetry) && (
         <div className="flex shrink-0 flex-col gap-2 border-t border-ops-line px-5 py-3">
           <div className="flex items-center gap-2">
             {w.canEdit && (
-              <Btn kind="edit" onClick={() => setEditing(true)}>
+              <Btn kind="edit" onClick={onEdit}>
                 수정
               </Btn>
             )}
@@ -132,34 +142,34 @@ export function WaybillPanel({
           onOk={() => w.retry(() => setAskingRetry(false))}
           onClose={() => setAskingRetry(false)}
         >
-          <b className="font-semibold">{v?.no}</b> 주문을 지금 저장된 내용으로 디버에 다시 보냅니다.
+          <b className="font-semibold">{v.no}</b> 주문을 지금 저장된 내용으로 디버에 다시 보냅니다.
           다시 결제하지 않습니다. 디버에 이미 접수돼 있을 수 있으니 디버 쪽을 먼저 확인해 주세요.
         </Confirm>
       )}
       {asking && w.canCancel && (
         <Confirm
-          title={v?.isDraft ? '미완료 주문을 삭제할까요?' : '주문을 취소할까요?'}
-          ok={v?.isDraft ? '삭제' : '주문 취소'}
+          title={v.isDraft ? '미완료 주문을 삭제할까요?' : '주문을 취소할까요?'}
+          ok={v.isDraft ? '삭제' : '주문 취소'}
           closeLabel="닫기"
           danger
           busy={w.busy}
           error={w.actionError}
-          onOk={() => w.cancel(v?.isDraft ? onClose : undefined)}
+          onOk={() => w.cancel(v.isDraft ? onClose : undefined)}
           onClose={() => setAsking(false)}
         >
-          {v?.isDraft ? (
+          {v.isDraft ? (
             <>
-              <b className="font-semibold">{v?.no}</b> 미완료 주문을 목록에서 지웁니다. 접수된
+              <b className="font-semibold">{v.no}</b> 미완료 주문을 목록에서 지웁니다. 접수된
               주문이나 결제와는 상관없습니다.
             </>
           ) : (
             <>
-              <b className="font-semibold">{v?.no}</b> 주문을 취소합니다. 되돌릴 수 없습니다.
+              <b className="font-semibold">{v.no}</b> 주문을 취소합니다. 되돌릴 수 없습니다.
             </>
           )}
         </Confirm>
       )}
-    </aside>
+    </>
   )
 }
 
