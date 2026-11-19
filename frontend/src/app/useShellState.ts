@@ -11,7 +11,7 @@ export function useShellState(): Shell {
   const session = useSession()
   const calls = useActiveCallCount()
   const persona = useActivePersonaName()
-  // 사이드바 숫자 (기업 피드백: 미답변이 숨어 있음 → 메뉴 옆에 늘 보이게)
+  // 사이드바 숫자 (미답변이 숨어 있음 → 메뉴 옆에 늘 보이게)
   const unanswered = useQuery(unansweredQueries.count())
   return {
     name: session.me?.name ?? '',

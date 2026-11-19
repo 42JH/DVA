@@ -11,7 +11,7 @@ type Key = { personaSeq: number; version: number }
 const same = (a: Key, b: Key | null) =>
   !!b && a.personaSeq === b.personaSeq && a.version === b.version
 
-/** 버전을 부르는 말 (새 안 — 화면에 '버전'이라는 말 없음). 시험 결과 위 줄 · 표 머리 · 상세 탭이 같이 씀
+/** 버전을 부르는 말 (화면에 '버전'이라는 말 없음). 시험 결과 위 줄 · 표 머리 · 상세 탭이 같이 씀
  *  통화에 쓰는 버전 = '통화에 쓰는 내용', 사용 중 상담가의 최신 = '고친 내용', 그 상담가의 더 옛 버전 = '이전 내용', 다른 상담가 = 그 이름 */
 export function sideLabel(me: Key & { isHead: boolean }, active: Key | null, name: string) {
   if (same(me, active)) return '통화에 쓰는 내용'

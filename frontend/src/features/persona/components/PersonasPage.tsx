@@ -1,4 +1,4 @@
-// AI 상담가 (새 안, 피그마 2368:2525) — 위 탭으로 상담가 고르기 | 카드 = 머리 줄(이름 · 목소리 · 저장 시각 · 버튼) + 프롬프트
+// AI 상담가 — 위 탭으로 상담가 고르기 | 카드 = 머리 줄(이름 · 목소리 · 저장 시각 · 버튼) + 프롬프트
 // 11/11: 저장 = 새 버전, [적용] 없음. 버전 기록은 5단계 수정 기록 창으로 옮김
 // 데이터 · 규칙은 usePersonaPage. 카드 = 탭 + 그 자리에서 고치기 (PersonaCard). [시나리오 시험]은 따로 화면 (ScenarioTest)
 import { useLocation } from 'react-router'
@@ -14,7 +14,7 @@ export function PersonasPage() {
   return <PersonasView key={useLocation().key} />
 }
 
-// 시안: 위 16 · 옆 24 · 아래 24, 탭 줄과 카드 사이 16
+// 위 16 · 옆 24 · 아래 24, 탭 줄과 카드 사이 16
 const FRAME = 'flex min-h-0 flex-1 flex-col gap-4 px-6 pt-4 pb-6'
 
 function PersonasView() {

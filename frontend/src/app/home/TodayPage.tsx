@@ -100,7 +100,7 @@ export function TodayPage() {
           <section aria-label="AI 상담 성능">
             <div className="mb-2 flex items-baseline justify-between">
               <h2 className="text-[14px] font-bold">AI 상담 성능</h2>
-              {/* 다른 카드의 [전체 보기]와 같은 말 · 모양 (버튼 검수 — 통계 화면으로 가는데 '그래프로 보기'였음) */}
+              {/* 다른 카드의 [전체 보기]와 같은 말 · 모양 (통계 화면으로 가는데 '그래프로 보기'였음) */}
               <Link
                 to="/stats"
                 className="flex items-center gap-0.5 text-[12px] font-medium text-ops-sub hover:text-ops-ink"

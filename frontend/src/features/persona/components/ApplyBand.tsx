@@ -4,14 +4,14 @@ import { Badge, Btn, Segments } from '@/shared/ui'
 type Vm = ReturnType<typeof usePersonaPage>
 type Band = NonNullable<Vm['band']>
 
-// 띠 모양 (시안) — 바탕은 뱃지(#fff4e0)보다 옅어 뱃지가 보임. 제목 16 · 흐린 글 14, 사이 12
+// 띠 모양 — 바탕은 뱃지(#fff4e0)보다 옅어 뱃지가 보임. 제목 16 · 흐린 글 14, 사이 12
 const BAND = 'flex flex-wrap items-center gap-3 border-b border-[#f3e2c2] bg-[#fff9ef] px-7 py-3'
 const TITLE = 'text-[16px] font-bold'
 const DIM = 'text-[14px] text-ops-faint'
 
-// 띠 (새 안 1번) — 반영 전(피그마 2368:2847) · 시험 중(3212) · 반영 중(3388) — 저장했지만 아직 통화에 안 쓰이는 버전이 있을 때
+// 띠 — 반영 전 · 시험 중 · 반영 중 — 저장했지만 아직 통화에 안 쓰이는 버전이 있을 때
 // 6번 — 다른 상담가로 바꾸기(switchNote): 시험 중 '통화에 쓰기 전 시험' · 반영 중 '통화에 들어가는 중'. 시험 통과 띠는 PassBand
-// 2번 — 시험 중 [시험 중단](2368:3753) → 시험 중단(4355): [지금까지 결과 보기] [다시 시험하고 반영]
+// 2번 — 시험 중 [시험 중단] → 시험 중단: [지금까지 결과 보기] [다시 시험하고 반영]
 // [반영 전] 고친 내용 · 저장 시각 · 수정한 사람 | [통화에 반영]  /  아래 줄 토글: 고친 내용 ↔ 통화에 쓰는 내용
 // 6번(다른 상담가로 바꾸기)은 반영 대신 사용 · 다시 시험만 (통과해도 저절로 안 바꿈)
 const applyLabel = (band: Band) => {
@@ -32,7 +32,7 @@ const waitNote = (band: Band) => {
     : 'AI 확인이 끝나면 통화에 들어갑니다'
 }
 
-// 시험 · 반영 중 — 버튼은 [진행 보기] [시험 중단]만(시험 중), 토글 없음 (피그마 2368:3212 · 3388)
+// 시험 · 반영 중 — 버튼은 [진행 보기] [시험 중단]만(시험 중), 토글 없음
 function WaitBand({
   band,
   onProgress,
@@ -59,7 +59,7 @@ function WaitBand({
             className="h-1.5 w-40 appearance-none overflow-hidden rounded-full bg-ops-idle-soft [&::-moz-progress-bar]:bg-ops-wait [&::-webkit-progress-bar]:bg-ops-idle-soft [&::-webkit-progress-value]:bg-ops-wait"
           />
           <span className={DIM}>통과 {p.pass}</span>
-          {/* 0개도 빨강 (시안 — 시나리오 시험 화면의 '실패 0'과 같게) */}
+          {/* 0개도 빨강 (시나리오 시험 화면의 '실패 0'과 같게) */}
           <span className="text-[14px] text-ops-stop">실패 {p.fail}</span>
         </>
       ) : (
@@ -110,7 +110,7 @@ export function ApplyBand({
     <>
       <div className={BAND}>
         {r ? (
-          // 4번 확인 필요 (피그마 2368:5628) — 실패가 있으면 바로 반영하지 않고 담당자가 확인
+          // 4번 확인 필요 — 실패가 있으면 바로 반영하지 않고 담당자가 확인
           <>
             <Badge tone="wait">확인 필요</Badge>
             <span className={TITLE}>시나리오 {r.fail}개 실패</span>
@@ -156,7 +156,7 @@ export function ApplyBand({
       </div>
       {band.canCompare && (
         <div className="flex border-b border-ops-line px-7 py-3">
-          {/* 회색 받침 위 토글 (시안) — 흰 카드 위에 글자만 있으면 눌리는 곳으로 안 보임 */}
+          {/* 회색 받침 위 토글 — 흰 카드 위에 글자만 있으면 눌리는 곳으로 안 보임 */}
           <div className="rounded-lg bg-ops-idle-soft p-1">
             <Segments
               label="보는 내용"

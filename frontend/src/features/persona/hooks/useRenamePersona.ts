@@ -6,9 +6,9 @@ import { personaQueries, requestApply, saveVersion } from '../api/personaApi'
 import type { EditTarget } from './usePromptEditor'
 import { useVoiceOptions } from './useVoiceOptions'
 
-/** 07 이름 연필 (새 안 10번) — 이름 자리가 입력 칸으로만 바뀜
+/** 07 이름 연필 — 이름 자리가 입력 칸으로만 바뀜
  * Enter = 이름만 새 버전으로 저장, Esc · 칸 밖 = 원래 이름. target이 null이면(권한 없음 · 지난 버전) 연필 없음
- * applyAfter: 통화에 쓰는 상담가이고 반영 전 내용이 없을 때 — 이름만 바뀐 버전이라 시험할 것이 없으니 바로 반영 (시안: 이름만 바뀌고 띠 없음) */
+ * applyAfter: 통화에 쓰는 상담가이고 반영 전 내용이 없을 때 — 이름만 바뀐 버전이라 시험할 것이 없으니 바로 반영 (이름만 바뀌고 띠 없음) */
 export function useRenamePersona(target: EditTarget | null, applyAfter = false) {
   const qc = useQueryClient()
   const options = useVoiceOptions() // saveVersion이 받는 값 — 이름만 보내도 형식상 필요

@@ -1,4 +1,4 @@
-// 주문 상세 패널: 목록 오른쪽에 붙음 (모달 이동 줄이기, 기업 피드백)
+// 주문 상세 패널: 목록 오른쪽에 붙음 (모달 이동 줄이기)
 // 송장처럼 줄 친 표(주문번호 · 보내는 분 · 받는 분 · 물품 · 요금 · 결제 · 수거 · 요청). 미완료면 빈 필수 칸을 노랗게. 이어진 통화는 주문 목록 자리에 띄움
 import { useState, type ReactNode } from 'react'
 import { WaybillEdit } from './WaybillEdit'
@@ -185,7 +185,7 @@ const MISSING_LABEL: Record<string, string> = {
   payMethod: '결제 방식',
 }
 
-/** 미완료 사유 — AI 통화가 끊겨 아직 비어 있는 칸 (기업 피드백: 미완료면 사유가 보여야 함) */
+/** 미완료 사유 — AI 통화가 끊겨 아직 비어 있는 칸 (미완료면 사유가 보여야 함) */
 function MissingNote({ w }: { w: Waybill }) {
   return (
     <div className="mb-4 flex gap-2.5 rounded-lg bg-ops-wait-soft px-3.5 py-3 text-ops-wait">

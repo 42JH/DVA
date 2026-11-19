@@ -100,7 +100,7 @@ export function useWaybill(orderSeq: number, parcelSeq: number | null) {
       analyzed: c.counts !== null,
     })),
   }
-  // 미완료 주문: 접수하려면 채워야 하는 칸 (주문 추가와 같은 규칙 — 물품 가액 · 결제 방식 포함). 기업 피드백: 미완료 사유 · 빈 칸 강조
+  // 미완료 주문: 접수하려면 채워야 하는 칸 (주문 추가와 같은 규칙 — 물품 가액 · 결제 방식 포함). 미완료 사유 · 빈 칸 강조
   const missing = new Set<string>()
   if (o && status === 'COLLECTING') {
     const need = (k: string, ok: unknown) => !ok && missing.add(k)

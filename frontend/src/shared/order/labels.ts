@@ -1,7 +1,7 @@
 // 주문 코드 → 화면 문구 (컨벤션 6.3: 코드는 orderApi, 문구는 labels)
 import type { PaymentMethod, PaymentState } from './orderTypes'
 
-/** 주문번호 'DV-00001' (Figma '주문' 11/04) — 서버 주문 번호(orderSeq)를 5자리로 */
+/** 주문번호 'DV-00001' — 서버 주문 번호(orderSeq)를 5자리로 */
 export const orderNo = (orderSeq: number) => `DV-${String(orderSeq).padStart(5, '0')}`
 
 /** 상태 묶음 = 서버 statusGroup — 03 목록 칩 · '주문 상태' 고르기 · 주문 상세 머리 칩 (Figma '주문' 11/04 문구) */

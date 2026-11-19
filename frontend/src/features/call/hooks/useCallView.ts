@@ -90,7 +90,7 @@ export function useCallView(callId: number) {
     ].map(([seq, what]) => ({ seq, what })),
   }
 
-  // AI 처리 기록을 대화 중 일어난 자리에 끼우려고 시각을 붙임 (기업 피드백: 툴 전환 같은 정보는 대화 중 발생 지점에)
+  // AI 처리 기록을 대화 중 일어난 자리에 끼우려고 시각을 붙임 (툴 전환 같은 정보는 대화 중 발생 지점에)
   const atOf = new Map((call?.actions ?? []).map((a) => [a.order, a.atSec]))
   const events = vm.actions.map((a) => ({ ...a, atSec: atOf.get(a.key) ?? null }))
 

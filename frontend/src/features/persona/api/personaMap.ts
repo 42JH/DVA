@@ -3,7 +3,7 @@
 // 서버 칸 → 화면: draft(초안, 페르소나마다 1개) = 'v(HEAD+1) 저장됨' · headVersion = 적용본(통화에 안 쓰는 페르소나도) · activeVersion = 지금 통화에 쓰는 버전
 // appliedAt은 'AI가 적용에 성공한 시각'이라 적용본을 찾는 기준이 아님 (백엔드 11/02 답)
 
-export type Speed = 'SLOW' | 'NORMAL' | 'FAST' // 발화 속도 3단계 칩 (서버는 숫자 · null = 기본)
+type Speed = 'SLOW' | 'NORMAL' | 'FAST' // 발화 속도 3단계 칩 (서버는 숫자 · null = 기본)
 type WaitTime = 'SHORT' | 'NORMAL' | 'LONG' // 고객 말 끝을 기다리는 시간
 
 /** 음성 설정 — 버전마다 따로. voice '' = AI 기본 음성(서버 null) */

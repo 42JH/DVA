@@ -1,5 +1,5 @@
 // 통화 목록 — 쪽 번호(기준 시각 고정, useSnapshotList) + 기간 · 검색. GET /calls 그대로
-// 기업 피드백: 통화 번호(#seq) 표기 · 상태(통화 중 · 분석 중 · 분석 실패 · 분석 완료)와 상담 결과(접수 · 조회 · 취소 · FAQ)를 다른 칸으로
+// 통화 번호(#seq) 표기 · 상태(통화 중 · 분석 중 · 분석 실패 · 분석 완료)와 상담 결과(접수 · 조회 · 취소 · FAQ)를 다른 칸으로
 import { fmtDuration, fmtPhone } from '@/shared/lib/format'
 import { callKinds } from '@/shared/lib/kinds'
 import { phoneDigits } from '@/shared/lib/search'

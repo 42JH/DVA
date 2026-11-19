@@ -18,7 +18,7 @@ const DEFAULTS = { q: '', call: '' }
 
 type Modal = { kind: 'delete' | 'faq'; item: UnansweredQuestion } | null
 
-/** 09 AI 미답변 문의 훅 (Figma 'FAQ 미답변' 11/06) — 처리 안 된 질문만 · 오래된 날부터(먼저 쌓인 것부터 처리)
+/** 09 AI 미답변 문의 훅 — 처리 안 된 질문만 · 오래된 날부터(먼저 쌓인 것부터 처리)
  * 검색 = 질문 · 이름 · 전화번호. 줄마다 [+](FAQ 화면 맨 위 추가 칸 → 저장하면 처리됨) · [휴지통](확인 창). 줄을 누르면 그 통화의 06
  * 같은 질문 묶기 · 한꺼번에 처리 없음 (콜드 스타트, MVP 후) */
 export function useUnansweredList() {

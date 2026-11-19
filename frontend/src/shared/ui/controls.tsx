@@ -14,7 +14,7 @@ const TONE: Record<Tone, string> = {
   route: 'bg-ops-route-soft text-ops-route',
 }
 
-/** 상태 뱃지 — 목록 · 상세가 같은 것을 씀 (기업 피드백: 뱃지 색 통일) */
+/** 상태 뱃지 — 목록 · 상세가 같은 것을 씀 (뱃지 색 통일) */
 export function Badge({ tone, children }: { tone: Tone; children: ReactNode }) {
   return (
     <span
@@ -40,7 +40,7 @@ const BTN = {
   plainBadge: BUTTON_LOOK.plain,
 }
 
-/** 버튼 높이 32 (기업 피드백: 버튼이 너무 큼) */
+/** 버튼 높이 32 (버튼이 너무 큼) */
 export function Btn({
   kind = 'plain',
   className = '',
@@ -100,7 +100,7 @@ export function Segments<T extends string>({
     <div role="tablist" aria-label={label} className="flex flex-wrap items-center gap-1">
       {items.map((it, i) => {
         const on = it.value === value
-        // 나란한 고르지 않은 탭 사이 짧은 세로줄 (시안) — 가상 요소라 폭 · 높이는 그대로
+        // 나란한 고르지 않은 탭 사이 짧은 세로줄 — 가상 요소라 폭 · 높이는 그대로
         const bar = i > 0 && !on && items[i - 1].value !== value
         return (
           <button

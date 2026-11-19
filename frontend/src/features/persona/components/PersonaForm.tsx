@@ -23,7 +23,7 @@ type FormVm = Pick<
   | 'keepEditing'
 >
 
-// 07 상담가 등록 (새 안, 피그마 2368:8290) — 카드 머리 줄 '새 상담가' + [취소] [등록]
+// 07 상담가 등록 — 카드 머리 줄 '새 상담가' + [취소] [등록]
 // 이름 · 목소리 한 줄, 아래는 보기 카드와 같은 회색 제목 줄 + 빈 칸 (PromptBody)
 export function PersonaForm({
   vm,

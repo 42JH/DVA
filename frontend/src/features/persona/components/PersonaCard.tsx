@@ -90,7 +90,7 @@ function Card({ vm, ed, editing }: { vm: Vm; ed: Ed | null; editing: boolean }) 
             {ed ? (
               <VoiceFields vm={ed} />
             ) : (
-              // 못 고칠 때(시험 · 반영 중 등) — 드롭다운 모양 그대로, 시험 · 반영 중엔 흐리게 (피그마 2368:3212)
+              // 못 고칠 때(시험 · 반영 중 등) — 드롭다운 모양 그대로, 시험 · 반영 중엔 흐리게
               <span
                 aria-disabled={vm.locked || undefined}
                 className={`${VOICE_BOX} ${vm.locked ? 'opacity-40' : ''}`}
@@ -99,7 +99,7 @@ function Card({ vm, ed, editing }: { vm: Vm; ed: Ed | null; editing: boolean }) 
                 <Icon name="chevron" className="size-3.5" />
               </span>
             )}
-            {/* 저장한 사람은 띠에만 (시안) */}
+            {/* 저장한 사람은 띠에만 */}
             <span>{p.time} 저장</span>
             {/* 고치는 중엔 막음 — 불러오기가 새 버전을 만들어 고치던 글이 사라지므로. 시험 · 반영 중도 (시험하던 글과 달라짐) */}
             <button
@@ -131,7 +131,7 @@ function Card({ vm, ed, editing }: { vm: Vm; ed: Ed | null; editing: boolean }) 
                 삭제
               </Btn>
             )}
-            {/* 시험 중 · 반영 중엔 머리 줄 버튼 없음 — [진행 보기]는 띠에 (피그마 1번 · 6번 줄)
+            {/* 시험 중 · 반영 중엔 머리 줄 버튼 없음 — [진행 보기]는 띠에
                 사용 중 상담가는 띠가 있으면(반영 전 · 확인 필요 · 시험 중단) 띠의 버튼만 (피그마 1 · 2 · 4번 줄) */}
             {vm.testTo && !vm.locked && !(c.inUse && vm.band) && (
               <Btn kind="plain" onClick={() => void navigate(vm.testTo!)}>

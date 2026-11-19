@@ -10,7 +10,7 @@ import {
 import { num, one, pctText, two } from '../format'
 import { PROCESS_LABEL, STAGE_LABEL } from '../labels'
 
-// 02 대시보드 '그래프 보기' (Figma '통계 · 응답 대기에 쓰인 통화시간' · '통계 · 단계별 이탈률' 11/05)
+// 02 대시보드 '그래프 보기'
 // 같은 카드 API를 신규(NEW) · 기존(EXISTING)으로 한 번씩 받아 묶음 막대로 비교. 항목 순서 · 이름은 labels.ts (명세가 늘 같은 순서로 줌)
 
 /** 고객군 하나 = 위 평균 칸 + 막대 값 */

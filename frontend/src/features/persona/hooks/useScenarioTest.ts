@@ -142,7 +142,7 @@ export function useScenarioTest(me: TestTarget, dateOf: (version: number) => str
     state: r.state,
     progress:
       r.state === 'running' && r.shown
-        ? // 11/13 새 안 2번(피그마 2368:3929): 진행 4 / 10 · 막대 · 통과 n · 실패 n (연결 실패는 어느 쪽에도 안 셈)
+        ? // 진행 4 / 10 · 막대 · 통과 n · 실패 n (연결 실패는 어느 쪽에도 안 셈)
           { value: ended, max: items.length, pass: count('pass'), fail: count('fail') }
         : null,
     // 11/13 새 안: 통과 + 실패 + 연결 실패 = 전체 (새로 실패 · 새로 통과는 표의 변화 칸에서). 멈춘 묶음처럼 못 한 것이 있으면 '시험 안 함'까지 더해 전체를 맞춤

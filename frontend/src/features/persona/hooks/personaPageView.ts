@@ -68,7 +68,7 @@ export function personaItems(
   return [...list]
     .sort((a, b) => Number(b.inUse) - Number(a.inUse))
     .map((p) => {
-      // 6번 시험 중 · 시험 통과 — [삭제]는 시험 중만, [통화에 사용하기]는 띠로 옮김 (피그마 6번 줄)
+      // 6번 시험 중 · 시험 통과 — [삭제]는 시험 중만, [통화에 사용하기]는 띠로 옮김
       const mine = p.personaSeq === x.currentSeq
       const free = x.canManage && !p.inUse && !p.applyingVersion
       return {
@@ -92,7 +92,7 @@ const statusBadges = (v: PersonaVersion) => {
   if (v.status === 'PENDING') b.push(VERSION_BADGE.PENDING)
   return b
 }
-/** 수정 기록 창 왼쪽 — 날짜별 목록 (새 안 5번, 피그마 2368:6500). 남은 초안은 기록이 아님 — 고쳐서 [저장]하면 버전이 됨 */
+/** 수정 기록 창 왼쪽 — 날짜별 목록. 남은 초안은 기록이 아님 — 고쳐서 [저장]하면 버전이 됨 */
 export function historyRows(
   all: PersonaVersion[],
   x: { head: PersonaVersion | null; picked: PersonaVersion | null; unapplied: boolean },
@@ -142,7 +142,7 @@ export function promptView(
   x: { callVersion: PersonaVersion | null; comparing: boolean; voice: string; canEdit: boolean },
 ): PromptView {
   return {
-    // 띠가 있으면 머리 줄 = 통화에 쓰는 버전의 저장 시각, 띠 = 고친 버전 (피그마처럼)
+    // 띠가 있으면 머리 줄 = 통화에 쓰는 버전의 저장 시각, 띠 = 고친 버전
     time: fmtVersionTime((x.callVersion ?? viewing).savedAt),
     voice: x.voice,
     sections: promptSections(viewing).sections,
@@ -152,7 +152,7 @@ export function promptView(
   }
 }
 
-/** 띠 — 반영 전 · 시험 중 · 반영 중 (새 안 1번). shown = 고친 내용(반영 중이면 그 버전, 아니면 현재 버전) */
+/** 띠 — 반영 전 · 시험 중 · 반영 중. shown = 고친 내용(반영 중이면 그 버전, 아니면 현재 버전) */
 export function bandView(
   step: BandStep,
   shown: PersonaVersion | null,

@@ -32,7 +32,7 @@ export function useLogin() {
   }
 
   const error = mutation.error
-  // 명세(API-01): ACTIVE 계정만 로그인됨 — 승인 대기 · 비활성화 · 삭제도 틀린 비밀번호와 같은 401이라 한 문구로 (피드백: 삭제된 계정에 '승인되지 않은' 안내는 틀림. BE 요청 B1: 상태 코드가 오면 /pending으로)
+  // 명세(API-01): ACTIVE 계정만 로그인됨 — 승인 대기 · 비활성화 · 삭제도 틀린 비밀번호와 같은 401이라 한 문구로 (삭제된 계정에 '승인되지 않은' 안내는 틀림. BE 요청 B1: 상태 코드가 오면 /pending으로)
   // 400(아이디 형식 · 6자 미만)도 같은 문구 — 서버의 일반 문구를 그대로 띄우지 않게
   const errorMessage = !error
     ? null
