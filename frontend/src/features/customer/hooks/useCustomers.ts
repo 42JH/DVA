@@ -1,4 +1,4 @@
-// 고객 — 기업 · 개인 상관없이 모든 고객 (기업 피드백: 고객 관리 화면 · 개인 주소록 확인)
+// 고객 — 기업 · 개인 상관없이 모든 고객 (고객 관리 화면 · 개인 주소록 확인)
 // GET /customers (이름 부분 검색 · 전화번호 4자리 이상 부분 검색) · GET /customers/{id}/pins (개인 주소록). 고객 번호 내림차순, 한 쪽 개수는 고른 대로
 import { useEffect, useState } from 'react'
 import {

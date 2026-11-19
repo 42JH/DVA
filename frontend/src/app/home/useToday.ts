@@ -1,4 +1,4 @@
-// 오늘 (첫 화면) — 위: 지금 처리할 일(건수 · 바로 가기) · 오늘 숫자, 아래: AI 상담 성능 요약 (기업 피드백: 통계는 아래로, 운영 정보 먼저)
+// 오늘 (첫 화면) — 위: 지금 처리할 일(건수 · 바로 가기) · 오늘 숫자, 아래: AI 상담 성능 요약 (통계는 아래로, 운영 정보 먼저)
 // 데이터는 홈 API 한 번 (GET /dashboard/home, 백엔드 11/09) — 모든 칸이 같은 조회 시점(observedAt)
 import { draftLabel, type ParcelDraftDto } from '@/shared/order/draftApi'
 import { useQuery } from '@tanstack/react-query'

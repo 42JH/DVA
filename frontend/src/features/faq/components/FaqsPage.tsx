@@ -1,5 +1,5 @@
 // FAQ — 왼쪽 분류(건수) | 가운데 질문 목록(누르면 펼쳐 답변 · 고객 질문 사례 · 수정 · 삭제) · 맨 위 추가 칸
-// 기업 피드백: 아코디언 유지 · 실제 통화 발화와 연결(사례를 누르면 그 통화)
+// 아코디언 유지 · 실제 통화 발화와 연결(사례를 누르면 그 통화)
 import type { ReactNode } from 'react'
 import { Link } from 'react-router'
 import { Markdown } from '@/shared/ui/Markdown'

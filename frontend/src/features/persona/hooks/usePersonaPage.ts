@@ -30,7 +30,7 @@ function confirmErrorText(error: unknown, kind: NonNullable<Confirming>['kind'] 
     : conflictText
 }
 
-/** 07 AI 상담가 훅 (새 안 — 저장 = 새 버전)
+/** 07 AI 상담가 훅 (저장 = 새 버전)
  * 카드 = 위 탭에서 고른 상담가의 현재 버전(그 자리에서 고침). 사용 중 상담가의 새 버전이 통화에 안 쓰이면 반영 전 띠
  * 수정 기록 창: 고른 날짜 내용을 통화에 쓰는 내용과 비교 · [이 내용 불러오기](카드 칸에 채움 — 저장은 [저장])
  * 통화 상담가 바꾸기 · 새 버전 반영은 확인 창으로만. 시나리오 시험은 따로 화면 */
@@ -191,7 +191,7 @@ export function usePersonaPage() {
           })
         : null,
 
-    // 수정 기록 창 (새 안 5번, 피그마 2368:6500) — 왼쪽 날짜별 목록, 오른쪽은 통화에 쓰는 내용과 다른 칸만
+    // 수정 기록 창 — 왼쪽 날짜별 목록, 오른쪽은 통화에 쓰는 내용과 다른 칸만
     historyOpen,
     history: historyRows(all, { head, picked, unapplied }),
     picked:
@@ -209,7 +209,7 @@ export function usePersonaPage() {
       setVersion(null)
       setShowCall(false)
     },
-    // 띠 — 반영 전 · 시험 중 · 반영 중 (새 안 1번). 고친 내용 = 반영 중이면 그 버전, 아니면 현재 버전
+    // 띠 — 반영 전 · 시험 중 · 반영 중. 고친 내용 = 반영 중이면 그 버전, 아니면 현재 버전
     band: bandView(step, applyingVersion ?? head, {
       switchTo: switching && persona ? persona.name : null,
       canApply: canManage,
@@ -281,7 +281,7 @@ export function usePersonaPage() {
         : null,
 
     editTarget,
-    // 저장하면 새로 생긴 현재 버전(고친 내용)을 보여 줌. 반영은 띠의 [통화에 반영]으로 (새 안 — 저장 직후 확인 창 없음)
+    // 저장하면 새로 생긴 현재 버전(고친 내용)을 보여 줌. 반영은 띠의 [통화에 반영]으로 (저장 직후 확인 창 없음)
     finishEdit: () => {
       setVersion(null)
       setShowCall(false)
@@ -289,7 +289,7 @@ export function usePersonaPage() {
 
     // 통화에 사용 중인 상담가는 늘 맨 위 (나머지는 서버가 준 순서 그대로)
     personas: items,
-    // 머리 줄 (새 안 — 이름 · 배지 · 목소리 · [삭제] · [통화에 사용하기]는 탭에서 고른 상담가 것)
+    // 머리 줄 (이름 · 배지 · 목소리 · [삭제] · [통화에 사용하기]는 탭에서 고른 상담가 것)
     current: items.find((p) => p.selected) ?? null,
     selectPersona: (seq: number) => {
       setPersonaSeq(seq)

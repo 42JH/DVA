@@ -1,5 +1,5 @@
-// 시나리오 시험 상세 (Figma 1941:5457) — 통화 상세와 같은 한 화면. 시나리오 시험 화면의 표에서 줄을 눌러 옴
-// 11/13 새 안 3번(피그마 2368:5606): 흰 카드 안 — 위 탭 [고친 내용] [통화에 쓰는 내용] [시나리오] · 시험 시각, 통화 길이. [시나리오] = 고객 대본 | 정답 · 행동 확인 (보기만)
+// 시나리오 시험 상세 — 통화 상세와 같은 한 화면. 시나리오 시험 화면의 표에서 줄을 눌러 옴
+// 흰 카드 안 — 위 탭 [고친 내용] [통화에 쓰는 내용] [시나리오] · 시험 시각, 통화 길이. [시나리오] = 고객 대본 | 정답 · 행동 확인 (보기만)
 // 왼쪽 대화(누르면 그 말부터 듣기) | 오른쪽 결과표 | 맨 아래 녹음 재생
 import { useRef } from 'react'
 import { Navigate, useLocation, useParams } from 'react-router'
@@ -196,7 +196,7 @@ function Call({ runId, scenario }: { runId: string; scenario: string }) {
           ))}
         </div>
         <section aria-label="결과표" className={SIDE}>
-          {/* 시안: 제목 16 · 흐린 글 14, 표 글자 14 · 칸 여백 10 12 · 줄 사이 점선 */}
+          {/* 제목 16 · 흐린 글 14, 표 글자 14 · 칸 여백 10 12 · 줄 사이 점선 */}
           <h2 className="text-[16px] font-bold">
             결과표
             <span className="ml-2.5 text-[14px] font-normal text-ops-faint">{vm.counts}</span>

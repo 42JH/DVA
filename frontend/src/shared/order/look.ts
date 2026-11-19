@@ -4,7 +4,7 @@ import type { Tone } from '@/shared/ui'
 
 /** 실제 상태 8개를 그대로 보여 줌 (기존 화면은 묶음 5개) — 결제 완료 뒤 디버 접수 진행까지 운영팀이 봐야 해서 */
 export const STATUS_LOOK: Record<OrderStatusDto, { label: string; tone: Tone }> = {
-  COLLECTING: { label: '미완료', tone: 'idle' }, // 기업 피드백: 미완료는 회색으로 죽이기
+  COLLECTING: { label: '미완료', tone: 'idle' }, // 미완료는 회색으로 죽이기
   notPaid: { label: '결제 대기', tone: 'wait' },
   PAID: { label: '결제 완료', tone: 'done' },
   SUBMITTING: { label: '디버 접수 중', tone: 'route' },

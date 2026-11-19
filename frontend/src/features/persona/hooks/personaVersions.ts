@@ -36,7 +36,7 @@ export function callStateOf(
   all: PersonaVersion[],
   head: PersonaVersion | null,
 ) {
-  // 반영 전 띠 (새 안 1번) — 사용 중 상담가의 현재 버전이 아직 통화에 안 쓰일 때
+  // 반영 전 띠 — 사용 중 상담가의 현재 버전이 아직 통화에 안 쓰일 때
   const unapplied = !!persona && newerThanCall(persona)
   // 토글 '통화에 쓰는 내용' — 그 버전을 못 찾으면(목록 밖) 토글 없음
   const callVersion = unapplied

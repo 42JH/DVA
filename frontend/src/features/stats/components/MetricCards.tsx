@@ -93,7 +93,7 @@ function Headline({
   )
 }
 
-/** 표 (Figma '단계별 이탈 · Row' · '업무별 응답 대기 · Row') — 머리 줄 옅은 바탕 · 줄 아래 선 · 숫자 열 오른쪽 맞춤
+/** 표 — 머리 줄 옅은 바탕 · 줄 아래 선 · 숫자 열 오른쪽 맞춤
  *  마지막 열 = 굵은 파랑, hot 줄 = 주황 바탕 + 주황 글자 */
 function MetricTable({
   cols,
