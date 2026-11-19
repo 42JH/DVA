@@ -1,3 +1,4 @@
+import { fmtNum } from '@/shared/lib/format'
 // 02 대시보드 숫자 · 문구 규칙 — 순수 함수 (format.test.ts). '@/' import 없음 (tsx로 바로 돌리려고)
 
 /** 서버 숫자(0~100 비율 · 초) → 소수 한 자리. null(미측정 · 분모 0)은 '—' — 0과 다름 (연동 명세 §1) */
@@ -7,7 +8,7 @@ export const pctText = (p: number | null) => (p === null ? '—' : `${one(p)}%`)
 /** 소수 두 자리 — 응답 대기의 초 중 카드 표 '평균 대기' · 그래프 보기 막대 위 숫자만. 나머지는 다 한 자리 (0.02초처럼 작은 값이라) */
 export const two = (n: number | null) => (n === null ? '—' : n.toFixed(2))
 /** 건수 → '1,800' */
-export const num = (n: number) => n.toLocaleString('ko-KR')
+export const num = fmtNum
 
 /** 초 → '5시간 0분' · '45분' (응답 대기 합계) */
 export function hoursMinutes(sec: number): string {

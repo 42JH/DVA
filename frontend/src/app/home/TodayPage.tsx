@@ -4,6 +4,7 @@ import { useKeepScroll } from '@/shared/lib/keepScroll'
 import { Link } from 'react-router'
 import { PageHead } from '@/shared/ui'
 import { useToday } from './useToday'
+import { fmtNum } from '@/shared/lib/format'
 
 const TONE_TEXT = { idle: 'text-ops-ink', stop: 'text-ops-stop', wait: 'text-ops-wait' }
 
@@ -18,13 +19,13 @@ export function TodayPage() {
           <div className="flex gap-1.5">
             <dt>오늘 주문</dt>
             <dd className="font-semibold text-ops-ink tabular-nums">
-              {vm.ordersToday?.toLocaleString('ko-KR') ?? '…'}건
+              {vm.ordersToday == null ? '…' : fmtNum(vm.ordersToday)}건
             </dd>
           </div>
           <div className="flex gap-1.5">
             <dt>오늘 통화</dt>
             <dd className="font-semibold text-ops-ink tabular-nums">
-              {vm.callsToday?.toLocaleString('ko-KR') ?? '…'}건
+              {vm.callsToday == null ? '…' : fmtNum(vm.callsToday)}건
             </dd>
           </div>
         </dl>

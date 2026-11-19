@@ -11,8 +11,12 @@ export const fmtMonthDay = (day: Ymd) =>
   `${Number(day.slice(5, 7))}월 ${Number(day.slice(8, 10))}일`
 
 /** 표 줄 앞 시각 '오후 3:02' — 날은 머리줄 · 표 왼쪽 날짜가 보여 줌 (시안 03 주문 · 04 통화 · 09 미답변 같은 형식) */
-export const fmtTime = (iso: string) =>
-  new Date(iso).toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit' })
+const TIME = new Intl.DateTimeFormat('ko-KR', { hour: 'numeric', minute: '2-digit' })
+export const fmtTime = (iso: string) => TIME.format(new Date(iso))
+
+// 숫자 '1,234' — 형식기는 한 번만 (toLocaleString('ko-KR')은 부를 때마다 새로 만들어 금액이 많은 화면에서 느렸음)
+const NUM = new Intl.NumberFormat('ko-KR')
+export const fmtNum = (n: number) => NUM.format(n)
 
 /** 목록 시각 칸 (연도 규칙): 올해면 ['10.20 14:33'] 한 줄, 다른 해면 ['2025.12.29', '13:40'] 날짜 위 · 시각 아래 두 줄 (칸 폭 그대로) */
 export function fmtListTime(iso: string, now = new Date()): [string] | [string, string] {

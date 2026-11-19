@@ -11,8 +11,8 @@ import { usePageSize } from '@/shared/lib/paging'
 import { MemberCsvModal, MemberFormModal, NameModal } from './CompanyModals'
 import { ChargeTable, MemberTable } from './CompanyTables'
 import { Confirm } from '@/shared/ui/Modal'
+import { won } from '@/shared/order/look'
 
-const won = (n: number) => `${n.toLocaleString('ko-KR')}원`
 const card = 'rounded-lg border border-ops-line bg-white'
 
 export function CompanyPage() {

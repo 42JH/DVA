@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { FETCH_ALL_MAX } from '@/shared/api/paging'
 import { ymd } from '@/shared/lib/dateRange'
-import { fmtListTime, fmtPhone, fmtTime } from '@/shared/lib/format'
+import { fmtListTime, fmtPhone, fmtTime, fmtNum } from '@/shared/lib/format'
 import { matchKo, phoneDigits } from '@/shared/lib/search'
 import { useListParams } from '@/shared/lib/useListParams'
 import { deleteUnanswered, unansweredQueries, type UnansweredQuestion } from '../api/unansweredApi'
@@ -81,7 +81,7 @@ export function useUnansweredList() {
     count: hit.length, // 검색 중엔 결과 수
     // 서버가 오래된 것부터 주고 2,000개까지만 받음 → 그 뒤(최신) 질문은 목록에 없음. 넘으면 서버 쪽 넘김으로 바꿔야 함
     listNote: capped
-      ? `오래된 ${FETCH_ALL_MAX.toLocaleString('ko-KR')}개만 표시됩니다 (전체 ${(total.data ?? 0).toLocaleString('ko-KR')}개)`
+      ? `오래된 ${fmtNum(FETCH_ALL_MAX)}개만 표시됩니다 (전체 ${fmtNum(total.data ?? 0)}개)`
       : null,
     isLoading: list.isPending,
     listError: list.error?.message ?? null,

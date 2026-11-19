@@ -9,7 +9,7 @@ import {
   useQueryClient,
 } from '@tanstack/react-query'
 import { api, type ApiItem, type ApiList } from '@/shared/api/client'
-import { fmtPhone } from '@/shared/lib/format'
+import { fmtPhone, fmtNum } from '@/shared/lib/format'
 import { useListParams } from '@/shared/lib/useListParams'
 import { usePageSize } from '@/shared/lib/paging'
 import { useDebounced } from '@/shared/lib/useDebounced'
@@ -132,7 +132,7 @@ const pinsOpts = (seq: number) => ({
 /** 이번 달 월결제 누적 한 줄 */
 const monthlyText = (billing: { error: unknown; data?: number }) => {
   if (billing.error) return '불러오지 못했습니다'
-  return billing.data === undefined ? '불러오는 중…' : `${billing.data.toLocaleString('ko-KR')}원`
+  return billing.data === undefined ? '불러오는 중…' : `${fmtNum(billing.data)}원`
 }
 
 /** 고객 한 명 + 개인 주소록 */

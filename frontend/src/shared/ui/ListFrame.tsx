@@ -5,6 +5,7 @@ import type { useSnapshotList } from '@/shared/lib/useSnapshotList'
 import { useScrollable } from '@/shared/lib/useScrollable'
 import { Icon } from './controls'
 import { Pagination } from './Pagination'
+import { fmtNum } from '@/shared/lib/format'
 
 type List = ReturnType<typeof useSnapshotList<unknown>>
 
@@ -53,7 +54,7 @@ export function ListFrame({
             role="status"
             className="sticky top-0 left-0 z-20 flex items-center gap-3 border-b border-ops-route/20 bg-ops-route-soft p-5 text-[13px] text-ops-route"
           >
-            새 {unit} {list.fresh.toLocaleString('ko-KR')}건이 들어왔습니다.
+            새 {unit} {fmtNum(list.fresh)}건이 들어왔습니다.
             <button
               type="button"
               onClick={() => {

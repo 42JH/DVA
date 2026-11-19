@@ -16,6 +16,7 @@ import { dateTime } from '@/shared/lib/when'
 import { useListParams } from '@/shared/lib/useListParams'
 import { usePageSize } from '@/shared/lib/paging'
 import { Pagination } from '@/shared/ui/Pagination'
+import { fmtNum } from '@/shared/lib/format'
 
 // d = 통화 시각 정렬 — 처리 대기열이라 기본은 오래된 순, 'desc'면 최신순
 const PARAMS = { d: 'asc' }
@@ -62,11 +63,7 @@ export function UnansweredPage() {
         className="flex min-h-0 flex-1 flex-col gap-3 px-6 pt-4 pb-4"
       >
         <p className="text-[13px] text-ops-sub">
-          질문{' '}
-          <b className="font-semibold text-ops-ink tabular-nums">
-            {vm.count.toLocaleString('ko-KR')}
-          </b>
-          건
+          질문 <b className="font-semibold text-ops-ink tabular-nums">{fmtNum(vm.count)}</b>건
         </p>
         <div
           ref={box}

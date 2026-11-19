@@ -25,6 +25,7 @@ import {
 } from './orderForm'
 import { useOrderPayment } from './useOrderPayment'
 import { useOrderSubmit } from './useOrderSubmit'
+import { fmtNum } from '@/shared/lib/format'
 
 /** 보내는 분 · 받는 분 칸 묶음 */
 function partyFields(
@@ -194,7 +195,7 @@ export function useOrderForm(
     declaredValue,
     setDeclaredValue: (v: string) => setDeclaredValue(digits(v, 10)),
     priceInRange: declaredValue !== '' && priceOk(Number(declaredValue)), // 1원 ~ 1억 (구간 고르기에서 범위 밖 금액은 '구간 선택')
-    shippingFee: lim.shippingFee ? `${lim.shippingFee.toLocaleString()}원` : '', // 잠긴 칸은 suffix를 안 그림
+    shippingFee: lim.shippingFee ? `${fmtNum(lim.shippingFee)}원` : '', // 잠긴 칸은 suffix를 안 그림
     pickupAt,
     setPickupAt,
     pickupMin: lim.pickup.min,
