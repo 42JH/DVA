@@ -12,7 +12,7 @@ const loadNotice = (q: { isPending: boolean; error: unknown }) => {
 }
 
 /** 주문 수정 창에 채울 주문 원본 — 상세 창과 같은 쿼리라 방금 상세를 봤으면 기다리지 않음
- * parcelSeq = 목록에서 누른 배송 상세 → 그 상세 값으로 채움 (11/01) */
+ * parcelSeq = 목록에서 누른 배송 상세 → 그 상세 값으로 채움 */
 export function useOrderToEdit(orderId: number, parcelSeq: number | null) {
   const q = useQuery(orderQueries.detail(orderId))
   const qc = useQueryClient()

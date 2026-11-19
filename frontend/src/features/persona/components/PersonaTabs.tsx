@@ -1,9 +1,9 @@
-import type { usePersonaPage } from '@/features/persona/hooks/usePersonaPage'
+import type { usePersonaPage } from '../hooks/usePersonaPage'
 import { Badge, Btn, Icon, Segments } from '@/shared/ui'
 
 type Vm = ReturnType<typeof usePersonaPage>
 
-// 위 탭 + [상담가 등록] — 보기 · 등록 화면 공용 (11/13 새 안 7번: 등록 중에도 탭이 보이고 고른 탭은 없음)
+// 위 탭 + [상담가 등록] — 보기 · 등록 화면 공용 (새 안 7번: 등록 중에도 탭이 보이고 고른 탭은 없음)
 // go: 고친 게 있으면 먼저 물은 뒤 이동 (useLeaveGuard.leave)
 export function PersonaTabs({
   vm,

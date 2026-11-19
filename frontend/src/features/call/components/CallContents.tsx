@@ -1,7 +1,7 @@
 // 통화 상세 오른쪽 — 운영팀용 정보(고객 · 이 통화의 주문 · 처리 결과 · 불만). 왼쪽 대화는 CallPage
 import { useRef, type ReactNode } from 'react'
 import { Link } from 'react-router'
-import { useCallOrder } from '@/features/call/hooks/useCallOrder'
+import { useCallOrder } from '../hooks/useCallOrder'
 import { orderNo, priceBand } from '@/shared/order/labels'
 import { fmtPhone } from '@/shared/lib/format'
 import { Badge } from '@/shared/ui'
@@ -100,7 +100,7 @@ export function Contents({ vm }: { vm: CallView }) {
                 </ul>
               )}
             </Section>
-            {/* 판정 (11/11): 고객 불만 = 대상 · 강도 · 고객이 한 말, AI 응대 오류 = 유형 · 근거. 판정 전('아직 분석 전') · 없음 · 통화 분석 전을 문구로 나눔 */}
+            {/* 판정: 고객 불만 = 대상 · 강도 · 고객이 한 말, AI 응대 오류 = 유형 · 근거. 판정 전('아직 분석 전') · 없음 · 통화 분석 전을 문구로 나눔 */}
             <Section
               id="customer-complaints"
               title={s.customer.length ? `고객 불만 ${s.customer.length}` : '고객 불만'}
@@ -198,7 +198,7 @@ function OrderCard({ seq, what }: { seq: number; what: '접수' | '취소' }) {
           </dd>
           <dt className="text-ops-sub">물품</dt>
           <dd>{itemsText(o.items) || '없음'}</dd>
-          {/* 통화에서 받은 가액이 맞게 들어갔는지 바로 보게 (11/09 사용자) */}
+          {/* 통화에서 받은 가액이 맞게 들어갔는지 바로 보게 */}
           <dt className="text-ops-sub">가액</dt>
           <dd className="tabular-nums">
             {o.itemPrice === null ? '없음' : priceBand(o.itemPrice).label}

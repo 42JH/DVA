@@ -1,7 +1,7 @@
 // 통계 '그래프 보기' — 위 줄은 다른 상세처럼 ‹ 제목 (‹ = 통계로). 그래프 상자는 기존 화면과 같은 GraphChart
 import { Navigate, useParams } from 'react-router'
 import { GraphChart } from './GraphPage'
-import { useDashboardGraph, type GraphKind } from '@/features/stats/hooks/useDashboardGraph'
+import { useDashboardGraph, type GraphKind } from '../hooks/useDashboardGraph'
 import { PageHead } from '@/shared/ui'
 
 const KINDS: GraphKind[] = ['response-wait', 'stage-dropoffs']

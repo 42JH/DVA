@@ -4,7 +4,7 @@
 export const one = (n: number | null) => (n === null ? '—' : n.toFixed(1))
 /** 0~100 비율 → '12.8%' (null은 '—') */
 export const pctText = (p: number | null) => (p === null ? '—' : `${one(p)}%`)
-/** 소수 두 자리 — 응답 대기의 초 중 카드 표 '평균 대기' · 그래프 보기 막대 위 숫자만. 나머지는 다 한 자리 (11/05 사용자: 0.02초처럼 작은 값이라) */
+/** 소수 두 자리 — 응답 대기의 초 중 카드 표 '평균 대기' · 그래프 보기 막대 위 숫자만. 나머지는 다 한 자리 (0.02초처럼 작은 값이라) */
 export const two = (n: number | null) => (n === null ? '—' : n.toFixed(2))
 /** 건수 → '1,800' */
 export const num = (n: number) => n.toLocaleString('ko-KR')

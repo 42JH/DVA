@@ -1,8 +1,8 @@
-// 기업 상세 (11/11 재설계, Figma '기업 재설계 v3') — 위: 이름 · 등록 · 담당자 수 · 사원 수 · [이름 수정] [기업 삭제]
+// 기업 상세 (재설계, Figma '기업 재설계 v3') — 위: 이름 · 등록 · 담당자 수 · 사원 수 · [이름 수정] [기업 삭제]
 // 청구액 카드(달 이동) · 왼쪽 부서(사원 거르기 · 추가 · 이름 변경 · 삭제) · 오른쪽 탭: 사원 / 청구 내역(+ 고른 건 상세)
-// 기업은 월결제 고정(기업 간 배송) → 결제 설정 없음. 숨긴 버튼 · 설명 문구 없음 (11/11 사용자)
+// 기업은 월결제 고정(기업 간 배송) → 결제 설정 없음. 숨긴 버튼 · 설명 문구 없음
 import { useParams } from 'react-router'
-import { useCompanyDetail } from '@/features/company/hooks/useCompanyDetail'
+import { useCompanyDetail } from '../hooks/useCompanyDetail'
 import { PageHead } from '@/shared/ui'
 import { Btn, Icon, Segments } from '@/shared/ui'
 import { SearchBox } from '@/shared/ui/ListFrame'
@@ -23,7 +23,7 @@ export function CompanyPage() {
   return (
     <>
       <PageHead title={vm.name || '기업'} back={{ to: '/companies', label: '기업 목록으로' }}>
-        {/* 이름 수정은 이름 바로 옆 연필 (11/11: 위 줄 색 버튼을 줄임) */}
+        {/* 이름 수정은 이름 바로 옆 연필 (위 줄 색 버튼을 줄임) */}
         <button
           type="button"
           aria-label="기업 이름 수정"
@@ -339,7 +339,7 @@ function Modals({ vm, id }: { vm: VM; id: number }) {
         />
       )
     case 'deleteMember':
-      // 기업마다 담당자 1명 이상 (11/11 사용자) — 마지막 담당자는 지우지 못함
+      // 기업마다 담당자 1명 이상 — 마지막 담당자는 지우지 못함
       return m.last ? (
         <Confirm
           title="마지막 담당자는 삭제할 수 없습니다"

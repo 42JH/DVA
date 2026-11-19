@@ -14,7 +14,7 @@ function center(list: HTMLElement | null, key: number) {
   })
 }
 
-/** 멜론 가사처럼 (11/05 사용자): 재생 중이면 짚은 줄이 바뀔 때마다 목록 가운데로 부드럽게 넘어감
+/** 멜론 가사처럼: 재생 중이면 짚은 줄이 바뀔 때마다 목록 가운데로 부드럽게 넘어감
  *  사람이 휠 · 터치로 굴리면 3초 동안은 안 따라감(보던 곳을 빼앗지 않게). jump(이전 · 다음 · AI 동작)는 늘 그 줄로
  *  돌려주는 함수 = 사람이 굴렸다는 신호 (목록의 onWheel · onTouchMove에) */
 export function useFollowScroll(

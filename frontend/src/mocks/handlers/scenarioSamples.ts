@@ -1,4 +1,4 @@
-// 가짜 시나리오 시험의 판정 · 대화 — 실제 시험 통화 결과 세 건을 그대로 옮긴 것 (11/12, ai/logs/persona_check/runs)
+// 가짜 시나리오 시험의 판정 · 대화 — 실제 시험 통화 결과 세 건을 그대로 옮긴 것 (ai/logs/persona_check/runs)
 // pass = 1건 조회(E1) 통과 · fail = 취소(F1) 실패 · stopped = 앞 항목 정정(B3), 통화가 중간에 멈춤. 손으로 고치지 않음
 export const SAMPLES = {
   pass: {

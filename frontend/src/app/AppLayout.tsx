@@ -29,14 +29,14 @@ export function AppLayout() {
   const { pathname } = useLocation()
   const nav = useNavigation()
   useTrackHistory()
-  const [askLogout, setAskLogout] = useState(false) // 로그아웃은 한 번 더 물음 (11/12 사용자: 잘못 누르면 바로 나가짐)
+  const [askLogout, setAskLogout] = useState(false) // 로그아웃은 한 번 더 물음 (잘못 누르면 바로 나가짐)
   const hasPledge = useHasPledge() // 시험이 모두 통과하면 반영 — 어느 화면에 있든 (AI 상담가 1번)
   const groups: { title: string; items: Item[] }[] = [
     {
       title: '운영',
       items: [
         { to: '/', label: '홈', icon: 'home' },
-        // 주문 옆 숫자는 뺌 (11/09 사용자: '주문 72'가 주문 수로 읽힘. 미완료는 홈 '처리할 일' · 주문 미완료 탭에서)
+        // 주문 옆 숫자는 뺌 ('주문 72'가 주문 수로 읽힘. 미완료는 홈 '처리할 일' · 주문 미완료 탭에서)
         { to: '/orders', label: '주문', icon: 'box' },
         {
           to: '/calls',
@@ -83,7 +83,7 @@ export function AppLayout() {
           {/* 로고를 누르면 홈 */}
           <Link
             to="/"
-            // 읽기용 이름에 보이는 글자(DVA 운영 콘솔)가 들어가야 음성 명령으로도 누름 (11/12 Lighthouse 접근성)
+            // 읽기용 이름에 보이는 글자(DVA 운영 콘솔)가 들어가야 음성 명령으로도 누름 (Lighthouse 접근성)
             aria-label="DVA 운영 콘솔 홈"
             className="flex h-14 items-center gap-2 px-5 outline-none focus-visible:ring-2 focus-visible:ring-ops-route focus-visible:ring-inset"
           >

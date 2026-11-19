@@ -1,7 +1,7 @@
 // 주문 목록 — 쪽 번호(기준 시각 고정, useSnapshotList) + 새 주문 알림 + 상태 묶음별 건수 + 기간 · 검색. 서버 API는 기존과 같음 (GET /admin/orders)
 import { useEffect } from 'react'
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
-import { draftList, draftListItem, fromAdminList } from '@/features/order/api/draftApi'
+import { draftList, draftListItem, fromAdminList } from '../api/draftApi'
 import { oldestPage } from '@/shared/lib/paging'
 import { pageCount } from '@/shared/api/paging'
 import { api, type ApiList } from '@/shared/api/client'
@@ -9,8 +9,8 @@ import { fmtPhone } from '@/shared/lib/format'
 import { useListParams } from '@/shared/lib/useListParams'
 import { useDebounced } from '@/shared/lib/useDebounced'
 import { phoneDigits } from '@/shared/lib/search'
-import type { OrderListItem, StatusGroup } from '@/features/order/api/orderApi'
-import { parcelRows } from '@/features/order/api/parcelRows'
+import type { OrderListItem, StatusGroup } from '../api/orderApi'
+import { parcelRows } from '../api/parcelRows'
 import { orderNo } from '@/shared/order/labels'
 import { orderQueries } from '@/shared/order/orderApi'
 import { useSnapshotList } from '@/shared/lib/useSnapshotList'
@@ -42,7 +42,7 @@ const GROUPS: { value: StatusGroup; label: string }[] = [
   { value: 'ALL', label: '전체' },
   { value: 'COLLECTING', label: '미완료' },
   { value: 'notPaid', label: '결제 대기' },
-  { value: 'PAID', label: '결제 완료' }, // 서버 묶음 PAID = 결제 완료 · 디버 접수 중 · 접수 재시도 중 (11/11)
+  { value: 'PAID', label: '결제 완료' }, // 서버 묶음 PAID = 결제 완료 · 디버 접수 중 · 접수 재시도 중
   { value: 'ACCEPTED', label: '접수 완료' },
   { value: 'SUBMISSION_FAILED', label: '접수 실패' }, // 최종 실패만
   { value: 'CANCELLED', label: '주문 취소' },
@@ -89,7 +89,7 @@ export function useOrders() {
     anchorQuery: base, // 모든 상태 탭 · 탭 건수가 같은 기준 시각 (탭 조건을 넣으면 '주문 취소' 탭은 마지막 취소 시각이 기준이 돼 그 뒤 주문이 전체 건수에서 빠졌음)
     enabled: g !== 'COLLECTING', // 미완료 탭은 초안 목록 — 주문 목록 · 쪽 당기기가 초안 쪽을 되돌리지 않게
   })
-  // 미완료 = 배송 초안 (055 — 새 AI 접수 · 이관된 옛 미완료는 주문이 아님). 다른 탭과 같은 기간 (11/13 사용자: 전체 0인데 미완료 3), 쪽 번호만
+  // 미완료 = 배송 초안 (055 — 새 AI 접수 · 이관된 옛 미완료는 주문이 아님). 다른 탭과 같은 기간 (전체 0인데 미완료 3), 쪽 번호만
   const drafting = g === 'COLLECTING'
   const { size, setSize } = list // 쪽 크기는 목록과 하나로
   const draftCount = useQuery<number>({

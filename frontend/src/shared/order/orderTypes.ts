@@ -39,7 +39,7 @@ export interface OrderDetail {
   sender: Party
   receiver: Party
   items: { document: number; small: number; medium: number; big: number; other: string | null }
-  pickupRequestedAt: string | null // 수기 접수에서 비워 둘 수 있음 (10/31)
+  pickupRequestedAt: string | null // 수기 접수에서 비워 둘 수 있음
   itemPrice: number | null // 수기 접수에서 비워 둘 수 있음
   clientComment: string | null
   paymentMethod: PaymentMethod | null // null = 미정 — 접수 전에 골라야 함

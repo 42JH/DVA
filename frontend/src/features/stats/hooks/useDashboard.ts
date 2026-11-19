@@ -6,12 +6,12 @@ import {
   type ResponseWait,
   type StageDropoffs,
   type VersionTime,
-} from '@/features/stats/api/dashboardApi'
-import { hoursMinutes, maxIndex, num, one, pctText, two, versionGap } from '@/features/stats/format'
-import { PROCESS_LABEL, STAGE_LABEL } from '@/features/stats/labels'
+} from '../api/dashboardApi'
+import { hoursMinutes, maxIndex, num, one, pctText, two, versionGap } from '../format'
+import { PROCESS_LABEL, STAGE_LABEL } from '../labels'
 import { FETCH_ALL_MAX } from '@/shared/api/paging'
 import type { CallListItemDto } from '@/shared/call/callDto'
-import { complaintView } from '@/features/stats/complaintView'
+import { complaintView } from '../complaintView'
 
 const sec = (s: number | null) => (s === null ? '—' : `${one(s)}초`)
 const sec2 = (s: number | null) => (s === null ? '—' : `${two(s)}초`) // 응답 대기 카드 표의 평균 대기만 두 자리 (0.02초처럼 작은 값)
@@ -25,7 +25,7 @@ export function useDashboard() {
       useQuery(dashboardQueries.card('registration-time', 'ALL')),
       registrationView,
     ),
-    // 판정 수(서버 통계)와 불만 있는 통화 목록이 둘 다 와야 그림 — 탭을 넘길 때 따로 기다리지 않게 (11/11 사용자)
+    // 판정 수(서버 통계)와 불만 있는 통화 목록이 둘 다 와야 그림 — 탭을 넘길 때 따로 기다리지 않게
     complaint: both(
       useQuery(dashboardQueries.card('complaint-calls', 'ALL')),
       useQuery(dashboardQueries.complainedCalls()),

@@ -1,16 +1,10 @@
 import { useReducer, useState } from 'react'
 import { ApiError } from '@/shared/api/client'
 import type { SearchedAddress } from '@/shared/ui'
-import { BOX_TYPES, type BoxKey, type OrderDetail } from '@/features/order/api/orderApi'
-import { orderErrorText } from '@/features/order/labels'
-import {
-  MAX_BOXES,
-  MAX_DOCUMENTS,
-  kstLocal,
-  pickupRange,
-  priceOk,
-} from '@/features/order/api/orderLimits'
-import { buildCustomerPatch, buildOrderPatch, submitMissing } from '@/features/order/api/orderPatch'
+import { BOX_TYPES, type BoxKey, type OrderDetail } from '../api/orderApi'
+import { orderErrorText } from '../labels'
+import { MAX_BOXES, MAX_DOCUMENTS, kstLocal, pickupRange, priceOk } from '../api/orderLimits'
+import { buildCustomerPatch, buildOrderPatch, submitMissing } from '../api/orderPatch'
 import { useCustomerSuggest, type Suggestion } from './useCustomerSuggest'
 import {
   digits,
@@ -134,7 +128,7 @@ export function useOrderForm(
     redraw()
     return false
   }
-  // 접수 중단 주문 수정 = 저장하면서 접수 (11/01 결정: 버튼 이름 [접수], 조건이 다 채워져야 켜짐)
+  // 접수 중단 주문 수정 = 저장하면서 접수 (버튼 이름 [접수], 조건이 다 채워져야 켜짐)
   const collecting = order?.status === 'COLLECTING'
   const showFee = order === undefined || collecting
 
@@ -231,7 +225,7 @@ export function useOrderForm(
     // 주소 검색 창 (폼 창 대신 뜸 — 두 창이 겹치면 Esc가 둘 다 닫음)
     searching: searching !== null,
     searchTitle: searching === 'receiver' ? '받는 분 주소 검색' : '보내는 분 주소 검색',
-    // 이미 채운 도로명으로 바로 검색 (11/09 사용자). 상세주소는 넣으면 결과가 안 나올 수 있어 뺌
+    // 이미 채운 도로명으로 바로 검색. 상세주소는 넣으면 결과가 안 나올 수 있어 뺌
     searchQuery: searching ? parties[searching].roadAddress : '',
     pickAddress: ({ roadAddress, ...picked }: SearchedAddress) => {
       if (searching)

@@ -1,7 +1,7 @@
 // 실행: npm test
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import type { Scenario, VersionTest } from '@/features/persona/api/scenarioTestApi'
+import type { Scenario, VersionTest } from '../api/scenarioTestApi'
 import { pledgeStep } from './applyPledge'
 import type { Pledge } from './pledgeStore'
 

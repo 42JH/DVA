@@ -4,7 +4,7 @@ import { pageCount, pageSlice } from '@/shared/api/paging'
 import { fmtDate } from '@/shared/lib/format'
 import { useListParams } from '@/shared/lib/useListParams'
 import { matchKo } from '@/shared/lib/search'
-import { companyQueries } from '@/features/company/api/companyApi'
+import { companyQueries } from '../api/companyApi'
 
 const PAGE_SIZE = 10 // 디자인: 한 쪽 10곳
 const DEFAULTS = { q: '' }
@@ -19,11 +19,11 @@ interface CompanyRow {
   date: string // 등록일 '2026-03-04' · 없으면 ''
 }
 
-/** 08 기업 목록 훅 (11/11 재설계) — 검색 · 쪽(URL) · 목록 · CSV 창. 줄을 누르면 상세(삭제 · 이름 수정은 상세에서) */
+/** 08 기업 목록 훅 — 검색 · 쪽(URL) · 목록 · CSV 창. 줄을 누르면 상세(삭제 · 이름 수정은 상세에서) */
 export function useCompanyList(size = PAGE_SIZE) {
   const { params, page, set } = useListParams(DEFAULTS)
 
-  // 검색어가 없으면 서버가 쪽을 나눔. 있으면 기업 전체를 받아 초성 · 띄어쓰기 무시로 앞에서 거름 (11/02)
+  // 검색어가 없으면 서버가 쪽을 나눔. 있으면 기업 전체를 받아 초성 · 띄어쓰기 무시로 앞에서 거름
   const q = useDeferredValue(params.q.trim())
   const searching = q !== ''
   const list = useQuery({

@@ -10,12 +10,8 @@ import {
   type Faq,
   type FaqCategory,
   type FaqInput,
-} from '@/features/faq/api/faqApi'
-import {
-  convertToFaq,
-  unansweredQueries,
-  type UnansweredQuestion,
-} from '@/features/faq/api/unansweredApi'
+} from '../api/faqApi'
+import { convertToFaq, unansweredQueries, type UnansweredQuestion } from '../api/unansweredApi'
 
 /** 09 FAQ 인라인 추가 · 수정 (Figma 'FAQ 등록' · 'FAQ 수정' 11/06 + 분류 고르기 11/11 — 서버는 분류 필수인데 고를 칸이 없어 '전체' · 미답변에서 만들면 늘 '접수'로 저장되던 것)
  * 분류: 처음 값 = 수정은 그 FAQ 분류, 추가는 왼쪽에서 고른 분류(전체 · 미답변이면 없음 → 골라야 저장). 공백만 입력 불가 · 서버 칸별 오류 · 저장

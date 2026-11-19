@@ -2,13 +2,8 @@ import { useMutation, usePrefetchQuery, useQuery, useQueryClient } from '@tansta
 import { useState } from 'react'
 import { fmtMonthDay, fmtVersionTime } from '@/shared/lib/format'
 import { ymd } from '@/shared/lib/dateRange'
-import { personaQueries, type PersonaVersion } from '@/features/persona/api/personaApi'
-import {
-  SCENARIO_TEST,
-  scenarioTestQueries,
-  startTest,
-  stopTest,
-} from '@/features/persona/api/scenarioTestApi'
+import { personaQueries, type PersonaVersion } from '../api/personaApi'
+import { SCENARIO_TEST, scenarioTestQueries, startTest, stopTest } from '../api/scenarioTestApi'
 import { restOf, rowsOf, sideLabel, testOf, withActiveTests } from './scenarioTest'
 
 export { SCENARIO_TEST } // 화면(components)은 api를 직접 부르지 않아 여기서 내보냄
@@ -103,7 +98,7 @@ export function useScenarioTestPage(personaSeq: number, version: number) {
 export function useScenarioTest(me: TestTarget, dateOf: (version: number) => string) {
   const d = useTestData()
   const qc = useQueryClient()
-  // 시험은 실제 통화라 요금이 듦 → 누르면 한 번 묻고 시작 (11/12 사용자: 실수로 눌러도 바로 걸리면 안 됨)
+  // 시험은 실제 통화라 요금이 듦 → 누르면 한 번 묻고 시작 (실수로 눌러도 바로 걸리면 안 됨)
   const [asking, setAsking] = useState<{ title: string; scenarios?: string[] } | null>(null)
   const testsKey = scenarioTestQueries.tests().queryKey
   const start = useMutation({

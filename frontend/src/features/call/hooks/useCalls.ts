@@ -16,7 +16,7 @@ import { callState, memberOf, STATE_FILTERS, stateKey, type StateFilter } from '
 import { fetchAll, FETCH_ALL_MAX, pageCount } from '@/shared/api/paging'
 import { orderNo } from '@/shared/order/labels'
 
-// at = 목록 기준 시각 · d = 시작 시각 정렬('asc' = 오래된 순) · s = 상태 필터(STATE_FILTERS). 불만 필터는 뺌 (11/09 사용자 — 상태와 겹쳐 골라져 불편, 불만은 표의 칩으로)
+// at = 목록 기준 시각 · d = 시작 시각 정렬('asc' = 오래된 순) · s = 상태 필터(STATE_FILTERS). 불만 필터는 뺌 (상태와 겹쳐 골라져 불편, 불만은 표의 칩으로)
 const DEFAULTS = { q: '', r: '7d', s: '', d: 'desc' } // 목록 기준 시각은 주소에 안 둠 (useSnapshotList, 11/10)
 
 /** 통화 상태 — 끝났는지(PBX 종료 시각)와 분석이 왔는지로 */
@@ -41,7 +41,7 @@ export function useCalls() {
     asc,
   })
 
-  // 상태 필터: 서버에 분석 상태 조건이 없어(11/09) 그 기간 · 검색의 통화를 모두 받아 화면에서 거르고 쪽을 나눔
+  // 상태 필터: 서버에 분석 상태 조건이 없어 그 기간 · 검색의 통화를 모두 받아 화면에서 거르고 쪽을 나눔
   // ponytail: 최대 2,000건(FETCH_ALL_MAX). 백엔드가 GET /calls?analysisStatus를 주면 그 조건으로 바꾸고 이 덩어리를 지움
   const { size, setSize } = list // 쪽 크기는 목록과 하나로 (따로 두면 상태를 바꿀 때 크기가 어긋남)
   const to = list.asOf ? new Date(list.asOf).toISOString() : undefined
@@ -84,7 +84,7 @@ export function useCalls() {
       phone: row.callerNumber ? fmtPhone(row.callerNumber) : '',
       kinds: callKinds(row.counts),
       analyzed: row.counts !== null,
-      // 고객 불만 칩 — 대상마다 하나, 전부 보임 (11/11 사용자: AI 응대 오류는 목록에서 빼고 상세 · 통계로, +N 없이). 근거는 그 대상의 첫 말
+      // 고객 불만 칩 — 대상마다 하나, 전부 보임 (AI 응대 오류는 목록에서 빼고 상세 · 통계로, +N 없이). 근거는 그 대상의 첫 말
       complaints: byTarget(row.complaints).map((c) => ({
         key: c.target,
         label: TARGET_LABEL[c.target],

@@ -1,8 +1,8 @@
-// AI 상담가 (11/13 새 안, 피그마 2368:2525) — 위 탭으로 상담가 고르기 | 카드 = 머리 줄(이름 · 목소리 · 저장 시각 · 버튼) + 프롬프트
+// AI 상담가 (새 안, 피그마 2368:2525) — 위 탭으로 상담가 고르기 | 카드 = 머리 줄(이름 · 목소리 · 저장 시각 · 버튼) + 프롬프트
 // 11/11: 저장 = 새 버전, [적용] 없음. 버전 기록은 5단계 수정 기록 창으로 옮김
 // 데이터 · 규칙은 usePersonaPage. 카드 = 탭 + 그 자리에서 고치기 (PersonaCard). [시나리오 시험]은 따로 화면 (ScenarioTest)
 import { useLocation } from 'react-router'
-import { usePersonaPage } from '@/features/persona/hooks/usePersonaPage'
+import { usePersonaPage } from '../hooks/usePersonaPage'
 import { AddPersona } from './AddPersona'
 import { PersonaCard } from './PersonaCard'
 import { PageHead } from '@/shared/ui'

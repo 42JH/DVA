@@ -1,4 +1,4 @@
-// 시나리오 시험 상세 (11/12, Figma 1941:5457) — 통화 상세와 같은 한 화면. 시나리오 시험 화면의 표에서 줄을 눌러 옴
+// 시나리오 시험 상세 (Figma 1941:5457) — 통화 상세와 같은 한 화면. 시나리오 시험 화면의 표에서 줄을 눌러 옴
 // 11/13 새 안 3번(피그마 2368:5606): 흰 카드 안 — 위 탭 [고친 내용] [통화에 쓰는 내용] [시나리오] · 시험 시각, 통화 길이. [시나리오] = 고객 대본 | 정답 · 행동 확인 (보기만)
 // 왼쪽 대화(누르면 그 말부터 듣기) | 오른쪽 결과표 | 맨 아래 녹음 재생
 import { useRef } from 'react'
@@ -7,12 +7,8 @@ import { Badge, PageHead, Segments } from '@/shared/ui'
 import { Talk } from '@/shared/call/AiSteps'
 import { Player } from '@/shared/call/Player'
 import { useFollowScroll } from '@/shared/call/useFollowScroll'
-import { SCENARIO_TEST } from '@/features/persona/hooks/useScenarioTest'
-import {
-  useScenarioCall,
-  useScenarioDetail,
-  useScenarioScript,
-} from '@/features/persona/hooks/useScenarioDetail'
+import { SCENARIO_TEST } from '../hooks/useScenarioTest'
+import { useScenarioCall, useScenarioDetail, useScenarioScript } from '../hooks/useScenarioDetail'
 import { Result } from './ScenarioTest'
 
 export function ScenarioDetailPage() {
@@ -51,7 +47,7 @@ function Detail(p: { personaSeq: number; version: number; scenario: string }) {
           ) : (
             <>
               <div className="flex shrink-0 flex-wrap items-center gap-4 border-b border-ops-line px-7 py-3">
-                {/* 회색 받침 위 탭 — 글자만 있으면 눌리는 곳으로 안 보임 (11/13) */}
+                {/* 회색 받침 위 탭 — 글자만 있으면 눌리는 곳으로 안 보임 */}
                 <div className="rounded-lg bg-ops-idle-soft p-1">
                   <Segments
                     label="보는 결과"
@@ -157,7 +153,7 @@ function Script({ scenario }: { scenario: string }) {
   )
 }
 
-/** 판정 칩 — warn(확인 필요)은 실패로 세지 않지만 볼 만한 것: 덧붙인 말 · 받아쓰기 오류 (11/15) */
+/** 판정 칩 — warn(확인 필요)은 실패로 세지 않지만 볼 만한 것: 덧붙인 말 · 받아쓰기 오류 */
 const STATUS = {
   pass: { tone: 'done', label: '통과' },
   fail: { tone: 'stop', label: '실패' },
@@ -247,7 +243,7 @@ function Call({ runId, scenario }: { runId: string; scenario: string }) {
                         </td>
                       </>
                     )}
-                    {/* 판정 사유(채점 안 한 이유 등)는 글로 붙이지 않고 칩에 올리면 보임 (11/12 사용자: 설명 문구 없이) */}
+                    {/* 판정 사유(채점 안 한 이유 등)는 글로 붙이지 않고 칩에 올리면 보임 (설명 문구 없이) */}
                     <td className="text-center!" title={c.note || undefined}>
                       <Badge tone={STATUS[c.status].tone}>{STATUS[c.status].label}</Badge>
                       {/* 어느 말에서 실패했는지 — 누르면 대화의 그 말로 가서 거기부터 들음 */}

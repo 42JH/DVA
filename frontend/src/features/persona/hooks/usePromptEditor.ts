@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { ApiError } from '@/shared/api/client'
-import { emptyPromptNotice, PROMPT_SECTIONS, unsupportedText } from '@/features/persona/labels'
+import { emptyPromptNotice, PROMPT_SECTIONS, unsupportedText } from '../labels'
 import {
   personaQueries,
   PROMPT_KEYS,
@@ -10,11 +10,11 @@ import {
   type PromptFields,
   type PromptKey,
   type VoiceSettings,
-} from '@/features/persona/api/personaApi'
-import { useVoiceDraft } from '@/features/persona/hooks/useVoiceDraft'
-import { useLeaveGuard } from '@/features/persona/hooks/useLeaveGuard'
+} from '../api/personaApi'
+import { useVoiceDraft } from './useVoiceDraft'
+import { useLeaveGuard } from './useLeaveGuard'
 
-/** 수정 창이 무엇을 고치는지 — 늘 그 페르소나의 최신 버전에서 시작: 초안이 있으면 초안, 없으면 HEAD (11/02 결정) */
+/** 수정 창이 무엇을 고치는지 — 늘 그 페르소나의 최신 버전에서 시작: 초안이 있으면 초안, 없으면 HEAD */
 export interface EditTarget {
   personaSeq: number
   personaName: string // 시작 이름 — 초안에서 바꿨으면 초안 이름
@@ -26,7 +26,7 @@ export interface EditTarget {
 }
 
 /** 07 프롬프트 수정 · 음성 설정 훅 (와이어프레임 07_페르소나관리_수정 · _음성세부조절, 10/31 · 11/02 실서버)
- * 화면엔 바로 'v5 · 작성 중'. [저장] = PATCH(바뀐 칸만) + 바로 확정 → 새 버전 v5 (11/11, 통화엔 [통화에 사용하기]로만)
+ * 화면엔 바로 'v5 · 작성 중'. [저장] = PATCH(바뀐 칸만) + 바로 확정 → 새 버전 v5 (통화엔 [통화에 사용하기]로만)
  * 음성 드롭다운은 저장 버튼 없이 바로 반영(작성 중에) → 수정 화면 [저장]으로 같이 저장
  * 저장 안 한 내용이 있으면 [취소] · 다른 화면 이동 · 탭 닫기를 한 번 막음 */
 export function usePromptEditor(target: EditTarget, onDone: (savedVersion?: number) => void) {
@@ -37,7 +37,7 @@ export function usePromptEditor(target: EditTarget, onDone: (savedVersion?: numb
   const { voice, voiceChanged, setVoice } = voiceDraft
   const changedKeys = PROMPT_KEYS.filter((k) => prompt[k] !== target.prompt[k])
   const promptChanged = changedKeys.length > 0
-  // 빈 칸은 프롬프트를 고칠 때만 막음 — 음성만 바꾼 저장은 프롬프트를 안 보내니 따로 저장되게 (11/11 사용자, 서버는 빈 칸 허용)
+  // 빈 칸은 프롬프트를 고칠 때만 막음 — 음성만 바꾼 저장은 프롬프트를 안 보내니 따로 저장되게 (, 서버는 빈 칸 허용)
   const emptyNotice = promptChanged ? emptyPromptNotice(prompt) : null
   const nameChanged = name.trim() !== target.personaName
   const dirty = nameChanged || promptChanged || voiceChanged
@@ -73,14 +73,14 @@ export function usePromptEditor(target: EditTarget, onDone: (savedVersion?: numb
     subtitle: target.personaName,
     name,
     setName,
-    // 칸마다 고정 제목 + 입력칸 (11/10 — 제목은 못 고침, 줄 번호 없음)
+    // 칸마다 고정 제목 + 입력칸 (제목은 못 고침, 줄 번호 없음)
     sections: PROMPT_SECTIONS.map((s) => ({
       ...s,
       value: prompt[s.key],
       empty: prompt[s.key].trim() === '',
     })),
     setField: (key: PromptKey, value: string) => setPrompt((p) => ({ ...p, [key]: value })),
-    // 수정 기록 [이 내용 불러오기] — 칸에 채우기만, 기록은 [저장]을 눌러야 남음 (11/15 사용자: 누르자마자 저장한 것처럼 기록에 뜸)
+    // 수정 기록 [이 내용 불러오기] — 칸에 채우기만, 기록은 [저장]을 눌러야 남음 (누르자마자 저장한 것처럼 기록에 뜸)
     load: (v: { name: string; prompt: PromptFields; voice: VoiceSettings }) => {
       setName(v.name)
       setPrompt(v.prompt)
@@ -91,7 +91,7 @@ export function usePromptEditor(target: EditTarget, onDone: (savedVersion?: numb
     // 음성 드롭다운
     ...voiceDraft,
 
-    dirty, // 고치기 시작하면 머리 줄 버튼이 [취소] [저장]으로 (11/13 새 안)
+    dirty, // 고치기 시작하면 머리 줄 버튼이 [취소] [저장]으로
     saveLabel: mutation.isPending ? '저장 중…' : '저장',
     canSave:
       (dirty || target.draftRevision !== null) && // 남은 초안은 고치지 않아도 확정할 수 있게

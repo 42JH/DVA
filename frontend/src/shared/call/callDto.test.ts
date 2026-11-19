@@ -72,7 +72,7 @@ const old = toCallRow({
   analysis: { ...analysis, isNewCustomer: undefined, faqAnswerCount: undefined },
 })
 assert.equal(old.isNew, null)
-// 고객을 못 찾은 통화(번호만) → AI가 신규라 해도 신규 아님 (11/10)
+// 고객을 못 찾은 통화(번호만) → AI가 신규라 해도 신규 아님
 assert.equal(toCallRow({ ...call, customerSeq: null, customerName: null, analysis }).isNew, null)
 assert.equal(toCallRow({ ...call, customerSeq: 31, customerName: null, analysis }).isNew, null)
 assert.equal(old.counts?.faq, null)

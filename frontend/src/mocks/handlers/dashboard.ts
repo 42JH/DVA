@@ -13,7 +13,7 @@ import type {
 
 // 가짜 02 대시보드 'AI 상담 성능' — 대시보드 프론트 연동 명세(BE feature/ai-dashboard) 모양 그대로: 카드마다 GET 하나 · customerType만 · 단건 { data, meta }
 // 모르는 쿼리 · 중복 · 빈 값 · 이상한 customerType은 400 INVALID_REQUEST (명세 §1). 비율 · 평균은 서버처럼 반올림 없이 계산
-// 신규 · 기존 고객 = Figma 예시 수치(11/04 'AI 상담 성능' · 11/05 '그래프 보기')에 맞춤, 미분류 = 지어낸 값, 전체 = 셋을 더함
+// 신규 · 기존 고객 = Figma 예시 수치 ('AI 상담 성능' · 11/05 '그래프 보기')에 맞춤, 미분류 = 지어낸 값, 전체 = 셋을 더함
 // 비교 버전 = 빠른 접수형 v6(적용 중) · v5(직전) — personas.ts와 같음
 
 const STAGES: Stage[] = [

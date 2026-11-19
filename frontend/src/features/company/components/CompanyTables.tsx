@@ -1,8 +1,8 @@
 // 08 기업 상세의 표 — 사원 탭 · 청구 내역 탭(고른 건 상세 포함). 화면 틀 · 카드 · 창은 CompanyPage
 import { useRef } from 'react'
 import { Link } from 'react-router'
-import type { useCompanyDetail } from '@/features/company/hooks/useCompanyDetail'
-import type { Charge } from '@/features/company/api/companyApi'
+import type { useCompanyDetail } from '../hooks/useCompanyDetail'
+import type { Charge } from '../api/companyApi'
 import { Badge, Btn, Icon } from '@/shared/ui'
 import { SkeletonRows } from '@/shared/ui/ListFrame'
 import { useScrollable } from '@/shared/lib/useScrollable'

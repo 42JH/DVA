@@ -11,7 +11,7 @@ interface ParcelRow {
   parcel: ListParcel | null // 상세가 아직 없는 접수 중 주문이면 null → 한 줄, 칸은 '—'
 }
 
-/** 주문 하나 → 줄들. 취소된 상세도 보여 줌 (11/01 결정: 취소돼도 계속 보임) */
+/** 주문 하나 → 줄들. 취소된 상세도 보여 줌 (취소돼도 계속 보임) */
 export function parcelRows(o: OrderListItem): ParcelRow[] {
   const base = {
     orderSeq: o.orderSeq,

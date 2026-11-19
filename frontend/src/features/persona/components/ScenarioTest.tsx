@@ -1,19 +1,19 @@
-// 시나리오 시험 (11/12, Figma 1990:7976) — AI 상담가 가운데 카드의 [시나리오 시험]을 눌러 오는 한 화면
+// 시나리오 시험 (Figma 1990:7976) — AI 상담가 가운데 카드의 [시나리오 시험]을 눌러 오는 한 화면
 // (처음엔 가운데 카드의 탭이었음 → 11/12 사용자: 탭 대신 버튼 + 더 크게. 주소 /personas/:personaSeq/tests/:version)
 // 위 줄: ‹ 시나리오 시험 + 상담가 이름 · 고친 내용 · 저장 시각. 표 위(카드 밖): 상태(시험 전 · 시험 중 진행 · 끝난 뒤 숫자) + [전체 시험]
-// 표(11/13 새 안 3번, 피그마 2368:5349): 업무 · 시나리오 · 통화에 쓰는 내용 · 고친 내용 · 변화. 줄을 누르면 그 통화의 상세(대화 · 결과표 · 녹음)
+// 표 (새 안 3번, 피그마 2368:5349): 업무 · 시나리오 · 통화에 쓰는 내용 · 고친 내용 · 변화. 줄을 누르면 그 통화의 상세(대화 · 결과표 · 녹음)
 // 시험 뒤 글을 고쳤으면 고치기 전 결과를 흐리게 + 안내 한 줄
 import { useState, type ReactNode } from 'react'
 import { Link, Navigate, useNavigate, useParams } from 'react-router'
 import { Badge, Btn, PageHead } from '@/shared/ui'
 import { Confirm } from '@/shared/ui/Modal'
-import type { Cell } from '@/features/persona/hooks/scenarioTest'
+import type { Cell } from '../hooks/scenarioTest'
 import {
   SCENARIO_TEST,
   useScenarioTest,
   useScenarioTestPage,
   type TestTarget,
-} from '@/features/persona/hooks/useScenarioTest'
+} from '../hooks/useScenarioTest'
 
 export function ScenarioTestPage() {
   const { personaSeq, version } = useParams()
@@ -69,7 +69,7 @@ function ScenarioTest({
 }) {
   const vm = useScenarioTest(me, dateOf)
   const navigate = useNavigate()
-  const [stopping, setStopping] = useState(false) // [시험 중단] 확인 창 (11/13 새 안 2번)
+  const [stopping, setStopping] = useState(false) // [시험 중단] 확인 창 (새 안 2번)
   // 시험이 멈추거나 끝나면 닫힌 것으로 되돌림 — 그대로 두면 다음 시험을 시작하는 순간 이 창이 저절로 다시 뜸(Enter 한 번에 방금 건 시험이 멈춤)
   if (stopping && !vm.stop) setStopping(false)
   if (vm.note)
@@ -161,7 +161,7 @@ function ScenarioTest({
       </div>
       <Box>
         <div className="min-h-0 flex-1 [scrollbar-width:thin] overflow-y-auto">
-          {/* 다른 목록과 같은 표 (ops-table) — 업무 · 시나리오는 왼쪽, 결과 · 변화는 가운데 (11/13 사용자) */}
+          {/* 다른 목록과 같은 표 (ops-table) — 업무 · 시나리오는 왼쪽, 결과 · 변화는 가운데 */}
           <table className={`ops-table ${dim}`}>
             <thead>
               <tr>

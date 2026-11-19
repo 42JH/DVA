@@ -1,6 +1,6 @@
 // 실행: npx tsx src/features/persona/hooks/scenarioTest.test.ts  (프레임워크 없이 assert만)
 import assert from 'node:assert/strict'
-import type { Scenario, TestItem, VersionTest } from '@/features/persona/api/scenarioTestApi'
+import type { Scenario, TestItem, VersionTest } from '../api/scenarioTestApi'
 import {
   baseOf,
   changeOf,
@@ -121,7 +121,7 @@ assert.equal(fail('연락처를 묻지 않는다', '어김: 보내는 분 연락
 assert.equal(fail('대본 진행', '말하지 못한 발화: [3]'), 3) // 마지막으로 한 대본 문장(2번)
 assert.equal(fail('대본 진행', '말하지 못한 발화: [1, 2, 3]'), 4) // 한 문장도 못 했으면 마지막 말
 assert.equal(fail('물품', '없음'), null) // 값만 틀린 것은 위치를 모름
-// 인용에 고객의 "네"가 들어 있어도 AI 줄로 (11/15 서버 시험: 고객 "네." 줄에 실패가 붙었음)
+// 인용에 고객의 "네"가 들어 있어도 AI 줄로 (서버 시험: 고객 "네." 줄에 실패가 붙었음)
 assert.equal(fail('연락처를 새로 묻지 않는다', '어김: 네. 받는 사람은 박서준이에요.'), null)
 assert.equal(
   failLine(

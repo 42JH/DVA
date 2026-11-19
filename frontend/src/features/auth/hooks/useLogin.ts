@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 import { ApiError } from '@/shared/api/client'
-import { login } from '@/features/auth/api/loginApi'
+import { login } from '../api/loginApi'
 
 /** 00 로그인 훅 — 입력값 · 제출 · 오류 문구 */
 export function useLogin() {
@@ -20,7 +20,7 @@ export function useLogin() {
   const mutation = useMutation({
     mutationFn: (v: { loginId: string; password: string }) => login(v.loginId.trim(), v.password),
     onSuccess: () => {
-      queryClient.clear() // 이전 계정의 내 정보 · 목록이 남지 않게 (11/09 검수: 세션 만료 뒤 다른 계정 로그인)
+      queryClient.clear() // 이전 계정의 내 정보 · 목록이 남지 않게 (세션 만료 뒤 다른 계정 로그인)
       navigate(from, { replace: true })
     },
   })
@@ -32,7 +32,7 @@ export function useLogin() {
   }
 
   const error = mutation.error
-  // 명세(API-01): ACTIVE 계정만 로그인됨 — 승인 대기 · 비활성화 · 삭제도 틀린 비밀번호와 같은 401이라 한 문구로 (11/01 피드백: 삭제된 계정에 '승인되지 않은' 안내는 틀림. BE 요청 B1: 상태 코드가 오면 /pending으로)
+  // 명세(API-01): ACTIVE 계정만 로그인됨 — 승인 대기 · 비활성화 · 삭제도 틀린 비밀번호와 같은 401이라 한 문구로 (피드백: 삭제된 계정에 '승인되지 않은' 안내는 틀림. BE 요청 B1: 상태 코드가 오면 /pending으로)
   // 400(아이디 형식 · 6자 미만)도 같은 문구 — 서버의 일반 문구를 그대로 띄우지 않게
   const errorMessage = !error
     ? null

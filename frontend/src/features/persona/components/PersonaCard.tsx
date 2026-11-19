@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router'
-import type { usePersonaPage } from '@/features/persona/hooks/usePersonaPage'
-import { usePromptEditor, type EditTarget } from '@/features/persona/hooks/usePromptEditor'
+import type { usePersonaPage } from '../hooks/usePersonaPage'
+import { usePromptEditor, type EditTarget } from '../hooks/usePromptEditor'
 import { Badge, Btn, Icon } from '@/shared/ui'
 import { Confirm } from '@/shared/ui/Modal'
 import { ApplyBand } from './ApplyBand'
@@ -15,7 +15,7 @@ import { VOICE_BOX, VoiceFields } from './VoiceFields'
 type Vm = ReturnType<typeof usePersonaPage>
 type Ed = ReturnType<typeof usePromptEditor>
 
-// 위 탭 + 카드 (11/13 새 안). 현재 버전 · 관리 권한이면 카드가 곧 입력 칸 — 고치기 시작하면 [취소] [저장]
+// 위 탭 + 카드. 현재 버전 · 관리 권한이면 카드가 곧 입력 칸 — 고치기 시작하면 [취소] [저장]
 export function PersonaCard({ vm }: { vm: Vm }) {
   const t = vm.prompt?.canEdit ? vm.editTarget : null
   if (!t) return <View vm={vm} ed={null} editing={false} />

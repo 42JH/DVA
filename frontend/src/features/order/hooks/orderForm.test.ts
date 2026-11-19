@@ -1,7 +1,7 @@
 // 실행: npx tsx --tsconfig tsconfig.app.json src/features/order/hooks/orderForm.test.ts  (프레임워크 없이 assert만)
 // 시각은 모두 +09:00으로 적어 브라우저 · 테스트 시간대와 상관없이 같은 결과
 import assert from 'node:assert/strict'
-import type { OrderDetail } from '@/features/order/api/orderApi'
+import type { OrderDetail } from '../api/orderApi'
 import {
   NO_ITEMS,
   formFilled,

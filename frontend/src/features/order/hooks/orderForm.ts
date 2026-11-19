@@ -10,9 +10,9 @@ import type {
   PayContext,
   PaymentMethod,
   PickedAddress,
-} from '@/features/order/api/orderApi'
-import { BOX_TYPES, type BoxKey } from '@/features/order/api/orderInput'
-import { orderErrorText } from '@/features/order/labels'
+} from '../api/orderApi'
+import { BOX_TYPES, type BoxKey } from '../api/orderInput'
+import { orderErrorText } from '../labels'
 import {
   MAX_BOXES,
   MAX_DOCUMENTS,
@@ -20,8 +20,8 @@ import {
   pickupOk,
   pickupRange,
   priceOk,
-} from '@/features/order/api/orderLimits'
-import { isJeju, shippingFeeOf } from '@/features/order/api/orderFee'
+} from '../api/orderLimits'
+import { isJeju, shippingFeeOf } from '../api/orderFee'
 
 export type Side = 'sender' | 'receiver'
 /** 입력 중인 칸 그대로 (전부 글자). 보낼 때 Party로 바꿈 */
@@ -77,7 +77,7 @@ export const draftOf = (p: Party): PartyDraft => ({
 })
 
 export const digits = (v: string, max: number) => v.replace(/\D/g, '').slice(0, max)
-// 서버 규칙 (11/11): 보내는 분 = 휴대전화만, 받는 분 = 휴대전화 + 02(9~10) + 기타 지역번호(10~11) + 070(11)
+// 서버 규칙: 보내는 분 = 휴대전화만, 받는 분 = 휴대전화 + 02(9~10) + 기타 지역번호(10~11) + 070(11)
 export const PHONE_RULE: Record<Side, { re: RegExp; message: string }> = {
   sender: {
     re: /^01[016-9]\d{8}$/,
@@ -107,7 +107,7 @@ export function limitsOf(
   const pickup = pickupRange(now)
   const boxTotal = v.counts.small + v.counts.medium + v.counts.big
   const was = order?.items
-  // 배송비 — 품목 개수로 자동 계산, 직접 입력 없음 (11/06). 추가 · 접수 중단 주문 수정에만 (그 외 수정은 그대로 유지)
+  // 배송비 — 품목 개수로 자동 계산, 직접 입력 없음. 추가 · 접수 중단 주문 수정에만 (그 외 수정은 그대로 유지)
   const shippingFee = shippingFeeOf(
     v.counts,
     isJeju(v.parties.sender.roadAddress) || isJeju(v.parties.receiver.roadAddress), // 제주 +3,000원
@@ -120,7 +120,7 @@ export function limitsOf(
       v.declaredValue !== initial.price &&
       !priceOk(Number(v.declaredValue)),
     boxTotal,
-    // 직접 입력은 max를 넘을 수 있음 — 몰래 줄이지 않고 알림 (11/06)
+    // 직접 입력은 max를 넘을 수 있음 — 몰래 줄이지 않고 알림
     boxesOut: boxTotal > MAX_BOXES && boxTotal !== (was ? was.small + was.medium + was.big : 0),
     docsOut: v.counts.document > MAX_DOCUMENTS && v.counts.document !== (was?.document ?? 0),
     hasItem: BOX_TYPES.some((b) => v.counts[b.key] > 0) || v.etcItem.trim() !== '',
@@ -185,7 +185,7 @@ const offHint = (isCompany: boolean, method: PaymentMethod) => {
   if (isCompany) return '기업 설정에서 꺼짐'
   return method === 'GROUP_CARD' ? '기업 고객만' : '쓸 수 없음'
 }
-/** 결제 자격 (11/10) — 보내는 분 = 주문 고객. 자격을 받기 전(payCtx 없음)엔 모두 켬 (접수 때 서버가 다시 확인)
+/** 결제 자격 — 보내는 분 = 주문 고객. 자격을 받기 전(payCtx 없음)엔 모두 켬 (접수 때 서버가 다시 확인)
  * 기업 소속: 월결제 · 그룹카드는 기업 · 부서 설정이라 꺼져 있으면 못 고름. 개인: 그룹카드 불가, 월결제은 물어보고 추가 */
 export function paymentChoices(payCtx: PayContext | undefined) {
   const isCompany = !!payCtx && payCtx.company !== null

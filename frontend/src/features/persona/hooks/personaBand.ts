@@ -1,6 +1,6 @@
 // 띠의 단계 · 확인 창 문구 — 순수 함수 (personaBand.test.ts). 상태는 usePersonaPage가 모아 넘김
 
-/** 띠의 단계 (11/13 새 안 1번) — unapplied 반영 전 · testing 시험 중 · applying 반영 중
+/** 띠의 단계 (새 안 1번) — unapplied 반영 전 · testing 시험 중 · applying 반영 중
  *  stopped = 시험을 멈춤(2번) — [통화에 반영] 대신 [다시 시험하고 반영], 입력 칸은 다시 열림
  *  review = 시험이 끝났는데 실패가 있음(4번) — 바로 반영하지 않고 담당자가 [확인하고 반영]
  *  passed = 6번 시험 통과 — 띠의 [통화에 사용하기]. null = 띠 없음 */
@@ -18,7 +18,7 @@ export type Confirming =
 /** 띠가 어느 단계인가
  *  switching = 통화에 안 쓰는 상담가(6번) · unapplied = 사용 중 상담가의 고친 내용이 아직 통화에 안 쓰임 — 둘 다 아니면 띠 없음
  *  연결 실패가 섞인 일부 시험(partial)도 실패가 있으면 확인 필요 (피그마 3 · 4번: 통과 7 · 실패 2 · 연결 실패 1)
- *  6번의 실패 · 중단은 4번 확인 필요 · 2번 시험 중단 띠를 그대로 (11/13 사용자). 6번은 시험 전이면 띠 없음 */
+ *  6번의 실패 · 중단은 4번 확인 필요 · 2번 시험 중단 띠를 그대로. 6번은 시험 전이면 띠 없음 */
 export function bandStep(
   who: { applying: boolean; switching: boolean; unapplied: boolean },
   test: { state: string; allPass: boolean; stopped: unknown; fail: number },

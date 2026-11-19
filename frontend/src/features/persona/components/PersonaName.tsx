@@ -1,8 +1,8 @@
-import type { EditTarget } from '@/features/persona/hooks/usePromptEditor'
-import { useRenamePersona } from '@/features/persona/hooks/useRenamePersona'
+import type { EditTarget } from '../hooks/usePromptEditor'
+import { useRenamePersona } from '../hooks/useRenamePersona'
 import { Icon } from '@/shared/ui'
 
-// 머리 줄 이름 + 연필 (11/13 새 안 10번, 피그마 2384:2) — 누르면 이름 자리만 입력 칸
+// 머리 줄 이름 + 연필 (새 안 10번, 피그마 2384:2) — 누르면 이름 자리만 입력 칸
 // Enter = 저장, Esc · 칸 밖 = 원래 이름. target이 null이면 연필 없음 (권한 없음 · 지난 버전 · 프롬프트 고치는 중)
 // locked: 시험 · 반영 중 — 연필은 그대로 보이되 못 누름 (피그마 2368:3212)
 // applyAfter: 이름을 저장하면 바로 통화에 반영 (통화에 쓰는 상담가 · 반영 전 내용 없음 — useRenamePersona)

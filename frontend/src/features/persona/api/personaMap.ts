@@ -1,5 +1,5 @@
 // 07 페르소나 — 서버 응답(develop-backend 11/02 초안 계약, docs/persona-head-management.md) → 화면 모양. React · HTTP를 모르는 순수 함수 (personaMap.test.ts)
-// 규칙 (11/02 사용자 결정): 수정은 최신 버전에서만 · 적용 전까지 새 버전 없음 · 지난 버전은 보기 + 시험 통화만 · 비교 = 적용본 ↔ 수정 중
+// 규칙: 수정은 최신 버전에서만 · 적용 전까지 새 버전 없음 · 지난 버전은 보기 + 시험 통화만 · 비교 = 적용본 ↔ 수정 중
 // 서버 칸 → 화면: draft(초안, 페르소나마다 1개) = 'v(HEAD+1) 저장됨' · headVersion = 적용본(통화에 안 쓰는 페르소나도) · activeVersion = 지금 통화에 쓰는 버전
 // appliedAt은 'AI가 적용에 성공한 시각'이라 적용본을 찾는 기준이 아님 (백엔드 11/02 답)
 
@@ -96,7 +96,7 @@ export interface Persona {
 export const toSpeed = (rate: number | null): Speed =>
   rate === null || rate === 1 ? 'NORMAL' : rate < 1 ? 'SLOW' : 'FAST'
 
-const RATE = { SLOW: 0.85, FAST: 1.2 } as const // 칩 → 숫자 (11/02 결정: 3단계 칩 유지)
+const RATE = { SLOW: 0.85, FAST: 1.2 } as const // 칩 → 숫자 (3단계 칩 유지)
 /** 칩 → 서버 숫자. 보통 = null(기본). 범위 밖이면 범위 끝으로
  * AI가 숫자 속도를 지원 안 하면(range null) 고른 값 그대로 보냄 → 서버가 422로 거절 (몰래 '보통'으로 바꿔 저장하지 않게, 11/02 사용자: 늘 세 칸) */
 export function toRate(speed: Speed, range: { min: number; max: number } | null): number | null {

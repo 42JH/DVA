@@ -2,7 +2,7 @@ import { useMutation } from '@tanstack/react-query'
 import { useState } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 import { ApiError } from '@/shared/api/client'
-import { signup } from '@/features/auth/api/signupApi'
+import { signup } from '../api/signupApi'
 
 const MIN_PASSWORD = 6 // 10/30 00 디자인 확정 · 명세 API-02
 const LOGIN_ID = /^[A-Za-z0-9]{1,20}$/ // 명세 API-02: 영문 · 숫자 1~20자, 대소문자 구분 (소문자로 바꾸지 않음)
