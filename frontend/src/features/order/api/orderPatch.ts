@@ -30,12 +30,8 @@ function partyPatch(before: Party, after: PartyInput) {
   return out
 }
 
-/** order = 수정 창을 연 그 배송 상세로 바꿔 끼운 주문(pickParcel), parcelSeq = 그 상세 번호 */
-export function buildOrderPatch(
-  order: OrderDetail,
-  parcelSeq: number | null,
-  input: OrderInput,
-): { patch: OrderPatch | null; roadChanged: boolean /* 주소 정보가 모자람 */ } {
+/** 배송 한 건에서 바뀐 칸 — 보내는 분 · 받는 분 · 물품 수 · 기타 물품 · 요청 · 가액 · 배송비 */
+function parcelPatch(order: OrderDetail, input: OrderInput) {
   const parcel: Record<string, unknown> = {}
   const origin = partyPatch(order.sender, input.sender)
   const destination = partyPatch(order.receiver, input.receiver)
@@ -57,6 +53,16 @@ export function buildOrderPatch(
   if (input.shippingFee !== undefined && input.shippingFee !== (order.notifiedPrice ?? null))
     parcel.notifiedPrice = input.shippingFee // 접수 중단 주문만 칸이 있음
 
+  return parcel
+}
+
+/** order = 수정 창을 연 그 배송 상세로 바꿔 끼운 주문(pickParcel), parcelSeq = 그 상세 번호 */
+export function buildOrderPatch(
+  order: OrderDetail,
+  parcelSeq: number | null,
+  input: OrderInput,
+): { patch: OrderPatch | null; roadChanged: boolean /* 주소 정보가 모자람 */ } {
+  const parcel = parcelPatch(order, input)
   const patch: OrderPatch = { expectedVersion: order.version ?? 0 }
   if (Object.keys(parcel).length)
     patch.parcels = [parcelSeq === null ? parcel : { orderParcelSeq: parcelSeq, ...parcel }]

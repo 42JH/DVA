@@ -159,6 +159,50 @@ const fail = (all: string[]): CsvResult => ({
 export const readMembersCsv = (text: string, kind: CsvKind = 'members'): CsvResult =>
   readMembersRows(parseCsv(text), kind)
 
+/** 한 줄 검사 → 사원 또는 오류 문장. company = 기업 CSV면 첫 칸(기업명), 사원 CSV면 null. 줄끼리 겹침은 부르는 쪽에서 */
+function checkRow(
+  [no = '', name = '', phone = '', leader = '', dept = '', ...addr]: string[],
+  line: number,
+  company: string | null,
+): CsvMember | string {
+  const digits = csvPhone(phone)
+  if (company === '') return `${line}행 기업명이 비어 있습니다.`
+  if (company && company.length > MAX_COMPANY_NAME)
+    return `${line}행 기업명은 ${MAX_COMPANY_NAME}자까지입니다.`
+  if (!no) return `${line}행 사번이 비어 있습니다.`
+  if (EXCEL_NUMBER.test(no)) return excelNumberError(line, '사번')
+  if (!name) return `${line}행 사원명이 비어 있습니다.`
+  if (EXCEL_NUMBER.test(phone)) return excelNumberError(line, '전화번호')
+  const badPhone = phoneError(digits)
+  if (badPhone) return `${line}행 ${badPhone}`
+  if (leader !== '' && leader.toUpperCase() !== 'Y')
+    return `${line}행 담당자는 Y 또는 빈칸이어야 합니다.`
+  if (dept.length > MAX_DEPARTMENT_NAME)
+    return `${line}행 부서 이름은 ${MAX_DEPARTMENT_NAME}자까지입니다.`
+  const [road = '', jibun = '', dong = '', postal = '', detail = ''] = addr
+  if (!(road && jibun && dong && postal))
+    return `${line}행 주소는 도로명, 지번, 동, 우편번호를 모두 써 주세요.`
+  // 엑셀은 0으로 시작하는 번호(서울 01~09)의 앞 0만 지움 → 4자리면 0 하나가 빠진 것. 그 밖의 길이는 원래 값을 알 수 없어 막음
+  const zip = /^\d{4}$/.test(postal) ? `0${postal}` : postal
+  if (!/^\d{5}$/.test(zip)) return `${line}행 우편번호는 숫자 5자리여야 합니다.`
+  return {
+    ...(company !== null ? { company } : {}),
+    employeeNo: no,
+    name,
+    phoneNumber: digits,
+    leader: leader !== '',
+    department: dept || null,
+    address: {
+      roadAddress: road,
+      jibunAddress: jibun,
+      dongName: dong,
+      postalCode: zip,
+      detailAddress: detail,
+    },
+    line,
+  }
+}
+
 /** 줄 · 칸(CSV든 엑셀이든) → 사원 목록 또는 오류 */
 function readMembersRows(rows: string[][], kind: CsvKind = 'members'): CsvResult {
   const [rawHead, ...rawBody] = rows.map((r) => r.map((v) => plainCell(v.trim())))
@@ -188,53 +232,19 @@ function readMembersRows(rows: string[][], kind: CsvKind = 'members'): CsvResult
   const members: CsvMember[] = []
   const seenNo = new Map<string, number>()
   const seenPhone = new Map<string, number>()
-  body.forEach(([no = '', name = '', phone = '', leader = '', dept = '', ...addr], i) => {
+  body.forEach((cells, i) => {
     const line = i + 2 // 머리줄 다음부터
-    const digits = csvPhone(phone)
-    const company = companies[i] ?? ''
-    if (withCompany && !company) return errors.push(`${line}행 기업명이 비어 있습니다.`)
-    if (company.length > MAX_COMPANY_NAME)
-      return errors.push(`${line}행 기업명은 ${MAX_COMPANY_NAME}자까지입니다.`)
+    const r = checkRow(cells, line, withCompany ? (companies[i] ?? '') : null)
+    if (typeof r === 'string') return errors.push(r)
     // 사번은 같은 기업 안에서만 겹치면 안 됨. 전화번호는 한 사람이 두 기업에 들 수 없어 파일 전체에서
-    const noKey = `${company}|${no}`
-    if (!no) return errors.push(`${line}행 사번이 비어 있습니다.`)
-    if (EXCEL_NUMBER.test(no)) return errors.push(excelNumberError(line, '사번'))
-    if (!name) return errors.push(`${line}행 사원명이 비어 있습니다.`)
-    if (EXCEL_NUMBER.test(phone)) return errors.push(excelNumberError(line, '전화번호'))
-    const badPhone = phoneError(digits)
-    if (badPhone) return errors.push(`${line}행 ${badPhone}`)
-    if (leader !== '' && leader.toUpperCase() !== 'Y')
-      return errors.push(`${line}행 담당자는 Y 또는 빈칸이어야 합니다.`)
-    if (dept.length > MAX_DEPARTMENT_NAME)
-      return errors.push(`${line}행 부서 이름은 ${MAX_DEPARTMENT_NAME}자까지입니다.`)
-    const [road = '', jibun = '', dong = '', postal = '', detail = ''] = addr
-    if (!(road && jibun && dong && postal))
-      return errors.push(`${line}행 주소는 도로명, 지번, 동, 우편번호를 모두 써 주세요.`)
-    // 엑셀은 0으로 시작하는 번호(서울 01~09)의 앞 0만 지움 → 4자리면 0 하나가 빠진 것. 그 밖의 길이는 원래 값을 알 수 없어 막음
-    const zip = /^\d{4}$/.test(postal) ? `0${postal}` : postal
-    if (!/^\d{5}$/.test(zip)) return errors.push(`${line}행 우편번호는 숫자 5자리여야 합니다.`)
     // 명세: 요청 안의 사번 · 전화 중복은 보내기 전에 정리 → 겹치면 어느 줄인지 알려 줌
+    const noKey = `${r.company ?? ''}|${r.employeeNo}`
     if (seenNo.has(noKey)) return errors.push(`${line}행 사번이 ${seenNo.get(noKey)}행과 겹칩니다.`)
-    if (seenPhone.has(digits))
-      return errors.push(`${line}행 전화번호가 ${seenPhone.get(digits)}행과 겹칩니다.`)
+    if (seenPhone.has(r.phoneNumber))
+      return errors.push(`${line}행 전화번호가 ${seenPhone.get(r.phoneNumber)}행과 겹칩니다.`)
     seenNo.set(noKey, line)
-    seenPhone.set(digits, line)
-    members.push({
-      ...(withCompany ? { company } : {}),
-      employeeNo: no,
-      name,
-      phoneNumber: digits,
-      leader: leader !== '',
-      department: dept || null,
-      address: {
-        roadAddress: road,
-        jibunAddress: jibun,
-        dongName: dong,
-        postalCode: zip,
-        detailAddress: detail,
-      },
-      line,
-    })
+    seenPhone.set(r.phoneNumber, line)
+    members.push(r)
   })
   // 한 파일 = 한 기업 · 담당자 1명 이상
   if (withCompany && errors.length === 0) {
