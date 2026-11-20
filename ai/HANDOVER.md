@@ -417,7 +417,7 @@ echo '<비밀번호>' | docker exec -i dva-prod-backend-1 node scripts/bootstrap
 | `지번_<시도>.txt` | 시도별 지번 |
 | `부가정보_<시도>.txt` | 시도별 행정동·우편번호·건물명 |
 
-- 원본은 행정안전부 주소기반산업지원서비스의 주소 내려받기 화면(https://business.juso.go.kr/jst/jstAddressDownload)에서 "주소DB" 자료를 받으시면 됩니다. 파일 형식은 그 자료에 포함된 "주소DB 활용방법" 가이드의 붙임1을 기준으로 합니다.
+- 원본은 행정안전부 주소기반산업지원서비스의 주소 내려받기 화면(https://business.juso.go.kr/jst/jstAddressDownload)에서 "주소DB" 전체분 자료를 받으시면 됩니다. 변동분이 아니라 전체분이어야 합니다. 파일 형식은 그 자료에 포함된 "주소DB 활용방법" 가이드의 붙임1을 기준으로 합니다.
 - 원본은 CP949 인코딩 그대로 두셔야 합니다. UTF-8로 바꿔 저장하면 변환이 실패합니다.
 
 변환은 AI 서버 이미지로 실행합니다. 한 번만 하면 되고 몇 분 정도 걸립니다.
