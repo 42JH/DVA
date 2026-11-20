@@ -1,3 +1,4 @@
+import { AVAILABLE_CALL_SQL, AVAILABLE_JOINED_CALL_SQL } from '../consultations/call-session-availability';
 import {
   AdminOrderListItemDto,
   AdminOrderListQueryDto,
@@ -246,8 +247,7 @@ export class OrdersRepository {
         `SELECT u.customer_seq AS "customerSeq", c.ended_at AS "endedAt", c.order_seq AS "orderSeq"
          FROM call_sessions c LEFT JOIN customers u
            ON u.phone_number=c.caller_phone_number AND u.status='ACTIVE' AND u.deleted_at IS NULL
-         WHERE c.call_session_seq=$1 AND c.deleted_at IS NULL
-           AND (c.incoming_at IS NULL OR c.incoming_at>clock_timestamp()-interval '5 years')`,
+         WHERE c.call_session_seq=$1 AND ${AVAILABLE_JOINED_CALL_SQL}`,
         [callId],
       )
     ).rows[0];
@@ -460,7 +460,7 @@ export class OrdersRepository {
         phone: string | null;
         orderIntakeEnabled: boolean;
       }>(
-        'SELECT order_seq AS "orderSeq", ended_at AS "endedAt", caller_phone_number AS phone,order_intake_enabled AS "orderIntakeEnabled" FROM call_sessions WHERE call_session_seq=$1 AND deleted_at IS NULL AND (incoming_at IS NULL OR incoming_at>clock_timestamp()-interval \'5 years\') FOR UPDATE',
+        `SELECT order_seq AS "orderSeq", ended_at AS "endedAt", caller_phone_number AS phone,order_intake_enabled AS "orderIntakeEnabled" FROM call_sessions WHERE call_session_seq=$1 AND ${AVAILABLE_CALL_SQL} FOR UPDATE`,
         [id],
       )
     ).rows[0];

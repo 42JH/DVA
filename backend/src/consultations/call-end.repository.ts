@@ -1,3 +1,4 @@
+import { AVAILABLE_CALL_SQL } from './call-session-availability';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PoolClient } from 'pg';
@@ -38,8 +39,7 @@ export class CallEndRepository {
     if (!event) return null;
     if (event.callId !== null) {
       const call = await client.query(
-        `SELECT 1 FROM call_sessions WHERE call_session_seq=$1 AND deleted_at IS NULL
-        AND (incoming_at IS NULL OR incoming_at>clock_timestamp()-interval '5 years') FOR SHARE`,
+        `SELECT 1 FROM call_sessions WHERE call_session_seq=$1 AND ${AVAILABLE_CALL_SQL} FOR SHARE`,
         [event.callId],
       );
       return call.rowCount ? event.callId : null;
