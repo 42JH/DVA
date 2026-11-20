@@ -13,7 +13,7 @@
 | 운영 통화 코드를 고치지 않는다 | 새 폴더만 추가한다. `app/` 등 기존 파일 변경 없음 |
 | AI 서버 이미지에 들어가지 않는다 | `Dockerfile`이 복사하는 폴더 목록에 없다(`call_analysis`와 같다) |
 | 실제 주문 · 고객 · 통계에 닿지 않는다 | 백엔드는 `MockBackend`로 고정이다. 환경변수로 실제 백엔드에 붙일 수 없다 |
-| 운영과 한도 · 청구를 나눈다 | `PERSONA_CHECK_OPENAI_API_KEY`만 쓴다. `OPENAI_API_KEY`는 읽지 않는다 |
+| 운영과 한도 · 청구를 나눈다 | `PERSONA_CHECK_OPENAI_API_KEY`만 쓴다. 운영 키는 넘기지 않는다(G1의 FAQ 질문 임베딩이 읽는 `OPENAI_API_KEY`에도 배포에서 시험 전용 키를 넣음) |
 | 판정기는 통화 코드와 무관하다 | `judge.py`, `customer.py`, `lint.py`는 `app/`을 import하지 않는다. 실행기(`try_call.py`)만 불러다 쓴다 |
 
 ## 구성
@@ -78,7 +78,7 @@ python -m pytest persona_check -q
 
 ## 시나리오와 판정
 
-시나리오 ID, 고객 발화, 공통 테스트 데이터는 AI 파트 문서 "AI 상담원 테스트 시나리오"에서 가져왔다. 지금 10개가 들어 있다: A1, A2, A4, B1, B3, E1, F1, G1, H9, H10. 핵심 묶음은 A1, B3, E1, F1, G1, H10이다. G1(접수 중 FAQ 질문 후 복귀)은 FAQ 검색 서버가 연결된 환경에서만 돌고, **아직 실제 통화로 돌려 보지 못했다.**
+시나리오 ID, 고객 발화, 공통 테스트 데이터는 AI 파트 문서 "AI 상담원 테스트 시나리오"에서 가져왔다. 지금 10개가 들어 있다: A1, A2, A4, B1, B3, E1, F1, G1, H9, H10. 핵심 묶음은 A1, B3, E1, F1, G1, H10이다. G1(접수 중 FAQ 질문 후 복귀)은 FAQ 검색 서버가 연결된 환경에서만 돌고, 11/12 서버 첫 시험에서 FAQ 검색이 전부 `KB_UNAVAILABLE`이라(검색 경로가 운영과 달랐음) 고쳤고, 고친 뒤 통과 기록은 아직 없다.
 
 실제 통화로 돌려 본 것: develop-ai 4484076b(11/12 00:11)에서 E1과 H10은 통과했다. A1은 끝까지 갔고 가액만 틀렸다(아래 관찰 6). B3는 AI가 전화번호를 거절해 멈췄다(관찰 1). F1은 AI가 취소 확인을 되풀이해 취소되지 않았다(관찰 7). 6e79326e(11/12 09:09)에서 A2, A4, B1, H9를 돌렸고 네 통 모두 도중에 멈췄다(관찰 8). A2 ~ H9는 아직 통과한 적이 없어, 시나리오 정의가 맞는지 확인되지 않았다.
 
@@ -97,7 +97,7 @@ python -m pytest persona_check -q
 
 1. **입구를 우회한다.** 전화(SIP)는 걸려 온 세션을 `accept`로 설정하는데, 여기서는 `sessions.accept`를 바꿔 끼워 운영이 만든 세션 설정을 가로챈 뒤 같은 설정으로 WebRTC 세션을 만든다. 그래서 통화마다 로그에 `accept 실패 persona-check-config`가 한 줄 찍힌다. 또 WebRTC 세션은 sideband가 붙기 전에 시작돼 운영 로직이 `session.started`를 놓칠 수 있어, 데이터 채널로 받은 같은 이벤트를 sideband 맨 앞에 넣어 준다(`try_call.Sideband`). 기본 WebSocket으로 만든 세션에는 sideband가 붙지 않아(503) WebRTC를 쓴다. 전화망 구간(SIP, 8kHz 코덱, PBX 종료 웹훅)은 타지 않는다.
 2. **주소DB와 카카오 키가 없으면 주소를 검증하지 못한다.** 운영 코드는 지번 · 우편번호가 없으면 주문을 미완료로 처리하므로 고정값으로 채운다. 이때 주소와 상세주소가 갈리지 않고 들은 말 그대로 저장되어, 판정은 지역(구 · 군)만 비교하고 상세주소는 제외한다. 주소DB나 키가 있으면 전부 비교한다.
-3. **FAQ 시나리오는 검색 서버가 있어야 돈다.** `QDRANT_URL`이 있으면 운영과 같은 `RagService`를 붙인다. 시험 통화의 FAQ 질문이 운영과 같은 검색 서버로 간다. 검색 서버가 없는 PC에서는 확인하지 못해, G1과 이 연결은 통화 없는 테스트만 거쳤다. G2 ~ G9는 넣지 않았다.
+3. **FAQ 시나리오는 검색 서버가 있어야 돈다.** `QDRANT_URL`이 있으면 운영과 같은 `RagService`를 붙인다. 시험 통화의 FAQ 질문이 운영과 같은 검색 서버로 간다. 검색 서버가 없는 PC에서는 확인하지 못한다. 서버 첫 시험(11/12)에서 검색 경로 문제를 찾아 고쳤다. G2 ~ G9는 넣지 않았다.
 4. **상담원 연결, 수거 시각 시나리오는 넣지 않았다.** 결과가 통화 시각과 서버 설정에 따라 달라진다.
 5. **전화번호 문장 하나를 다르게 읽는다.** 대본의 "010-7777-8888이요"는 "…입니다"로 읽게 해 두었다(`scenarios.toml`의 `say`). AI가 "…이요"로 끝나는 번호를 거절해서 둔 임시 조치다(관찰 1). 고쳐지면 `say`를 지운다.
 6. **가짜 고객은 사람보다 늦게 대답한다.** AI 말이 끝났는지 1.5~4초 기다린 뒤 대사를 고른다(중간값 2.5초). 끼어들기와 잡음은 넣지 않았다.
@@ -117,7 +117,7 @@ python -m pytest persona_check -q
 배포는 AI 서버 배포에 얹혀 있다(`deploy/upload.sh`, `deploy/deploy.sh`, `deploy/compose.persona-check.yaml`, `persona_check/Dockerfile`).
 
 - 이미지는 그 릴리스의 AI 서버 이미지 위에 `persona_check`와 WebRTC 라이브러리를 얹어 만든다. 통화 코드가 늘 운영과 같은 커밋이다.
-- 비밀값은 운영 비밀 파일(`dva-ai`)과 따로 둔다: Jenkins Secret file `dva-persona-check`(선택) → 서버의 `shared/persona-check.env`. 이 파일이 있을 때만 뜬다. 내용은 `PERSONA_CHECK_TOKEN`과 `PERSONA_CHECK_OPENAI_API_KEY`(시험 전용 키) 두 줄. 동시 통화 수는 `PERSONA_CHECK_MAX_CONCURRENCY`(배포 기본 2).
+- 비밀값은 운영 비밀 파일(`dva-ai`)과 따로 둔다: Jenkins Secret file `dva-persona-check`(선택) → 서버의 `shared/persona-check.env`. 이 파일이 있을 때만 뜬다. 내용은 `PERSONA_CHECK_TOKEN`과 `PERSONA_CHECK_OPENAI_API_KEY`(시험 전용 키) 두 줄. 동시 통화 수는 `PERSONA_CHECK_MAX_CONCURRENCY`(배포 기본 2, 여러 묶음 합계의 상한 — 묶음 하나는 관리자 웹이 보내는 2와 이 값 중 작은 값). 녹음 보관 날수는 `PERSONA_CHECK_AUDIO_KEEP_DAYS`(배포 기본 30).
 - AI 서버 배포를 확인한 뒤에 띄우고, 빌드나 기동이 실패해도 AI 서버 배포는 성공으로 둔다.
 - 결과 폴더는 볼륨 `dva-persona-check_persona_check_runs`에 남는다. 릴리스가 바뀌어도 지난 결과가 조회된다.
 - 백엔드는 `http://persona-check:8765`로 부른다(네트워크 `dva-prod_ai_net`). 호스트 포트는 열지 않는다.
