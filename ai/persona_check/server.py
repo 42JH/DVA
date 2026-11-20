@@ -43,6 +43,8 @@ FILES = {"verdict": "verdict.json", "record": "backend.json", "audio": "call.wav
 # 형식을 정해 보낸다: Python 3.14는 .wav를 audio/vnd.wave로 짐작하고, 백엔드 중계는 audio/wav · audio/x-wav만 받아 녹음이 안 들렸다(11/12 서버 첫 시험)
 MEDIA = {"verdict": "application/json", "record": "application/json", "audio": "audio/wav", "report": "text/html; charset=utf-8"}
 RUN_ID = re.compile(r"\d{4}_\d{6}_[0-9a-f]{6}")
+AUDIO_KEEP_DAYS = 30  # 녹음(통화마다 약 25MB)은 이만큼만 두고 지운다. 판정 · 기록 JSON은 남긴다 (PERSONA_CHECK_AUDIO_KEEP_DAYS, 0 = 지우지 않음)
+PRUNE_EVERY = 24 * 60 * 60  # 초. 창구를 띄울 때 한 번, 그 뒤 하루마다
 MAX_PROMPT_CHARS = 20000  # 운영 페르소나 글 상한(config/server.toml persona_max_prompt_chars)과 같게
 
 
@@ -138,6 +140,25 @@ class Runs:
         path = self.root / run_id / scenario / FILES[kind]
         return path if path.is_file() else None
 
+    def prune_audio(self, keep_days: int, now: float | None = None) -> int:
+        """keep_days일보다 오래된 녹음(call.wav)을 지운다. 돌고 있는 묶음은 건드리지 않는다. 지운 파일 수를 돌려준다.
+        판정 · 통화 기록은 남겨 화면의 결과 표 · 상세는 그대로 보이고, 녹음만 '들을 수 없음'이 된다."""
+        if keep_days <= 0 or not self.root.is_dir():
+            return 0
+        limit = (now if now is not None else time.time()) - keep_days * 86400
+        removed = 0
+        for wav in self.root.glob(f"*/*/{FILES['audio']}"):
+            run_id = wav.parent.parent.name
+            if run_id in self.live or not RUN_ID.fullmatch(run_id):
+                continue
+            try:
+                if wav.stat().st_mtime < limit:
+                    wav.unlink()
+                    removed += 1
+            except OSError:
+                continue  # 다른 곳에서 먼저 지웠거나 잠겨 있음 → 다음 정리 때
+        return removed
+
     def _save(self, run: dict) -> None:
         (self.root / run["runId"] / "run.json").write_text(json.dumps(run, ensure_ascii=False, indent=1), encoding="utf-8")
 
@@ -190,9 +211,19 @@ def create_app(runs: Runs) -> FastAPI:
         if not hmac.compare_digest(authorization.encode(), f"Bearer {token}".encode()):
             raise HTTPException(401, "인증 실패")
 
+    async def prune_loop() -> None:
+        keep = int(os.environ.get("PERSONA_CHECK_AUDIO_KEEP_DAYS", str(AUDIO_KEEP_DAYS)))
+        while True:
+            removed = await asyncio.to_thread(runs.prune_audio, keep)
+            if removed:
+                logging.getLogger(__name__).info("오래된 시험 녹음 %d개를 지웠습니다 (%d일 지남)", removed, keep)
+            await asyncio.sleep(PRUNE_EVERY)
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        pruner = asyncio.create_task(prune_loop())
         yield
+        pruner.cancel()
         await runs.stop()  # 창구가 내려갈 때 음성 세션을 남기지 않는다
 
     api = APIRouter(dependencies=[Depends(auth)])

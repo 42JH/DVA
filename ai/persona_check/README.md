@@ -1,10 +1,10 @@
 # persona_check: 페르소나 적용 전 시나리오 시험
 
-관리자가 AI 상담가(페르소나)를 고쳐 [통화에 사용하기]를 누르면 다음 통화부터 운영에 적용된다. 그 전에 시나리오 통화를 자동으로 돌려, 고친 글이 접수 · 조회 · 취소 흐름을 깨지 않는지 확인하는 도구다.
+관리자가 AI 상담가(페르소나)를 고쳐 [통화에 사용하기]를 누르면 다음 통화부터 운영에 적용된다. 그 전에 시나리오 통화를 자동으로 돌려, 고친 프롬프트가 접수 · 조회 · 취소 흐름을 깨지 않는지 확인하는 도구다.
 
-- 가짜 고객이 운영과 같은 통화 로직에 실제 음성으로 전화를 건다.
+- 가상 고객(테스트용 음성 봇)이 운영과 같은 통화 로직에 실제 음성으로 전화를 건다.
 - 끝난 통화를 시나리오의 정답과 확인 항목으로 판정한다.
-- 관리자 화면과 백엔드가 붙을 창구(API)가 있다.
+- 관리자 화면이 백엔드를 거쳐 부르는 테스트 서버(API)가 있다.
 
 ## 운영과의 분리
 
@@ -13,19 +13,19 @@
 | 운영 통화 코드를 고치지 않는다 | 새 폴더만 추가한다. `app/` 등 기존 파일 변경 없음 |
 | AI 서버 이미지에 들어가지 않는다 | `Dockerfile`이 복사하는 폴더 목록에 없다(`call_analysis`와 같다) |
 | 실제 주문 · 고객 · 통계에 닿지 않는다 | 백엔드는 `MockBackend`로 고정이다. 환경변수로 실제 백엔드에 붙일 수 없다 |
-| 운영과 한도 · 청구를 나눈다 | `PERSONA_CHECK_OPENAI_API_KEY`만 쓴다. `OPENAI_API_KEY`는 읽지 않는다 |
+| 운영과 한도 · 청구를 나눈다 | `PERSONA_CHECK_OPENAI_API_KEY`만 쓴다. 운영 키는 넘기지 않는다(G1의 FAQ 질문 임베딩이 읽는 `OPENAI_API_KEY`에도 배포에서 시험 전용 키를 넣음) |
 | 판정기는 통화 코드와 무관하다 | `judge.py`, `customer.py`, `lint.py`는 `app/`을 import하지 않는다. 실행기(`try_call.py`)만 불러다 쓴다 |
 
 ## 구성
 
 | 파일 | 역할 |
 |---|---|
-| `try_call.py` | 시험 통화 한 통. 가짜 고객 음성을 WebRTC로 GPT-Live 세션에 넣고, 운영 통화 로직(`CallService`, `LiveFlow`, 결과 전송)을 sideband로 붙인다 |
-| `customer.py`, `customer.md` | 가짜 고객. 시나리오 대본에서 AI가 방금 물은 것에 맞는 문장을 고른다. 숫자는 한글 읽기로 바꿔 TTS에 준다 |
-| `judge.py`, `judge.md` | 판정기. 저장된 값과 건수는 코드로, 행동 확인 항목은 모델로(3판 중 2판 이상 같은 답만) 판정한다 |
-| `server.py` | 시험 묶음 창구. 시작, 진행 조회, 판정 · 녹음 내려받기 |
+| `try_call.py` | 시험 통화 한 통. 가상 고객 음성을 WebRTC로 GPT-Live 세션에 넣고, 운영 통화 로직(`CallService`, `LiveFlow`, 결과 전송)을 sideband로 붙인다 |
+| `customer.py`, `customer.md` | 가상 고객. 시나리오 대본에서 AI가 방금 물은 것에 맞는 문장을 고른다. 숫자는 한글 읽기로 바꿔 TTS에 준다 |
+| `judge.py`, `judge.md` | 판정기. 저장된 값과 건수는 코드로, 행동 확인 항목은 모델로(3번 물어 2번 이상 같은 답만) 판정한다 |
+| `server.py` | 테스트 서버 API. 시험 실행 시작 · 진행 조회 · 멈춤, 판정 · 녹음 내려받기 |
 | `scenarios.toml` | 공통 테스트 데이터와 시나리오(대본, 정답, 확인 항목) |
-| `lint.py`, `lint.md`, `samples/` | 통화 없이 페르소나 글만 검사(업무 지시 섞임, 업무 규칙과 반대, 칸끼리 모순) |
+| `lint.py`, `lint.md`, `samples/` | 통화 없이 페르소나 프롬프트만 검사(업무 지시 섞임, 업무 규칙과 반대, 칸끼리 모순) |
 
 ## 실행
 
@@ -37,42 +37,43 @@ uv pip install --target .pydeps aiortc numpy
 # 한 통
 PYTHONPATH=.pydeps PERSONA_CHECK_OPENAI_API_KEY=... python -m persona_check.try_call A1 [페르소나.md]
 
-# 창구
+# 테스트 서버
 PYTHONPATH=.pydeps PERSONA_CHECK_OPENAI_API_KEY=... PERSONA_CHECK_TOKEN=... python -m persona_check.server
 ```
 
 | 환경변수 | 뜻 | 기본 |
 |---|---|---|
-| `PERSONA_CHECK_OPENAI_API_KEY` | 시험 전용 OpenAI 키. 음성 세션, 가짜 고객, TTS, 판정에 쓴다 | 없으면 실패 |
-| `PERSONA_CHECK_TOKEN` | 창구 인증(`Authorization: Bearer`) | 없으면 창구가 닫힌다(503) |
-| `PERSONA_CHECK_MAX_CONCURRENCY` | 동시에 거는 통화 수(묶음 전체 합) | 1 |
-| `PERSONA_CHECK_HOST`, `PERSONA_CHECK_PORT` | 창구 주소 | `127.0.0.1`, `8765` |
+| `PERSONA_CHECK_OPENAI_API_KEY` | 시험 전용 OpenAI 키. 음성 세션, 가상 고객, TTS, 판정에 쓴다 | 없으면 실패 |
+| `PERSONA_CHECK_TOKEN` | 테스트 서버 인증(`Authorization: Bearer`) | 없으면 요청을 받지 않는다(503) |
+| `PERSONA_CHECK_MAX_CONCURRENCY` | 동시에 거는 통화 수의 상한(모든 시험 실행 합계) | 1 |
+| `PERSONA_CHECK_AUDIO_KEEP_DAYS` | 녹음(call.wav)을 남겨 두는 날수. 서버를 띄울 때와 하루마다 이보다 오래된 녹음만 지우고 판정 · 기록은 남김. 0이면 지우지 않음 | 30 |
+| `PERSONA_CHECK_HOST`, `PERSONA_CHECK_PORT` | 테스트 서버 주소 | `127.0.0.1`, `8765` |
 | `BACKEND_MODEL`, `BACKEND_EFFORT` | 위임 Backend 모델. 운영과 같은 값으로 둔다 | `gpt-6-luna`, `low` |
 | `QDRANT_URL`, `QDRANT_API_KEY`, `RAG_RERANKER_URL`, `RAG_RERANKER_API_KEY` | FAQ 검색 서버. 운영 AI 서버와 같은 값을 넣으면 FAQ 시나리오(G1)가 돈다. `QDRANT_URL`이 없으면 G1은 빠진다. 질문 임베딩은 `OPENAI_API_KEY`를 읽으므로 배포에서는 그 이름으로 시험 전용 키를 넘긴다 | 없음 |
 | `ADDRESS_DB`, `KAKAO_REST_API_KEY` | 주소DB와 카카오 키. 둘 다 없으면 주소 정보를 고정값으로 채운다(아래 한계) | 없음 |
 
-## 창구
+## API
 
 | 요청 | 내용 |
 |---|---|
-| `GET /scenarios` | 시나리오 목록 `[{id, name, group, core, available}]`. `available`이 false면 이 환경에서 돌릴 수 없다(FAQ 검색 서버 미연결). 전체 · 핵심 묶음에서 빠지고, 골라서 요청하면 422 |
+| `GET /scenarios` | 시나리오 목록 `[{id, name, group, core, available}]`. `available`이 false면 이 환경에서 돌릴 수 없다(FAQ 검색 서버 미연결). 전체 · 핵심 세트에서 빠지고, 골라서 요청하면 422 |
 | `GET /scenarios/{id}` | 시나리오 한 개의 내용 `{id, name, group, core, available, caller, lines: [{text, optional}], expected: [{name, value}], checks: [문장]}`. `expected`는 판정 결과표의 코드 검사와 같은 이름과 값이다(화면의 시나리오 보기) |
-| `POST /runs` | `{scenarios?: [ID], core?: bool, promptText?: 후보 페르소나 글, voiceId?, concurrency?, tag?}` → `202 {runId}`. 시나리오를 안 주면 전체, `core`면 핵심 묶음. `tag`는 화면이 붙이는 표시(어느 상담가 버전의 시험인지)로, 창구는 저장과 조회만 한다. `scenarios`가 빈 목록이면 422, 같은 `tag`의 묶음이 아직 돌고 있으면 409(같은 통화가 두 번 걸리지 않게) |
-| `POST /runs/{runId}/stop` | 시험 멈춤 → `202 {runId}`. 돌던 통화는 끊고, 아직 안 건 시나리오는 걸지 않는다. 묶음은 `stopped`, 못 끝낸 항목은 `queued`/`running`으로 남는다. 이미 끝난 묶음이어도 202, 없는 묶음은 404. 멈추면 같은 `tag`의 새 시험을 바로 받는다 |
-| `GET /runs` | 묶음 목록(최신순). 항목은 `GET /runs/{runId}`와 같은 모양에 `tag`, `createdAt`이 붙는다. `?tag=`를 주면 그 표시의 묶음만 |
+| `POST /runs` | `{scenarios?: [ID], core?: bool, promptText?: 시험할 페르소나 프롬프트, voiceId?, concurrency?, tag?}` → `202 {runId}`. 시나리오를 안 주면 전체, `core`면 핵심 세트. `tag`는 화면이 붙이는 표시(어느 상담가 버전의 시험인지)로, 서버는 저장과 조회만 한다. `scenarios`가 빈 목록이면 422, 같은 `tag`의 시험 실행이 아직 돌고 있으면 409(같은 통화가 두 번 걸리지 않게) |
+| `POST /runs/{runId}/stop` | 시험 멈춤 → `202 {runId}`. 돌던 통화는 끊고, 아직 안 건 시나리오는 걸지 않는다. 시험 실행은 `stopped`, 못 끝낸 항목은 `queued`/`running`으로 남는다. 이미 끝난 시험 실행이어도 202, 없는 실행은 404. 멈추면 같은 `tag`의 새 시험을 바로 받는다 |
+| `GET /runs` | 시험 실행 목록(최신순). 항목은 `GET /runs/{runId}`와 같은 모양에 `tag`, `createdAt`이 붙는다. `?tag=`를 주면 그 표시의 실행만 |
 | `GET /runs/{runId}` | `{status: running/done/interrupted/stopped, total, finished, items: [{scenario, name, group, status: queued/running/done/error, passed, summary, error, seconds, liveSeconds}]}` |
 | `GET /runs/{runId}/{scenario}/verdict` | 판정 전체 `{passed, summary, checks: [{name, status: pass/fail/skip/warn, expected, actual, note}]}` |
-| `GET /runs/{runId}/{scenario}/record` | 통화 기록 `{customer: {lines: [[초, AI/고객, 말]], choices}, received: {events, drafts, analyses, orders, …}, said, liveSeconds, callLog}`. 화면의 통화 상세에 쓴다. `callLog`는 AI 통화 로그(`call.json`, 운영 AI가 통화마다 남기는 JSON 로그와 같은 모양) — 백엔드 중계로 이 주소를 열면 AI 파트가 로그를 바로 본다 |
+| `GET /runs/{runId}/{scenario}/record` | 통화 기록 `{customer: {lines: [[초, AI/고객, 말]], choices}, received: {events, drafts, analyses, orders, …}, said, liveSeconds, callLog}`. 화면의 통화 상세에 쓴다. `callLog`는 AI 통화 로그(`call.json`, 운영 AI가 통화마다 남기는 JSON 로그와 같은 모양) — 백엔드 프록시로 이 주소를 열면 AI 파트가 로그를 바로 본다 |
 | `GET /runs/{runId}/{scenario}/audio` | 통화 녹음(wav, 고객과 AI를 섞은 모노) |
 | `GET /runs/{runId}/{scenario}/report` | 한 장 보기(html) |
 
 - `error`는 시나리오 실패가 아니라 시험 자체의 실패다(통화가 연결되지 않음).
 - `liveSeconds`는 음성 모델이 보고한 누적 음성 시간이다. 요금의 기준이다.
-- 묶음마다 `logs/persona_check/runs/<runId>/`에 `run.json`과 시나리오별 폴더(`backend.json`, `verdict.json`, `call.wav`, `call.json`, `report.html`)가 남는다. 창구를 다시 띄워도 조회된다. 돌던 중에 꺼진 묶음은 `interrupted`로 보인다.
+- 시험 실행마다 `logs/persona_check/runs/<runId>/`에 `run.json`과 시나리오별 폴더(`backend.json`, `verdict.json`, `call.wav`, `call.json`, `report.html`)가 남는다. 서버를 다시 띄워도 조회된다. 돌던 중에 꺼진 실행은 `interrupted`로 보인다.
 
 ## 시나리오와 판정
 
-시나리오 ID, 고객 발화, 공통 테스트 데이터는 AI 파트 문서 "AI 상담원 테스트 시나리오"에서 가져왔다. 지금 10개가 들어 있다: A1, A2, A4, B1, B3, E1, F1, G1, H9, H10. 핵심 묶음은 A1, B3, E1, F1, G1, H10이다. G1(접수 중 FAQ 질문 후 복귀)은 FAQ 검색 서버가 연결된 환경에서만 돌고, **아직 실제 통화로 돌려 보지 못했다.**
+시나리오 ID, 고객 발화, 공통 테스트 데이터는 AI 파트 문서 "AI 상담원 테스트 시나리오"에서 가져왔다. 지금 10개가 들어 있다: A1, A2, A4, B1, B3, E1, F1, G1, H9, H10. 핵심 세트는 A1, B3, E1, F1, G1, H10이다. G1(접수 중 FAQ 질문 후 복귀)은 FAQ 검색 서버가 연결된 환경에서만 돌고, 11/12 서버 첫 시험에서 FAQ 검색이 전부 `KB_UNAVAILABLE`이라(검색 경로가 운영과 달랐음) 고쳤고, 고친 뒤 통과 기록은 아직 없다.
 
 실제 통화로 돌려 본 것: develop-ai 4484076b(11/12 00:11)에서 E1과 H10은 통과했다. A1은 끝까지 갔고 가액만 틀렸다(아래 관찰 6). B3는 AI가 전화번호를 거절해 멈췄다(관찰 1). F1은 AI가 취소 확인을 되풀이해 취소되지 않았다(관찰 7). 6e79326e(11/12 09:09)에서 A2, A4, B1, H9를 돌렸고 네 통 모두 도중에 멈췄다(관찰 8). A2 ~ H9는 아직 통과한 적이 없어, 시나리오 정의가 맞는지 확인되지 않았다.
 
@@ -83,22 +84,22 @@ PYTHONPATH=.pydeps PERSONA_CHECK_OPENAI_API_KEY=... PERSONA_CHECK_TOKEN=... pyth
 | 대본 진행 | 필수 발화를 고객이 다 말했는가. 통화가 중간에 멈추면 "접수가 없어야 함" 같은 정답이 저절로 맞기 때문에 먼저 본다 |
 | 접수 건수, 저장된 값 | 백엔드가 받은 초안과 통화 분석을 정답과 비교한다. 보내는 분은 정답에 적지 않으면 발신번호와 등록 고객의 이름 · 주소여야 한다 |
 | 조회, 취소 | 조회 실행 횟수, 심어 둔 기존 주문의 상태(취소하기로 한 건만 취소됐는가) |
-| 행동 확인 항목(`checks`) | 통화 이벤트를 보여 주고 모델이 판정한다. "어김"과 "확인 필요"는 통화에 글자 그대로 있는 AI 발화를 인용했을 때만 남긴다. 3판 중 2판 이상 같은 답만 쓰고, 갈리면 제외한다 |
+| 행동 확인 항목(`checks`) | 통화 이벤트를 보여 주고 모델이 판정한다. "어김"과 "확인 필요"는 통화에 글자 그대로 있는 AI 발화를 인용했을 때만 남긴다. 3번 물어 2번 이상 같은 답만 쓰고, 갈리면 제외한다 |
 
-판정기의 입력은 시나리오와 "그 통화에서 백엔드가 받은 것"(`backend.json`)뿐이다. 통화 이벤트, 접수 초안, 통화 분석이 백엔드 계약 모양 그대로라, 통화를 어떻게 돌렸는지와 무관하다.
+판정기의 입력은 시나리오와 "그 통화에서 백엔드가 받은 것"(`backend.json`)뿐이다. 통화 이벤트, 접수 초안, 통화 분석이 백엔드 API 형식 그대로라, 통화를 어떻게 돌렸는지와 무관하다.
 
 ## 알려진 한계
 
 1. **입구를 우회한다.** 전화(SIP)는 걸려 온 세션을 `accept`로 설정하는데, 여기서는 `sessions.accept`를 바꿔 끼워 운영이 만든 세션 설정을 가로챈 뒤 같은 설정으로 WebRTC 세션을 만든다. 그래서 통화마다 로그에 `accept 실패 persona-check-config`가 한 줄 찍힌다. 또 WebRTC 세션은 sideband가 붙기 전에 시작돼 운영 로직이 `session.started`를 놓칠 수 있어, 데이터 채널로 받은 같은 이벤트를 sideband 맨 앞에 넣어 준다(`try_call.Sideband`). 기본 WebSocket으로 만든 세션에는 sideband가 붙지 않아(503) WebRTC를 쓴다. 전화망 구간(SIP, 8kHz 코덱, PBX 종료 웹훅)은 타지 않는다.
 2. **주소DB와 카카오 키가 없으면 주소를 검증하지 못한다.** 운영 코드는 지번 · 우편번호가 없으면 주문을 미완료로 처리하므로 고정값으로 채운다. 이때 주소와 상세주소가 갈리지 않고 들은 말 그대로 저장되어, 판정은 지역(구 · 군)만 비교하고 상세주소는 제외한다. 주소DB나 키가 있으면 전부 비교한다.
-3. **FAQ 시나리오는 검색 서버가 있어야 돈다.** `QDRANT_URL`이 있으면 운영과 같은 `RagService`를 붙인다. 시험 통화의 FAQ 질문이 운영과 같은 검색 서버로 간다. 검색 서버가 없는 PC에서는 확인하지 못해, G1과 이 연결은 통화 없는 테스트만 거쳤다. G2 ~ G9는 넣지 않았다.
+3. **FAQ 시나리오는 검색 서버가 있어야 돈다.** `QDRANT_URL`이 있으면 운영과 같은 `RagService`를 붙인다. 시험 통화의 FAQ 질문이 운영과 같은 검색 서버로 간다. 검색 서버가 없는 PC에서는 확인하지 못한다. 서버 첫 시험(11/12)에서 검색 경로 문제를 찾아 고쳤다. G2 ~ G9는 넣지 않았다.
 4. **상담원 연결, 수거 시각 시나리오는 넣지 않았다.** 결과가 통화 시각과 서버 설정에 따라 달라진다.
 5. **전화번호 문장 하나를 다르게 읽는다.** 대본의 "010-7777-8888이요"는 "…입니다"로 읽게 해 두었다(`scenarios.toml`의 `say`). AI가 "…이요"로 끝나는 번호를 거절해서 둔 임시 조치다(관찰 1). 고쳐지면 `say`를 지운다.
-6. **가짜 고객은 사람보다 늦게 대답한다.** AI 말이 끝났는지 1.5~4초 기다린 뒤 대사를 고른다(중간값 2.5초). 끼어들기와 잡음은 넣지 않았다.
+6. **가상 고객은 사람보다 늦게 대답한다.** AI 말이 끝났는지 1.5~4초 기다린 뒤 대사를 고른다(중간값 2.5초). 끼어들기와 잡음은 넣지 않았다.
 7. **한 번의 통화로 판정한다.** 음성 모델은 통화마다 다르게 말한다. 같은 시나리오를 반복해 결과가 얼마나 흔들리는지는 재지 않았다.
 8. **행동 확인 항목의 "지킴"에는 인용 근거가 없다.** 어김만 인용을 확인한다. 항목 문구가 넓으면 판정이 흔들려서, 구체적으로 적어야 한다.
-9. **기록이 쌓인다.** 녹음이 통화마다 약 25MB다. 보관 기간을 정해 지우는 장치는 없다.
-10. **동시 실행은 3통까지만 확인했다.** 2통씩 동시에 3통을 돌려 모두 정상 진행됐다(195초). 그보다 많은 동시 통화와 서버 부하는 재지 않았다. `PERSONA_CHECK_MAX_CONCURRENCY`의 기본값은 1이다.
+9. **녹음은 30일만 남긴다.** 녹음이 통화마다 약 25MB라, `PERSONA_CHECK_AUDIO_KEEP_DAYS`(기본 30)일 지난 녹음은 지운다. 판정 · 대화 기록(JSON)은 남아 화면의 결과 표 · 상세는 그대로 보이고, 그 통화의 녹음만 들을 수 없다.
+10. **동시 실행은 3통까지만 확인했다.** 동시 2통 설정으로 시나리오 3개를 돌려 모두 정상 진행됐다(195초). 그보다 많은 동시 통화와 서버 부하는 재지 않았다. `PERSONA_CHECK_MAX_CONCURRENCY`의 기본값은 1이다.
 
 ## 서버에 올릴 때 필요한 것
 
@@ -106,26 +107,26 @@ PYTHONPATH=.pydeps PERSONA_CHECK_OPENAI_API_KEY=... PERSONA_CHECK_TOKEN=... pyth
 - 서버의 주소DB(`data/address.db`)와 카카오 키를 연결하면 주소까지 검증된다.
 - FAQ 검색 서버 설정값 네 개를 넣으면 G1이 돈다.
 - WebRTC는 밖으로 나가는 UDP가 열려 있어야 한다.
-- 화면이 쓰려면 백엔드가 이 창구로 요청을 넘겨 줘야 한다(관리자 확인 뒤 그대로 전달). 결과는 이 창구가 보관하므로 백엔드 저장은 필요 없다.
+- 화면이 쓰려면 백엔드가 관리자 권한을 확인한 뒤 이 서버로 요청을 넘겨 줘야 한다(프록시). 결과는 이 서버가 보관하므로 백엔드 저장은 필요 없다.
 
-배포는 AI 서버 배포에 얹혀 있다(`deploy/upload.sh`, `deploy/deploy.sh`, `deploy/compose.persona-check.yaml`, `persona_check/Dockerfile`).
+배포는 AI 서버 배포에 함께 묶여 있다(`deploy/upload.sh`, `deploy/deploy.sh`, `deploy/compose.persona-check.yaml`, `persona_check/Dockerfile`).
 
-- 이미지는 그 릴리스의 AI 서버 이미지 위에 `persona_check`와 WebRTC 라이브러리를 얹어 만든다. 통화 코드가 늘 운영과 같은 커밋이다.
-- 비밀값은 운영 비밀 파일(`dva-ai`)과 따로 둔다: Jenkins Secret file `dva-persona-check`(선택) → 서버의 `shared/persona-check.env`. 이 파일이 있을 때만 뜬다. 내용은 `PERSONA_CHECK_TOKEN`과 `PERSONA_CHECK_OPENAI_API_KEY`(시험 전용 키) 두 줄. 동시 통화 수는 `PERSONA_CHECK_MAX_CONCURRENCY`(배포 기본 2).
+- 도커 이미지는 같은 릴리스의 AI 서버 이미지를 바탕으로 `persona_check`와 WebRTC 라이브러리를 더해 만든다. 통화 코드가 늘 운영과 같은 커밋이다.
+- 비밀값은 운영 비밀 파일(`dva-ai`)과 따로 둔다: Jenkins Secret file `dva-persona-check`(선택) → 서버의 `shared/persona-check.env`. 이 파일이 있을 때만 뜬다. 내용은 `PERSONA_CHECK_TOKEN`과 `PERSONA_CHECK_OPENAI_API_KEY`(시험 전용 키) 두 줄. 동시 통화 수는 `PERSONA_CHECK_MAX_CONCURRENCY`(배포 기본 2, 모든 시험 실행 합계의 상한 — 시험 실행 하나는 관리자 웹이 보내는 2와 이 값 중 작은 값). 녹음 보관 날수는 `PERSONA_CHECK_AUDIO_KEEP_DAYS`(배포 기본 30).
 - AI 서버 배포를 확인한 뒤에 띄우고, 빌드나 기동이 실패해도 AI 서버 배포는 성공으로 둔다.
 - 결과 폴더는 볼륨 `dva-persona-check_persona_check_runs`에 남는다. 릴리스가 바뀌어도 지난 결과가 조회된다.
 - 백엔드는 `http://persona-check:8765`로 부른다(네트워크 `dva-prod_ai_net`). 호스트 포트는 열지 않는다.
-- FAQ 검색(G1): 운영 AI 스택의 Qdrant 내부망 `dva-ai_rag_net`에 붙고, 운영 `.env`의 `QDRANT_API_KEY` · `RAG_RERANKER_URL` · `RAG_RERANKER_API_KEY`를 읽는다. 검색만 하고 색인 · FAQ 동기화는 하지 않는다. 질문 임베딩은 시험 전용 키로 청구된다. 운영 AI는 FAQ 관리 화면에 등록된 FAQ의 색인(관리 색인)으로 검색하므로, 시험 묶음마다 운영 AI의 FAQ 저장 파일(볼륨 `dva-ai_rag_state`, 읽기 전용)을 한 번 복사해 같은 검색을 한다. 운영 Qdrant에는 쓰지 않는다(등록 · 삭제 · 삭제 정리를 막음).
+- FAQ 검색(G1): 운영 AI 스택의 Qdrant 내부망 `dva-ai_rag_net`에 붙고, 운영 `.env`의 `QDRANT_API_KEY` · `RAG_RERANKER_URL` · `RAG_RERANKER_API_KEY`를 읽는다. 검색만 하고 색인 · FAQ 동기화는 하지 않는다. 질문 임베딩은 시험 전용 키로 청구된다. 운영 AI는 FAQ 관리 화면에 등록된 FAQ의 색인(관리 색인)으로 검색하므로, 시험 실행마다 운영 AI의 FAQ 저장 파일(볼륨 `dva-ai_rag_state`, 읽기 전용)을 한 번 복사해 같은 검색을 한다. 운영 Qdrant에는 쓰지 않는다(등록 · 삭제 · 삭제 정리를 막음).
 
 ## 시험 통화에서 본 것 (2026-11-11 ~ 11-12, develop-ai a7e6dfa2 ~ 6e79326e)
 
-가짜 고객(TTS)과의 통화에서 관찰한 것이라, 실제 통화에서 재현되는지는 확인하지 않았다.
+가상 고객(TTS)과의 통화에서 관찰한 것이라, 실제 통화에서 재현되는지는 확인하지 않았다.
 
 1. **"…이요"로 끝나는 전화번호를 자릿수 오류로 거절한다.** "공일공 구팔칠육 오사삼이요"(1회), "공일공 삼사오육 칠팔구공이요"(3회 연속, "열 자리로 들려요"). "공일공 칠칠칠칠 팔팔팔팔이요"는 "열두 자리로 확인돼요"라며 3회 연속 거절했다. 같은 번호를 "…입니다"로 말하면 기록된다. 끝말 "이요"의 "이"를 숫자로 세는 것으로 보인다.
 2. **등록 고객 인사 뒤 "택배 보내려고요"에서 멈춘다.** 접수 의도 판정 점수가 기준에 못 미쳐(0.49, 0.52) "접수 시작 결과를 확인하고 있습니다"만 되풀이했다(2통).
 3. **AI가 고객이 할 말을 자기가 말한 통화가 있다.** 인사에 이어 "아니요, 오늘은 다른 데서 보낼 거예요."가 AI 발화로 기록됐고, 이후 새 발송 주소를 받는 흐름으로 갔다(1통).
 4. **받는 분 번호 되읽기가 고객이 말한 번호와 달랐다.** 010-2345-6789를 "공일공, 일이삼사오, 육칠팔구"로 읽었다. 저장된 값은 맞았다(1통).
 5. **"접수됐습니다"를 말한 뒤 "접수됐다고 확인드린 것은 아직입니다"로 정정했다**(1통).
-6. **"5만 원 정도요"를 만 원으로 기록했다**(1통). 가짜 고객의 TTS 글이 "오 만 원"으로 띄어져 있던 탓일 수 있어 "오만 원"으로 고쳤다. 고친 뒤에는 돌리지 않았다.
-7. **"네, 취소해 주세요"로 취소가 되지 않았다**(1통, 3회 반복). 고객 말이 "네"와 "취소해 주세요" 두 발화로 나뉘어 들어갔고, 뒤 발화가 새 취소 요청(switch=cancel 1.00)으로 판정돼 "취소 진행해도 될까요?"를 되풀이했다. 가짜 고객 TTS의 쉼표 쉼이 사람보다 길 수 있다.
-8. **6e79326e에서 돌린 네 통이 모두 도중에 멈췄다**(11/12 09:20경). A2: "이지은"을 "이지윤"으로 기록해 주소록에서 찾지 못했다. A4: 받는 곳 주소까지 받은 뒤 물품 단계에서 진행하지 않았다. B1: 등록 고객에게 "보내는 분 성함을 알려주시겠어요?"를 되풀이했다. H9: "접수 시작을 확인 중입니다"를 되풀이했다(관찰 2와 같다). A2는 가짜 고객이 대본에 없는 연락처를 지어낸 탓도 있어 고쳤다.
+6. **"5만 원 정도요"를 만 원으로 기록했다**(1통). 가상 고객의 TTS 문장이 "오 만 원"으로 띄어져 있던 탓일 수 있어 "오만 원"으로 고쳤다. 고친 뒤에는 돌리지 않았다.
+7. **"네, 취소해 주세요"로 취소가 되지 않았다**(1통, 3회 반복). 고객 말이 "네"와 "취소해 주세요" 두 발화로 나뉘어 들어갔고, 뒤 발화가 새 취소 요청(switch=cancel 1.00)으로 판정돼 "취소 진행해도 될까요?"를 되풀이했다. 가상 고객 TTS의 쉼표 쉼이 사람보다 길 수 있다.
+8. **6e79326e에서 돌린 네 통이 모두 도중에 멈췄다**(11/12 09:20경). A2: "이지은"을 "이지윤"으로 기록해 주소록에서 찾지 못했다. A4: 받는 곳 주소까지 받은 뒤 물품 단계에서 진행하지 않았다. B1: 등록 고객에게 "보내는 분 성함을 알려주시겠어요?"를 되풀이했다. H9: "접수 시작을 확인 중입니다"를 되풀이했다(관찰 2와 같다). A2는 가상 고객이 대본에 없는 연락처를 지어낸 탓도 있어 고쳤다.
