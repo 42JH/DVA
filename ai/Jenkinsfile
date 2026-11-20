@@ -15,9 +15,9 @@ pipeline {
     }
 
     environment {
-        // 각 Jenkins가 자기 서버에 배포한다. AI 전용 서버 Jenkins는 전역 환경변수 AI_DEPLOY_HOST=3.37.162.168, 없으면 백엔드 서버
+        // 배포 대상 서버 주소는 Jenkins 전역 환경변수 AI_DEPLOY_HOST=<배포 서버 주소>로 준다. 없으면 upload.sh가 멈춘다
         // 호스트 키는 ai/deploy/known_hosts에 고정
-        DEPLOY_HOST = "${env.AI_DEPLOY_HOST ?: '13.209.59.180'}"
+        DEPLOY_HOST = "${env.AI_DEPLOY_HOST ?: ''}"
     }
 
     stages {

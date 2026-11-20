@@ -5,7 +5,7 @@
 이번 MR 배포 후 적용한다. AI는 상담 결과를 백엔드에 전달하고, 디버 접수·녹취 다운로드·S3 저장은 백엔드가 처리한다.
 
 - 내부 주소: 같은 Docker 네트워크에서 `http://backend:3000`
-- 외부 주소: `https://13.209.59.180`
+- 외부 주소: `https://<BACKEND_HOST>`
 - 공통: `Content-Type: application/json`. 아래 두 AI 호출은 현재 MVP 기준 관리자 쿠키·Bearer 토큰이 필요 없다.
 
 ## 1. 통화 시작: 고객 확인
