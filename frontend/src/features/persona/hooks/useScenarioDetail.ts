@@ -8,8 +8,16 @@ import type { PlayerView } from '@/shared/call/CallPlayer'
 import { useRecordingPlayer } from '@/shared/call/useRecordingPlayer'
 import { personaQueries } from '../api/personaApi'
 import { scenarioTestQueries, type Check, type VersionTest } from '../api/scenarioTestApi'
-import { cellOf, failLine, shownCheck, sideLabel, withActiveTests, type Cell } from './scenarioTest'
-import { talksOf } from './useScenarioTest'
+import {
+  cellOf,
+  failLine,
+  shownCheck,
+  sideLabel,
+  talksOf,
+  withActiveTests,
+  withCarriedTests,
+  type Cell,
+} from './scenarioTest'
 
 const EMPTY: Record<Cell, string> = {
   pass: '',
@@ -43,7 +51,12 @@ export function useScenarioDetail(personaSeq: number, version: number, scenarioI
     ...personaQueries.versions(inUse?.personaSeq ?? 0),
     enabled: !!inUse,
   })
-  const all = withActiveTests(tests.data ?? [], talksOf(activeVersions.data), active)
+  // 이 버전도 이름만 바꾼 버전이면 앞 버전 결과를 이어 씀 (시험 표와 같은 기준)
+  const all = withCarriedTests(
+    withActiveTests(tests.data ?? [], talksOf(activeVersions.data), active),
+    talksOf(versions.data),
+    mine,
+  )
   const date = (k: typeof mine) => {
     const v = k.personaSeq === personaSeq && versions.data?.find((x) => x.version === k.version)
     return v ? fmtMonthDay(ymd(new Date(v.savedAt))) : ''

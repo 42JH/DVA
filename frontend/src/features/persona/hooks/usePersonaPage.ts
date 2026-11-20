@@ -8,6 +8,7 @@ import { bandView, historyRows, personaItems, pickedView, promptView } from './p
 import { callStateOf, editTargetOf, reuseDiff } from './personaVersions'
 import { bandStep } from './personaBand'
 import { usePersonaConfirm } from './usePersonaConfirm'
+import { talksOf } from './scenarioTest'
 import { SCENARIO_TEST } from '../api/scenarioTestApi'
 import { personaQueries, type PersonaVersion } from '../api/personaApi'
 
@@ -60,7 +61,11 @@ export function usePersonaPage() {
   // 통화와의 관계 — 반영 전 띠 · 통화에 쓰는 버전 · 띠에서 시험하고 반영할 대상
   const call = callStateOf(persona, all, head)
   const { unapplied, callVersion, switching } = call
-  const applyTest = useApplyTest(call.applyTarget, { auto: !switching, expected: call.banded })
+  const applyTest = useApplyTest(call.applyTarget, {
+    auto: !switching,
+    expected: call.banded,
+    talks: talksOf(all),
+  })
   // 카드를 처음 그릴 때는 시험 결과까지 기다림 — 띠가 뜰 상담가를 먼저 그리면 '반영 전' 띠와 열린 입력 칸이 잠깐 보였다가 시험 중 · 확인 필요로 바뀜
   // 한 번 그린 뒤 띠가 생길 때(저장 직후)는 기다리지 않음 — 방금 저장한 내용은 시험한 적이 없어 '반영 전'이 맞고, 카드를 가리면 깜빡임
   const [shownSeq, setShownSeq] = useState<number | null>(null)

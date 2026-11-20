@@ -1,5 +1,6 @@
 // 시나리오 시험 결과 읽기 (순수 함수, scenarioTest.test.ts) — 표의 칸 · 변화 · [통화에 사용하기] 관문
 import type { Check, Scenario, TestItem, VersionTest } from '../api/scenarioTestApi'
+import type { PersonaVersion } from '../api/personaApi'
 
 /** 표의 한 칸: 통과 · 실패 · 연결 실패 · 시험 중 · 대기 · 결과 없음 */
 export type Cell = 'pass' | 'fail' | 'error' | 'running' | 'queued' | 'none'
@@ -72,6 +73,25 @@ export function withActiveTests(
   const base = baseOf(tests, versions, active)
   if (!active || !base || base.version === active.version) return tests
   return tests.map((t) => (t === base ? { ...t, version: active.version } : t))
+}
+
+/** 버전마다 AI가 받는 것(프롬프트 · 목소리)을 한 글로 — 내용이 같은 버전 찾기(withActiveTests · withCarriedTests)에 씀
+ *  상담가 이름은 통화용 글(백엔드 composePersonaPrompt)에 들어가지 않아 비교에서 뺌 */
+export const talksOf = (versions: PersonaVersion[] | undefined) =>
+  (versions ?? [])
+    .filter((v) => !v.isDraft)
+    .map((v) => ({ version: v.version, talk: JSON.stringify([v.prompt, v.voice]) }))
+
+/** 이 버전을 시험한 적이 없고, 프롬프트 · 목소리가 같은 바로 앞 버전들(이름만 바꿈)에 결과가 있으면 그 결과를 이 버전 것으로 덧붙임
+ *  — 원래 버전의 결과는 그대로 둠(통화에 쓰는 버전과 비교할 때 씀). 이름을 바꿨다고 다시 시험(요금)하지 않게 */
+export function withCarriedTests(
+  tests: VersionTest[],
+  versions: { version: number; talk: string }[],
+  me: Key | null,
+): VersionTest[] {
+  const base = baseOf(tests, versions, me)
+  if (!me || !base || base.version === me.version) return tests
+  return [...tests, { ...base, version: me.version }]
 }
 
 /** 통화에 쓰는 내용의 시험 결과. 그 버전 것이 없으면 AI가 받는 것(프롬프트 · 목소리)이 같은 바로 앞 버전들의 결과

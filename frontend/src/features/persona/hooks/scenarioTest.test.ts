@@ -11,6 +11,7 @@ import {
   sideLabel,
   testOf,
   withActiveTests,
+  withCarriedTests,
   type Cell,
 } from './scenarioTest'
 
@@ -206,4 +207,17 @@ assert.equal(sideLabel({ personaSeq: 2, version: 1, isHead: true }, live, '친�
   assert.equal(moved[0].items, v7.items)
   const own = [v7, v5]
   assert.equal(withActiveTests(own, versions, { personaSeq: 1, version: 7 }), own)
+  // 이름만 바꾼 버전(9 · 8은 7과 내용이 같음)엔 7의 결과를 덧붙이고, 7의 결과는 그대로 둠
+  const carried = withCarriedTests([v7, v5], versions, { personaSeq: 1, version: 9 })
+  assert.deepEqual(
+    carried.map((t) => t.version),
+    [7, 5, 9],
+  )
+  assert.equal(carried[2].items, v7.items)
+  assert.equal(withCarriedTests(own, versions, { personaSeq: 1, version: 7 }), own) // 제 결과가 있으면 그대로
+  assert.deepEqual(
+    // 내용이 다른 버전(5)의 결과는 안 붙임
+    withCarriedTests([v5], versions, { personaSeq: 1, version: 9 }).map((t) => t.version),
+    [5],
+  )
 }
