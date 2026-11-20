@@ -21,8 +21,7 @@ export class ObservabilityService {
     try {
       await this.database.pool.query('SELECT 1');
       databaseUp = 1;
-      await this.database.transaction(async (client) => {
-        await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
+      await this.database.readSnapshot(async (client) => {
         await client.query("SET LOCAL statement_timeout = '2s'");
         orders = (
           await client.query<{ status: string; count: string }>(

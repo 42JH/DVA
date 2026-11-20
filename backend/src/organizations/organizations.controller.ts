@@ -43,6 +43,7 @@ import { OrganizationBillingService } from './organization-billing.service';
 import { OrganizationDeletionService } from './organization-deletion.service';
 import { DeleteOrganizationsDto } from './dto/delete-organizations.dto';
 import { BillingMonthQueryDto, BillingMonthEnvelopeDto } from './dto/billing-month.dto';
+import { BillingChargesEnvelopeDto, BillingChargesQueryDto } from './dto/billing-charges.dto';
 
 const single = (model: typeof CreatedOrganizationDto) => ({
   type: 'object',
@@ -73,6 +74,19 @@ export class OrganizationsController {
   @ApiOkResponse({ type: BillingMonthEnvelopeDto })
   billingMonth(@Param() params: OrganizationIdParamsDto, @Query() query: BillingMonthQueryDto) {
     return this.billing.read(params.id, query.month);
+  }
+
+  @Get(':id/billing/charges')
+  @ApiOperation({ summary: '기업 월결제 청구 내역 조회' })
+  @ApiOkResponse({ type: BillingChargesEnvelopeDto })
+  @ApiNotFoundResponse({ type: ErrorResponseDto })
+  async billingCharges(
+    @Param() params: OrganizationIdParamsDto,
+    @Query() query: BillingChargesQueryDto,
+    @Req() request: AuthRequest,
+  ) {
+    const page = await this.billing.readCharges(params.id, query);
+    return Object.assign(page, { meta: { requestId: request.requestId } });
   }
 
   // 정적 경로를 :id보다 먼저 등록하여 search를 기업 번호로 해석하지 않는다.

@@ -1,3 +1,4 @@
+import { AVAILABLE_CALL_SQL } from './call-session-availability';
 import { Injectable } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import { ApiException } from '../common/errors/api.exception';
@@ -15,8 +16,7 @@ export class CallSessionRepository {
         endedAt: Date | null;
       }>(
         `SELECT caller_phone_number AS phone,customer_seq AS "customerSeq",ended_at AS "endedAt"
-         FROM call_sessions WHERE call_session_seq=$1 AND deleted_at IS NULL
-         AND (incoming_at IS NULL OR incoming_at>clock_timestamp()-interval '5 years') FOR SHARE`,
+         FROM call_sessions WHERE call_session_seq=$1 AND ${AVAILABLE_CALL_SQL} FOR SHARE`,
         [id],
       )
     ).rows[0];
@@ -24,8 +24,7 @@ export class CallSessionRepository {
 
   async attachRecording(client: PoolClient, callId: number, objectKey: string): Promise<void> {
     const call = await client.query(
-      `SELECT 1 FROM call_sessions WHERE call_session_seq=$1 AND deleted_at IS NULL
-      AND (incoming_at IS NULL OR incoming_at>clock_timestamp()-interval '5 years') FOR SHARE`,
+      `SELECT 1 FROM call_sessions WHERE call_session_seq=$1 AND ${AVAILABLE_CALL_SQL} FOR SHARE`,
       [callId],
     );
     if (!call.rowCount) throw new Error('recording_call_unavailable');
@@ -108,7 +107,7 @@ export class CallSessionRepository {
       await client.query<{ id: number; matches: boolean; available: boolean }>(
         `SELECT call_session_seq AS id,
          caller_phone_number=$2 AND incoming_at=$3::timestamptz AS matches,
-         deleted_at IS NULL AND (incoming_at IS NULL OR incoming_at>clock_timestamp()-interval '5 years') AS available
+         ${AVAILABLE_CALL_SQL} AS available
        FROM call_sessions WHERE provider_call_id=$1 FOR UPDATE`,
         [input.providerCallId, phone, input.incomingAt],
       )

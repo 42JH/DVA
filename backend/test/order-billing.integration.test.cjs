@@ -881,6 +881,200 @@ test('employees without departments retain corporate credit and cannot use group
   );
 });
 
+test('company credit charges keep ledger scope, parcel order and filtered totals across pages', async () => {
+  const company = (
+    await request('/companies', { name: '청구 내역 검증 기업', monthlyBillingEnabled: true })
+  ).body.data.organizationSeq;
+  const department = (
+    await request(`/companies/${company}/departments`, {
+      name: '청구 내역 발송팀',
+      groupBillingEnabled: true,
+    })
+  ).body.data.departmentSeq;
+  const makeCustomer = async (name, phoneNumber) => {
+    const created = await request('/customers', { name, phoneNumber, address: customerAddress() });
+    assert.equal(created.status, 201);
+    return created.body.data.customerSeq;
+  };
+  const customer = await makeCustomer('청구 내역 회사 고객', '01000138988');
+  assert.equal(
+    (await request(`/companies/${company}/members`, {
+      customerSeq: customer,
+      employeeNo: 'CHARGE-DETAILS',
+      role: 'MEMBER',
+      departmentSeq: department,
+    })).status,
+    204,
+  );
+  await groupPolicy(company, customer, true);
+
+  const credit = finalBody({ customerSeq: customer, paymentMethodType: 'credit' });
+  credit.parcels[0].origin = {
+    ...credit.parcels[0].origin,
+    name: '원장 발송인',
+    roadAddress: '발송로 12',
+    detailAddress: '3층',
+  };
+  credit.parcels[1].destination = {
+    ...credit.parcels[1].destination,
+    name: '두번째 수령인',
+    roadAddress: '수령로 34',
+    detailAddress: '502호',
+  };
+  credit.parcels[1].otherItemDescription = '별도 물품';
+  const first = (await createFinal(credit)).body.data;
+  const second = (await createFinal(finalBody({
+    customerSeq: customer,
+    paymentMethodType: 'credit',
+  }))).body.data;
+  const group = (await createFinal(finalBody({
+    customerSeq: customer,
+    paymentMethodType: 'groupBilling',
+  }))).body.data;
+  const individual = await makeCustomer('청구 내역 개인 고객', '01000138989');
+  assert.equal(
+    (await request(`/customers/${individual}`, { monthlyBillingEnabled: true }, false, 'PATCH')).status,
+    204,
+  );
+  const personal = (await createFinal(finalBody({
+    customerSeq: individual,
+    paymentMethodType: 'credit',
+  }))).body.data;
+  for (const order of [first, second, group, personal]) assert.equal(order.status, 'ACCEPTED');
+
+  const ledger = (
+    await pool.query(
+      "SELECT to_char(billing_month,'YYYY-MM') AS month,occurred_at FROM order_billing_charges WHERE order_seq=$1",
+      [first.orderSeq],
+    )
+  ).rows[0];
+  await pool.query(
+    'UPDATE order_billing_charges SET occurred_at=(SELECT occurred_at FROM order_billing_charges WHERE order_seq=$2) WHERE order_seq=$1',
+    [second.orderSeq, first.orderSeq],
+  );
+  const path = `/companies/${company}/billing/charges`;
+  const readCharges = async (params = {}) => {
+    const response = await request(
+      path + '?' + new URLSearchParams({ month: ledger.month, ...params }),
+      undefined,
+      false,
+      'GET',
+    );
+    assert.equal(response.status, 200, JSON.stringify(response.body));
+    assert.match(response.body.meta.requestId, /^[0-9a-f-]{36}$/i);
+    return response.body;
+  };
+
+  const summary = (
+    await request(`/companies/${company}/billing?month=${ledger.month}`, undefined, false, 'GET')
+  ).body.data;
+  const all = await readCharges({ q: '' });
+  assert.deepEqual(all.data.map((row) => row.orderSeq), [second.orderSeq, first.orderSeq]);
+  assert.equal(all.total_count, 2);
+  assert.equal(all.total_amount, summary.monthlyAmount);
+  assert.equal(all.total_amount, 24000);
+  assert.equal(all.hasNext, false);
+  const page = await readCharges({ limit: '1' });
+  assert.deepEqual(page.data.map((row) => row.orderSeq), [second.orderSeq]);
+  assert.equal(page.hasNext, true);
+  assert.equal(page.total_count, 2);
+  assert.equal(page.total_amount, all.total_amount);
+  const tail = await readCharges({ limit: '1', offset: '1' });
+  assert.equal(tail.hasNext, false);
+  const [line] = tail.data;
+  assert.equal(line.orderSeq, first.orderSeq);
+  assert.equal(line.paidAt, ledger.occurred_at.toISOString());
+  assert.equal(line.amount, 12000);
+  assert.equal(line.orderCancelled, false);
+  assert.deepEqual(line.sender, {
+    name: '원장 발송인',
+    phoneNumber: '01000138001',
+    departmentName: '청구 내역 발송팀',
+    address: '발송로 12 3층',
+  });
+  assert.deepEqual(line.parcels.map((parcel) => parcel.recipient.name), [
+    '결제 고객', '두번째 수령인', '결제 고객',
+  ]);
+  assert.equal(line.parcels[0].items.other, null);
+  assert.deepEqual(line.parcels[1], {
+    cancelled: false,
+    recipient: { name: '두번째 수령인', phoneNumber: '01000138001', address: '수령로 34 502호' },
+    items: { document: 0, small: 1, medium: 0, big: 0, other: '별도 물품' },
+  });
+  const beyond = await readCharges({ offset: '10' });
+  assert.deepEqual(beyond.data, []);
+  assert.equal(beyond.total_count, 2);
+  assert.equal(beyond.total_amount, 24000);
+  for (const q of [
+    '발송인', '두번째', String(first.orderSeq), 'dv-' + String(first.orderSeq).padStart(5, '0'),
+  ]) {
+    const filtered = await readCharges({ q });
+    assert.deepEqual(filtered.data.map((row) => row.orderSeq), [first.orderSeq], q);
+    assert.equal(filtered.total_count, 1, q);
+    assert.equal(filtered.total_amount, 12000, q);
+  }
+  for (const params of [{ month: '2099-02' }, { q: '%' }]) {
+    const empty = await readCharges(params);
+    assert.deepEqual(empty.data, []);
+    assert.equal(empty.hasNext, false);
+    assert.equal(empty.total_count, 0);
+    assert.equal(empty.total_amount, 0);
+  }
+
+  const transferred = (
+    await request('/companies', { name: '청구 내역 이직 기업', monthlyBillingEnabled: true })
+  ).body.data.organizationSeq;
+  await pool.query(
+    'UPDATE memberships SET deleted_at=clock_timestamp() WHERE organization_seq=$1 AND customer_seq=$2',
+    [company, customer],
+  );
+  assert.equal(
+    (await request(`/companies/${transferred}/members`, {
+      customerSeq: customer,
+      employeeNo: 'CHARGE-TRANSFER',
+      role: 'MEMBER',
+    })).status,
+    204,
+  );
+  assert.deepEqual((await readCharges()).data, all.data);
+  const destination = (
+    await request(`/companies/${transferred}/billing/charges?month=${ledger.month}`, undefined, false, 'GET')
+  ).body;
+  assert.deepEqual(destination.data, []);
+  assert.equal(destination.total_count, 0);
+  await pool.query(
+    'UPDATE memberships SET deleted_at=clock_timestamp() WHERE organization_seq=$1 AND customer_seq=$2',
+    [transferred, customer],
+  );
+  assert.deepEqual((await readCharges()).data, all.data);
+});
+
+test('company charges require a session, a valid month and supported pagination filters', async () => {
+  const company = (await request('/companies', { name: '청구 요청 검증 기업' })).body.data.organizationSeq;
+  const path = `/companies/${company}/billing/charges`;
+  const month = '?month=2026-11';
+  assert.equal((await fetch(base + path + month)).status, 401);
+  assert.equal((await request(path + month, undefined, true, 'GET')).status, 401);
+  const missing = await request('/companies/2147483647/billing/charges' + month, undefined, false, 'GET');
+  assert.equal(missing.status, 404);
+  assert.equal(missing.body.error.code, 'NOT_FOUND');
+  assert.equal(missing.body.error.message, '기업을 찾을 수 없습니다.');
+  for (const suffix of [
+    '', '?month=2026-13', '?month=0000-11', month + '&limit=0', month + '&limit=101',
+    month + '&offset=-1', month + '&unknown=1', month + '&q=%00', month + '&q=' + 'x'.repeat(201),
+  ]) {
+    const invalid = await request(path + suffix, undefined, false, 'GET');
+    assert.equal(invalid.status, 400, suffix);
+    assert.equal(invalid.body.error.code, 'INVALID_REQUEST', suffix);
+  }
+  const { SwaggerModule, DocumentBuilder } = require('@nestjs/swagger');
+  const spec = SwaggerModule.createDocument(app, new DocumentBuilder().build());
+  const route = spec.paths['/api/companies/{id}/billing/charges'].get;
+  assert.deepEqual(route.security, [{ adminSession: [] }]);
+  assert.equal(route.parameters.find((param) => param.name === 'month').required, true);
+  assert.equal(route.parameters.find((param) => param.name === 'limit').schema.default, 50);
+});
+
 async function groupPolicy(company, customer, enabled) {
   if (enabled) await seedTestCard(pool, 'ORGANIZATION', company);
   const member = (

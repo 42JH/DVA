@@ -2,10 +2,14 @@ import { Injectable } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import { DatabaseService } from '../database/database.service';
 import { CompleteOrderIntakeDto, ParcelConversionDto } from './dto/order-intake.dto';
+import { ParcelDraftsRepository } from './parcel-drafts.repository';
 
 @Injectable()
 export class OrderIntakeRepository {
-  constructor(private readonly database: DatabaseService) {}
+  constructor(
+    private readonly database: DatabaseService,
+    private readonly drafts: ParcelDraftsRepository,
+  ) {}
 
   async seal(client: PoolClient, id: number, input: CompleteOrderIntakeDto) {
     await client.query(
@@ -42,10 +46,7 @@ export class OrderIntakeRepository {
       );
     else
       for (const mapping of mappings)
-        await client.query(
-          `UPDATE order_parcel_drafts SET status='CONVERTED',order_parcel_seq=$2,order_seq=$3,version=version+1,updated_at=clock_timestamp() WHERE draft_seq=$1`,
-          [mapping.draftSeq, mapping.orderParcelSeq, orderSeq],
-        );
+        await this.drafts.markConverted(client, mapping.draftSeq, orderSeq, mapping.orderParcelSeq);
     await client.query(
       `UPDATE order_parcel_drafts SET status='INCOMPLETE',version=version+1,updated_at=clock_timestamp()
       WHERE call_session_seq=$1 AND status='EDITING' AND deleted_at IS NULL`,

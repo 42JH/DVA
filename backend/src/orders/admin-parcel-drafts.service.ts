@@ -71,10 +71,7 @@ export class AdminParcelDraftsService {
         requestId,
       );
       const parcel = (await this.orders.parcelReferences(client, created.orderSeq))[0];
-      await client.query(
-        `UPDATE order_parcel_drafts SET status='CONVERTED',order_seq=$2,order_parcel_seq=$3,version=version+1,updated_at=clock_timestamp() WHERE draft_seq=$1`,
-        [id, created.orderSeq, parcel.orderParcelSeq],
-      );
+      await this.drafts.markConverted(client, id, created.orderSeq, parcel.orderParcelSeq);
       await this.audit.recordSuccess(
         {
           actorId: adminId,
@@ -140,10 +137,7 @@ export class AdminParcelDraftsService {
             'INVALID_STATE',
             '통화 주문 확정 전에는 초안을 삭제할 수 없습니다.',
           );
-        await client.query(
-          'UPDATE order_parcel_drafts SET deleted_at=clock_timestamp(),version=version+1,updated_at=clock_timestamp() WHERE draft_seq=$1',
-          [id],
-        );
+        await this.drafts.softDelete(client, id);
         await this.audit.recordSuccess(
           {
             actorId: adminId,

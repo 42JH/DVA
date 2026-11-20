@@ -1,3 +1,4 @@
+import { AVAILABLE_CALL_SQL } from '../consultations/call-session-availability';
 import { readPage } from '../common/pagination-query';
 import { Injectable } from '@nestjs/common';
 import { PoolClient } from 'pg';
@@ -34,7 +35,7 @@ export class PinsRepository {
         endedAt: Date | null;
       }>(
         `SELECT caller_phone_number AS phone,customer_seq AS "customerSeq",ended_at AS "endedAt" FROM call_sessions
-       WHERE call_session_seq=$1 AND deleted_at IS NULL AND (incoming_at IS NULL OR incoming_at>clock_timestamp()-interval '5 years')${lock ? ' FOR SHARE' : ''}`,
+       WHERE call_session_seq=$1 AND ${AVAILABLE_CALL_SQL}${lock ? ' FOR SHARE' : ''}`,
         [id],
       )
     ).rows[0];

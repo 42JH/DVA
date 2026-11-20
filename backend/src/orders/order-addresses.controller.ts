@@ -7,7 +7,7 @@ import {
   OrderAddressHistoryEnvelopeDto,
   OrderAddressHistoryQueryDto,
 } from './dto/order-address-history.dto';
-import { OrdersService } from './orders.service';
+import { OrderReadService } from './order-read.service';
 
 @ApiTags('Orders')
 @ApiResponse({ status: 400, type: ErrorResponseDto })
@@ -18,7 +18,7 @@ import { OrdersService } from './orders.service';
 @Roles('OPERATOR', 'SYSTEM_ADMIN')
 @Controller('customers')
 export class OrderAddressesController {
-  constructor(private readonly orders: OrdersService) {}
+  constructor(private readonly reads: OrderReadService) {}
 
   @Get(':id/addresses')
   @AiOrAdminAccess()
@@ -41,7 +41,7 @@ export class OrderAddressesController {
     @Req() request: AuthRequest,
     @Headers('call_session_seq') header?: string,
   ) {
-    return this.orders.addressHistory(
+    return this.reads.addressHistory(
       request.admin?.adminUserSeq ?? null,
       params.id,
       query,

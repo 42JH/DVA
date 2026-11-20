@@ -2,11 +2,13 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsString, Matches, ValidateIf } from 'class-validator';
 import { RequestMetaDto } from '../../common/dto/api-response.dto';
 
+export const BILLING_MONTH_PATTERN = /^[1-9][0-9]{3}-(0[1-9]|1[0-2])$/;
+
 export class BillingMonthQueryDto {
   @ApiPropertyOptional({ description: 'YYYY-MM. 생략하면 현재 한국 시간 월.', example: '2026-11' })
   @ValidateIf((_o, value) => value !== undefined)
   @IsString()
-  @Matches(/^[1-9][0-9]{3}-(0[1-9]|1[0-2])$/)
+  @Matches(BILLING_MONTH_PATTERN)
   month?: string;
 }
 export class BillingMonthDto {

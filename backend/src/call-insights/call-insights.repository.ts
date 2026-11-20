@@ -1,3 +1,4 @@
+import { AVAILABLE_CALL_SQL } from '../consultations/call-session-availability';
 import { preparedQuery } from '../database/prepared-query';
 import { Injectable } from '@nestjs/common';
 import { PoolClient } from 'pg';
@@ -9,7 +10,7 @@ export class CallInsightsRepository {
     // Lock before checking analysis so the existing success path's FOR SHARE cannot race us.
     const result = await client.query<{ provider_call_id: string }>(
       preparedQuery(
-        "SELECT provider_call_id FROM call_sessions WHERE call_session_seq=$1 AND deleted_at IS NULL AND (incoming_at IS NULL OR incoming_at>clock_timestamp()-interval '5 years') FOR UPDATE",
+        `SELECT provider_call_id FROM call_sessions WHERE call_session_seq=$1 AND ${AVAILABLE_CALL_SQL} FOR UPDATE`,
         [id],
       ),
     );
@@ -32,7 +33,7 @@ export class CallInsightsRepository {
   async findProviderCallId(client: PoolClient, id: number): Promise<string | undefined> {
     const result = await client.query<{ provider_call_id: string }>(
       preparedQuery(
-        "SELECT provider_call_id FROM call_sessions WHERE call_session_seq=$1 AND deleted_at IS NULL AND (incoming_at IS NULL OR incoming_at>clock_timestamp()-interval '5 years') FOR SHARE",
+        `SELECT provider_call_id FROM call_sessions WHERE call_session_seq=$1 AND ${AVAILABLE_CALL_SQL} FOR SHARE`,
         [id],
       ),
     );

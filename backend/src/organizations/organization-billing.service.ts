@@ -4,6 +4,8 @@ import { randomUUID } from 'node:crypto';
 import { DatabaseService } from '../database/database.service';
 import { AuditService } from '../audit/audit.service';
 import { ApiException } from '../common/errors/api.exception';
+import { ListResponse } from '../common/pagination';
+import { BillingChargesQueryDto } from './dto/billing-charges.dto';
 import { OrganizationBillingRepository } from './organization-billing.repository';
 
 @Injectable()
@@ -18,6 +20,12 @@ export class OrganizationBillingService {
     if (!result) throw new ApiException(404, 'NOT_FOUND', '기업을 찾을 수 없습니다.');
     return result;
   }
+  async readCharges(id: number, query: BillingChargesQueryDto) {
+    const result = await this.repository.readCharges(id, query);
+    if (!result) throw new ApiException(404, 'NOT_FOUND', '기업을 찾을 수 없습니다.');
+    return Object.assign(new ListResponse(result, query.limit), { total_amount: result.total_amount });
+  }
+
   private async ensureMonth(client: PoolClient, id: number, month: string, requestId: string) {
     const previous = await this.repository.ensureMonth(client, id, month);
     if (previous === undefined) return;
