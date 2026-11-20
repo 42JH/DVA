@@ -814,10 +814,24 @@ export interface RunResult extends Judged {
 
 type Faq = { question?: unknown; answer?: unknown };
 
+export function prepareJudgeInput(rec: CallRecord) {
+  const text = rec.turns.length ? describe(rec) : '';
+  return { rec, text, tooLong: chars(text).length > MAX_INPUT_CHARS };
+}
+
 /** 통화 하나 판정: votes판을 동시에 판정해 다수결 + 장면 확인. 말이 없는 통화는 빈 판정.
  *  입력이 너무 길거나 성공한 판이 다수결에 모자라면 null(판정 안 함 · 실패는 호출한 쪽이 구분) */
 export async function run(
   rec: CallRecord,
+  ask: AskModel,
+  faqs: Faq[] | null,
+  votes = VOTES,
+): Promise<RunResult | null> {
+  return runPrepared(prepareJudgeInput(rec), ask, faqs, votes);
+}
+
+export async function runPrepared(
+  { rec, text, tooLong }: ReturnType<typeof prepareJudgeInput>,
   ask: AskModel,
   faqs: Faq[] | null,
   votes = VOTES,
@@ -830,8 +844,7 @@ export async function run(
       votes: 0,
       usage: null,
     };
-  const text = describe(rec);
-  if (chars(text).length > MAX_INPUT_CHARS) return null;
+  if (tooLong) return null;
   const need = Math.min(NEED, votes);
   let prepared: { instructions: string; sources: string; references: string } | undefined;
   const judgeOnce = async () => {

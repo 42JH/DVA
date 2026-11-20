@@ -16,7 +16,11 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 $releaseDir = Join-Path $repoRoot ".deploy/$Version"
 $knownHosts = Join-Path $PSScriptRoot 'known_hosts'
-$server = "$SshUser@13.209.59.180"
+$sshHost = $env:LIGHTSAIL_SSH_HOST
+if ($sshHost -notmatch '^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?\z') {
+    throw 'Set LIGHTSAIL_SSH_HOST to the deployment hostname or IPv4 address.'
+}
+$server = "$SshUser@$sshHost"
 $remoteRoot = '/home/ubuntu/dva-deploy'
 $sshExe = Join-Path $env:WINDIR 'System32/OpenSSH/ssh.exe'
 $scpExe = Join-Path $env:WINDIR 'System32/OpenSSH/scp.exe'
@@ -76,7 +80,8 @@ try {
 
     $knownHostsOption = 'UserKnownHostsFile="' + $knownHosts.Replace('\', '/') + '"'
     $sshOptions = @('-i', $privateKey, '-o', 'BatchMode=yes', '-o', 'IdentitiesOnly=yes',
-        '-o', 'StrictHostKeyChecking=yes', '-o', $knownHostsOption, '-o', 'ConnectTimeout=15')
+        '-o', 'StrictHostKeyChecking=yes', '-o', 'HostKeyAlias=dva-monolith-deploy',
+        '-o', $knownHostsOption, '-o', 'ConnectTimeout=15')
     Invoke-Native -Program $sshExe -ProgramArgs ($sshOptions + @($server,
         "test -f $remoteRoot/shared/.env && sudo -n docker info >/dev/null && docker compose version"))
     if ($VerifyOnly) {

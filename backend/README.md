@@ -109,7 +109,7 @@ AI는 [주문 API 계약](../docs/api/orders.md)에 따라 POST /api/orders에 �
 상담 시작의 [고객 확인 API](../docs/api/caller-context.md)는 먼저 phoneNumber만 보내 조회한다. AI가 실제 업무 의도를 확인한 뒤 최초 call(providerCallId·incomingAt)을 추가해 통화를 생성·재사용한다. 응답의 callSessionSeq를 상담 중 주문 조회·취소·주소록 API의 call_session_seq 헤더로 보내고, 주문 결과는 같은 통화에 연결한다. 무의미 통화는 등록·결과 전송을 생략한다. 새 두 단계 계약은 위 AI 전달 문서를 우선한다.
 PBX 수신함 저장 후 유일한 통화의 종료를 즉시 반영하고 S3·recordings 연결은 비동기로 처리한다. 즉시 매칭이 실패하면 기존 워커가 재시도한다. 미연결 수신은 30분 경과 후 정리하며 연결된 통화는 보존한다. 최신 [실시간 통화 수 계약](docs/active-call-count.md)과 기존 [AI·PBX 연동 명세](../docs/api/ai-pbx-recordings.md)·[S3 설정](../docs/api/recording-s3-setup.md)을 참고한다.
 
-Jira: [S15P31D109-134](https://ssafy.atlassian.net/browse/S15P31D109-134). Node.js 24, NestJS 11, PostgreSQL 17, `pg`를 사용한다.
+Node.js 24, NestJS 11, PostgreSQL 17, `pg`를 사용한다.
 업무 API의 초기 계약은 팀이 제공한 API 명세 초안을 따른다. MSA 애플리케이션과 독립적으로 관리한다.
 
 NestJS 11 호환성을 유지하면서 전이 의존성의 알려진 DoS 취약점을 수정하기 위해 overrides로
@@ -149,14 +149,14 @@ npm run start:dev
 | `AI_PERSONA_TOKEN` | 선택, AI 서버와 공유할 32자 이상 공백 없는 ASCII 토큰. 페르소나 옵션·알림·설정 조회·적용 회신 전용. 비어 있으면 해당 연동과 재시도 워커만 비활성 |
 | `AI_FAQ_TOKEN` | 선택, 32자 이상 공백 없는 ASCII 토큰. FAQ 변경 알림 전용. 비어 있으면 FAQ 쓰기·알림 대기는 보존하고 전송 워커만 비활성 |
 | `AI_INSIGHTS_TOKEN` | 선택, 통화 분석·이벤트·미답변 수집 전용 32자 이상 공백 없는 ASCII 토큰. 미설정 시 ANL-01·EVT-01·UNQ-01은 503 |
-| `CORS_ORIGINS` | 정확한 origin을 쉼표로 구분. 예: `http://localhost:5173,https://13.209.59.180`. 경로·와일드카드 금지 |
+| `CORS_ORIGINS` | 정확한 origin을 쉼표로 구분. 예: `http://localhost:5173,https://frontend.example.test`. 경로·와일드카드 금지 |
 | `SWAGGER_ENABLED` | true / false. 개발 기본 true, 테스트·운영 기본 false |
 | `PBX_WEBHOOK_TOKEN` | 선택, 설정하면 공백 없는 32바이트 이상 토큰. 미설정 시 PBX 수신은 기존대로 503 |
-| `DVER_API_URL` | 기본 `https://purple-wood-25a4.summer2.workers.dev`. HTTPS, 자격정보·query·fragment 금지. test에서만 로컬 HTTP 모의 서버 허용. 기존 환경변수 변경은 [접수 주소 전환](docs/dver-endpoint-change.md) 참고 |
-| `DVER_API_KEY` | 서버 전용 디버 키. 빈 값이면 신규 최종 접수만 503. 공백·제어문자 금지. Compose가 backend에 전달 |
+| `DVER_API_URL` | 배포 환경에서 지정하는 HTTPS 접수 URL. 자격정보·query·fragment 금지. test에서만 로컬 HTTP 모의 서버 허용. 설정 절차는 [접수 주소 설정](docs/dver-endpoint-change.md) 참고 |
+| `DVER_API_KEY` | 서버 전용 디버 키. 주소·키 중 하나라도 비어 있으면 최종 접수는 503. 공백·제어문자 금지 |
 | `AWS_REGION` | S3 대상 리전. 기본 ap-northeast-2 |
 | `S3_RECORDINGS_BUCKET` | 비공개 녹취 버킷명. 미설정이면 업로드만 비활성. 미연결 PBX 수신의 30분 정리는 계속 실행 |
-| `RECORDING_ALLOWED_HOSTS` | 정확한 원본 다운로드 호스트 목록. 기본 디버 녹취 S3 호스트, 쉼표 구분 |
+| `RECORDING_ALLOWED_HOSTS` | 정확한 원본 다운로드 호스트 목록, 쉼표 구분. 비어 있으면 새 녹취 업로드를 보류하며 수신·매칭·기존 녹취 재생은 유지 |
 | `RECORDING_MATCH_WINDOW_SECONDS` | 동일 발신번호의 OpenAI/PBX 시작 시각 허용 차이. 기본 ±30초, 1~300 |
 
 AWS 자격 증명은 SDK 기본 체인을 사용한다. 역할이 없는 환경은 배포 비밀의 `AWS_ACCESS_KEY_ID`·`AWS_SECRET_ACCESS_KEY`·필요 시 `AWS_SESSION_TOKEN`을 Compose로 주입한다. 새 앱 실행 전 011 migration이 필요하다. 기존 테이블에 연결·재시도 컬럼만 추가하며 새 업무 테이블은 없다.
@@ -460,7 +460,7 @@ Jenkins의 Backend checks 단계가 성공한 뒤에만 이미지 패키징과 �
 관리자 인증 AUTH-01~08은 아래 계약을 따른다. 최초 관리자는 운영자가 CLI로 직접 생성한다.
 고객·주문 등 업무 API, 프론트 배포/로그인 연동, 업무 스키마 변경 및 MSA 구성은 포함하지 않는다.
 
-## 관리자 세션 인증 — S15P31D109-83
+## 관리자 세션 인증
 
 | API | 결과 / 권한 |
 |---|---|

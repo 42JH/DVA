@@ -1,3 +1,4 @@
+import { AVAILABLE_CALL_SQL } from '../consultations/call-session-availability';
 import { preparedQuery } from '../database/prepared-query';
 import { readPage, PageRows } from '../common/pagination-query';
 import { Injectable } from '@nestjs/common';
@@ -91,8 +92,7 @@ export class CallEventsRepository {
       await client.query<EventCall>(
         preparedQuery(
           `SELECT provider_call_id AS "providerCallId",caller_phone_number AS phone,order_seq AS "orderSeq"
-       FROM call_sessions WHERE call_session_seq=$1 AND deleted_at IS NULL
-         AND (incoming_at IS NULL OR incoming_at>clock_timestamp()-interval '5 years') FOR SHARE`,
+       FROM call_sessions WHERE call_session_seq=$1 AND ${AVAILABLE_CALL_SQL} FOR SHARE`,
           [id],
         ),
       )

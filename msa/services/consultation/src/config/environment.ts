@@ -137,6 +137,9 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
         !/^[a-fA-F0-9]{64}$/.test(securityLogKey)))
   )
     errors.push('SECURITY_LOG_HMAC_KEY');
+  const recordingHosts = raw.RECORDING_ALLOWED_HOSTS;
+  if (recordingHosts !== undefined && typeof recordingHosts !== 'string')
+    errors.push('RECORDING_ALLOWED_HOSTS');
   const config: Environment = {
     AUTH_PROXY_HOPS: Number(authProxyHops),
     SECURITY_LOG_HMAC_KEY:
@@ -183,12 +186,10 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
       typeof raw.S3_RECORDINGS_BUCKET === 'string' && raw.S3_RECORDINGS_BUCKET
         ? raw.S3_RECORDINGS_BUCKET
         : undefined,
-    RECORDING_ALLOWED_HOSTS: String(
-      (raw.RECORDING_ALLOWED_HOSTS ||
-        'dvercorp-aicc-connect-dev-recordings.s3.ap-northeast-2.amazonaws.com') as string,
-    )
-      .split(',')
-      .map((host) => host.trim().toLowerCase()),
+    RECORDING_ALLOWED_HOSTS:
+      typeof recordingHosts === 'string' && recordingHosts
+        ? recordingHosts.split(',').map((host) => host.trim().toLowerCase())
+        : [],
     RECORDING_MATCH_WINDOW_SECONDS: Number(
       raw.RECORDING_MATCH_WINDOW_SECONDS || '30',
     ),

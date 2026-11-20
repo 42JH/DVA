@@ -1,3 +1,4 @@
+import { AVAILABLE_JOINED_CALL_SQL } from '../../consultations/call-session-availability';
 import { Injectable } from '@nestjs/common';
 import { DatabaseService } from '../../database/database.service';
 import { CallEndedPayload } from './pbx-webhook.payload';
@@ -34,8 +35,7 @@ export class PbxWebhookRepository {
              OR (NOT requires_review AND (next_attempt_at IS NULL OR next_attempt_at<=clock_timestamp())))
            AND ($2::boolean OR call_session_seq IS NULL)
            AND (call_session_seq IS NULL OR EXISTS(SELECT 1 FROM call_sessions c
-            WHERE c.call_session_seq=call_ended_events.call_session_seq AND c.deleted_at IS NULL
-             AND (c.incoming_at IS NULL OR c.incoming_at>clock_timestamp()-interval '5 years')))
+            WHERE c.call_session_seq=call_ended_events.call_session_seq AND ${AVAILABLE_JOINED_CALL_SQL}))
            AND ((call_session_seq IS NULL AND received_at<=clock_timestamp()-interval '30 minutes')
              OR last_attempt_at IS NULL OR last_attempt_at<clock_timestamp()-interval '1 minute')
            AND (claimed_until IS NULL OR claimed_until<=clock_timestamp())

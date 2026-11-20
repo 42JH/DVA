@@ -37,6 +37,7 @@ import { ApiException } from '../common/errors/api.exception';
 import { ErrorResponseDto, RequestMetaDto } from '../common/dto/api-response.dto';
 import { CreateManualOrderDto, ManualOrderResultDto } from './dto/manual-order.dto';
 import { OrdersService } from './orders.service';
+import { OrderReadService } from './order-read.service';
 import { OrderRequestKey } from './order-request-key';
 import { OrderIdParamsDto } from './dto/order-query.dto';
 import { SubmittedOrderDto } from './dto/submit-order.dto';
@@ -50,6 +51,7 @@ import { OrderSubmissionService } from './order-submission.service';
 export class AdminOrdersController {
   constructor(
     private readonly orders: OrdersService,
+    private readonly reads: OrderReadService,
     private readonly submissions: OrderSubmissionService,
   ) {}
 
@@ -66,7 +68,7 @@ export class AdminOrdersController {
   })
   @ApiUnauthorizedResponse({ type: ErrorResponseDto, description: '활성 관리자 세션 필요.' })
   list(@Query() query: AdminOrderListQueryDto) {
-    return this.orders.adminList(query);
+    return this.reads.adminList(query);
   }
 
   @Post(':id/retry')

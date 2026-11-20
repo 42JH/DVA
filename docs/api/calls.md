@@ -169,7 +169,7 @@ AI 동작은 `GET /api/calls/{id}/actions`, 주문·FAQ 처리 결과는 `GET /a
   {
     "recordingSeq": 7,
     "createdAt": "2026-10-28T01:04:00.000Z",
-    "url": "https://dva-d109-storage.s3.ap-northeast-2.amazonaws.com/recordings/example?X-Amz-Algorithm=AWS4-HMAC-SHA256&...",
+    "url": "https://storage.example.test/recordings/example?X-Amz-Algorithm=AWS4-HMAC-SHA256&...",
     "expiresAt": "2026-10-28T01:09:00.000Z",
     "playbackError": null
   }

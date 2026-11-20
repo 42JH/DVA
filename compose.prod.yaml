@@ -55,7 +55,7 @@ services:
       AI_INSIGHTS_TOKEN: ${AI_INSIGHTS_TOKEN:-}
       CALL_ANALYSIS_OPENAI_API_KEY: ${CALL_ANALYSIS_OPENAI_API_KEY:-}
       CALL_ANALYSIS_CONCURRENCY: ${CALL_ANALYSIS_CONCURRENCY:-2}
-      DVER_API_URL: ${DVER_API_URL:-https://purple-wood-25a4.summer2.workers.dev}
+      DVER_API_URL: ${DVER_API_URL:-}
       DVER_API_KEY: ${DVER_API_KEY:-}
       ORDER_PAYMENTS_ENABLED: ${ORDER_PAYMENTS_ENABLED:-false}
       PAYMENT_PUBLIC_URL: ${PAYMENT_PUBLIC_URL:-}
@@ -69,7 +69,8 @@ services:
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
       AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
-      RECORDING_ALLOWED_HOSTS: ${RECORDING_ALLOWED_HOSTS:-dvercorp-aicc-connect-dev-recordings.s3.ap-northeast-2.amazonaws.com}
+      # Stop before replacing the running backend if recording storage is configured without a source allowlist.
+      RECORDING_ALLOWED_HOSTS: ${RECORDING_ALLOWED_HOSTS:-${S3_RECORDINGS_BUCKET:+${RECORDING_ALLOWED_HOSTS:?Set RECORDING_ALLOWED_HOSTS for the configured S3 recording bucket}}}
       RECORDING_MATCH_WINDOW_SECONDS: ${RECORDING_MATCH_WINDOW_SECONDS:-30}
       PBX_WEBHOOK_TOKEN: ${PBX_WEBHOOK_TOKEN:?Set the server-only PBX webhook token}
       CORS_ORIGINS: ${CORS_ORIGINS:-}

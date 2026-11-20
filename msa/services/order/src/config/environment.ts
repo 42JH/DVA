@@ -21,7 +21,7 @@ export interface Environment extends PaymentEnvironment {
   CONSULTATION_URL: string;
   CUSTOMER_URL: string;
   DELIVERY_URL: string;
-  DVER_API_URL: string;
+  DVER_API_URL?: string;
   DVER_API_KEY?: string;
 }
 
@@ -92,25 +92,28 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
     (typeof businessToken !== 'string' || !/^[\x21-\x7e]{32,256}$/.test(businessToken))
   )
     errors.push('AI_BUSINESS_TOKEN');
-  const dverSetting = raw.DVER_API_URL ?? 'https://purple-wood-25a4.summer2.workers.dev';
-  const dverUrl = typeof dverSetting === 'string' ? dverSetting : '';
-  try {
-    const url = new URL(dverUrl);
-    if (
-      (url.protocol !== 'https:' &&
-        !(
-          nodeEnv === 'test' &&
-          url.protocol === 'http:' &&
-          ['127.0.0.1', 'localhost'].includes(url.hostname)
-        )) ||
-      url.username ||
-      url.password ||
-      url.search ||
-      url.hash
-    )
+  const dverSetting = raw.DVER_API_URL;
+  if (dverSetting !== undefined && typeof dverSetting !== 'string') errors.push('DVER_API_URL');
+  const dverUrl = typeof dverSetting === 'string' && dverSetting ? dverSetting : undefined;
+  if (dverUrl) {
+    try {
+      const url = new URL(dverUrl);
+      if (
+        (url.protocol !== 'https:' &&
+          !(
+            nodeEnv === 'test' &&
+            url.protocol === 'http:' &&
+            ['127.0.0.1', 'localhost'].includes(url.hostname)
+          )) ||
+        url.username ||
+        url.password ||
+        url.search ||
+        url.hash
+      )
+        errors.push('DVER_API_URL');
+    } catch {
       errors.push('DVER_API_URL');
-  } catch {
-    errors.push('DVER_API_URL');
+    }
   }
   const dverKey = raw.DVER_API_KEY;
   if (

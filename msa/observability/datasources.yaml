@@ -4,12 +4,12 @@ datasources:
     uid: msa-prometheus
     type: prometheus
     access: proxy
-    url: http://prometheus.dva-observability.svc:9090
+    url: $MSA_PROMETHEUS_URL
     isDefault: true
     editable: false
   - name: MSA Loki
     uid: msa-loki
     type: loki
     access: proxy
-    url: http://loki.dva-observability.svc:3100
+    url: $MSA_LOKI_URL
     editable: false

@@ -1,3 +1,4 @@
+import { AVAILABLE_JOINED_CALL_SQL } from '../../consultations/call-session-availability';
 import { Injectable } from '@nestjs/common';
 import { DatabaseService } from '../../database/database.service';
 import { AuditService } from '../../audit/audit.service';
@@ -7,8 +8,6 @@ import { CallEvent } from './complaint-judge';
 export const MAX_TRIES = 3; // 모델 장애로 3번 실패하면 더 집지 않음 (has_complaint는 NULL = 미판정으로 남음)
 const GIVE_UP = 10; // 판정할 수 없는 통화(대본이 너무 김) — 다시 집지 않음
 const LEASE = "interval '10 minutes'"; // 한 통화 판정은 길어야 3분 남짓. 그 사이 다른 인스턴스가 같은 통화를 집지 않게
-const LIVE_CALL =
-  "c.deleted_at IS NULL AND (c.incoming_at IS NULL OR c.incoming_at>clock_timestamp()-interval '5 years')";
 
 export interface StoredComplaint {
   type: string;
@@ -37,7 +36,7 @@ export class ComplaintJudgeRepository {
            WHERE a.has_complaint IS NULL AND a.complaint_attempts<${MAX_TRIES}
              AND EXISTS(SELECT 1 FROM call_insight_events e JOIN call_utterances u ON u.call_utterance_seq=e.call_utterance_seq
                WHERE e.call_session_seq=a.call_session_seq AND e.kind='UTTERANCE')
-             AND (a.complaint_retry_at IS NULL OR a.complaint_retry_at<=clock_timestamp()) AND ${LIVE_CALL}
+             AND (a.complaint_retry_at IS NULL OR a.complaint_retry_at<=clock_timestamp()) AND ${AVAILABLE_JOINED_CALL_SQL}
            ORDER BY a.analysed_at DESC LIMIT 1 FOR UPDATE OF a SKIP LOCKED`,
         )
       ).rows[0];

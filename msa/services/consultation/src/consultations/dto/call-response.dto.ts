@@ -148,7 +148,7 @@ export class RecordingDto {
     format: 'uri',
     nullable: true,
     example:
-      'https://dva-d109-storage.s3.ap-northeast-2.amazonaws.com/recordings/example?X-Amz-Algorithm=AWS4-HMAC-SHA256&...',
+      'https://recordings.example.test/recordings/example?X-Amz-Algorithm=AWS4-HMAC-SHA256&...',
   })
   url!: string | null;
 

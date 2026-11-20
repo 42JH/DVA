@@ -1,3 +1,4 @@
+import { AVAILABLE_CALL_SQL } from '../consultations/call-session-availability';
 import { preparedQuery } from '../database/prepared-query';
 import { readPage, PageRows } from '../common/pagination-query';
 import { Injectable } from '@nestjs/common';
@@ -100,7 +101,7 @@ export class UnansweredQuestionsRepository {
     return (
       await client.query<{ providerCallId: string }>(
         preparedQuery(
-          'SELECT provider_call_id AS "providerCallId" FROM call_sessions WHERE call_session_seq=$1 AND deleted_at IS NULL AND (incoming_at IS NULL OR incoming_at>clock_timestamp()-interval \'5 years\') FOR SHARE',
+          `SELECT provider_call_id AS "providerCallId" FROM call_sessions WHERE call_session_seq=$1 AND ${AVAILABLE_CALL_SQL} FOR SHARE`,
           [id],
         ),
       )

@@ -10,6 +10,12 @@ import jenkins.model.JenkinsLocationConfiguration
 
 def instance = Jenkins.get()
 assert instance.isUseSecurity(): 'Refuse to expose an unsecured controller'
+def location = JenkinsLocationConfiguration.get()
+def publicUrl = System.getenv('JENKINS_PUBLIC_URL') ?: location.getUrl()
+assert publicUrl: 'Set JENKINS_PUBLIC_URL or restore an existing Jenkins URL'
+def address = new URI(publicUrl)
+assert address.scheme == 'https' && address.host && address.rawPath == '/jenkins/' &&
+    address.rawUserInfo == null && address.rawQuery == null && address.rawFragment == null : 'Invalid Jenkins public URL'
 instance.setNumExecutors(0)
 instance.setSlaveAgentPort(-1)
 if (instance.getNode('linux-docker-builder') == null) {
@@ -28,8 +34,8 @@ instance.getAllItems(hudson.model.Job).each { job ->
         job.save()
     }
 }
-JenkinsLocationConfiguration.get().setUrl('https://13.209.59.180/jenkins/')
-JenkinsLocationConfiguration.get().save()
+location.setUrl(publicUrl)
+location.save()
 instance.save()
 def output = new File('/run/bootstrap-output')
 output.mkdirs()

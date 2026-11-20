@@ -47,6 +47,8 @@ import {
 } from './dto/order-response.dto';
 import { OrderIdParamsDto, OrderQueryDto } from './dto/order-query.dto';
 import { OrdersService } from './orders.service';
+import { OrderReadService } from './order-read.service';
+import { OrderCancellationService } from './order-cancellation.service';
 import { UpdateOrderDto, UpdatedOrderDto } from './dto/update-order.dto';
 import { SubmitOrderDto, SubmittedOrderDto } from './dto/submit-order.dto';
 import { CancelOrderParcelsDto } from './dto/cancel-order-parcels.dto';
@@ -83,7 +85,11 @@ import { OrderRequestKey } from './order-request-key';
 @Roles('OPERATOR', 'SYSTEM_ADMIN')
 @Controller('orders')
 export class OrdersController {
-  constructor(private readonly orders: OrdersService) {}
+  constructor(
+    private readonly orders: OrdersService,
+    private readonly reads: OrderReadService,
+    private readonly cancellations: OrderCancellationService,
+  ) {}
 
   @Delete()
   @HttpCode(204)
@@ -146,7 +152,7 @@ export class OrdersController {
     @Query() query: OrderQueryDto,
     @Headers('call_session_seq') callSessionSeq?: string,
   ) {
-    return this.orders.list(request.admin?.adminUserSeq ?? null, query, callSessionSeq);
+    return this.reads.list(request.admin?.adminUserSeq ?? null, query, callSessionSeq);
   }
 
   @Post()
@@ -455,7 +461,7 @@ export class OrdersController {
     @Param() params: OrderIdParamsDto,
     @Headers('call_session_seq') callSessionSeq?: string,
   ) {
-    return this.orders.cancel(
+    return this.cancellations.cancel(
       request.admin?.adminUserSeq ?? null,
       params.id,
       request.requestId,
@@ -500,7 +506,7 @@ export class OrdersController {
     @Body() input: CancelOrderParcelsDto,
     @Headers('call_session_seq') callSessionSeq?: string,
   ) {
-    return this.orders.cancel(
+    return this.cancellations.cancel(
       request.admin?.adminUserSeq ?? null,
       params.id,
       request.requestId,
@@ -644,6 +650,6 @@ export class OrdersController {
     @Param() params: OrderIdParamsDto,
     @Headers('call_session_seq') callSessionSeq?: string,
   ) {
-    return this.orders.detail(request.admin?.adminUserSeq ?? null, params.id, callSessionSeq);
+    return this.reads.detail(request.admin?.adminUserSeq ?? null, params.id, callSessionSeq);
   }
 }

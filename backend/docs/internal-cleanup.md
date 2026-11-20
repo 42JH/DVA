@@ -1,8 +1,6 @@
 # 백엔드 내부 구조 및 테스트 정리
 
-- Jira: [S15P31D109-158](https://ssafy.atlassian.net/browse/S15P31D109-158)
 - 기준: `develop-backend`의 `17d86ce`, 작업 브랜치: `refactor/backend-internals`
-- 담당자: 한태원, SP: 5
 - 절차: 각 단계의 계획 → 수정 → 검증을 완료한 뒤 다음 단계로 진행한다.
 
 ## 유지할 계약과 검증 기준
@@ -128,11 +126,10 @@ API 계약 비교와 Git 변경 범위 검사를 수행한다. PR 생성·운영
 전체 실행 근거는 로컬 임시 로그 `dva-internals-final-check.log`,
 `dva-internals-final-database.log`이며 단계별 로그와 Swagger 비교 결과도 별도로 보관했다.
 검증은 격리된 로컬 Linux Docker 기준이다. 운영 DB/S3·배포·Jenkins 및 실제 AI/프론트 환경의
-수동 연동 실행은 하지 않았다. Jira는 진행 중으로 유지하며 PR 생성/병합은 수행하지 않는다.
+수동 연동은 이번 검증 범위에서 제외했다.
 
 ## 추가 작업: 남은 테스트 준비 코드 중복 정리
 
-- 기존 Jira S15P31D109-158과 `refactor/backend-internals` 브랜치에서 이어서 진행한다.
 - 동일한 설정의 DB Pool 생성 21개 파일을 기존 `createTestPool`로 교체한 뒤 해당 통합 테스트를 검증한다.
   격리 DB 확인, 연결 옵션, 마이그레이션, 트랜잭션과 종료 순서는 유지한다.
 - 이어서 동일한 앱 초기화를 기존 `startTestApp`으로 교체하고 관련 테스트와 전체 검증을 수행한다.

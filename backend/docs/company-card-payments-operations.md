@@ -9,7 +9,7 @@
 ## 운영 설정과 배포
 
 1. 기존 백엔드 쓰기·워커를 중지하고 DB를 백업한다. 배포 스크립트는 최초 064 적용에서 이 절차를 수행한다.
-2. 기존 `~/dva-deploy/shared/.env`에 `TOSS_BILLING_SECRET_KEY`와 `PAYMENT_CARD_ENCRYPTION_KEY`를 추가한다. 기존 결제창용 키, MM URL, 인증 토큰은 보존한다.
+2. 배포 환경 파일(예: `/path/to/deploy/shared/.env`)에 `TOSS_BILLING_SECRET_KEY`와 `PAYMENT_CARD_ENCRYPTION_KEY`를 추가한다. 기존 결제창용 키, MM URL, 인증 토큰은 보존한다.
 3. 빌링 시크릿 키는 **API 개별 연동·자동결제 계약 상점**의 `test_sk_...` 또는 `live_sk_...`다. 기존 결제창용 `test_gsk_...`로 대체하지 않는다.
 4. 암호화 키는 `openssl rand -hex 32`로 최초 한 번 생성하는 64자리 hex다. 서버 비밀 저장소에 백업하며 이후 재생성하지 않는다. 임의 변경하면 기존 카드 키를 복호화할 수 없다.
 5. 063·064를 순서대로 적용하고 `infra/database/verify.sql`을 통과한 새 이미지를 배포한다. Compose가 새 변수 두 개를 backend에 전달한다. 기존 컨테이너 restart만으로는 환경변수가 갱신되지 않는다.

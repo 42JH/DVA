@@ -30,8 +30,7 @@ export class HomeService {
   }
 
   private readHome(): Promise<HomeDto> {
-    return this.database.transaction(async (client) => {
-      await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
+    return this.database.readSnapshot(async (client) => {
       const { observedAt } = (
         await client.query<{ observedAt: Date }>('SELECT transaction_timestamp() AS "observedAt"')
       ).rows[0];

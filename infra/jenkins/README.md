@@ -48,7 +48,7 @@ controller는 Docker 소켓을 마운트하지 않는다. agent는 TLS와 내부
 
 ## 접속 및 계정
 
-- 주소: `https://13.209.59.180/jenkins/`
+- 접속 주소 예시: `https://192.0.2.10/jenkins/`
 - Nginx HTTPS 프록시 → `127.0.0.1:8080`의 Jenkins. 8080·50000 포트를 외부에 개방하지 않는다.
 - 기존 사용자·보안 설정·시스템 Credentials를 복원한다. 익명 접근과 회원가입을 허용하지 않는다.
 - 요청한 새 ID는 `dva-admin`. 초기 이전에는 `jlkim909`의 비밀번호 해시를 복사했고, 이후 사용자가 새 계정에서 비밀번호를 변경했다.
@@ -65,10 +65,14 @@ controller는 Docker 소켓을 마운트하지 않는다. agent는 TLS와 내부
 따라서 이전 서버의 과거 빌드 페이지에서 옛 바이너리 산출물을 다운로드할 수는 없다.
 
 ```sh
-sudo bash infra/jenkins/install.sh /보호된경로/jenkins-settings.tar.gz /별도보호경로/jenkins-keys.tar.gz /home/ubuntu/dva-jenkins
+export JENKINS_PUBLIC_URL=https://192.0.2.10/jenkins/  # 현재 환경의 공개 주소로 교체
+sudo --preserve-env=JENKINS_PUBLIC_URL bash infra/jenkins/install.sh \
+  /보호된경로/jenkins-settings.tar.gz /별도보호경로/jenkins-keys.tar.gz /home/ubuntu/dva-jenkins
 ```
 
 `install.sh`는 기존 home이 있으면 중단한다. controller 0 executors, 기존 Job 비활성화 상태로 복원한다.
+공개 주소를 지정해야 하는 새 복원 환경은 Compose 환경에 `JENKINS_PUBLIC_URL`을 설정한다.
+이 값이 비어 있으면 백업에서 복원한 HTTPS 공개 URL을 사용한다. URL 경로는 `/jenkins/`으로 끝나야 한다.
 한 번 실행할 `bootstrap.groovy`는 Linux agent를 등록하고, 새 관리자 계정을 구성하고,
 검증용 임시 API token과 agent secret을 보호된 파일에 쓴다. 비밀값은 로그에 쓰지 않는다.
 
@@ -99,7 +103,7 @@ agent-secret은 에이전트 실행에 필요하므로 유지한다.
 
 선택 규칙 자체를 바꾸는 첫 병합은 CI 코드 변경이므로 전체 검증한다. 이후 일반 백엔드 변경부터 관련 없는 인프라 검증을 생략한다.
 
-2026-11-01 [Jenkins #70](https://13.209.59.180/jenkins/job/dva-ci-linux-validation/70/)에서 선택 규칙 커밋 `3b5072e`를 검증했다. 백엔드는 `6bcacce5b14d`로 고정하고, #69의 실제 변경 범위 `8f06f67c3d88..6bcacce5b14d`에 대해 배포 선택값을 `true`로 둔 기존·개선 규칙을 비교했다. 두 방식 모두 컴파일·정적 검사·단위 테스트 캐시를 재사용했고, DB 통합·운영 이미지 검증은 각각 530개를 실행해 통과했다. 선택 규칙 회귀 테스트 5개와 배포 조건 회귀도 통과했다.
+2026-11-01 [Jenkins #70](https://192.0.2.10/jenkins/job/dva-ci-linux-validation/70/)에서 선택 규칙 커밋 `3b5072e`를 검증했다. 백엔드는 `6bcacce5b14d`로 고정하고, #69의 실제 변경 범위 `8f06f67c3d88..6bcacce5b14d`에 대해 배포 선택값을 `true`로 둔 기존·개선 규칙을 비교했다. 두 방식 모두 컴파일·정적 검사·단위 테스트 캐시를 재사용했고, DB 통합·운영 이미지 검증은 각각 530개를 실행해 통과했다. 선택 규칙 회귀 테스트 5개와 배포 조건 회귀도 통과했다.
 
 | 검증 구간 | 기존 전체 검증 | 변경 범위 선택 |
 | --- | ---: | ---: |
@@ -127,7 +131,8 @@ Node.js 24와 Docker CLI는 agent 이미지에 포함한다. Backend 컴파일�
 새 Linux package.sh·upload.sh도 서버의 환경 파일·DB 볼륨을 초기화하지 않는다.
 
 Job의 GitLab credential ID는 `gitlab-dva-readonly`, 배포 credential ID는 `dva-lightsail-ssh`를 유지한다.
-배포 시 SSH 호스트 키를 `infra/deploy/known_hosts`로 검증한다.
+배포 시 SSH 대상은 `LIGHTSAIL_SSH_HOST` 또는 Jenkins가 제공하는 `BUILD_URL`의 호스트를 사용하고,
+호스트 키는 `infra/deploy/known_hosts`로 검증한다.
 
 ## 모놀리식 웹훅 경로 필터
 
