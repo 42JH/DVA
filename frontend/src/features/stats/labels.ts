@@ -24,7 +24,7 @@ export const STAGE_LABEL: Record<Stage, string> = {
   ORDER_CANCEL: '주문 취소',
 }
 
-/** 도넛 조각(stroke) · 범례 네모(bg) 색 — 파랑 계열 짙은 → 옅은, 마지막은 회색 (11/09). 클래스 이름은 글자 그대로 있어야 Tailwind가 만듦 (조립 금지) */
+/** 도넛 조각(stroke) · 범례 네모(bg) 색 — 파랑 계열 짙은 → 옅은, 마지막은 회색. 클래스 이름은 글자 그대로 있어야 Tailwind가 만듦 (조립 금지) */
 const SHADES = [
   { stroke: 'stroke-[#1f6feb]', bg: 'bg-[#1f6feb]' },
   { stroke: 'stroke-[#4b8cf0]', bg: 'bg-[#4b8cf0]' },
@@ -33,7 +33,7 @@ const SHADES = [
   { stroke: 'stroke-ops-faint', bg: 'bg-ops-faint' },
 ]
 
-/** AI 응대 오류 탭 — 네 유형 (11/11 Jira 148) */
+/** AI 응대 오류 탭 — 네 유형 (Jira 148) */
 export const AI_ERROR: Record<AiErrorType, { label: string; stroke: string; bg: string }> = {
   INFORMATION_RECOGNITION_ERROR: { label: '정보 인식 오류', ...SHADES[0] },
   INTENT_RECOGNITION_ERROR: { label: '용건 인식 오류', ...SHADES[1] },

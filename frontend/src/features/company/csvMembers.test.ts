@@ -83,7 +83,7 @@ assert.deepEqual(errs(`${HEAD}\n${row('1,가,01011112222')}\n${row('2,나,010-11
   '3행 전화번호가 2행과 겹칩니다.',
 ])
 
-// 전화번호 = 010-1234-5678 형식 하나로 통일 (11/06) — 하이픈은 있어도 없어도, 서버엔 숫자 11자리
+// 전화번호 = 010-1234-5678 형식 하나로 통일 — 하이픈은 있어도 없어도, 서버엔 숫자 11자리
 const phoneOf = (phone: string) => {
   const r = readMembersCsv(`${HEAD}\n${row(`1,가,${phone}`)}`)
   assert.ok(r.ok, `${phone}: ${JSON.stringify(r)}`)
@@ -245,7 +245,7 @@ assert.equal(
 )
 assert.match(errorText({ status: 422, details: [] }, '등록'), /등록 조건에 맞지 않아/)
 
-// 부서 · 주소 열 (11/01): 주소 4칸 필수, 부서 · 상세주소는 빈칸 가능, 상세주소 열은 생략 가능
+// 부서 · 주소 열: 주소 4칸 필수, 부서 · 상세주소는 빈칸 가능, 상세주소 열은 생략 가능
 const FULL = '사번,사원명,전화번호,담당자,부서,도로명 주소,지번 주소,동,우편번호,상세주소'
 const withAddr = ok(
   [
@@ -300,7 +300,7 @@ assert.deepEqual(
   ],
 )
 
-// 기업 CSV (11/11): 첫 칸 기업명 · 한 파일 = 한 기업 · 담당자 1명 이상
+// 기업 CSV: 첫 칸 기업명 · 한 파일 = 한 기업 · 담당자 1명 이상
 const coText = exampleCsv('companies')
 assert.ok(coText.startsWith('﻿기업명,사번,'))
 const co = readMembersCsv(coText, 'companies')

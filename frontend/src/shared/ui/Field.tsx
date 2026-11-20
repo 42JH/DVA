@@ -54,7 +54,7 @@ export function TextInput({
 }
 
 // 처음 그릴 때 초점을 주고 커서를 글 끝에 — 모듈에 둔 같은 함수라 다시 그려도 한 번만 불림
-// preventScroll: 초점을 줄 때 브라우저가 칸 첫 줄로 끌어올림 → 긴 글을 내려 보다 누르면 화면이 튐 (11/15 재 봄: 900 → 0)
+// preventScroll: 초점을 줄 때 브라우저가 칸 첫 줄로 끌어올림 → 긴 글을 내려 보다 누르면 화면이 튐 (재 봄: 900 → 0)
 const focusEnd = (el: HTMLTextAreaElement | null) => {
   if (!el) return
   el.focus({ preventScroll: true })

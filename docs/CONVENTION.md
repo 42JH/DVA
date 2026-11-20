@@ -5,7 +5,7 @@
 ```text
 main
 └── develop
-    ├── develop-frontend
+    ├── develop-fe
     │   └── 타입/작업내용
     ├── develop-backend
     │   └── 타입/작업내용
@@ -17,7 +17,7 @@ main
 | --- | --- |
 | `main` | 배포 및 발표 가능한 안정 버전 |
 | `develop` | Frontend·Backend·AI 통합 및 연동 테스트 |
-| `develop-frontend` | Frontend 작업 통합 |
+| `develop-fe` | Frontend 작업 통합 |
 | `develop-backend` | Backend 작업 통합 |
 | `develop-ai` | AI 작업 통합 |
 
@@ -89,7 +89,7 @@ develop-backend
 ## 5. 병합 방향
 
 ```text
-Frontend 작업 브랜치 → develop-frontend ─┐
+Frontend 작업 브랜치 → develop-fe ─┐
 Backend 작업 브랜치  → develop-backend ─┼→ develop → main
 AI 작업 브랜치       → develop-ai ──────┘
 ```

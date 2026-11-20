@@ -1,5 +1,6 @@
-// 복잡도 재기 — 저장소의 ESLint 설정은 건드리지 않고 따로 둔 설정. frontend 폴더에서 실행 (아래 import 주소는 자기 저장소 위치로 바꿈)
-import tseslint from 'file:///C:/Users/SSAFY/Desktop/S15P31D109/frontend/node_modules/typescript-eslint/dist/index.js'
+// 복잡도 재기 — 저장소의 ESLint 설정은 건드리지 않고 따로 둔 설정. frontend 폴더에서 실행 (typescript-eslint는 그 폴더의 node_modules에서 찾음)
+import { createRequire } from 'node:module'
+const tseslint = createRequire(`${process.cwd()}/package.json`)('typescript-eslint')
 export default [
   { ignores: ['dist/**', 'public/**', 'src/mocks/**', '**/*.test.ts', 'node_modules/**'] },
   {

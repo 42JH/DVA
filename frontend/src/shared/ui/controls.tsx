@@ -1,6 +1,7 @@
 // 화면 공통 부품 (버튼 · 탭 · 뱃지 · 아이콘 · 정렬 칸 머리). 색은 global.css의 ops-* 토큰
 import type { ButtonHTMLAttributes, ReactNode } from 'react'
 import { ACTION_BADGE_SIZE, BUTTON_LOOK } from './actionBadge'
+import { fmtNum } from '@/shared/lib/format'
 
 export type Tone = 'idle' | 'wait' | 'done' | 'stop' | 'route' | 'cancel'
 
@@ -13,7 +14,7 @@ const TONE: Record<Tone, string> = {
   route: 'bg-ops-route-soft text-ops-route',
 }
 
-/** 상태 뱃지 — 목록 · 상세가 같은 것을 씀 (기업 피드백: 뱃지 색 통일) */
+/** 상태 뱃지 — 목록 · 상세가 같은 것을 씀 (뱃지 색 통일) */
 export function Badge({ tone, children }: { tone: Tone; children: ReactNode }) {
   return (
     <span
@@ -27,7 +28,7 @@ export function Badge({ tone, children }: { tone: Tone; children: ReactNode }) {
 // 버튼 모양 · 색 규칙은 actionBadge.ts BUTTON_LOOK. kind = 속성, 이름이 …Badge로 끝나면 목록 줄 안에 넣는 22px (나머지 32px)
 const BTN = {
   primary: BUTTON_LOOK.solid, // 화면 맨 위 줄의 만들기(주문 추가 등) · 창의 저장 · 등록 · 확정 — 채움
-  primaryBadge: BUTTON_LOOK.line, // 줄 안 등록 (미답변 줄 FAQ 등록) — 줄 안은 테두리 (11/11 사용자)
+  primaryBadge: BUTTON_LOOK.line, // 줄 안 등록 (미답변 줄 FAQ 등록) — 줄 안은 테두리
   lineBadge: BUTTON_LOOK.line, // 줄 안 승인 · 적용
   line: BUTTON_LOOK.line, // 화면 안(카드 · 패널) 만들기 · 등록 — 테두리
   edit: BUTTON_LOOK.edit, // 수정 · 설정 열기 — 자리 상관없이 테두리
@@ -39,7 +40,7 @@ const BTN = {
   plainBadge: BUTTON_LOOK.plain,
 }
 
-/** 버튼 높이 32 (기업 피드백: 버튼이 너무 큼) */
+/** 버튼 높이 32 (버튼이 너무 큼) */
 export function Btn({
   kind = 'plain',
   className = '',
@@ -73,7 +74,7 @@ export function SortTh({
         type="button"
         onClick={onToggle}
         title={asc ? '오래된 순 (누르면 최신순)' : '최신순 (누르면 오래된 순)'}
-        // 글자는 다른 칸 머리처럼 가운데, 화살표는 칸 오른쪽 끝 (11/09 사용자)
+        // 글자는 다른 칸 머리처럼 가운데, 화살표는 칸 오른쪽 끝
         className="relative flex h-9 w-full items-center justify-center outline-none hover:text-ops-route focus-visible:ring-2 focus-visible:ring-ops-route focus-visible:ring-inset"
       >
         {label}
@@ -99,7 +100,7 @@ export function Segments<T extends string>({
     <div role="tablist" aria-label={label} className="flex flex-wrap items-center gap-1">
       {items.map((it, i) => {
         const on = it.value === value
-        // 나란한 고르지 않은 탭 사이 짧은 세로줄 (11/13 시안) — 가상 요소라 폭 · 높이는 그대로
+        // 나란한 고르지 않은 탭 사이 짧은 세로줄 — 가상 요소라 폭 · 높이는 그대로
         const bar = i > 0 && !on && items[i - 1].value !== value
         return (
           <button
@@ -112,13 +113,13 @@ export function Segments<T extends string>({
           >
             {it.label}
             {it.badge}
-            {/* 건수 자리는 받기 전(null)에도 잡아 둠 — 숫자가 하나씩 오며 탭이 밀려 울렁이던 것 (11/09 사용자)
+            {/* 건수 자리는 받기 전(null)에도 잡아 둠 — 숫자가 하나씩 오며 탭이 밀려 울렁이던 것
                 undefined = 건수 없는 탭(기간 등) */}
             {it.count !== undefined && (
               <span
                 className={`min-w-[2ch] tabular-nums ${on ? 'text-ops-sub' : 'text-ops-faint'}`}
               >
-                {it.count?.toLocaleString('ko-KR')}
+                {it.count == null ? null : fmtNum(it.count)}
               </span>
             )}
           </button>
@@ -128,6 +129,7 @@ export function Segments<T extends string>({
   )
 }
 
+// 선 아이콘 경로 (24×24, 선 굵기 2) — Lucide(ISC, https://lucide.dev) 아이콘을 바탕으로 그림. 라이선스: THIRD_PARTY_NOTICES.md
 const PATHS = {
   search: 'm21 21-4.3-4.3M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14Z',
   x: 'M18 6 6 18M6 6l12 12',

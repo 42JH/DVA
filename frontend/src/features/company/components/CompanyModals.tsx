@@ -1,12 +1,12 @@
 // 기업 창 — 사원 추가 · 수정, CSV로 사원 추가, CSV로 기업 등록, 이름 하나 입력(기업명 · 부서명). 규칙 · 요청은 기존 훅 그대로
 // 파일 칸 규칙은 긴 설명 대신 [샘플 파일 받기]로 (샘플 파일에 칸 이름 · 형식이 다 들어 있음)
-import type { Member } from '@/features/company/api/companyApi'
-import { downloadExample, type CsvKind, type CsvMember } from '@/features/company/csvMembers'
+import type { Member } from '../api/companyApi'
+import { downloadExample, type CsvKind, type CsvMember } from '../csvMembers'
 import { fmtPhone } from '@/shared/lib/format'
-import { MEMBER_ROLE } from '@/features/company/labels'
-import { useCompanyCsv } from '@/features/company/hooks/useCompanyCsv'
-import { useMemberCsv } from '@/features/company/hooks/useMemberCsv'
-import { useMemberForm } from '@/features/company/hooks/useMemberForm'
+import { MEMBER_ROLE } from '../labels'
+import { useCompanyCsv } from '../hooks/useCompanyCsv'
+import { useMemberCsv } from '../hooks/useMemberCsv'
+import { useMemberForm } from '../hooks/useMemberForm'
 import { Btn, Icon, SelectField } from '@/shared/ui'
 import { AddressPicker } from '@/shared/ui/AddressPicker'
 import { AddressButton, Choice, FileDrop, TextInput } from '@/shared/ui/Field'
@@ -46,7 +46,7 @@ export function MemberFormModal({
   member: Member | null // null = 추가
   onClose: () => void
   initialDept?: number | null
-  onCsv?: () => void // 추가 창에서 CSV 일괄 등록 창으로 바꿈 (11/11: 화면의 CSV 버튼을 이 창 안으로)
+  onCsv?: () => void // 추가 창에서 CSV 일괄 등록 창으로 바꿈 (화면의 CSV 버튼을 이 창 안으로)
 }) {
   const vm = useMemberForm(companyId, member, onClose, initialDept)
   return (
@@ -55,26 +55,7 @@ export function MemberFormModal({
       sub={companyName}
       width={560}
       onClose={onClose}
-      footer={
-        vm.searching ? null : vm.addressFailMessage ? (
-          // 사원은 저장됨 — 주소만 다시 보내거나 닫기
-          <>
-            <FootNote error={vm.addressFailMessage} />
-            <Btn onClick={onClose}>닫기</Btn>
-            <Btn kind="primary" disabled={vm.retrying} onClick={vm.retryAddress}>
-              {vm.retrying ? '저장 중…' : '주소 다시 저장'}
-            </Btn>
-          </>
-        ) : (
-          <>
-            <FootNote error={vm.errorMessage} hint={vm.addressHint} />
-            <Btn onClick={onClose}>취소</Btn>
-            <Btn kind="primary" type="submit" form="member-form" disabled={!vm.canSubmit}>
-              {vm.isSubmitting ? '저장 중…' : vm.editing ? '저장' : '추가'}
-            </Btn>
-          </>
-        )
-      }
+      footer={vm.searching ? null : <MemberFooter vm={vm} onClose={onClose} />}
     >
       {vm.searching ? (
         <AddressPicker title="사원 주소 검색" onPick={vm.pickAddress} onClose={vm.closeSearch} />
@@ -208,7 +189,7 @@ export function MemberCsvModal({
   )
 }
 
-/** 올린 파일에서 읽은 사원 — 등록 전에 그대로 확인 (11/09 사용자: 엑셀에서 앞 0이 사라져 보여도 여기선 010-1234-5678)
+/** 올린 파일에서 읽은 사원 — 등록 전에 그대로 확인 (엑셀에서 앞 0이 사라져 보여도 여기선 010-1234-5678)
  *  mark = 사원 추가에서 신규 · 바뀜 · 그대로 */
 function CsvTable({ rows }: { rows: (CsvMember & { mark?: string })[] }) {
   if (!rows.length) return null
@@ -336,5 +317,34 @@ export function NameModal({
         <TextInput label={label} value={value} onChange={setValue} />
       </form>
     </Modal>
+  )
+}
+
+/** 사원 창 아래 버튼 — 사원은 저장됐는데 주소만 실패했으면 주소만 다시 보내거나 닫기 */
+function MemberFooter({
+  vm,
+  onClose,
+}: {
+  vm: ReturnType<typeof useMemberForm>
+  onClose: () => void
+}) {
+  if (vm.addressFailMessage)
+    return (
+      <>
+        <FootNote error={vm.addressFailMessage} />
+        <Btn onClick={onClose}>닫기</Btn>
+        <Btn kind="primary" disabled={vm.retrying} onClick={vm.retryAddress}>
+          {vm.retrying ? '저장 중…' : '주소 다시 저장'}
+        </Btn>
+      </>
+    )
+  return (
+    <>
+      <FootNote error={vm.errorMessage} hint={vm.addressHint} />
+      <Btn onClick={onClose}>취소</Btn>
+      <Btn kind="primary" type="submit" form="member-form" disabled={!vm.canSubmit}>
+        {vm.isSubmitting ? '저장 중…' : vm.editing ? '저장' : '추가'}
+      </Btn>
+    </>
   )
 }

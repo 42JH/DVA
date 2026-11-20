@@ -5,8 +5,8 @@ import { api, type ApiItem } from '@/shared/api/client'
 import { fetchAll } from '@/shared/api/paging'
 
 /**
- * 분류 10개 고정 (10/27 확정 · 10/28 '기타' 추가, 맨 끝) — 서버 허용값과 같은 글자(가운데점 · 띄어쓰기 그대로). 화면에서 추가 · 수정 · 삭제 없음
- * AI 미답변 질문엔 분류가 없음 — 관리자가 [FAQ 추가] 창에서 고름 (10/28)
+ * 분류 10개 고정 (확정 · 10/28 '기타' 추가, 맨 끝) — 서버 허용값과 같은 글자(가운데점 · 띄어쓰기 그대로). 화면에서 추가 · 수정 · 삭제 없음
+ * AI 미답변 질문엔 분류가 없음 — 관리자가 [FAQ 추가] 창에서 고름
  */
 export const FAQ_CATEGORIES = [
   { name: '접수' },

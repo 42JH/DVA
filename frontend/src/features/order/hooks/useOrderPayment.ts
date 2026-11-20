@@ -1,8 +1,8 @@
-// 주문 폼의 결제 방식 (11/10) — 보내는 분(= 주문 고객)이 쓸 수 있는 방식만 켜고, 개인 고객의 월결제은 물어보고 추가
+// 주문 폼의 결제 방식 — 보내는 분(= 주문 고객)이 쓸 수 있는 방식만 켜고, 개인 고객의 월결제은 물어보고 추가
 import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { PAYMENT_METHOD_LABEL } from '@/shared/order/labels'
-import { orderQueries, type OrderDetail, type PaymentMethod } from '@/features/order/api/orderApi'
+import { orderQueries, type OrderDetail, type PaymentMethod } from '../api/orderApi'
 import { paymentChoices, phoneOk } from './orderForm'
 
 export function useOrderPayment(order: OrderDetail | undefined, senderPhone: string) {

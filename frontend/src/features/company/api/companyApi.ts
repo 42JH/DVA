@@ -13,7 +13,7 @@ interface Company {
   status: ActiveStatus
   memberCount: number // 현재 ACTIVE 구성원 수 (부서 없는 사원 · 담당자 포함)
   createdAt: string | null // 등록 시각 — 예전 기업은 이력이 없어 null
-  // 아래 셋은 목록 화면용으로 백엔드에 요청한 칸 (11/11). 오기 전엔 undefined → 빈칸
+  // 아래 셋은 목록 화면용으로 백엔드에 요청한 칸. 오기 전엔 undefined → 빈칸
   departmentCount?: number
   managerNames?: string[] // 담당자(ORG_ADMIN) 이름 — 사번 순
   monthlyAmount?: number // 이번 달(한국 시각) 청구액, 원
@@ -84,15 +84,26 @@ interface BillingMonth {
   groupBillingAmount: number // 부서 그룹결제 사용액 — 그룹결제가 없어지기 전까지 청구액에 더함
 }
 
-/** 청구 내역 한 건 — GET /companies/{id}/billing/charges (11/11 백엔드에 요청한 계약)
- * 기업 간 배송의 월결제 원장 한 줄. 금액은 결제 확정 때 값(뒤에 주문 금액이 바뀌어도 그대로) */
+/** 청구 건의 사람 — 주문에 저장된 값이라 비어 있을 수 있음 */
+export interface ChargeParty {
+  name: string | null
+  phoneNumber: string | null
+  address: string | null // 도로명 + 상세주소
+}
+
+/** 청구 내역 한 건 — GET /companies/{id}/billing/charges. 월결제 원장 한 줄 = 주문 하나
+ *  금액 · 기업 · 부서는 결제 확정 때 값(뒤에 주문이 바뀌거나 사원이 옮겨도 그대로). 결제 뒤 취소돼도 원장에 남음 */
 export interface Charge {
   orderSeq: number
   paidAt: string // 결제 확정 시각 ISO
   amount: number
-  sender: { name: string; phoneNumber: string; departmentName: string | null; address: string }
-  recipient: { organizationName: string; name: string; phoneNumber: string; address: string }
-  items: { label: string; amount: number }[] // '중박스 1개' · 6000
+  orderCancelled: boolean
+  sender: ChargeParty & { departmentName: string | null } // 첫 배송의 보내는 분 · 결제 당시 부서
+  parcels: {
+    cancelled: boolean
+    recipient: ChargeParty
+    items: { document: number; small: number; medium: number; big: number; other: string | null }
+  }[] // 배송 순서대로
 }
 
 const MAX_LIMIT = 100 // 목록 limit 최대
@@ -108,7 +119,7 @@ export const companyQueries = {
           signal,
         }),
     }),
-  // 검색용 전체 — 서버 검색은 글자 그대로라 초성이 안 돼서 다 받아 화면에서 거름 (11/02, 04와 같은 방식). 5분 재사용
+  // 검색용 전체 — 서버 검색은 글자 그대로라 초성이 안 돼서 다 받아 화면에서 거름 (04와 같은 방식). 5분 재사용
   // shortcut: fetchAll 2,000곳 상한 — 넘으면 앞 2,000곳 안에서만 찾음. 그때는 서버 초성 검색으로
   pool: () =>
     queryOptions({
@@ -146,7 +157,7 @@ export const companyQueries = {
           })
         ).data,
     }),
-  // 청구 내역 — 그 달 · 검색(보낸 사원 · 받는 기업 · 받는 분 · 주문 번호) · 쪽
+  // 청구 내역 — 그 달 · 검색(보낸 사람 · 받는 분 이름, 주문번호) · 쪽
   charges: (id: number, q: { month: string; q?: string; limit: number; offset: number }) =>
     queryOptions({
       queryKey: [...companyQueries.all(), id, 'charges', q],
@@ -176,7 +187,7 @@ export async function fetchAllMembers(id: number, signal?: AbortSignal): Promise
 }
 
 /** 기업 등록 — 201 data.organizationSeq. 같은 이름도 등록됨 */
-/** 기업 + 부서 + 사원을 한 번에 — POST /companies (11/01 백엔드 확장). 하나의 트랜잭션: 전부 되거나 전부 안 됨
+/** 기업 + 부서 + 사원을 한 번에 — POST /companies (백엔드 확장). 하나의 트랜잭션: 전부 되거나 전부 안 됨
  * departmentName은 같은 요청의 departments[].name, role 생략 = MEMBER. 201 data.organizationSeq. 같은 이름 기업도 등록됨 */
 interface NewCompanyMember extends MemberInput {
   role?: Member['membership']['role']
@@ -247,7 +258,7 @@ export async function assignLeaders(id: number, employeeNos: string[]): Promise<
 }
 
 /** 사원 주소 저장 — 주소는 사원 소속이 아니라 고객 정보에 있음: PATCH /customers/{customerSeq} { address } (204)
- * address는 전체 교체 객체(필수: 도로명 · 지번 · 동 · 우편번호). 03 주문 '고객정보에도 저장'과 같은 API (11/01) */
+ * address는 전체 교체 객체(필수: 도로명 · 지번 · 동 · 우편번호). 03 주문 '고객정보에도 저장'과 같은 API */
 export const saveCustomerAddress = (customerSeq: number, address: CustomerAddress): Promise<void> =>
   api.patch(`/customers/${customerSeq}`, { body: { address } })
 

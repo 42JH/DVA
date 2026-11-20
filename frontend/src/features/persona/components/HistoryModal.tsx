@@ -1,14 +1,14 @@
 import type { ReactNode } from 'react'
-import type { usePersonaPage } from '@/features/persona/hooks/usePersonaPage'
-import type { usePromptEditor } from '@/features/persona/hooks/usePromptEditor'
+import type { usePersonaPage } from '../hooks/usePersonaPage'
+import type { usePromptEditor } from '../hooks/usePromptEditor'
 import { Badge, Btn } from '@/shared/ui'
 import { Modal } from '@/shared/ui/Modal'
 
 type Vm = ReturnType<typeof usePersonaPage>
 
-// 수정 기록 창 (11/13 새 안 5번, 피그마 2368:6500) — 왼쪽 날짜별 목록, 오른쪽은 고른 날짜 내용 중 통화에 쓰는 내용과 다른 칸만
-// [이 내용 불러오기] = 카드 칸에 그 내용을 채우고 창을 닫음 → [취소][저장]. 기록은 [저장]을 눌러야 남음 (11/15)
-// 크기는 시안: 창 1000 · 몸 540, 목록 300(날짜 16 · 사람 14), 오른쪽 제목 17 · 글 16 / 1.7. 창 머리 · 아래 줄은 공용 창 그대로
+// 수정 기록 창 — 왼쪽 날짜별 목록, 오른쪽은 고른 날짜 내용 중 통화에 쓰는 내용과 다른 칸만
+// [이 내용 불러오기] = 카드 칸에 그 내용을 채우고 창을 닫음 → [취소][저장]. 기록은 [저장]을 눌러야 남음
+// 크기: 창 1000 · 몸 540, 목록 300(날짜 16 · 사람 14), 오른쪽 제목 17 · 글 16 / 1.7. 창 머리 · 아래 줄은 공용 창 그대로
 export function HistoryModal({
   vm,
   ed,
@@ -118,8 +118,8 @@ const Item = ({ title, children }: { title: string; children: ReactNode }) => (
   </div>
 )
 
-// 비교 글 — 빠진 말 = 회색 취소선, 더한 말 = 파란 바탕 굵은 글씨 (시안)
-// 빠진 말의 회색은 시안(#8a95a2, 흰 바탕 3.1:1)보다 진한 흐린 글자 색 — 대비 4.5:1 규칙 (11/12 접근성)
+// 비교 글 — 빠진 말 = 회색 취소선, 더한 말 = 파란 바탕 굵은 글씨
+// 빠진 말의 회색은 시안(#8a95a2, 흰 바탕 3.1:1)보다 진한 흐린 글자 색 — 대비 4.5:1 규칙 (접근성)
 const Del = ({ children }: { children: ReactNode }) => (
   <del className="text-ops-faint">
     <span className="sr-only">빠진 말: </span>

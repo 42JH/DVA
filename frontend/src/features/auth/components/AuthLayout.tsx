@@ -1,8 +1,8 @@
 import type { ReactNode } from 'react'
-import box from '@/features/auth/assets/illust-box.webp'
-import phone from '@/features/auth/assets/illust-phone.webp'
-import truck from '@/features/auth/assets/illust-truck.webp'
-import logo from '@/features/auth/assets/logo.svg'
+import box from '../assets/illust-box.webp'
+import phone from '../assets/illust-phone.webp'
+import truck from '../assets/illust-truck.webp'
+import logo from '../assets/logo.svg'
 
 // 00 네 화면 공통 틀 (디자인/목업 '00_로그인' 10/30) — 왼쪽 576 그림 판 + 오른쪽 가운데 440 칸(아이콘 · 제목 · 설명 · 내용)
 // 그림 판은 디자인 좌표(576×1024) 그대로 두고 세로 가운데 — 화면이 1024보다 낮으면 위아래가 같이 잘림. 로고만 판 위에 고정
@@ -21,7 +21,7 @@ export function AuthLayout({
   children: ReactNode
 }) {
   return (
-    // 좁은 창(1280 미만)에선 그림 판이 줄고(오른쪽이 잘림) 오른쪽 칸은 최소 520 — 440 칸 양옆 여백 (11/05 반응형)
+    // 좁은 창(1280 미만)에선 그림 판이 줄고(오른쪽이 잘림) 오른쪽 칸은 최소 520 — 440 칸 양옆 여백 (반응형)
     <div className="grid h-full grid-cols-[minmax(0,1fr)_minmax(520px,1fr)] xl:grid-cols-[576px_1fr]">
       <aside className="relative overflow-hidden bg-action-soft">
         <div className="absolute top-1/2 left-0 h-[1024px] w-[576px] -translate-y-1/2">

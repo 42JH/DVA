@@ -2,9 +2,9 @@
 import type { Tone } from '@/shared/ui'
 
 /** 통화 상태 = 통화 진행 + AI 분석 진행 (통화 결과는 고객 용건 · 접수 주문 칸에)
- *  통화 중 → 분석 중 → 분석 완료 · 분석 실패. 분석 상태는 백엔드 판정 그대로 (11/08 — 녹취 · 시간으로 짐작하지 않음)
+ *  통화 중 → 분석 중 → 분석 완료 · 분석 실패. 분석 상태는 백엔드 판정 그대로 (녹취 · 시간으로 짐작하지 않음)
  *  PENDING은 분석 중 · 재전송 · 알림 누락을 구별 못 함 — AI가 실패를 알려야 FAILED
- *  analysisStatus 먼저 — 통화 중은 PENDING이면서 시작했고 안 끝난 통화만 (11/18) */
+ *  analysisStatus 먼저 — 통화 중은 PENDING이면서 시작했고 안 끝난 통화만 */
 export function callState(d: {
   startedAt: string | null
   endedAt: string | null

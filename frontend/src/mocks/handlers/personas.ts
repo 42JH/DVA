@@ -16,7 +16,7 @@ const ver = (
   version,
   name: '빠른 접수형',
   promptText: '빠르고 정확하게 택배 접수를 돕는 상담원입니다.',
-  // 프롬프트 6칸 (백엔드 persona-response.dto — 늘 글자). 없으면 수정 화면이 깨졌음 (11/11 QA)
+  // 프롬프트 6칸 (백엔드 persona-response.dto — 늘 글자). 없으면 수정 화면이 깨졌음 (QA)
   role: '택배 접수를 돕는 AI 상담원',
   personality: '친절하고 차분함',
   tone: '존댓말, 짧고 분명하게',
@@ -78,7 +78,11 @@ const initial = (): State => ({
       ver(4, 'INACTIVE', '2026-09-01T09:00:00+09:00', '2026-08-31T18:00:00+09:00'),
     ],
     [KIND_SEQ]: [
-      kind(ver(2, 'INACTIVE', '2026-08-20T09:00:00+09:00', '2026-08-19T18:00:00+09:00'), 22),
+      // v2 = v1을 시험한 뒤 성격을 고친 버전 → v2를 보면 '고치기 전 글의 결과'(v1)
+      {
+        ...kind(ver(2, 'INACTIVE', '2026-08-20T09:00:00+09:00', '2026-08-19T18:00:00+09:00'), 22),
+        personality: '친절하고 공감을 잘함',
+      },
       kind(ver(1, 'INACTIVE', '2026-08-01T09:00:00+09:00', '2026-07-31T18:00:00+09:00'), 21),
     ],
   },
@@ -143,7 +147,7 @@ const missing = () =>
   )
 
 export const personaHandlers = [
-  // 등록 — v1 저장만(통화엔 안 씀). 없으면 목업에서 진짜 서버로 넘어가 401 → 로그아웃 (11/13 7번 확인)
+  // 등록 — v1 저장만(통화엔 안 씀). 없으면 목업에서 진짜 서버로 넘어가 401 → 로그아웃 (7번 확인)
   http.post(`${API_BASE_URL}/personas`, async ({ request }) => {
     const body = (await request.json()) as Partial<Ver>
     const seq = Math.max(0, ...state.personas.map((x) => x.aiPersonaSeq)) + 1
@@ -210,7 +214,7 @@ export const personaHandlers = [
     save()
     return new HttpResponse(null, { status: 204 })
   }),
-  // AI가 지원하는 음성 설정 (GET /api/ai/options) — 없으면 목업에서 진짜 서버로 넘어가 401 → 로그아웃 (11/11 QA)
+  // AI가 지원하는 음성 설정 (GET /api/ai/options) — 없으면 목업에서 진짜 서버로 넘어가 401 → 로그아웃 (QA)
   http.get(`${API_BASE_URL}/ai/options`, () =>
     HttpResponse.json({
       data: {
@@ -224,7 +228,7 @@ export const personaHandlers = [
     }),
   ),
   http.get(`${API_BASE_URL}/personas`, () => HttpResponse.json(page(state.personas.map(dto)))),
-  // 상세 — 화면이 고른 페르소나를 다시 받음 (11/06 가짜에 추가)
+  // 상세 — 화면이 고른 페르소나를 다시 받음 (가짜에 추가)
   http.get(`${API_BASE_URL}/personas/:id`, ({ params }) => {
     const p = row(Number(params.id))
     return p ? HttpResponse.json({ data: dto(p) }) : missing()

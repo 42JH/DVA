@@ -1,7 +1,7 @@
 [
   {
     "name": "login",
-    "url": "https://dva-d109.duckdns.org/login",
+    "url": "https://<관리자 웹>/login",
     "scores": [
       98,
       98,
@@ -16,7 +16,7 @@
   },
   {
     "name": "home",
-    "url": "https://dva-d109.duckdns.org/",
+    "url": "https://<관리자 웹>/",
     "scores": [
       95,
       96,
@@ -31,7 +31,7 @@
   },
   {
     "name": "calls",
-    "url": "https://dva-d109.duckdns.org/calls",
+    "url": "https://<관리자 웹>/calls",
     "scores": [
       88,
       95,
@@ -46,7 +46,7 @@
   },
   {
     "name": "call-detail",
-    "url": "https://dva-d109.duckdns.org/calls/530",
+    "url": "https://<관리자 웹>/calls/530",
     "scores": [
       94,
       94,
@@ -61,7 +61,7 @@
   },
   {
     "name": "orders",
-    "url": "https://dva-d109.duckdns.org/orders",
+    "url": "https://<관리자 웹>/orders",
     "scores": [
       81,
       88,
@@ -76,7 +76,7 @@
   },
   {
     "name": "faqs",
-    "url": "https://dva-d109.duckdns.org/faqs",
+    "url": "https://<관리자 웹>/faqs",
     "scores": [
       85,
       85,
@@ -91,7 +91,7 @@
   },
   {
     "name": "stats",
-    "url": "https://dva-d109.duckdns.org/stats",
+    "url": "https://<관리자 웹>/stats",
     "scores": [
       92,
       93,
@@ -106,7 +106,7 @@
   },
   {
     "name": "personas",
-    "url": "https://dva-d109.duckdns.org/personas",
+    "url": "https://<관리자 웹>/personas",
     "scores": [
       87,
       92,

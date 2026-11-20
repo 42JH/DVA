@@ -5,8 +5,8 @@ import { ApiError } from '@/shared/api/client'
 import { fmtPhone } from '@/shared/lib/format'
 import { dateTime } from '@/shared/lib/when'
 import { callKinds } from '@/shared/lib/kinds'
-import { cancelOrder, retryOrder, type OrderStatus } from '@/features/order/api/orderApi'
-import { deleteDraft } from '@/features/order/api/draftApi'
+import { cancelOrder, retryOrder, type OrderStatus } from '../api/orderApi'
+import { deleteDraft } from '../api/draftApi'
 import { orderQueries, type Party } from '@/shared/order/orderApi'
 import { pickParcel } from '@/shared/order/useOrderDetail'
 import {
@@ -17,7 +17,7 @@ import {
 } from '@/shared/order/labels'
 import { itemsText, STATUS_LOOK, won } from '@/shared/order/look'
 
-// [디버에 다시 접수] 응답 상태 → 안내 (11/10). 성공(ACCEPTED)은 뱃지 · 버튼이 바뀌어 안내 없음
+// [디버에 다시 접수] 응답 상태 → 안내. 성공(ACCEPTED)은 뱃지 · 버튼이 바뀌어 안내 없음
 // SUBMITTING = 서버가 결과 저장에 실패 — 디버엔 접수됐을 수 있어 바로 다시 누르지 않게 (order-submission.service finishSubmission)
 const RETRY_NOTICE: Partial<Record<OrderStatus, { text: string; tone: 'stop' | 'wait' }>> = {
   SUBMISSION_FAILED: {
@@ -100,7 +100,7 @@ export function useWaybill(orderSeq: number, parcelSeq: number | null) {
       analyzed: c.counts !== null,
     })),
   }
-  // 미완료 주문: 접수하려면 채워야 하는 칸 (주문 추가와 같은 규칙 — 물품 가액 · 결제 방식 포함). 기업 피드백: 미완료 사유 · 빈 칸 강조
+  // 미완료 주문: 접수하려면 채워야 하는 칸 (주문 추가와 같은 규칙 — 물품 가액 · 결제 방식 포함). 미완료 사유 · 빈 칸 강조
   const missing = new Set<string>()
   if (o && status === 'COLLECTING') {
     const need = (k: string, ok: unknown) => !ok && missing.add(k)

@@ -1,4 +1,4 @@
-// 통화 (11/06) — 운영팀이 통화 내역을 훑고 문제 통화(불만 · 미분석)를 찾는 표. 줄을 누르면 통화 상세
+// 통화 — 운영팀이 통화 내역을 훑고 문제 통화(불만 · 미분석)를 찾는 표. 줄을 누르면 통화 상세
 import { useLayoutEffect, useRef, useState, type RefObject } from 'react'
 import { Link, useLocation } from 'react-router'
 import { PageHead } from '@/shared/ui'
@@ -16,7 +16,7 @@ const COLS = [
   { label: '구분', className: 'w-[80px] max-[1600px]:hidden' }, // 1600 아래에선 숨김 (통화 상세에 있음)
   { label: '전화번호', className: 'w-[130px]' },
   { label: '접수 주문', className: 'w-[100px]' },
-  // 칩 칸 둘은 머리 글 · 칩 모두 왼쪽(칸 안 여백 15 = td와 같게) — 칩 수가 줄마다 달라 왼쪽에 모아야 훑기 쉬움 (11/11 사용자: 정렬 기준)
+  // 칩 칸 둘은 머리 글 · 칩 모두 왼쪽(칸 안 여백 15 = td와 같게) — 칩 수가 줄마다 달라 왼쪽에 모아야 훑기 쉬움 (정렬 기준)
   { label: '고객 용건', className: 'pl-[15px] text-left!', chips: 'kinds' }, // 남는 자리 전부 (바닥 KINDS_BASE)
   { label: '고객 불만', className: 'pl-[15px] text-left!', chips: 'complaints' }, // 대상 칩 셋이 다 들어가는 폭으로 고정
   { label: '통화 시간', className: 'w-[90px] max-[1600px]:hidden' },
@@ -97,12 +97,12 @@ export function CallsPage() {
   )
 }
 
-// 칩이 다 생겼을 때를 바닥으로 — 쪽마다 칩 수에 따라 칸이 줄었다 늘었다 하지 않게 (11/11 사용자: 모든 칩이 생겼을 때 기준)
+// 칩이 다 생겼을 때를 바닥으로 — 쪽마다 칩 수에 따라 칸이 줄었다 늘었다 하지 않게 (모든 칩이 생겼을 때 기준)
 // 고객 용건: 한 자리 숫자 칩 4개(택배 접수 · 주문 확인 · 접수 취소 · 문의). 고객 불만: 대상 칩 3개(AI 응대 · 서비스 정책 · 배송)
 const KINDS_BASE = 310
 const COMPLAINTS_BASE = 182
 
-/** 두 칩 칸이 남는 자리를 칩이 다 생겼을 때 폭의 비율(용건 310 : 불만 182)로 나눔 — 넓은 화면에서 한쪽만 커지지 않게 (11/11 사용자: 균형)
+/** 두 칩 칸이 남는 자리를 칩이 다 생겼을 때 폭의 비율(용건 310 : 불만 182)로 나눔 — 넓은 화면에서 한쪽만 커지지 않게 (균형)
  *  고객 불만 칸 폭을 정하고 고객 용건 칸이 나머지(table-layout fixed). 바닥보다 좁아지면 표 최소 너비를 늘려 가로 스크롤 */
 function useChipColumns(ref: RefObject<HTMLTableElement | null>, rows: unknown) {
   const [minWidth, setMinWidth] = useState(1120)
@@ -149,7 +149,7 @@ function Row({ r, from, onWarm }: { r: CallsRow; from: string; onWarm: () => voi
         to={to}
         state={{ from }}
         tabIndex={first ? 0 : -1}
-        // 줄 전체를 누를 수 있게 칸마다 같은 링크 — 읽기 프로그램엔 첫 칸 하나만 (빈 칸 링크가 이름 없는 링크로 수십 개 읽히던 것, 11/11 QA)
+        // 줄 전체를 누를 수 있게 칸마다 같은 링크 — 읽기 프로그램엔 첫 칸 하나만 (빈 칸 링크가 이름 없는 링크로 수십 개 읽히던 것)
         aria-hidden={first ? undefined : true}
         className={`flex h-11 min-w-0 items-center ${align === 'left' ? 'justify-start' : 'justify-center'} outline-none`}
       >
@@ -215,7 +215,7 @@ function Row({ r, from, onWarm }: { r: CallsRow; from: string; onWarm: () => voi
       {cell(
         <span data-chips="complaints" className="flex gap-1 whitespace-nowrap">
           {r.judging ? (
-            // 불만 판정 전은 회색 '분석 전' 칩. 옛 판정 결과는 무시(빈칸) — 최신 판정본만 (11/11 사용자)
+            // 불만 판정 전은 회색 '분석 전' 칩. 옛 판정 결과는 무시(빈칸) — 최신 판정본만
             <Badge tone="idle">분석 전</Badge>
           ) : (
             r.complaints.map((c) => (

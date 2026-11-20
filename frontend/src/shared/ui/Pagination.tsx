@@ -2,6 +2,7 @@
 //   왼쪽 '1–50 / 526건' | 가운데 « ‹ 1 2 3 … 10 › » | 오른쪽 [50개씩]
 import { PAGE_SIZES, pageGroup } from '@/shared/lib/paging'
 import { Icon, type IconName } from './controls'
+import { fmtNum } from '@/shared/lib/format'
 
 const box =
   'grid size-8 place-items-center rounded-md text-[13px] tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ops-route'
@@ -41,8 +42,7 @@ export function Pagination({
   return (
     <div className="grid shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-4 text-[13px] text-ops-sub">
       <span className="tabular-nums">
-        {from.toLocaleString('ko-KR')}–{to.toLocaleString('ko-KR')} /{' '}
-        {total.toLocaleString('ko-KR')}
+        {fmtNum(from)}–{fmtNum(to)} / {fmtNum(total)}
         {unit}
       </span>
       <nav aria-label="쪽" className="flex items-center gap-0.5">

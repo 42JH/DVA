@@ -82,7 +82,7 @@ assert.deepEqual(
   },
 )
 
-// 주소를 다시 검색해 고름 → 주소 전체 + 위도 · 경도 1 고정 (11/01 결정)
+// 주소를 다시 검색해 고름 → 주소 전체 + 위도 · 경도 1 고정
 assert.deepEqual(
   buildOrderPatch(order, 101, {
     ...same,

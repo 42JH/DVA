@@ -1,9 +1,9 @@
-// 미답변 문의 (11/06) — AI가 답하지 못한 질문 처리 대기열. 오래된 것부터(먼저 쌓인 것부터 처리)
+// 미답변 문의 — AI가 답하지 못한 질문 처리 대기열. 오래된 것부터(먼저 쌓인 것부터 처리)
 // 줄: 질문 | 사유 | 고객 · 전화 | 통화 시각 | [FAQ로 만들기] [삭제]. 질문을 누르면 그 통화 상세
 // 데이터 · 검색 · 삭제는 기존 useUnansweredList 그대로. [FAQ 등록] = 이 화면의 창에서 고객 말을 채워 등록 (저장하면 처리됨)
 import { useRef, useState } from 'react'
 import { reasonTag } from '@/shared/lib/unansweredReason'
-import { useUnansweredList, type UnansweredRow } from '@/features/faq/hooks/useUnansweredList'
+import { useUnansweredList, type UnansweredRow } from '../hooks/useUnansweredList'
 import { PageHead } from '@/shared/ui'
 import { Badge, Btn, Icon, SortTh } from '@/shared/ui'
 import { SearchBox } from '@/shared/ui/ListFrame'
@@ -16,19 +16,34 @@ import { dateTime } from '@/shared/lib/when'
 import { useListParams } from '@/shared/lib/useListParams'
 import { usePageSize } from '@/shared/lib/paging'
 import { Pagination } from '@/shared/ui/Pagination'
+import { fmtNum } from '@/shared/lib/format'
 
 // d = 통화 시각 정렬 — 처리 대기열이라 기본은 오래된 순, 'desc'면 최신순
 const PARAMS = { d: 'asc' }
 
+/** 목록은 한 번에 받아 두고 화면에서 쪽을 나눔 (검색을 바꾸면 기존 훅이 쪽을 1로). 정렬 · 쪽은 주소에 */
+function usePagedRows(all: UnansweredRow[]) {
+  const { params, page: wantedPage, set } = useListParams(PARAMS)
+  const asc = params.d !== 'desc'
+  const sorted = asc ? all : [...all].reverse()
+  const [size, setSize] = usePageSize()
+  const page = Math.min(wantedPage, Math.max(1, Math.ceil(sorted.length / size)))
+  return {
+    rows: sorted.slice((page - 1) * size, page * size),
+    total: sorted.length,
+    page,
+    size,
+    setSize,
+    setPage: (p: number) => set({ page: p }),
+    asc,
+    toggleSort: () => set({ d: asc ? 'desc' : 'asc' }),
+  }
+}
+
 export function UnansweredPage() {
   const vm = useUnansweredList()
-  // 목록은 한 번에 받아 두고 화면에서 쪽을 나눔 (검색을 바꾸면 기존 훅이 쪽을 1로)
-  const { params, page: rawPage, set } = useListParams(PARAMS)
-  const asc = params.d !== 'desc'
-  const all = asc ? vm.rows : [...vm.rows].reverse()
-  const [size, setSize] = usePageSize()
-  const page = Math.min(rawPage, Math.max(1, Math.ceil(all.length / size)))
-  const rows = all.slice((page - 1) * size, page * size)
+  const paged = usePagedRows(vm.rows)
+  const rows = paged.rows
   const box = useRef<HTMLDivElement>(null)
   const scrollable = useScrollable(box, [rows])
   useKeepScroll(box, 'list')
@@ -43,30 +58,14 @@ export function UnansweredPage() {
           placeholder="질문, 이름, 전화번호로 검색"
           label="미답변 검색"
         />
-        {vm.callChip && (
-          <span className="inline-flex h-8 items-center gap-1 rounded-full bg-ops-route-soft pr-1.5 pl-3 text-[13px] font-medium text-ops-route">
-            {vm.callChip}
-            <button
-              type="button"
-              aria-label="필터 지우기"
-              onClick={vm.clearCall}
-              className="grid size-6 place-items-center rounded-full hover:bg-white"
-            >
-              <Icon name="x" className="size-3.5" />
-            </button>
-          </span>
-        )}
+        {vm.callChip && <CallFilterChip label={vm.callChip} onClear={vm.clearCall} />}
       </PageHead>
       <section
         aria-label="미답변 문의 목록"
         className="flex min-h-0 flex-1 flex-col gap-3 px-6 pt-4 pb-4"
       >
         <p className="text-[13px] text-ops-sub">
-          질문{' '}
-          <b className="font-semibold text-ops-ink tabular-nums">
-            {vm.count.toLocaleString('ko-KR')}
-          </b>
-          건
+          질문 <b className="font-semibold text-ops-ink tabular-nums">{fmtNum(vm.count)}</b>건
         </p>
         <div
           ref={box}
@@ -85,8 +84,8 @@ export function UnansweredPage() {
                 </th>
                 <SortTh
                   label="통화"
-                  asc={asc}
-                  onToggle={() => set({ d: asc ? 'desc' : 'asc' })}
+                  asc={paged.asc}
+                  onToggle={paged.toggleSort}
                   className="w-[150px]"
                 />
                 <th scope="col" className="w-[150px] text-right">
@@ -95,33 +94,30 @@ export function UnansweredPage() {
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => (
+              {rows.map((row) => (
                 <Row
-                  key={r.unansweredQuestionSeq}
-                  r={r}
+                  key={row.unansweredQuestionSeq}
+                  r={row}
                   vm={vm}
-                  onFaq={() => vm.openAdd(r)}
-                  onOpen={() => setOpen(r)}
+                  onFaq={() => vm.openAdd(row)}
+                  onOpen={() => setOpen(row)}
                 />
               ))}
             </tbody>
           </table>
           {rows.length === 0 && (
             <p className="flex flex-1 items-center justify-center py-16 text-center text-[14px] text-ops-sub">
-              {vm.isLoading
-                ? '불러오는 중…'
-                : (vm.listError ??
-                  (vm.q ? '검색어에 맞는 질문이 없습니다.' : 'AI가 답하지 못한 질문이 없습니다.'))}
+              {emptyText(vm)}
             </p>
           )}
           {vm.listNote && <p className="px-4 py-3 text-[12px] text-ops-faint">{vm.listNote}</p>}
         </div>
         <Pagination
-          page={page}
-          size={size}
-          total={all.length}
-          onPage={(p) => set({ page: p })}
-          onSize={setSize}
+          page={paged.page}
+          size={paged.size}
+          total={paged.total}
+          onPage={paged.setPage}
+          onSize={paged.setSize}
         />
       </section>
       {open && (
@@ -148,6 +144,30 @@ export function UnansweredPage() {
         </Confirm>
       )}
     </>
+  )
+}
+
+/** 목록이 비었을 때 — 받는 중 · 못 받음 · 검색 결과 없음 · 처리할 질문 없음 */
+function emptyText(vm: ReturnType<typeof useUnansweredList>) {
+  if (vm.isLoading) return '불러오는 중…'
+  if (vm.listError) return vm.listError
+  return vm.q ? '검색어에 맞는 질문이 없습니다.' : 'AI가 답하지 못한 질문이 없습니다.'
+}
+
+/** 통화 상세에서 '이 통화의 미답변'으로 왔을 때의 필터 칩 — 누르면 필터를 지움 */
+function CallFilterChip({ label, onClear }: { label: string; onClear: () => void }) {
+  return (
+    <span className="inline-flex h-8 items-center gap-1 rounded-full bg-ops-route-soft pr-1.5 pl-3 text-[13px] font-medium text-ops-route">
+      {label}
+      <button
+        type="button"
+        aria-label="필터 지우기"
+        onClick={onClear}
+        className="grid size-6 place-items-center rounded-full hover:bg-white"
+      >
+        <Icon name="x" className="size-3.5" />
+      </button>
+    </span>
   )
 }
 

@@ -14,7 +14,7 @@ export interface UnansweredQuestion {
   customerName: string // 연결 고객의 지금 이름. 모르면 '—'
   callerNumber: string // 발신번호, 숫자만. 모르면 ''
   question: string // 고객이 한 말 그대로 (어… 음… 포함) — 다듬는 건 관리자가 [FAQ 추가] 창 질문 칸에서
-  reason: UnansweredReason | null // 미답변 사유 (11/04). null = 미분류
+  reason: UnansweredReason | null // 미답변 사유. null = 미분류
 }
 
 /** 서버 UnansweredQuestion (§13) — 화면에서 안 쓰는 칸(occurredAt · offsetSeconds · status 등)은 뺌 */

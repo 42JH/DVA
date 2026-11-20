@@ -1,10 +1,11 @@
 // 백엔드 DTO 계약 스냅샷 — 서버 Swagger(/api/docs-json, 백엔드 DTO 데코레이터로 만들어짐)에서
 // 화면이 보내는 요청 본문의 스키마만 뽑아 src/app/contract/backend-dto.json 으로 저장 → backendContract.test.ts 가 검사
-// 사용: npm run sync:dto [서버 주소]   (기본 https://13.209.59.180 — 자체 서명 인증서라 이 스크립트에서만 검증을 끔)
+// 사용: npm run sync:dto <서버 주소>   (자체 서명 인증서여도 되게 이 스크립트에서만 검증을 끔)
 // 백엔드 DTO가 바뀌면 다시 돌려 커밋 (스냅샷이라 CI는 서버 없이 돎)
 import { writeFileSync } from 'node:fs'
 
-const base = process.argv[2] ?? 'https://13.209.59.180'
+const base = process.argv[2] ?? process.env.DTO_SERVER
+if (!base) throw new Error('서버 주소가 필요합니다 — npm run sync:dto https://<백엔드 서버>')
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
 
 /** 화면이 본문을 보내는 요청 — 'METHOD 경로' (경로는 Swagger 그대로) */
@@ -68,7 +69,7 @@ const schemas = {}
 for (const seen = new Set(); [...used].some((n) => !seen.has(n));)
   for (const n of [...used]) if (!seen.has(n)) (seen.add(n), (schemas[n] = slim(all[n])))
 
-const out = { source: `${base}/api/docs-json`, version: spec.info?.version, operations, schemas }
+const out = { source: '/api/docs-json', version: spec.info?.version, operations, schemas }
 writeFileSync(
   new URL('../src/app/contract/backend-dto.json', import.meta.url),
   JSON.stringify(out, null, 2) + '\n',

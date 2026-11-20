@@ -1,5 +1,5 @@
 // 10 관리자 권한 관리 — API-06~10 /admins (API 연동 상세명세 3장). SYSTEM_ADMIN 전용. React를 모르는 데이터 · API 층
-// 성공은 모두 204(본문 없음) → 화면은 목록을 다시 받음. 권한 변경(PATCH role)은 안 씀 — 역할은 OPERATOR · SYSTEM_ADMIN 둘뿐이고 승격 금지 (11/11 권한 이분화)
+// 성공은 모두 204(본문 없음) → 화면은 목록을 다시 받음. 권한 변경(PATCH role)은 안 씀 — 역할은 OPERATOR · SYSTEM_ADMIN 둘뿐이고 승격 금지 (권한 이분화)
 import { queryOptions } from '@tanstack/react-query'
 import { api } from '@/shared/api/client'
 import type { AdminRole } from '@/shared/auth/sessionApi'
@@ -28,7 +28,7 @@ interface AdminListQuery {
   status: AdminStatus
   limit: number // 1~100
   offset: number
-  q?: string // 이름 · 로그인 아이디 부분 검색 (11/08)
+  q?: string // 이름 · 로그인 아이디 부분 검색
 }
 
 export const adminQueries = {
@@ -41,7 +41,7 @@ export const adminQueries = {
 }
 
 /** 상태 바꾸기 — PATCH /admins/{id} { status } (204)
- * 가입 승인 = PENDING → ACTIVE, 비활성화 · 활성화 = OPERATOR의 ACTIVE ↔ INACTIVE (11/11 SUPERVISOR 없앰)
+ * 가입 승인 = PENDING → ACTIVE, 비활성화 · 활성화 = OPERATOR의 ACTIVE ↔ INACTIVE (SUPERVISOR 없앰)
  * 최고 관리자는 서버가 거절 · 비활성화하면 대상의 모든 세션이 끊김(재활성화해도 이전 세션은 복구 안 됨) */
 export const setAdminStatus = (id: number, status: 'ACTIVE' | 'INACTIVE'): Promise<void> =>
   api.patch(`/admins/${id}`, { body: { status } })

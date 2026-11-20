@@ -1,4 +1,4 @@
-// 06 AI 동작 기록 글 정제 (11/05 사용자: 실서버 요약이 'ADDRESS_NOT_FOUND' · '기록: 1개 항목' · 'COLLECTING'처럼 날 것 그대로)
+// 06 AI 동작 기록 글 정제 (실서버 요약이 'ADDRESS_NOT_FOUND' · '기록: 1개 항목' · 'COLLECTING'처럼 날 것 그대로)
 // AI 서버가 보내는 summaryText(ai/app/calls/results.py _summary · 통화 결과 전송)를 화면 말로 — 서버는 고치지 않음, 지난 통화에도 그대로 적용
 // 순수 함수 · '@/' import 없음 — `npx tsx src/features/call/actionText.test.ts` 로 바로 확인
 import type { AiAction } from './callDto'
@@ -81,14 +81,14 @@ export function refineAction(text: string): string {
   if (m) return `항목 ${m[1]}개 기록`
   m = /^통화 결과 전송:\s*(.+)$/.exec(t)
   if (m) return `주문 전송: ${STATUS_TEXT[m[1]] ?? m[1]}`
-  if (t === 'FAQ 근거 있음') return 'FAQ 검색 후보 있음' // 지난 기록 — 검색은 후보를 찾았다는 뜻일 뿐, 답했다는 뜻이 아님 (11/05 AI팀)
+  if (t === 'FAQ 근거 있음') return 'FAQ 검색 후보 있음' // 지난 기록 — 검색은 후보를 찾았다는 뜻일 뿐, 답했다는 뜻이 아님 (AI팀)
   if (t === 'FAQ 근거 없음') return 'FAQ에 답이 없음'
-  if (t === '미등록 고객') return '고객 조회: 등록되지 않은 번호' // 서버 글. 고객이 아니니 '고객'이라 부르지 않음 (11/11 사용자)
+  if (t === '미등록 고객') return '고객 조회: 등록되지 않은 번호' // 서버 글. 고객이 아니니 '고객'이라 부르지 않음
   if (t === '등록 고객' || t === '탈퇴 고객') return `고객 조회: ${t}`
   return t
 }
 
-/** FAQ 검색 뒤 최종 응대 결과 (11/05 AI팀 — 검색 기록과 최종 결과를 따로 보냄)
+/** FAQ 검색 뒤 최종 응대 결과 (AI팀 — 검색 기록과 최종 결과를 따로 보냄)
  *  FAQ_ANSWERED = 근거 있음 · 미답변 KB_NO_ANSWER = 근거 부족 · 미답변 KB_UNAVAILABLE · 사유 없음 = 서버 에러 */
 export function faqResultText(
   kind: 'FAQ_ANSWERED' | 'QUESTION_UNANSWERED',

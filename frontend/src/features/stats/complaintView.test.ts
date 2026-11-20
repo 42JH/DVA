@@ -1,4 +1,4 @@
-// 실행: npm test — 통계 [AI 응대 오류 | 고객 불만] 탭 세기 (11/11 Jira 148)
+// 실행: npm test — 통계 [AI 응대 오류 | 고객 불만] 탭 세기 (Jira 148)
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { CallListItemDto } from '@/shared/call/callDto'

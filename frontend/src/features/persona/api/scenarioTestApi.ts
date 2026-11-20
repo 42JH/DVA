@@ -1,4 +1,4 @@
-// 시나리오 시험 (11/12) — 페르소나 글을 통화에 쓰기 전에, 정해진 고객 대본으로 AI에게 전화를 걸어 보는 시험
+// 시나리오 시험 — 페르소나 글을 통화에 쓰기 전에, 정해진 고객 대본으로 AI에게 전화를 걸어 보는 시험
 // 주소와 모양은 시험 창구(ai/persona_check)의 것 그대로. 백엔드는 관리자 확인 뒤 /api/persona-check/* 를 창구로 넘기기만 함(저장 · 가공 없음)
 // JSON 응답은 백엔드의 기본 모양 { data, meta }로 감싸져 옴(녹음만 파일 그대로) → unwrap으로 알맹이를 꺼냄
 // 창구는 결과를 자기 쪽 폴더에 보관. '어느 버전의 시험인지'는 화면이 시작할 때 붙인 tag로 남고, 버전별로 모으는 일은 화면이 함 (scenarioTestMap.ts)
@@ -18,11 +18,8 @@ import {
 export type { TestItem, VersionTest }
 
 /** 화면을 켜는 스위치 — 늘 켜짐(가짜 모드 · 실제 백엔드 · 배포 모두. 백엔드 중계가 모든 서버에 있음, 11/12)
- *  끄려면 VITE_SCENARIO_TEST=false → 화면과 [통화에 사용하기] 관문이 함께 사라짐 */
+ *  끄려면 VITE_SCENARIO_TEST=false → 화면과 반영 전 시험 관문([통화에 반영] · [통화에 사용하기])이 함께 사라짐 */
 export const SCENARIO_TEST = import.meta.env.VITE_SCENARIO_TEST !== 'false'
-/** 반영 전 시험 — 꺼 두면 [통화에 반영] · [통화에 사용하기]가 시험 없이 바로 확인 창 (시나리오 시험 화면은 그대로)
- *  11/15 사용자: 지금은 임시로 시험 없이 반영. ponytail: 임시 스위치 — 다시 켜려면 VITE_TEST_BEFORE_APPLY=true (또는 기본값을 true로) */
-export const TEST_BEFORE_APPLY = SCENARIO_TEST && import.meta.env.VITE_TEST_BEFORE_APPLY === 'true'
 
 export interface Scenario {
   id: string // 'A1' — AI 파트 문서의 번호
@@ -127,7 +124,7 @@ export const startTest = async (input: {
 
 /** 시험 멈춤 — 그 버전에서 돌고 있는 묶음을 모두 멈춤(남은 것 시험을 하면 묶음이 여럿)
  *  창구 POST /runs/{runId}/stop: 돌던 통화는 끊고, 아직 안 건 시나리오는 걸지 않음 → 시험 안 함으로 남아 [남은 N개 시험]으로 이어 돌림
- *  이미 끝난 묶음에 보내도 202(두 번 눌러도 같음). 백엔드가 같은 주소로 중계 (11/14, 끝난 묶음 202 · 없는 묶음 404) */
+ *  이미 끝난 묶음에 보내도 202(두 번 눌러도 같음). 백엔드가 같은 주소로 중계 (끝난 묶음 202 · 없는 묶음 404) */
 export const stopTest = async (input: { personaSeq: number; version: number }): Promise<void> => {
   const tag = encodeURIComponent(tagOf(input.personaSeq, input.version))
   const runs = await get<RunDto[]>(`/runs?tag=${tag}`)

@@ -34,10 +34,10 @@ type ProcessingKind =
   | 'INQUIRY'
   | 'FAQ_ANSWERED'
 
-/** 고객 불만(DISSATISFACTION_EXPRESSION)의 대상 · 강도 (11/11 백엔드 !476). 다른 유형 · 그 전 판정은 null 또는 칸 없음 */
+/** 고객 불만(DISSATISFACTION_EXPRESSION)의 대상 · 강도 (백엔드 !476). 다른 유형 · 그 전 판정은 null 또는 칸 없음 */
 export type ComplaintTarget = 'ai_service' | 'price_policy' | 'delivery_other'
 export type ComplaintLevel = 'explicit' | 'mild'
-export interface CallComplaintDto {
+interface CallComplaintDto {
   type: ComplaintType
   evidenceText: string // 고객 불만이면 고객이 한 말 그대로
   offsetSeconds: number | null
@@ -79,7 +79,7 @@ interface CallDto {
   customerSeq: number | null
   customerName: string | null
   organizationName: string | null // 고객의 지금 소속 기업 (없으면 null — 고객 있으면 개인, 둘 다 없으면 미확인)
-  // 백엔드 판정 (11/08) · EXPIRED = 분석도 실패 통보도 없이 통화가 끝난 지 10분 지남 (11/09 후속 명세, 배포 전엔 안 옴)
+  // 백엔드 판정 · EXPIRED = 분석도 실패 통보도 없이 통화가 끝난 지 10분 지남 (후속 명세, 배포 전엔 안 옴)
   analysisStatus: 'PENDING' | 'COMPLETED' | 'FAILED' | 'EXPIRED'
   recordedAt: string | null // 첫 녹취가 DB에 저장된 시각 (재생 가능 여부 아님)
   callerPhoneNumber: string | null
@@ -127,11 +127,11 @@ export interface CallActionDto {
 export interface CallProcessingResultDto extends Omit<CallActionDto, 'action'> {
   action: ProcessingKind
   unansweredQuestionSeq: number | null
-  unansweredReason?: UnansweredReason | null // 연결된 미답변의 사유 (11/04). 다른 결과 · 미분류 · 삭제한 미답변은 null, 연동 전 서버는 칸 없음
+  unansweredReason?: UnansweredReason | null // 연결된 미답변의 사유. 다른 결과 · 미분류 · 삭제한 미답변은 null, 연동 전 서버는 칸 없음
   questionText: string | null // 미답변 삭제 뒤 null
   answerText: string | null
   faqEntrySeq: number | null // 사용 FAQ가 하나면 그 번호, 여럿이면 null
-  faqEntrySeqs?: number[] | null // 사용 FAQ 번호들 (11/05 — FAQ 응대 한 건에 여럿). FAQ 응대가 아니면 null, 구버전 서버는 칸 없음
+  faqEntrySeqs?: number[] | null // 사용 FAQ 번호들 (FAQ 응대 한 건에 여럿). FAQ 응대가 아니면 null, 구버전 서버는 칸 없음
   questionUtteranceOrder: number | null
   answerUtteranceOrder: number | null
 }
@@ -214,7 +214,7 @@ interface ResultBlock {
   reason: UnansweredReason | null // AI 미답변 사유 (null = 미분류 · 다른 결과)
 }
 export interface Recording {
-  recordingSeq: number // 재조회마다 서명 URL 글자가 바뀌어도 같은 녹취인지 보는 열쇠 (11/02 연동 명세)
+  recordingSeq: number // 재조회마다 서명 URL 글자가 바뀌어도 같은 녹취인지 보는 열쇠 (연동 명세)
   url: string | null
   expiresAt: string | null
   error: RecordingDto['playbackError']
@@ -256,7 +256,7 @@ export function durationSec(startedAt: string | null, endedAt: string | null): n
   return Math.max(0, Math.round((Date.parse(endedAt) - Date.parse(startedAt)) / 1000))
 }
 
-/** 고객을 못 찾은 통화(번호만 있음)는 AI가 신규라 해도 신규로 안 봄 — 미등록 발신자를 신규로 부를지 팀 결정 전 (11/10) */
+/** 고객을 못 찾은 통화(번호만 있음)는 AI가 신규라 해도 신규로 안 봄 — 미등록 발신자를 신규로 부를지 팀 결정 전 */
 function isNewOf(c: CallDto, isNewCustomer: boolean | null | undefined): boolean | null {
   if (c.customerSeq === null || c.customerName === null) return null
   return isNewCustomer ?? null

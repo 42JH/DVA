@@ -2,16 +2,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { FETCH_ALL_MAX } from '@/shared/api/paging'
 import { ymd } from '@/shared/lib/dateRange'
-import { fmtListTime, fmtPhone, fmtTime } from '@/shared/lib/format'
+import { fmtListTime, fmtPhone, fmtTime, fmtNum } from '@/shared/lib/format'
 import { matchKo, phoneDigits } from '@/shared/lib/search'
 import { useListParams } from '@/shared/lib/useListParams'
-import {
-  deleteUnanswered,
-  unansweredQueries,
-  type UnansweredQuestion,
-} from '@/features/faq/api/unansweredApi'
+import { deleteUnanswered, unansweredQueries, type UnansweredQuestion } from '../api/unansweredApi'
 
-export type { UnansweredQuestion } from '@/features/faq/api/unansweredApi'
+export type { UnansweredQuestion } from '../api/unansweredApi'
 
 /** 목록 한 줄 = 질문 + 화면용 글 (시각 '오후 3:02' · 하이픈 전화번호) */
 export type UnansweredRow = UnansweredQuestion & { time: string; phone: string }
@@ -22,7 +18,7 @@ const DEFAULTS = { q: '', call: '' }
 
 type Modal = { kind: 'delete' | 'faq'; item: UnansweredQuestion } | null
 
-/** 09 AI 미답변 문의 훅 (Figma 'FAQ 미답변' 11/06) — 처리 안 된 질문만 · 오래된 날부터(먼저 쌓인 것부터 처리)
+/** 09 AI 미답변 문의 훅 — 처리 안 된 질문만 · 오래된 날부터(먼저 쌓인 것부터 처리)
  * 검색 = 질문 · 이름 · 전화번호. 줄마다 [+](FAQ 화면 맨 위 추가 칸 → 저장하면 처리됨) · [휴지통](확인 창). 줄을 누르면 그 통화의 06
  * 같은 질문 묶기 · 한꺼번에 처리 없음 (콜드 스타트, MVP 후) */
 export function useUnansweredList() {
@@ -83,15 +79,15 @@ export function useUnansweredList() {
     clearCall: () => set({ call: '' }), // ✕ → 전체 미답변으로
     rows,
     count: hit.length, // 검색 중엔 결과 수
-    // 서버가 오래된 것부터 주고 2,000개까지만 받음 → 그 뒤(최신) 질문은 목록에 없음. 넘으면 서버 쪽 넘김으로 바꿔야 함 (11/02)
+    // 서버가 오래된 것부터 주고 2,000개까지만 받음 → 그 뒤(최신) 질문은 목록에 없음. 넘으면 서버 쪽 넘김으로 바꿔야 함
     listNote: capped
-      ? `오래된 ${FETCH_ALL_MAX.toLocaleString('ko-KR')}개만 표시됩니다 (전체 ${(total.data ?? 0).toLocaleString('ko-KR')}개)`
+      ? `오래된 ${fmtNum(FETCH_ALL_MAX)}개만 표시됩니다 (전체 ${fmtNum(total.data ?? 0)}개)`
       : null,
     isLoading: list.isPending,
     listError: list.error?.message ?? null,
 
     modal,
-    // [FAQ 등록] = 이 화면에서 바로 창으로 (11/11 — FAQ 화면으로 넘어갔다 오던 것). 질문 칸은 고객이 한 말, 저장하면 이 질문이 처리됨(API-27)
+    // [FAQ 등록] = 이 화면에서 바로 창으로 (FAQ 화면으로 넘어갔다 오던 것). 질문 칸은 고객이 한 말, 저장하면 이 질문이 처리됨(API-27)
     openAdd: (u: UnansweredQuestion) => setModal({ kind: 'faq', item: u }),
     openDelete: (u: UnansweredQuestion) => {
       remove.reset()

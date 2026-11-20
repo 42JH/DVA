@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { faqResultText, groupActions, refineAction } from './actionText'
 import type { AiAction } from './callDto'
 
-// 실서버에서 본 요약 (11/05 사용자 화면)
+// 실서버에서 본 요약 (화면)
 assert.equal(refineAction('실패·재질문: ADDRESS_NOT_FOUND'), '주소를 찾지 못해 다시 물음')
 assert.equal(refineAction('실패·재질문: DEST_NONE'), '받는 곳 후보가 없어 다시 물음')
 assert.equal(refineAction('실패·재질문: KB_UNAVAILABLE'), 'FAQ 검색 장애')

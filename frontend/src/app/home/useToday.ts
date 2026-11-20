@@ -1,4 +1,4 @@
-// 오늘 (첫 화면) — 위: 지금 처리할 일(건수 · 바로 가기) · 오늘 숫자, 아래: AI 상담 성능 요약 (기업 피드백: 통계는 아래로, 운영 정보 먼저)
+// 오늘 (첫 화면) — 위: 지금 처리할 일(건수 · 바로 가기) · 오늘 숫자, 아래: AI 상담 성능 요약 (통계는 아래로, 운영 정보 먼저)
 // 데이터는 홈 API 한 번 (GET /dashboard/home, 백엔드 11/09) — 모든 칸이 같은 조회 시점(observedAt)
 import { draftLabel, type ParcelDraftDto } from '@/shared/order/draftApi'
 import { useQuery } from '@tanstack/react-query'
@@ -42,7 +42,7 @@ export function useToday() {
     refetchInterval: 15_000, // 최근 통화(통화 중)가 너무 늦지 않게
   })
   const h = home.data
-  const complained = useQuery(dashboardQueries.complainedCalls('home')) // 통계 카드와 같은 캐시 (실서버 통계가 목데이터일 땐 따로)
+  const complained = useQuery(dashboardQueries.complainedCalls()) // 통계 카드와 같은 캐시
   const pct = (n: number | null | undefined) => (n == null ? '—' : `${n.toFixed(1)}%`)
   const pctOf = (v: string) => (v === '—' ? v : `${v}%`)
 
@@ -105,7 +105,7 @@ export function useToday() {
       ),
     })),
     perf: [
-      // 통계 [AI 응대 오류] 탭과 같은 값 — 서버 비율은 AI 응대 불만까지 섞여 있어(11/11) 통계처럼 목록으로 셈
+      // 통계 [AI 응대 오류] 탭과 같은 값 — 서버 비율은 AI 응대 불만까지 섞여 있어 통계처럼 목록으로 셈
       {
         label: 'AI 응대 오류가 난 통화',
         value: pctOf(

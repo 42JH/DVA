@@ -7,11 +7,6 @@ import { keepPreviousData, queryOptions } from '@tanstack/react-query'
 import { api, type ApiItem } from '@/shared/api/client'
 import { fetchAll } from '@/shared/api/paging'
 import type { CallListItemDto } from '@/shared/call/callDto'
-import { demoCard, demoComplainedCalls } from './dashboardDemo'
-
-/** 실서버 빌드에서만 통계 페이지(카드 · 그래프 보기)를 목데이터로 (11/18 사용자: 발표 · 시연용, 홈은 실데이터 그대로)
- *  개발 서버는 그대로 API(가짜 모드면 MSW가 같은 숫자). ponytail: 실제 통화가 쌓이면 false로 */
-const STATS_DEMO = import.meta.env.PROD
 
 export type CustomerType = 'ALL' | 'NEW' | 'EXISTING'
 export type Stage =
@@ -122,25 +117,20 @@ export const dashboardQueries = {
     queryOptions({
       queryKey: ['dashboard', card, customerType],
       queryFn: async ({ signal }) =>
-        STATS_DEMO
-          ? demoCard(card, customerType)
-          : (
-              await api.get<ApiItem<Cards[K]>>(`/dashboard/${card}`, {
-                query: { customerType },
-                signal,
-              })
-            ).data,
+        (
+          await api.get<ApiItem<Cards[K]>>(`/dashboard/${card}`, {
+            query: { customerType },
+            signal,
+          })
+        ).data,
       placeholderData: keepPreviousData, // 탭을 바꾸는 동안 이전 탭 카드가 흐리게 남음 (깜빡임 없게)
     }),
-  /** 판정에 불만 · 오류가 있는 통화 전부 — 서버 통계는 AI 응대 오류와 AI 응대 불만을 합친 비율 하나라서(11/11),
+  /** 판정에 불만 · 오류가 있는 통화 전부 — 서버 통계는 AI 응대 오류와 AI 응대 불만을 합친 비율 하나라서,
    *  고객 불만(대상별) · AI 응대 오류를 따로 세려고 목록을 받아 화면에서 셈. 통계 API처럼 기간 없이 전체
    *  ponytail: 최대 2,000통화(FETCH_ALL_MAX) — 넘으면 카드에 '최근 2,000통화 기준'. 서버가 두 집계를 주면 이걸 지움 */
-  complainedCalls: (page: 'stats' | 'home') =>
+  complainedCalls: () =>
     queryOptions({
-      queryKey: ['dashboard', 'complained-calls', page === 'stats' && STATS_DEMO],
-      queryFn: ({ signal }) =>
-        page === 'stats' && STATS_DEMO
-          ? demoComplainedCalls()
-          : fetchAll<CallListItemDto>('/calls', { hasComplaint: true }, signal),
+      queryKey: ['dashboard', 'complained-calls'],
+      queryFn: ({ signal }) => fetchAll<CallListItemDto>('/calls', { hasComplaint: true }, signal),
     }),
 }

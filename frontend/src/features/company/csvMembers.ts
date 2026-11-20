@@ -1,11 +1,11 @@
 // 08 사원 CSV → 등록 항목 (CSV로 기업 등록 · CSV로 사원 추가 공용). React를 모르는 순수 함수 — csvMembers.test.ts
-// 모양 (11/01 결정): 사번,사원명,전화번호,담당자(예전 파일의 '대표자'도 받음),부서,도로명 주소,지번 주소,동,우편번호,상세주소
-//   우편번호까지 9열 필수(상세주소 열만 생략 가능) · 값은 사번 · 사원명 · 전화 · 주소 4칸 필수, 담당자 · 부서 · 상세주소는 빈칸 가능 (11/01 결정)
+// 모양: 사번,사원명,전화번호,담당자(예전 파일의 '대표자'도 받음),부서,도로명 주소,지번 주소,동,우편번호,상세주소
+//   우편번호까지 9열 필수(상세주소 열만 생략 가능) · 값은 사번 · 사원명 · 전화 · 주소 4칸 필수, 담당자 · 부서 · 상세주소는 빈칸 가능
 //   담당자 'Y'(여러 명) · 주소는 카카오 검색 결과의 칸을 그대로
 // 서버에 파일을 보내지 않고 JSON으로 바꿔 보냄 (명세 7장: CSV API 없음). 행 번호는 머리줄 = 1행
 import { parseCsv } from '@/shared/lib/csv'
-import type { Member, MemberInput } from '@/features/company/api/companyApi'
-import { MEMBER_REASON } from '@/features/company/labels'
+import type { Member, MemberInput } from './api/companyApi'
+import { MEMBER_REASON } from './labels'
 
 const CSV_HEADER = [
   '사번',
@@ -19,10 +19,10 @@ const CSV_HEADER = [
   '우편번호',
   '상세주소',
 ] as const
-// 예시 CSV (11/06 사용자: 예시 CSV를 내려받아 엑셀로 열어도 앞 0이 사라지지 않게) — 사원 CSV · 기업 CSV(첫 칸 기업명) 두 양식
+// 예시 CSV (예시 CSV를 내려받아 엑셀로 열어도 앞 0이 사라지지 않게) — 사원 CSV · 기업 CSV(첫 칸 기업명) 두 양식
 //   엑셀은 CSV를 열 때 숫자처럼 보이는 칸('001' · '04524')을 숫자로 바꿔 앞 0을 지움 (CSV엔 칸 형식이 없어서)
 //   → 사번 · 우편번호는 ="001" 로 적음: 엑셀이 글자를 돌려주는 수식으로 읽어 0이 남고, 엑셀에서 저장하면 001로 저장됨
-//   → 전화번호는 전화번호 형식 010-0000-0001 (11/06 사용자: 전화번호 형식으로 통일) — 하이픈이 있어 엑셀이 숫자로 안 바꿈
+//   → 전화번호는 전화번호 형식 010-0000-0001 (전화번호 형식으로 통일) — 하이픈이 있어 엑셀이 숫자로 안 바꿈
 //   맨 앞 BOM — 엑셀이 UTF-8로 읽게 (없으면 한글이 깨짐). 양식(CSV_HEADER)을 바꾸면 여기도 같이 고침
 const ADDR = ['서울특별시 중구 세종대로 110', '서울특별시 중구 태평로1가 31', '태평로1가', '04524']
 const EXAMPLE_ROWS = [
@@ -63,7 +63,7 @@ export function downloadExample(kind: CsvKind = 'members') {
 /** 엑셀 글자 칸 표기를 벗김 — 예시의 ="001" (엑셀 말고 메모장으로 고친 파일) · 엑셀에서 쓴 '001 */
 const plainCell = (v: string) => /^="(.*)"$/s.exec(v)?.[1] ?? v.replace(/^'(?=\d)/, '')
 
-/** 올린 파일 → 검사 결과. 엑셀(.xlsx)이면 첫 시트를, 아니면 CSV로 읽어 같은 검사(readMembersRows)에 넘김 (11/06) */
+/** 올린 파일 → 검사 결과. 엑셀(.xlsx)이면 첫 시트를, 아니면 CSV로 읽어 같은 검사(readMembersRows)에 넘김 */
 export async function readMembersFile(file: File, kind: CsvKind = 'members'): Promise<CsvResult> {
   if (!/\.xlsx$/i.test(file.name)) return readMembersCsv(decodeCsv(await file.arrayBuffer()), kind)
   try {
@@ -80,12 +80,12 @@ export async function readMembersFile(file: File, kind: CsvKind = 'members'): Pr
 }
 
 const MAX_MEMBERS = 1000 // 명세: 한 번에 1~1000건
-const SHOW_ERRORS = 3 // 오류는 처음 3줄까지 (11/01 결정), 나머지는 '외 n건'
+const SHOW_ERRORS = 3 // 오류는 처음 3줄까지, 나머지는 '외 n건'
 const REQUIRED_COLUMNS = 9 // 사번 ~ 우편번호 (기업 CSV는 앞에 기업명)
 const MAX_COMPANY_NAME = 100
 const MAX_DEPARTMENT_NAME = 100 // 서버 부서 이름 최대 (CreateDepartmentDto)
 
-/** 파일 바이트 → 글자. UTF-8로 읽어 보고 깨지면(잘못된 바이트) EUC-KR로 (11/01 결정 A)
+/** 파일 바이트 → 글자. UTF-8로 읽어 보고 깨지면(잘못된 바이트) EUC-KR로 (A)
  * 엑셀 '다른 이름으로 저장 → CSV'의 기본이 EUC-KR(한국어 Windows)이라 그대로 읽으면 한글이 깨짐. 브라우저 기본 TextDecoder만 씀 */
 export function decodeCsv(bytes: ArrayBuffer): string {
   try {
@@ -95,7 +95,7 @@ export function decodeCsv(bytes: ArrayBuffer): string {
   }
 }
 
-// 전화번호 = 전화번호 형식 010-1234-5678 하나로 통일 (11/06 사용자: 무조건 전화번호 형식) — CSV · 사원 추가 창(수기 등록) 공용
+// 전화번호 = 전화번호 형식 010-1234-5678 하나로 통일 (무조건 전화번호 형식) — CSV · 사원 추가 창(수기 등록) 공용
 //   하이픈 · 공백은 있어도 없어도 받고, 서버엔 숫자 11자리로 보냄 = 백엔드 사원 전화(MOBILE_PHONE_PATTERN '휴대전화 번호 11자리 문자열, 선행 0 유지')
 export const phoneDigits = (v: string) => v.replace(/[-\s]/g, '')
 const isPhone = (digits: string) => /^0\d{10}$/.test(digits)
@@ -159,6 +159,50 @@ const fail = (all: string[]): CsvResult => ({
 export const readMembersCsv = (text: string, kind: CsvKind = 'members'): CsvResult =>
   readMembersRows(parseCsv(text), kind)
 
+/** 한 줄 검사 → 사원 또는 오류 문장. company = 기업 CSV면 첫 칸(기업명), 사원 CSV면 null. 줄끼리 겹침은 부르는 쪽에서 */
+function checkRow(
+  [no = '', name = '', phone = '', leader = '', dept = '', ...addr]: string[],
+  line: number,
+  company: string | null,
+): CsvMember | string {
+  const digits = csvPhone(phone)
+  if (company === '') return `${line}행 기업명이 비어 있습니다.`
+  if (company && company.length > MAX_COMPANY_NAME)
+    return `${line}행 기업명은 ${MAX_COMPANY_NAME}자까지입니다.`
+  if (!no) return `${line}행 사번이 비어 있습니다.`
+  if (EXCEL_NUMBER.test(no)) return excelNumberError(line, '사번')
+  if (!name) return `${line}행 사원명이 비어 있습니다.`
+  if (EXCEL_NUMBER.test(phone)) return excelNumberError(line, '전화번호')
+  const badPhone = phoneError(digits)
+  if (badPhone) return `${line}행 ${badPhone}`
+  if (leader !== '' && leader.toUpperCase() !== 'Y')
+    return `${line}행 담당자는 Y 또는 빈칸이어야 합니다.`
+  if (dept.length > MAX_DEPARTMENT_NAME)
+    return `${line}행 부서 이름은 ${MAX_DEPARTMENT_NAME}자까지입니다.`
+  const [road = '', jibun = '', dong = '', postal = '', detail = ''] = addr
+  if (!(road && jibun && dong && postal))
+    return `${line}행 주소는 도로명, 지번, 동, 우편번호를 모두 써 주세요.`
+  // 엑셀은 0으로 시작하는 번호(서울 01~09)의 앞 0만 지움 → 4자리면 0 하나가 빠진 것. 그 밖의 길이는 원래 값을 알 수 없어 막음
+  const zip = /^\d{4}$/.test(postal) ? `0${postal}` : postal
+  if (!/^\d{5}$/.test(zip)) return `${line}행 우편번호는 숫자 5자리여야 합니다.`
+  return {
+    ...(company !== null ? { company } : {}),
+    employeeNo: no,
+    name,
+    phoneNumber: digits,
+    leader: leader !== '',
+    department: dept || null,
+    address: {
+      roadAddress: road,
+      jibunAddress: jibun,
+      dongName: dong,
+      postalCode: zip,
+      detailAddress: detail,
+    },
+    line,
+  }
+}
+
 /** 줄 · 칸(CSV든 엑셀이든) → 사원 목록 또는 오류 */
 function readMembersRows(rows: string[][], kind: CsvKind = 'members'): CsvResult {
   const [rawHead, ...rawBody] = rows.map((r) => r.map((v) => plainCell(v.trim())))
@@ -188,55 +232,21 @@ function readMembersRows(rows: string[][], kind: CsvKind = 'members'): CsvResult
   const members: CsvMember[] = []
   const seenNo = new Map<string, number>()
   const seenPhone = new Map<string, number>()
-  body.forEach(([no = '', name = '', phone = '', leader = '', dept = '', ...addr], i) => {
+  body.forEach((cells, i) => {
     const line = i + 2 // 머리줄 다음부터
-    const digits = csvPhone(phone)
-    const company = companies[i] ?? ''
-    if (withCompany && !company) return errors.push(`${line}행 기업명이 비어 있습니다.`)
-    if (company.length > MAX_COMPANY_NAME)
-      return errors.push(`${line}행 기업명은 ${MAX_COMPANY_NAME}자까지입니다.`)
+    const r = checkRow(cells, line, withCompany ? (companies[i] ?? '') : null)
+    if (typeof r === 'string') return errors.push(r)
     // 사번은 같은 기업 안에서만 겹치면 안 됨. 전화번호는 한 사람이 두 기업에 들 수 없어 파일 전체에서
-    const noKey = `${company}|${no}`
-    if (!no) return errors.push(`${line}행 사번이 비어 있습니다.`)
-    if (EXCEL_NUMBER.test(no)) return errors.push(excelNumberError(line, '사번'))
-    if (!name) return errors.push(`${line}행 사원명이 비어 있습니다.`)
-    if (EXCEL_NUMBER.test(phone)) return errors.push(excelNumberError(line, '전화번호'))
-    const badPhone = phoneError(digits)
-    if (badPhone) return errors.push(`${line}행 ${badPhone}`)
-    if (leader !== '' && leader.toUpperCase() !== 'Y')
-      return errors.push(`${line}행 담당자는 Y 또는 빈칸이어야 합니다.`)
-    if (dept.length > MAX_DEPARTMENT_NAME)
-      return errors.push(`${line}행 부서 이름은 ${MAX_DEPARTMENT_NAME}자까지입니다.`)
-    const [road = '', jibun = '', dong = '', postal = '', detail = ''] = addr
-    if (!(road && jibun && dong && postal))
-      return errors.push(`${line}행 주소는 도로명, 지번, 동, 우편번호를 모두 써 주세요.`)
-    // 엑셀은 0으로 시작하는 번호(서울 01~09)의 앞 0만 지움 → 4자리면 0 하나가 빠진 것. 그 밖의 길이는 원래 값을 알 수 없어 막음
-    const zip = /^\d{4}$/.test(postal) ? `0${postal}` : postal
-    if (!/^\d{5}$/.test(zip)) return errors.push(`${line}행 우편번호는 숫자 5자리여야 합니다.`)
     // 명세: 요청 안의 사번 · 전화 중복은 보내기 전에 정리 → 겹치면 어느 줄인지 알려 줌
+    const noKey = `${r.company ?? ''}|${r.employeeNo}`
     if (seenNo.has(noKey)) return errors.push(`${line}행 사번이 ${seenNo.get(noKey)}행과 겹칩니다.`)
-    if (seenPhone.has(digits))
-      return errors.push(`${line}행 전화번호가 ${seenPhone.get(digits)}행과 겹칩니다.`)
+    if (seenPhone.has(r.phoneNumber))
+      return errors.push(`${line}행 전화번호가 ${seenPhone.get(r.phoneNumber)}행과 겹칩니다.`)
     seenNo.set(noKey, line)
-    seenPhone.set(digits, line)
-    members.push({
-      ...(withCompany ? { company } : {}),
-      employeeNo: no,
-      name,
-      phoneNumber: digits,
-      leader: leader !== '',
-      department: dept || null,
-      address: {
-        roadAddress: road,
-        jibunAddress: jibun,
-        dongName: dong,
-        postalCode: zip,
-        detailAddress: detail,
-      },
-      line,
-    })
+    seenPhone.set(r.phoneNumber, line)
+    members.push(r)
   })
-  // 한 파일 = 한 기업 (11/11 사용자) · 담당자 1명 이상
+  // 한 파일 = 한 기업 · 담당자 1명 이상
   if (withCompany && errors.length === 0) {
     const companies = [...new Set(members.map((m) => m.company ?? ''))] // 파일에 나온 순서
     if (companies.length > 1)
@@ -252,7 +262,7 @@ export function serverRowErrors(
   members: CsvMember[],
 ): string[] {
   return details.flatMap((d) => {
-    // 사원 추가는 items.N, 기업 한 번에 등록은 members.N (11/01)
+    // 사원 추가는 items.N, 기업 한 번에 등록은 members.N
     const m = /^(?:items|members)\.(\d+)(?:\.(\w+))?/.exec(d.field)
     const row = m ? members[Number(m[1])] : undefined
     if (!row) return []
@@ -262,9 +272,9 @@ export function serverRowErrors(
   })
 }
 
-/** CSV 사원 추가 미리 보기 (11/01 결정 B) — 기존 사원과 비교해 신규 · 바뀜 · 변경 없음으로 나눔
+/** CSV 사원 추가 미리 보기 (B) — 기존 사원과 비교해 신규 · 바뀜 · 변경 없음으로 나눔
  * 서버는 같은 사번이면 조용히 덮어써서, 무엇이 바뀌는지 [등록] 전에 보여 줌
- * 비교 칸 (11/01 결정): 이름 · 전화 · 담당자 · 부서 · 주소(좌표 빼고) */
+ * 비교 칸: 이름 · 전화 · 담당자 · 부서 · 주소(좌표 빼고) */
 type ChangedField = '사원명' | '전화번호' | '담당자' | '부서' | '주소'
 interface CsvChange {
   row: CsvMember

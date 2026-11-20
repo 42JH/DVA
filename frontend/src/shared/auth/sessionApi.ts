@@ -12,7 +12,7 @@ interface AdminMe {
   loginId: string
   name: string // 관리자 이름 '홍길동' (API-04) — 작성자 · 내정보 표시용
   role: AdminRole
-  status: 'ACTIVE' | 'PENDING' | 'INACTIVE' // INACTIVE = 최고 관리자가 비활성화 (10/30 00 디자인)
+  status: 'ACTIVE' | 'PENDING' | 'INACTIVE' // INACTIVE = 최고 관리자가 비활성화 (00 디자인)
 }
 
 export const sessionQueries = {

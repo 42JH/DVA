@@ -1,6 +1,6 @@
 // 화면을 새로 열 때 나가는 API 요청 수 — 화면 틀이 부르던 미완료 건수(parcel-drafts?limit=1) 요청이 화면마다 있는지
 // 가짜 서버(mock 5174). 실행: node shell-reqs.cjs
-const { chromium } = require(process.env.PW_CORE ?? 'C:/Users/SSAFY/AppData/Local/Temp/pw/node_modules/playwright-core')
+const { chromium } = require(process.env.PW_CORE ?? 'playwright-core')
 const BASE = process.env.BASE ?? 'http://localhost:5174'
 const PATHS = ['/', '/orders', '/calls', '/customers', '/companies', '/faqs', '/unanswered', '/personas', '/stats', '/admins']
 ;(async () => {

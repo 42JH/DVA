@@ -1,5 +1,5 @@
 // 화면 틀(AppLayout)이 한 번 받아 둔 상단 · 사이드바 상태 — 화면 위 줄(PageHead) · 홈이 같이 씀
-// 틀만 받음: 부를 때마다 진행 통화 SSE가 하나씩 더 열리던 것 (11/09 검수)
+// 틀만 받음: 부를 때마다 진행 통화 SSE가 하나씩 더 열리던 것
 import { createContext, useContext } from 'react'
 
 export interface Shell {

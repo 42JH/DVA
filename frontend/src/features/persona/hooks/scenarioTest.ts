@@ -1,5 +1,6 @@
 // 시나리오 시험 결과 읽기 (순수 함수, scenarioTest.test.ts) — 표의 칸 · 변화 · [통화에 사용하기] 관문
-import type { Check, Scenario, TestItem, VersionTest } from '@/features/persona/api/scenarioTestApi'
+import type { Check, Scenario, TestItem, VersionTest } from '../api/scenarioTestApi'
+import type { PersonaVersion } from '../api/personaApi'
 
 /** 표의 한 칸: 통과 · 실패 · 연결 실패 · 시험 중 · 대기 · 결과 없음 */
 export type Cell = 'pass' | 'fail' | 'error' | 'running' | 'queued' | 'none'
@@ -11,7 +12,7 @@ type Key = { personaSeq: number; version: number }
 const same = (a: Key, b: Key | null) =>
   !!b && a.personaSeq === b.personaSeq && a.version === b.version
 
-/** 버전을 부르는 말 (11/13 새 안 — 화면에 '버전'이라는 말 없음). 시험 결과 위 줄 · 표 머리 · 상세 탭이 같이 씀
+/** 버전을 부르는 말 (화면에 '버전'이라는 말 없음). 시험 결과 위 줄 · 표 머리 · 상세 탭이 같이 씀
  *  통화에 쓰는 버전 = '통화에 쓰는 내용', 사용 중 상담가의 최신 = '고친 내용', 그 상담가의 더 옛 버전 = '이전 내용', 다른 상담가 = 그 이름 */
 export function sideLabel(me: Key & { isHead: boolean }, active: Key | null, name: string) {
   if (same(me, active)) return '통화에 쓰는 내용'
@@ -72,6 +73,25 @@ export function withActiveTests(
   const base = baseOf(tests, versions, active)
   if (!active || !base || base.version === active.version) return tests
   return tests.map((t) => (t === base ? { ...t, version: active.version } : t))
+}
+
+/** 버전마다 AI가 받는 것(프롬프트 · 목소리)을 한 글로 — 내용이 같은 버전 찾기(withActiveTests · withCarriedTests)에 씀
+ *  상담가 이름은 통화용 글(백엔드 composePersonaPrompt)에 들어가지 않아 비교에서 뺌 */
+export const talksOf = (versions: PersonaVersion[] | undefined) =>
+  (versions ?? [])
+    .filter((v) => !v.isDraft)
+    .map((v) => ({ version: v.version, talk: JSON.stringify([v.prompt, v.voice]) }))
+
+/** 이 버전을 시험한 적이 없고, 프롬프트 · 목소리가 같은 바로 앞 버전들(이름만 바꿈)에 결과가 있으면 그 결과를 이 버전 것으로 덧붙임
+ *  — 원래 버전의 결과는 그대로 둠(통화에 쓰는 버전과 비교할 때 씀). 이름을 바꿨다고 다시 시험(요금)하지 않게 */
+export function withCarriedTests(
+  tests: VersionTest[],
+  versions: { version: number; talk: string }[],
+  me: Key | null,
+): VersionTest[] {
+  const base = baseOf(tests, versions, me)
+  if (!me || !base || base.version === me.version) return tests
+  return [...tests, { ...base, version: me.version }]
 }
 
 /** 통화에 쓰는 내용의 시험 결과. 그 버전 것이 없으면 AI가 받는 것(프롬프트 · 목소리)이 같은 바로 앞 버전들의 결과
@@ -143,7 +163,7 @@ export function failLine(c: Check, lines: Line[], script: string[]): number | nu
   return null
 }
 
-/** 판정기가 주는 대본 진행 항목 이름. 판정기 문구는 그대로 두고 화면에서만 바꿈(11/13) — 이미 저장된 결과도 같은 이름으로 보이게 */
+/** 판정기가 주는 대본 진행 항목 이름. 판정기 문구는 그대로 두고 화면에서만 바꿈 — 이미 저장된 결과도 같은 이름으로 보이게 */
 const SCRIPT_CHECK = '대본 진행'
 /** '말하지 못한 발화: [4, 5]' → [4, 5] (대본 번호는 1부터) */
 const unsaid = (actual: unknown): number[] =>

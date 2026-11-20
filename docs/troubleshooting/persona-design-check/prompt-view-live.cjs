@@ -3,10 +3,10 @@
 //  2) 가짜 서버(5174, 새 코드): 그 원문을 칸에 넣고 칸 밖을 눌러 보는 모양으로 → 화면에 보이는 글 · 쓰인 꾸밈 종류를 뽑음
 //  3) 원문에서 마크다운 기호만 뺀 글과 화면 글이 같은지 비교. 원문은 화면에 찍지 않고 길이 · 다른 자리 앞뒤 몇 글자만 냄
 // 실행: LH_ID=… LH_PW=… node prompt-view-live.cjs <그림 남길 폴더>   (로그인 정보는 환경변수로만, 어디에도 적지 않음)
-const { chromium } = require(process.env.PW_CORE ?? 'C:/Users/SSAFY/AppData/Local/Temp/pw/node_modules/playwright-core')
+const { chromium } = require(process.env.PW_CORE ?? 'playwright-core')
 const fs = require('fs')
 const path = require('path')
-const LIVE = process.env.LIVE ?? 'https://dva-d109.duckdns.org'
+const LIVE = process.env.LIVE ?? (() => { throw new Error('LIVE(관리자 웹 주소)가 필요합니다') })()
 const MOCK = process.env.BASE ?? 'http://localhost:5174'
 const OUT = process.argv[2]
 fs.mkdirSync(OUT, { recursive: true })

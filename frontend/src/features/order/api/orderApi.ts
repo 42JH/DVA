@@ -15,7 +15,7 @@ export type { OrderDetail, Party, PaymentMethod } from '@/shared/order/orderApi'
 import type { OrderStatusDto } from '@/shared/order/orderDto'
 export type OrderStatus = OrderStatusDto
 
-/** '주문 상태' 고르기 = 서버 statusGroup (11/11): 결제 완료 = PAID · SUBMITTING · SUBMITTING_FAILED(재시도 중), 접수 완료 = ACCEPTED, 접수 실패 = SUBMISSION_FAILED */
+/** '주문 상태' 고르기 = 서버 statusGroup: 결제 완료 = PAID · SUBMITTING · SUBMITTING_FAILED(재시도 중), 접수 완료 = ACCEPTED, 접수 실패 = SUBMISSION_FAILED */
 export type StatusGroup = 'ALL' | OrderGroup
 
 /** OrderListParty — 수집 중이면 칸마다 null일 수 있음 */
@@ -62,7 +62,7 @@ export const orderQueries = {
     }),
 }
 
-// ---------- 결제 자격 (11/10) ----------
+// ---------- 결제 자격 ----------
 // 서버 규칙 (customers.repository availablePaymentMethods · order-payments eligibility):
 // 개인카드 = 늘 · 월결제 = 개인 고객은 고객 설정, 기업 소속은 기업 설정 · 그룹카드 = 기업 소속 + 부서 설정. 접수 때 서버가 다시 확인(아니면 403)
 const PAY_FROM_DTO: Record<'billing' | 'credit' | 'groupBilling', PaymentMethod> = {
@@ -97,7 +97,7 @@ async function fetchPayContext(phone: string, signal?: AbortSignal): Promise<Pay
 
 /** 개인 고객에게 월결제 추가 — 주문을 보내기 전에 (서버가 접수 순간 자격을 확인). 고객 번호를 돌려줌
  * 기존 고객 = PATCH /customers/{id} · 처음 보는 번호 = POST /customers(주소 필수)로 월결제 켠 채 생성
- * 그 사이 같은 번호가 등록됐으면(409) 다시 찾아 PATCH. 주문이 나중에 실패해도 월결제은 켜진 채 남음 (11/10 결정) */
+ * 그 사이 같은 번호가 등록됐으면(409) 다시 찾아 PATCH. 주문이 나중에 실패해도 월결제은 켜진 채 남음 */
 export async function addMonthly(customerSeq: number | null, sender: PartyInput): Promise<number> {
   const patch = (id: number) =>
     api.patch(`/customers/${id}`, { body: { monthlyBillingEnabled: true } }).then(() => id)

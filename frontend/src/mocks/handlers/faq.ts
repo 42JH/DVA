@@ -4,7 +4,7 @@ import { todayYmd } from '@/shared/lib/dateRange'
 import { recentQuestionsOf } from './faqHeard'
 
 // 가짜 FAQ · AI 미답변 — 연동 상세명세 10/31 API-26~33 모양 그대로. 메모리에만 있어서 새로고침하면 처음으로
-// 예시 질문은 와이어프레임 09 + 디버 FAQ 참고자료([프로젝트] 고정값) 기준. 분류는 10개(10/28 '기타' 추가). 전부 예시
+// 예시 질문은 와이어프레임 09 + 디버 FAQ 참고자료([프로젝트] 고정값) 기준. 분류는 10개 ('기타' 추가). 전부 예시
 type Faq = {
   faqEntrySeq: number
   category: string
@@ -36,7 +36,7 @@ export const SEED: [string, string, string][] = [
     '평일 오전에 접수하면 당일 수거, 오후 접수는 다음 영업일 수거입니다. 기사님 방문 시간은 접수 후 문자로 안내해 드립니다.',
   ],
   [
-    // 실서버 FAQ 4번처럼 답변이 마크다운 표인 경우 (11/01) — 09 답변 띠가 표로 그리는지 확인용
+    // 실서버 FAQ 4번처럼 답변이 마크다운 표인 경우 — 09 답변 띠가 표로 그리는지 확인용
     '접수',
     '주문 상태는 어떻게 나뉘나요?',
     '| 상태 | 뜻 |\n| --- | --- |\n| 접수완료 (notPaid) | 접수는 됐고 아직 결제하지 않은 상태 |\n| 결제완료 (paid) | 결제가 끝났고, 지점이 아직 물건을 받지 않은 상태 |\n| 수령완료 (received) | 지점이 고객의 물건을 받은 상태 |\n| 발송완료 (sent) | 택배사에 넘긴 상태. 이후는 택배사 운송장으로 추적 |\n| 취소완료 (canceled) | 관리자가 취소 요청을 확인하고 승인한 상태 |',
@@ -273,7 +273,7 @@ const UA_SEED: [string, string, string, string, number?, number?][] = [
   [`${today}T10:47:00`, '(주)새봄식품', '01031167745', '아이스박스는 몇 개까지 한 번에 돼요?'],
   [`${today}T11:30:00`, '진우석', '01067702218', '받는 분이 집에 없으면 어떻게 돼요?'],
 ]
-// 사유(11/04 미답변 사유 연동): 10/19까지 = 사유 연동 전에 쌓인 질문(미분류 null) · 10/20 15시대와 9104 통화 = 검색 서버가 멈춘 때(검색 장애) · 나머지 = 근거 부족
+// 사유 (미답변 사유 연동): 10/19까지 = 사유 연동 전에 쌓인 질문(미분류 null) · 10/20 15시대와 9104 통화 = 검색 서버가 멈춘 때(검색 장애) · 나머지 = 근거 부족
 const reasonOf = (at: string, call?: number): Unanswered['reason'] =>
   at < '2026-10-20'
     ? null
@@ -324,7 +324,7 @@ export const faqHandlers = [
       .sort((a, b) => a.faqEntrySeq - b.faqEntrySeq)
     return HttpResponse.json(pageOf(hit, url))
   }),
-  // FAQ 상세 + 고객 질문 사례 (11/05 연동) — recentQuestions 최대 10 · 최신순, 없으면 [] (null 아님)
+  // FAQ 상세 + 고객 질문 사례 (연동) — recentQuestions 최대 10 · 최신순, 없으면 [] (null 아님)
   http.get(`${API_BASE_URL}/faqs/:id`, ({ params }) => {
     const faq = faqs.find((f) => f.faqEntrySeq === Number(params.id))
     if (!faq) return error(404, 'NOT_FOUND', 'FAQ가 없습니다.')
