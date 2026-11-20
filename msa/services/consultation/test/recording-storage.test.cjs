@@ -22,6 +22,18 @@ const config = () =>
     RECORDING_ALLOWED_HOSTS: [host],
   });
 
+test('recording downloads stay disabled until a source host and destination bucket are set', t => {
+  const settings = config();
+  const storage = new RecordingStorage(settings);
+  t.after(() => storage.onApplicationShutdown());
+  assert.equal(storage.configured, true);
+  settings.set('RECORDING_ALLOWED_HOSTS', []);
+  assert.equal(storage.configured, false);
+  settings.set('RECORDING_ALLOWED_HOSTS', [host]);
+  settings.set('S3_RECORDINGS_BUCKET', '');
+  assert.equal(storage.configured, false);
+});
+
 test('playback uses the source SDK signing lifetime and isolates recording errors',async t=>{
   const {HeadObjectCommand}=require('@aws-sdk/client-s3');
   const {RecordingPlaybackService}=require('../dist/consultations/recording-playback.service');

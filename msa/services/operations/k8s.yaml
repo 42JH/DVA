@@ -57,7 +57,7 @@ spec:
               valueFrom:
                 secretKeyRef: {name: msa-ai-business, key: AI_BUSINESS_TOKEN, optional: true}
             - name: CORS_ORIGINS
-              value: "https://13.209.59.180,https://k15d109.p.ssafy.io"
+              value: "__MSA_CORS_ORIGINS__"
             - name: SWAGGER_ENABLED
               value: "true"
             - name: CONSULTATION_URL
@@ -146,7 +146,7 @@ metadata:
 spec:
   ingressClassName: traefik
   rules:
-    - host: k15d109.p.ssafy.io
+    - host: __MSA_INGRESS_HOST__
       http:
         paths:
           - path: /health

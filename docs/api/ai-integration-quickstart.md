@@ -5,7 +5,7 @@
 이번 MR 배포 후 적용한다. AI는 상담 결과를 백엔드에 전달하고, 디버 접수·녹취 다운로드·S3 저장은 백엔드가 처리한다.
 
 - 내부 주소: 같은 Docker 네트워크에서 `http://backend:3000`
-- 외부 주소: `https://13.209.59.180`
+- 외부 주소 예시: `https://192.0.2.10`
 - 공통: `Content-Type: application/json`. 고객 확인·등록·상세·수정은 `Authorization: Bearer <AI_BUSINESS_TOKEN>`이 필요하다. AI는 관리자 쿠키를 보내지 않는다. 주문 결과 전송은 기존 계약을 유지한다. [고객 인증 전환](../../backend/docs/ai-business-auth.md)
 
 ## 1. 통화 시작: 고객 확인

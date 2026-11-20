@@ -86,8 +86,7 @@ export class PbxWebhookController {
           maxLength: 8192,
           description:
             '인증 없이 GET 가능한 HTTPS 녹취 URL 또는 서명 URL. 설정된 다운로드 호스트만 허용.',
-          example:
-            'https://dvercorp-aicc-connect-dev-recordings.s3.ap-northeast-2.amazonaws.com/example.mp3',
+          example: 'https://recordings.example.test/example.mp3',
         },
       },
     },

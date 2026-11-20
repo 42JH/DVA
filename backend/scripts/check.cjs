@@ -173,7 +173,7 @@ try {
     '-e',
     'AI_AGENT_URL=http://ai.invalid:8000',
     '-e',
-    'CORS_ORIGINS=https://13.209.59.180',
+    'CORS_ORIGINS=https://frontend.example.test',
     '-e',
     `PBX_WEBHOOK_TOKEN=${webhookToken}`,
     '-e',

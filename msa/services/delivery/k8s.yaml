@@ -112,7 +112,7 @@ metadata:
 spec:
   ingressClassName: traefik
   rules:
-    - host: k15d109.p.ssafy.io
+    - host: __MSA_INGRESS_HOST__
       http:
         paths:
           - path: /delivery

@@ -2,7 +2,7 @@
 
 이 문서는 최초 최적화 기록이다. 후속 실행 범위 확대·테스트 준비 정리는 [테스트 정리 결과](test-cleanup-results.md)를 참고한다.
 
-기준: develop-backend 9f6c72e. 작업: ci/backend-checks. 프론트·AI·MSA 소스, 업무 API와 DB 스키마는 변경하지 않는다. Jira 연결은 사용자 요청으로 생략한다.
+기준: develop-backend 9f6c72e. 작업: ci/backend-checks. 프론트·AI·MSA 소스, 업무 API와 DB 스키마는 변경하지 않는다.
 
 ## 작업 단위와 검증
 

@@ -89,6 +89,6 @@ loki.process "sanitized" {
 
 loki.write "msa" {
   endpoint {
-    url = "http://loki.dva-observability.svc:3100/loki/api/v1/push"
+    url = sys.env("MSA_LOKI_PUSH_URL")
   }
 }

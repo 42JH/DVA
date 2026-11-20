@@ -201,16 +201,18 @@ test('a lost response or a stalled body is REVIEW_REQUIRED without a second exte
   assert.equal(requests.length, 1);
 });
 
-test('a missing Dver key disables submission without sending anything', async () => {
+test('a missing Dver endpoint or key disables submission without sending anything', async () => {
   requests = [];
-  const disabled = new DverClient(new ConfigService({ DVER_API_URL: url }));
-  assert.throws(
-    () => disabled.ensureConfigured(),
-    (error) => error.getStatus() === 503,
-  );
-  await assert.rejects(
-    () => disabled.submit(dverPayload(complete())),
-    (error) => error.getStatus() === 503,
-  );
+  for (const settings of [{ DVER_API_URL: url }, { DVER_API_KEY: 'test-only-key' }]) {
+    const disabled = new DverClient(new ConfigService(settings));
+    assert.throws(
+      () => disabled.ensureConfigured(),
+      (error) => error.getStatus() === 503,
+    );
+    await assert.rejects(
+      () => disabled.submit(dverPayload(complete())),
+      (error) => error.getStatus() === 503,
+    );
+  }
   assert.equal(requests.length, 0);
 });

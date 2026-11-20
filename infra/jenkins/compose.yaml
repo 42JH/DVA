@@ -8,6 +8,7 @@ services:
     environment:
       JAVA_OPTS: '-Xms256m -Xmx512m -Djenkins.install.runSetupWizard=false'
       JENKINS_OPTS: '--prefix=/jenkins'
+      JENKINS_PUBLIC_URL: "${JENKINS_PUBLIC_URL:-}"
     mem_limit: 1g
     cpus: 0.5
     pids_limit: 512

@@ -32,10 +32,12 @@ def kube(*args, data=None, output=None, source=None, timeout=180):
 
 
 def database(service):
-    secret = json.loads(kube('-n', 'dva', 'get', 'secret', service + '-db', '-o', 'json'))
+    namespace = 'dva'
+    postgres_dns = f'postgres.{namespace}.svc'
+    secret = json.loads(kube('-n', namespace, 'get', 'secret', service + '-db', '-o', 'json'))
     values = {key: base64.b64decode(secret['data'][key], validate=True).decode('utf-8')
               for key in ('PGHOST', 'PGPORT', 'PGDATABASE')}
-    if (values['PGHOST'] not in ('postgres', 'postgres.dva.svc', 'postgres.dva.svc.cluster.local')
+    if (values['PGHOST'] not in ('postgres', postgres_dns, f'{postgres_dns}.cluster.local')
             or values['PGPORT'] != '5432' or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]{0,62}', values['PGDATABASE'])):
         raise RuntimeError('055 automatic backup requires the configured in-cluster PostgreSQL')
     return values['PGDATABASE']

@@ -100,21 +100,27 @@ test('recording config is disabled until a bucket is set and bounds correlation 
   assert.equal(defaults.S3_RECORDINGS_BUCKET, undefined);
   assert.equal(defaults.AWS_REGION, 'ap-northeast-2');
   assert.equal(defaults.RECORDING_MATCH_WINDOW_SECONDS, 30);
-  assert.deepEqual(defaults.RECORDING_ALLOWED_HOSTS, [
-    'dvercorp-aicc-connect-dev-recordings.s3.ap-northeast-2.amazonaws.com',
-  ]);
+  assert.deepEqual(defaults.RECORDING_ALLOWED_HOSTS, []);
+  assert.deepEqual(
+    validateEnvironment({ ...valid, RECORDING_ALLOWED_HOSTS: '' }).RECORDING_ALLOWED_HOSTS,
+    [],
+  );
   const enabled = validateEnvironment({
     ...valid,
     S3_RECORDINGS_BUCKET: 'dva-private-recordings',
     RECORDING_MATCH_WINDOW_SECONDS: '10',
-    RECORDING_ALLOWED_HOSTS: 'records.example.test,second.example.test',
+    RECORDING_ALLOWED_HOSTS: 'Records.example.test, second.example.test',
   });
   assert.equal(enabled.RECORDING_MATCH_WINDOW_SECONDS, 10);
-  assert.equal(enabled.RECORDING_ALLOWED_HOSTS.length, 2);
+  assert.deepEqual(enabled.RECORDING_ALLOWED_HOSTS, [
+    'records.example.test',
+    'second.example.test',
+  ]);
   for (const settings of [
     { AWS_REGION: 'https://wrong.example' },
     { S3_RECORDINGS_BUCKET: 'arn:aws:s3:::secret-bucket' },
     { RECORDING_ALLOWED_HOSTS: '*' },
+    { RECORDING_ALLOWED_HOSTS: 123 },
     { RECORDING_ALLOWED_HOSTS: '127.0.0.1' },
     { RECORDING_ALLOWED_HOSTS: 'https://records.example.test' },
     { RECORDING_MATCH_WINDOW_SECONDS: '0' },
@@ -131,13 +137,13 @@ test('configuration parses ports and exact CORS origins; production docs default
   const config = validateEnvironment({
     ...valid,
     NODE_ENV: 'production',
-    CORS_ORIGINS: 'https://13.209.59.180,http://localhost:5173',
+    CORS_ORIGINS: 'https://frontend.example.test,http://localhost:5173',
     DB_PORT: '5433',
   });
   assert.equal(config.PORT, 3000);
   assert.equal(config.DB_PORT, 5433);
   assert.equal(config.SWAGGER_ENABLED, false);
-  assert.deepEqual(config.CORS_ORIGINS, ['https://13.209.59.180', 'http://localhost:5173']);
+  assert.deepEqual(config.CORS_ORIGINS, ['https://frontend.example.test', 'http://localhost:5173']);
 });
 
 test('missing/invalid configuration fails without including input values', () => {
@@ -189,7 +195,8 @@ test('the actual process exits before listening when a required setting is missi
 
 test('Dver requires HTTPS, rejects credential-bearing URLs and accepts empty keys as disabled', () => {
   const disabled = validateEnvironment(valid);
-  assert.equal(disabled.DVER_API_URL, 'https://purple-wood-25a4.summer2.workers.dev');
+  assert.equal(disabled.DVER_API_URL, undefined);
+  assert.equal(validateEnvironment({ ...valid, DVER_API_URL: '' }).DVER_API_URL, undefined);
   assert.equal(disabled.DVER_API_KEY, undefined);
   assert.equal(validateEnvironment({ ...valid, DVER_API_KEY: '' }).DVER_API_KEY, undefined);
   assert.equal(
@@ -197,7 +204,7 @@ test('Dver requires HTTPS, rejects credential-bearing URLs and accepts empty key
     'http://127.0.0.1:1234/parcel',
   );
   for (const invalid of [
-    { DVER_API_URL: '' },
+    { DVER_API_URL: 123 },
     { DVER_API_URL: 'http://provider.invalid/parcel' },
     { DVER_API_URL: 'https://user:secret@provider.invalid/parcel' },
     { DVER_API_URL: 'https://provider.invalid/parcel?key=secret' },

@@ -12,11 +12,15 @@ class AppDeploymentTests(unittest.TestCase):
         test_deploy.DeploymentTests.setUp(self)
 
         self.env['RELEASE_NAME'] = test_deploy.RELEASE
+        self.env['MSA_INGRESS_HOST'] = 'app.example.test'
+        self.env['MSA_CORS_ORIGINS'] = 'https://admin.example.test,https://app.example.test'
         self.service_dir = self.root / 'msa/services/customer'
         self.service_dir.mkdir(parents=True)
         self.manifest = self.service_dir / 'k8s.yaml'
         self.manifest.write_text(
             'image: docker.io/library/dva-customer:RELEASE_TAG\n'
+            'host: __MSA_INGRESS_HOST__\n'
+            'value: "__MSA_CORS_ORIGINS__"\n'
         )
         self.app_release = (
             self.root / 'msa-release/apps'
@@ -54,12 +58,32 @@ if name == 'ssh' and 'bash remote-app.sh' in args[-1]:
             expected,
             (self.app_release / 'k8s.yaml').read_text(),
         )
+        manifest = (self.app_release / 'k8s.yaml').read_text()
+        self.assertIn('host: app.example.test', manifest)
+        self.assertIn('value: "https://admin.example.test,https://app.example.test"', manifest)
         self.assertTrue(
             (self.app_release / 'remote-app.sh').is_file()
         )
         self.run_script(
             'deploy/package-app.sh', 'customer', ok=False
         )
+
+    def test_invalid_or_missing_addresses_fail_before_packaging(self):
+        for variable, value in (
+            ('MSA_INGRESS_HOST', ''),
+            ('MSA_INGRESS_HOST', 'https://app.example.test/path'),
+            ('MSA_CORS_ORIGINS', 'https://app.example.test/path'),
+        ):
+            with self.subTest(variable=variable, value=value):
+                previous = self.env[variable]
+                try:
+                    self.env[variable] = value
+                    result = self.run_script('deploy/package-app.sh', 'customer', ok=False)
+                    self.assertIn(variable, result.stderr)
+                    self.assertFalse(self.app_release.exists())
+                finally:
+                    self.env[variable] = previous
+        self.assertFalse(any(call[0] == 'docker' for call in self.calls()))
 
     def test_upload_pins_host_and_invokes_remote(self):
         self.package()
@@ -69,7 +93,10 @@ if name == 'ssh' and 'bash remote-app.sh' in args[-1]:
         ssh_calls = [c for c in self.calls() if c[0] == 'ssh']
         self.assertEqual(len(ssh_calls), 2)
         self.assertTrue(all(
-            'StrictHostKeyChecking=yes' in c for c in ssh_calls
+            'StrictHostKeyChecking=yes' in c
+            and 'HostKeyAlias=dva-msa-deploy' in c
+            and 'ubuntu@ssh.example.test' in c
+            for c in ssh_calls
         ))
         self.assertIn(
             "bash remote-app.sh 'customer'",
