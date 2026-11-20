@@ -1,5 +1,5 @@
 param(
-    [string]$Project = 'dvr-rerank',
+    [string]$Project = '<GCP_PROJECT>',
     [string]$Gcloud = 'C:/Users/SSAFY/AppData/Local/Google/Cloud SDK/google-cloud-sdk/bin/gcloud.cmd'
 )
 $ErrorActionPreference = 'Stop'

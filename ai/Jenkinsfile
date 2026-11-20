@@ -1,4 +1,4 @@
-// AI 서버 CI·배포. develop-ai에 들어올 때마다 빌드·테스트가 통과하면 Lightsail에 배포한다.
+// AI 서버 CI·배포. develop-ai에 들어올 때마다 빌드와 기동 확인이 통과하면 Lightsail에 배포한다.
 // 배포는 ai/deploy/upload.sh(이미지·릴리스 전송) → 대상 서버의 ai/deploy/deploy.sh(실행, 실패 시 직전 릴리스로 복구).
 // 비밀값은 Jenkins Secret file credential 'dva-ai'(커밋 금지). 배포 때 대상 서버의 /home/ubuntu/dva-ai/shared/.env로 올린다.
 // 시험 창구(persona_check)의 비밀값은 따로 'dva-persona-check'(선택) → shared/persona-check.env. 없으면 시험 창구는 뜨지 않는다.
@@ -15,9 +15,9 @@ pipeline {
     }
 
     environment {
-        // 각 Jenkins가 자기 서버에 배포한다. AI 전용 서버 Jenkins는 전역 환경변수 AI_DEPLOY_HOST=3.37.162.168, 없으면 백엔드 서버
+        // 배포 대상 서버 주소는 Jenkins 전역 환경변수 AI_DEPLOY_HOST=<배포 서버 주소>로 준다. 없으면 upload.sh가 멈춘다
         // 호스트 키는 ai/deploy/known_hosts에 고정
-        DEPLOY_HOST = "${env.AI_DEPLOY_HOST ?: '13.209.59.180'}"
+        DEPLOY_HOST = "${env.AI_DEPLOY_HOST ?: ''}"
     }
 
     stages {
@@ -37,15 +37,11 @@ pipeline {
             steps { sh 'docker build --pull --platform linux/amd64 --tag "$AI_IMAGE" ai' }
         }
 
-        stage('Test') {
+        stage('Check') {
             steps {
                 sh 'bash -n ai/deploy/upload.sh ai/deploy/deploy.sh'
-                // agent의 Python(3.13)이 아니라 방금 빌드한 3.14 이미지 안에서 dev 의존성을 더해 테스트한다. uv 캐시 볼륨으로 재다운로드를 피한다
-                sh '''
-                    set -eu
-                    tar -C ai --exclude=.venv -cf - . | docker run -i --rm --user root -v dva-ai-uv-cache:/root/.cache/uv "$AI_IMAGE" \
-                        sh -c 'tar -xf - -C /app && uv sync --frozen && uv run --frozen pytest -q'
-                '''
+                // 자동 테스트는 저장소에 없다. 방금 빌드한 이미지에서 앱 모듈이 불러와지는지만 확인한다
+                sh 'docker run --rm "$AI_IMAGE" /app/.venv/bin/python -c "import app.main"'
             }
         }
 

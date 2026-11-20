@@ -1,6 +1,5 @@
-# 원문/기존 평가의 바이트 해시를 Windows·Linux에서 동일하게 보존한다.
+# 원문의 바이트 해시를 Windows·Linux에서 동일하게 보존한다.
 manuals/*.md -text whitespace=-blank-at-eol,cr-at-eol
 config/rag-search-descriptions.json -text whitespace=cr-at-eol
-evaluation/datasets/** -text whitespace=cr-at-eol
 deploy/gcp/*.sh text eol=lf
 deploy/gcp/*.service text eol=lf

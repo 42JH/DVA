@@ -33,4 +33,3 @@ OpenAI는 통화 종료 웹훅을 보내지 않는다(종료는 sideband `sessio
 - 동작
   - 진행 중인 통화면 마무리 인사를 기다리지 않고 바로 `hangup`. 보통은 OpenAI가 고객의 SIP 종료로 세션을 이미 닫아서 404(`session_id_not_found`)이고, 이는 오류로 남기지 않는다.
   - accept 중인 통화면 accept가 끝나는 대로 `hangup`하고 sideband를 열지 않는다.
-  - 관제 화면에 `pbx_ended`(`ended_at`, `recording_id`)로 남긴다.

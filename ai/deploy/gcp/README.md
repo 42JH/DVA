@@ -9,13 +9,13 @@
 
 | 항목 | 값 |
 |---|---|
-| 프로젝트 | dvr-rerank |
+| 프로젝트 | <GCP_PROJECT> |
 | VM | dvr-reranker-l4 |
 | 영역 | asia-northeast3-a (서울) |
 | 머신 | g2-standard-4 / L4 1개 / vCPU4 / RAM16GB |
 | 부팅 디스크 | pd-balanced 60GB |
-| 고정 외부 IP | 35.216.116.177 (Standard tier) |
-| HTTPS 루트 | https://35.216.116.177.sslip.io |
+| 고정 외부 IP | <RERANKER_IP> (Standard tier) |
+| HTTPS 루트 | https://<RERANKER_IP>.sslip.io |
 | API | POST /rerank, GET /health |
 | 관리 접속 | Google IAP SSH, 전용 VPC에서35.235.240.0/20만22허용 |
 | 외부 공개 | 80/443.8001은 VM의127.0.0.1에만 바인딩 |
@@ -35,8 +35,8 @@ Cloud Console에서 VM의 **시작/중지** 버튼을 눌러도 된다. 중지�
 PowerShell의 CLI로도 제어할 수 있다.
 
 ```powershell
-gcloud.cmd compute instances start dvr-reranker-l4 --project=dvr-rerank --zone=asia-northeast3-a
-gcloud.cmd compute instances stop dvr-reranker-l4 --project=dvr-rerank --zone=asia-northeast3-a
+gcloud.cmd compute instances start dvr-reranker-l4 --project=<GCP_PROJECT> --zone=asia-northeast3-a
+gcloud.cmd compute instances stop dvr-reranker-l4 --project=<GCP_PROJECT> --zone=asia-northeast3-a
 ```
 
 등록된30분 제한은 시작할 때마다 적용된다. 준비 시간도 포함하며 진행 중인 전화가 있어도 자동 중지는 기다려주지 않는다. 기존 전화 서버는 이때 검색 오류로 안내하고 접수 상태를 유지하도록 구현돼 있다. 자동으로 요청이 VM을 깨우는 구조는 아니다.

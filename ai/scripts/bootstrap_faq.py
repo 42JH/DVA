@@ -12,7 +12,9 @@ from app.rag.faq_events import FaqEventStore
 
 async def execute(enqueue=False):
     cfg = load_server_config()
-    backend = BackendAPI(os.environ['BACKEND_API_URL'], cfg.backend.timeout_sec)
+    # FAQ 조회는 AI_BUSINESS_TOKEN 인증이 필요하다(서버 app/main.py와 같은 값)
+    backend = BackendAPI(os.environ['BACKEND_API_URL'], cfg.backend.timeout_sec,
+                         business_token=os.environ.get('AI_BUSINESS_TOKEN') or None)
     try:
         entries = await backend.initial_faq_entries()
     finally:

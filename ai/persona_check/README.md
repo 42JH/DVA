@@ -26,7 +26,6 @@
 | `server.py` | 테스트 서버 API. 시험 실행 시작 · 진행 조회 · 멈춤, 판정 · 녹음 내려받기 |
 | `scenarios.toml` | 공통 테스트 데이터와 시나리오(대본, 정답, 확인 항목) |
 | `lint.py`, `lint.md`, `samples/` | 통화 없이 페르소나 프롬프트만 검사(업무 지시 섞임, 업무 규칙과 반대, 칸끼리 모순) |
-| `tests/` | 통화와 모델 호출 없이 도는 테스트. 실행기가 운영 코드와 맞물리는지도 여기서 본다 |
 
 ## 실행
 
@@ -40,9 +39,6 @@ PYTHONPATH=.pydeps PERSONA_CHECK_OPENAI_API_KEY=... python -m persona_check.try_
 
 # 테스트 서버
 PYTHONPATH=.pydeps PERSONA_CHECK_OPENAI_API_KEY=... PERSONA_CHECK_TOKEN=... python -m persona_check.server
-
-# 테스트(통화 없음)
-python -m pytest persona_check -q
 ```
 
 | 환경변수 | 뜻 | 기본 |
@@ -55,7 +51,6 @@ python -m pytest persona_check -q
 | `BACKEND_MODEL`, `BACKEND_EFFORT` | 위임 Backend 모델. 운영과 같은 값으로 둔다 | `gpt-6-luna`, `low` |
 | `QDRANT_URL`, `QDRANT_API_KEY`, `RAG_RERANKER_URL`, `RAG_RERANKER_API_KEY` | FAQ 검색 서버. 운영 AI 서버와 같은 값을 넣으면 FAQ 시나리오(G1)가 돈다. `QDRANT_URL`이 없으면 G1은 빠진다. 질문 임베딩은 `OPENAI_API_KEY`를 읽으므로 배포에서는 그 이름으로 시험 전용 키를 넘긴다 | 없음 |
 | `ADDRESS_DB`, `KAKAO_REST_API_KEY` | 주소DB와 카카오 키. 둘 다 없으면 주소 정보를 고정값으로 채운다(아래 한계) | 없음 |
-| `MONITOR_USER`, `MONITOR_PASSWORD` | 주면 운영 관제 화면(`/monitor`)에 시험 통화를 띄운다. 개발 확인용 | 없음 |
 
 ## API
 
