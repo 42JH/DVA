@@ -50,6 +50,7 @@ python -m pytest persona_check -q
 | `PERSONA_CHECK_OPENAI_API_KEY` | 시험 전용 OpenAI 키. 음성 세션, 가짜 고객, TTS, 판정에 쓴다 | 없으면 실패 |
 | `PERSONA_CHECK_TOKEN` | 창구 인증(`Authorization: Bearer`) | 없으면 창구가 닫힌다(503) |
 | `PERSONA_CHECK_MAX_CONCURRENCY` | 동시에 거는 통화 수(묶음 전체 합) | 1 |
+| `PERSONA_CHECK_AUDIO_KEEP_DAYS` | 녹음(call.wav)을 남겨 두는 날수. 창구를 띄울 때와 하루마다 이보다 오래된 녹음만 지우고 판정 · 기록은 남김. 0이면 지우지 않음 | 30 |
 | `PERSONA_CHECK_HOST`, `PERSONA_CHECK_PORT` | 창구 주소 | `127.0.0.1`, `8765` |
 | `BACKEND_MODEL`, `BACKEND_EFFORT` | 위임 Backend 모델. 운영과 같은 값으로 둔다 | `gpt-6-luna`, `low` |
 | `QDRANT_URL`, `QDRANT_API_KEY`, `RAG_RERANKER_URL`, `RAG_RERANKER_API_KEY` | FAQ 검색 서버. 운영 AI 서버와 같은 값을 넣으면 FAQ 시나리오(G1)가 돈다. `QDRANT_URL`이 없으면 G1은 빠진다. 질문 임베딩은 `OPENAI_API_KEY`를 읽으므로 배포에서는 그 이름으로 시험 전용 키를 넘긴다 | 없음 |
@@ -102,7 +103,7 @@ python -m pytest persona_check -q
 6. **가짜 고객은 사람보다 늦게 대답한다.** AI 말이 끝났는지 1.5~4초 기다린 뒤 대사를 고른다(중간값 2.5초). 끼어들기와 잡음은 넣지 않았다.
 7. **한 번의 통화로 판정한다.** 음성 모델은 통화마다 다르게 말한다. 같은 시나리오를 반복해 결과가 얼마나 흔들리는지는 재지 않았다.
 8. **행동 확인 항목의 "지킴"에는 인용 근거가 없다.** 어김만 인용을 확인한다. 항목 문구가 넓으면 판정이 흔들려서, 구체적으로 적어야 한다.
-9. **기록이 쌓인다.** 녹음이 통화마다 약 25MB다. 보관 기간을 정해 지우는 장치는 없다.
+9. **녹음은 30일만 남긴다.** 녹음이 통화마다 약 25MB라, `PERSONA_CHECK_AUDIO_KEEP_DAYS`(기본 30)일 지난 녹음은 지운다. 판정 · 대화 기록(JSON)은 남아 화면의 결과 표 · 상세는 그대로 보이고, 그 통화의 녹음만 들을 수 없다.
 10. **동시 실행은 3통까지만 확인했다.** 2통씩 동시에 3통을 돌려 모두 정상 진행됐다(195초). 그보다 많은 동시 통화와 서버 부하는 재지 않았다. `PERSONA_CHECK_MAX_CONCURRENCY`의 기본값은 1이다.
 
 ## 서버에 올릴 때 필요한 것
