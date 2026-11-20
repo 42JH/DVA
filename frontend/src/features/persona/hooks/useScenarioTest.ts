@@ -2,26 +2,23 @@ import { useMutation, usePrefetchQuery, useQuery, useQueryClient } from '@tansta
 import { useState } from 'react'
 import { fmtMonthDay, fmtVersionTime } from '@/shared/lib/format'
 import { ymd } from '@/shared/lib/dateRange'
-import { personaQueries, type PersonaVersion } from '@/features/persona/api/personaApi'
+import { personaQueries } from '../api/personaApi'
+import { SCENARIO_TEST, scenarioTestQueries, startTest, stopTest } from '../api/scenarioTestApi'
 import {
-  SCENARIO_TEST,
-  scenarioTestQueries,
-  startTest,
-  stopTest,
-} from '@/features/persona/api/scenarioTestApi'
-import { restOf, rowsOf, sideLabel, testOf, withActiveTests } from './scenarioTest'
+  restOf,
+  rowsOf,
+  sideLabel,
+  talksOf,
+  testOf,
+  withActiveTests,
+  withCarriedTests,
+} from './scenarioTest'
 
 export { SCENARIO_TEST } // 화면(components)은 api를 직접 부르지 않아 여기서 내보냄
 
 type Me = { personaSeq: number; version: number; isHead: boolean }
 /** 시험할 버전 — 시작할 때 그 버전의 합친 글과 음성을 창구에 보냄 (voiceId null = AI 기본 음성) */
 export type TestTarget = Me & { promptText: string; voiceId: string | null }
-
-/** 버전마다 AI가 받는 것(프롬프트 · 목소리)을 한 글로 — 내용이 같은 버전 찾기(withActiveTests)에 씀 */
-export const talksOf = (versions: PersonaVersion[] | undefined) =>
-  (versions ?? [])
-    .filter((v) => !v.isDraft)
-    .map((v) => ({ version: v.version, talk: JSON.stringify([v.prompt, v.voice]) }))
 
 /** 시나리오 · 버전별 결과 · 통화에 사용 중인 버전 — 시나리오 시험 화면의 표 (띠 · 상세와 캐시 공유) */
 function useTestData() {
@@ -41,8 +38,14 @@ function useTestData() {
     ready: !!scenarios.data && !!tests.data,
     failed: scenarios.isError || tests.isError,
     active,
-    read: (me: Me) => {
-      const { state, shown } = testOf(all, scenarios.data ?? [], me, active)
+    // talks = 이 버전 상담가의 버전들 — 이름만 바꾼 버전은 앞 버전 결과를 이어 씀
+    read: (me: Me, talks: { version: number; talk: string }[]) => {
+      const { state, shown } = testOf(
+        withCarriedTests(all, talks, me),
+        scenarios.data ?? [],
+        me,
+        active,
+      )
       return { state, shown, rows: rowsOf(scenarios.data ?? [], base, shown) }
     },
   }
@@ -103,7 +106,7 @@ export function useScenarioTestPage(personaSeq: number, version: number) {
 export function useScenarioTest(me: TestTarget, dateOf: (version: number) => string) {
   const d = useTestData()
   const qc = useQueryClient()
-  // 시험은 실제 통화라 요금이 듦 → 누르면 한 번 묻고 시작 (11/12 사용자: 실수로 눌러도 바로 걸리면 안 됨)
+  // 시험은 실제 통화라 요금이 듦 → 누르면 한 번 묻고 시작 (실수로 눌러도 바로 걸리면 안 됨)
   const [asking, setAsking] = useState<{ title: string; scenarios?: string[] } | null>(null)
   const testsKey = scenarioTestQueries.tests().queryKey
   const start = useMutation({
@@ -130,7 +133,8 @@ export function useScenarioTest(me: TestTarget, dateOf: (version: number) => str
     mutationFn: stopTest,
     onSettled: () => qc.invalidateQueries({ queryKey: testsKey }),
   })
-  const r = d.read(me)
+  const myVersions = useQuery({ ...personaQueries.versions(me.personaSeq), enabled: SCENARIO_TEST })
+  const r = d.read(me, talksOf(myVersions.data))
   const items = r.shown?.items ?? []
   const ended = items.filter((i) => i.status === 'done' || i.status === 'error').length
   const rest = restOf(r.state, r.rows)
@@ -147,7 +151,7 @@ export function useScenarioTest(me: TestTarget, dateOf: (version: number) => str
     state: r.state,
     progress:
       r.state === 'running' && r.shown
-        ? // 11/13 새 안 2번(피그마 2368:3929): 진행 4 / 10 · 막대 · 통과 n · 실패 n (연결 실패는 어느 쪽에도 안 셈)
+        ? // 진행 4 / 10 · 막대 · 통과 n · 실패 n (연결 실패는 어느 쪽에도 안 셈)
           { value: ended, max: items.length, pass: count('pass'), fail: count('fail') }
         : null,
     // 11/13 새 안: 통과 + 실패 + 연결 실패 = 전체 (새로 실패 · 새로 통과는 표의 변화 칸에서). 멈춘 묶음처럼 못 한 것이 있으면 '시험 안 함'까지 더해 전체를 맞춤

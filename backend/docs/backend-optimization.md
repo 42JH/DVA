@@ -1,6 +1,5 @@
 # 백엔드 최적화 작업 기록
 
-- 기준: `develop-backend` / `f20206a3947dcf6467c9a1674aee76d280940252`
 - 브랜치: `refactor/backend-optimization`
 - 변경 범위: `backend/`, `infra/`, 루트 Jenkinsfile. 프론트·AI 코드는 수정하지 않는다.
 - API URL·요청·응답·인증·오류 코드·정확한 total_count·일괄 등록의 원자성을 유지한다.
@@ -44,11 +43,11 @@
 - 검증: 기존 테스트 명령과 새 compiled 명령의 선택이 같음을 검사했고, 변경 후 lint·format·컴파일·단위 101개·결제 샘플 21개가 통과했다.
 - 판정: 채택. Docker 실행 경로는 같은 단계의 Linux CI에서 검증한다.
 
-- Linux CI #63에서 `JsonSlurperClassic` 생성이 Jenkins sandbox에 차단됨을 확인했다. 관리자 허용 목록을 바꾸지 않고 엄격한 3개 boolean·사유 문자열을 전달하도록 수정했다. CLI 전달 형식 회귀 검증을 추가하고 CI 재검증 전까지 다음 단계를 적용하지 않는다.
+- 초기 Linux CI에서 `JsonSlurperClassic` 생성이 Jenkins sandbox에 차단됨을 확인했다. 관리자 허용 목록을 바꾸지 않고 엄격한 3개 boolean·사유 문자열을 전달하도록 수정했다. CLI 전달 형식 회귀 검증을 추가하고 CI 재검증 전까지 다음 단계를 적용하지 않는다.
 
-- Linux CI #64: 경로 판정·배포 셸 fixture·백엔드 기본 122개·DB 499개·운영 이미지/Nginx 17개 통과. 관측 fixture의 Nginx 시작 직후 `nginx -t`와 master의 listen이 겹치며 포트 충돌이 발생했다. 임시 컨테이너의 실제 HTTP 준비를 기다린 후 설정을 검사하도록 바꿨다. 백엔드 Docker 검증도 같은 시작 경쟁을 피하고 실제 HTTP 계약 검사는 유지한다. 최종 CI 재검증 전까지 다음 단계를 채택하지 않는다.
+- 후속 Linux CI에서 경로 판정·배포 셸 fixture·백엔드 기본 122개·DB 499개·운영 이미지/Nginx 17개가 통과했다. 관측 fixture의 Nginx 시작 직후 `nginx -t`와 master의 listen이 겹치며 포트 충돌이 발생했다. 임시 컨테이너의 실제 HTTP 준비를 기다린 후 설정을 검사하도록 바꿨다. 백엔드 Docker 검증도 같은 시작 경쟁을 피하고 실제 HTTP 계약 검사는 유지한다. 최종 CI 재검증 전까지 다음 단계를 채택하지 않는다.
 
-- Linux CI #65 재검증: 기본 122개·DB 499개·운영 이미지/Nginx 17개와 관측 실제 수집·알림·결제 인프라 검증 통과. 패키징·SSH·배포 단계는 건너뛰었다. 단계 1 채택.
+- Linux CI 재검증에서 기본 122개·DB 499개·운영 이미지/Nginx 17개와 관측 실제 수집·알림·결제 인프라 검증이 통과했다. 패키징·SSH·배포 단계는 건너뛰었다. 단계 1 채택.
 
 ### 2. 테스트 준비 정리
 
@@ -147,7 +146,7 @@
 
 ## 최종 검증
 
-- [Jenkins #66](https://13.209.59.180/jenkins/job/dva-ci-linux-validation/66/) 성공, 9분 57초. 실행 코드는 `7f446876740eff4ae893bbe0dabc19dc1515c89c`로 고정했다. 이후 커밋은 이 검증 결과를 적은 문서만 변경한다.
+- 최종 CI 검증은 9분 57초에 성공했다.
 - Linux/Node.js 24/PostgreSQL 17: 기본 123개 + DB 508개 + 운영 이미지/실제 Nginx 17개 = 백엔드 648개 통과. CI 경로 판정 4개와 Linux 배포 fixture·관측 수집/경보·결제 데모 인프라 검사도 통과했다.
 - 배포 패키징·SSH 접근·실제 배포 단계는 모두 건너뛰었다. 서비스 DB·AI·프론트 소스는 변경하지 않았다.
 - 로컬 PostgreSQL 18.4에서 030 상태의 고객·주문·통화·녹취·PBX 수신 데이터를 만들고 031·032를 적용했다. 기존 행의 값이 그대로이며, 기존 수신의 lease 두 컬럼은 null인 것을 확인했다. 체크섬 ledger 31개 버전 재실행도 변경 없이 통과했다. 실제 `infra/database/verify.sql`의 27 public 테이블·25 FK·10 trigger·새 스키마/인덱스/ledger 검사도 통과했다.

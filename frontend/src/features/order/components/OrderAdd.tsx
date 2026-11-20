@@ -1,7 +1,7 @@
 // 주문 추가 (수기 접수) 창 — 칸은 상세 패널 수정과 같은 OrderFields. 규칙 · 요청은 기존 useOrderForm 그대로
 // 처음엔 빈 칸을 빨갛게 하지 않고, 모자란 채로 [접수]를 누르면 그때 빈 칸을 짚음
 import { useState } from 'react'
-import { useOrderForm } from '@/features/order/hooks/useOrderForm'
+import { useOrderForm } from '../hooks/useOrderForm'
 import { Btn } from '@/shared/ui'
 import { Modal } from '@/shared/ui/Modal'
 import { OrderFields } from './OrderFields'

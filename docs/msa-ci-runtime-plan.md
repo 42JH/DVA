@@ -8,7 +8,7 @@ Jira: [S15P31D109-160](https://ssafy.atlassian.net/browse/S15P31D109-160)
 
 ## 관찰한 원인
 
-[Jenkins #40](https://13.209.59.180/jenkins/job/dva-msa/40/console): 총 3,629.724초.
+[Jenkins #40](https://192.0.2.10/jenkins/job/dva-msa/40/console): 총 3,629.724초.
 Jenkins 단계 기록은 DB 1,265.613초, operations 945.336초, customer 148.035초,
 consultation 477.306초, order 517.216초, 앱 빌드/패키징 131.356초다.
 검증 5개가 전체 시간의 약 92%이며, DB 로그에 Liquibase 기동 173회,

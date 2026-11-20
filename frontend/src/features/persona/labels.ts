@@ -3,11 +3,11 @@ import { ApiError } from '@/shared/api/client'
 import type { Tone } from '@/shared/ui'
 import { PROMPT_KEYS, type PromptFields, type PromptKey } from './api/personaApi'
 
-// 프롬프트 칸 제목 — 서버가 합친 글(persona-prompt.ts)과 같은 말. 사용자가 못 고치는 글 (11/10)
+// 프롬프트 칸 제목 — 서버가 합친 글(persona-prompt.ts)과 같은 말. 사용자가 못 고치는 글
 const PROMPT_LABEL: Record<PromptKey, string> = {
   role: '역할',
   personality: '성격',
-  tone: '발화 톤', // 서버 글은 '발화 스타일' 아래 '톤' — 화면엔 묶음 제목이 없어 '발화'를 붙임 (11/13 새 안)
+  tone: '발화 톤', // 서버 글은 '발화 스타일' 아래 '톤' — 화면엔 묶음 제목이 없어 '발화'를 붙임
   speedInstruction: '발화 속도',
   backchannel: '맞장구',
   interruption: '끼어들기',
@@ -30,11 +30,11 @@ export function emptyPromptNotice(p: PromptFields): string | null {
   return empty.length ? `${empty.join(', ')} 칸이 비어 있습니다` : null
 }
 
-// 버전 표시 (11/11 — 저장 = 새 버전, [적용] 없음): 통화에 쓰는 버전 · AI 확인을 기다리는 버전
+// 버전 표시 (저장 = 새 버전, [적용] 없음): 통화에 쓰는 버전 · AI 확인을 기다리는 버전
 export const VERSION_BADGE = {
   ACTIVE: { label: '통화에 사용 중', tone: 'done' },
   PENDING: { label: '반영 중', tone: 'wait' }, // AI가 확인하면 통화에 사용 중 (그동안 이전 버전이 계속 쓰임) — 띠의 '반영 중'과 같은 말
-  UNAPPLIED: { label: '반영 전', tone: 'wait' }, // 저장했지만 아직 통화에 안 쓰임 (11/13 새 안)
+  UNAPPLIED: { label: '반영 전', tone: 'wait' }, // 저장했지만 아직 통화에 안 쓰임
 } satisfies Record<string, { label: string; tone: Tone }>
 
 export const DEFAULT_VOICE_LABEL = '기본 음성' // 서버 voiceId null (목소리 '' )

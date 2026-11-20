@@ -1,4 +1,4 @@
-// 주문 상세 패널 (11/06): 목록 오른쪽에 붙음 (모달 이동 줄이기, 기업 피드백)
+// 주문 상세 패널: 목록 오른쪽에 붙음 (모달 이동 줄이기)
 // 송장처럼 줄 친 표(주문번호 · 보내는 분 · 받는 분 · 물품 · 요금 · 결제 · 수거 · 요청). 미완료면 빈 필수 칸을 노랗게. 이어진 통화는 주문 목록 자리에 띄움
 import { useState, type ReactNode } from 'react'
 import { WaybillEdit } from './WaybillEdit'
@@ -29,9 +29,45 @@ export function WaybillPanel({
   useEscape(onClose)
   const [editing, setEditing] = useState(false)
   const [notice, setNotice] = useState<string | null>(initialNotice) // 미완료 주문 접수 결과
-  const [asking, setAsking] = useState(false)
-  const [askingRetry, setAskingRetry] = useState(false) // [디버에 다시 접수] 확인 창
   const v = w.view
+
+  let body: ReactNode
+  if (!v)
+    body = w.error ? (
+      <p className="py-10 text-center text-[14px] text-ops-sub">{w.error}</p>
+    ) : (
+      <PanelSkeleton />
+    )
+  else if (editing)
+    // 수정은 그 자리에서 — 상세와 같은 칸, 저장 · 취소하면 상세로
+    body = (
+      <WaybillEdit
+        orderSeq={orderSeq}
+        parcelSeq={parcelSeq}
+        fee={v.fee}
+        onDone={(notice, newOrderSeq) => {
+          setEditing(false)
+          if (newOrderSeq) onMoved(newOrderSeq, notice)
+          else setNotice(notice ?? null)
+        }}
+      />
+    )
+  else
+    body = (
+      <>
+        {notice && (
+          <p
+            role="status"
+            className="mb-3 rounded-md bg-ops-route-soft px-3 py-2 text-[13px] text-ops-route"
+          >
+            {notice}
+          </p>
+        )}
+        {w.missing.size > 0 && <MissingNote w={w} />}
+        <Slip w={w} />
+        <Calls calls={v.calls} openCall={openCall} onOpen={onOpenCall} />
+      </>
+    )
 
   return (
     <aside
@@ -52,47 +88,25 @@ export function WaybillPanel({
         </button>
       </div>
 
-      <div className="min-h-0 flex-1 [scrollbar-width:thin] overflow-y-auto px-5 py-4">
-        {!v ? (
-          w.error ? (
-            <p className="py-10 text-center text-[14px] text-ops-sub">{w.error}</p>
-          ) : (
-            <PanelSkeleton />
-          )
-        ) : editing ? (
-          // 수정은 그 자리에서 — 상세와 같은 칸, 저장 · 취소하면 상세로
-          <WaybillEdit
-            orderSeq={orderSeq}
-            parcelSeq={parcelSeq}
-            fee={v.fee}
-            onDone={(notice, newOrderSeq) => {
-              setEditing(false)
-              if (newOrderSeq) onMoved(newOrderSeq, notice)
-              else setNotice(notice ?? null)
-            }}
-          />
-        ) : (
-          <>
-            {notice && (
-              <p
-                role="status"
-                className="mb-3 rounded-md bg-ops-route-soft px-3 py-2 text-[13px] text-ops-route"
-              >
-                {notice}
-              </p>
-            )}
-            {w.missing.size > 0 && <MissingNote w={w} />}
-            <Slip w={w} />
-            <Calls calls={v.calls} openCall={openCall} onOpen={onOpenCall} />
-          </>
-        )}
-      </div>
+      <div className="min-h-0 flex-1 [scrollbar-width:thin] overflow-y-auto px-5 py-4">{body}</div>
 
-      {v && !editing && (w.canEdit || w.canCancel || w.canRetry) && (
+      {v && !editing && <Actions w={w} onEdit={() => setEditing(true)} onClose={onClose} />}
+    </aside>
+  )
+}
+
+/** 아래 버튼 줄 [수정] [디버에 다시 접수] [삭제 · 주문 취소] + 확인 창 둘 */
+function Actions({ w, onEdit, onClose }: { w: Waybill; onEdit: () => void; onClose: () => void }) {
+  const v = w.view!
+  const [asking, setAsking] = useState(false)
+  const [askingRetry, setAskingRetry] = useState(false) // [디버에 다시 접수] 확인 창
+  return (
+    <>
+      {(w.canEdit || w.canCancel || w.canRetry) && (
         <div className="flex shrink-0 flex-col gap-2 border-t border-ops-line px-5 py-3">
           <div className="flex items-center gap-2">
             {w.canEdit && (
-              <Btn kind="edit" onClick={() => setEditing(true)}>
+              <Btn kind="edit" onClick={onEdit}>
                 수정
               </Btn>
             )}
@@ -128,34 +142,34 @@ export function WaybillPanel({
           onOk={() => w.retry(() => setAskingRetry(false))}
           onClose={() => setAskingRetry(false)}
         >
-          <b className="font-semibold">{v?.no}</b> 주문을 지금 저장된 내용으로 디버에 다시 보냅니다.
+          <b className="font-semibold">{v.no}</b> 주문을 지금 저장된 내용으로 디버에 다시 보냅니다.
           다시 결제하지 않습니다. 디버에 이미 접수돼 있을 수 있으니 디버 쪽을 먼저 확인해 주세요.
         </Confirm>
       )}
       {asking && w.canCancel && (
         <Confirm
-          title={v?.isDraft ? '미완료 주문을 삭제할까요?' : '주문을 취소할까요?'}
-          ok={v?.isDraft ? '삭제' : '주문 취소'}
+          title={v.isDraft ? '미완료 주문을 삭제할까요?' : '주문을 취소할까요?'}
+          ok={v.isDraft ? '삭제' : '주문 취소'}
           closeLabel="닫기"
           danger
           busy={w.busy}
           error={w.actionError}
-          onOk={() => w.cancel(v?.isDraft ? onClose : undefined)}
+          onOk={() => w.cancel(v.isDraft ? onClose : undefined)}
           onClose={() => setAsking(false)}
         >
-          {v?.isDraft ? (
+          {v.isDraft ? (
             <>
-              <b className="font-semibold">{v?.no}</b> 미완료 주문을 목록에서 지웁니다. 접수된
+              <b className="font-semibold">{v.no}</b> 미완료 주문을 목록에서 지웁니다. 접수된
               주문이나 결제와는 상관없습니다.
             </>
           ) : (
             <>
-              <b className="font-semibold">{v?.no}</b> 주문을 취소합니다. 되돌릴 수 없습니다.
+              <b className="font-semibold">{v.no}</b> 주문을 취소합니다. 되돌릴 수 없습니다.
             </>
           )}
         </Confirm>
       )}
-    </aside>
+    </>
   )
 }
 
@@ -171,7 +185,7 @@ const MISSING_LABEL: Record<string, string> = {
   payMethod: '결제 방식',
 }
 
-/** 미완료 사유 — AI 통화가 끊겨 아직 비어 있는 칸 (기업 피드백: 미완료면 사유가 보여야 함) */
+/** 미완료 사유 — AI 통화가 끊겨 아직 비어 있는 칸 (미완료면 사유가 보여야 함) */
 function MissingNote({ w }: { w: Waybill }) {
   return (
     <div className="mb-4 flex gap-2.5 rounded-lg bg-ops-wait-soft px-3.5 py-3 text-ops-wait">
@@ -285,10 +299,8 @@ function Row({
           <Val missing={missing}>
             <span className="font-normal text-ops-faint">없음</span>
           </Val>
-        ) : missing && typeof children === 'string' ? (
-          <Val missing>{children}</Val>
         ) : (
-          children
+          <Val missing={missing && typeof children === 'string'}>{children}</Val>
         )}
       </dd>
     </>

@@ -5,6 +5,7 @@ const { randomUUID } = require('node:crypto');
 const { setTimeout: delay } = require('node:timers/promises');
 const { EventEmitter } = require('node:events');
 const { JsonLogger, logRecord, logContext } = require('../dist/observability/json-logger');
+const { DatabaseService } = require('../dist/database/database.service');
 const { ObservabilityService } = require('../dist/observability/observability.service');
 const { recordHttp, httpMetrics } = require('../dist/observability/http-metrics');
 const { requestContext } = require('../dist/common/http/request-context');
@@ -354,6 +355,7 @@ test('DB failure and order-query failure are distinct and never report an empty 
   assert.ok(!down.includes('dva_orders_attention'));
   const badQuery = new ObservabilityService({
     transactionStatistics,
+    readSnapshot: DatabaseService.prototype.readSnapshot,
     pool: { ...poolStatistics, query: async () => ({}) },
     transaction: async () => {
       throw new Error('private parameters');
@@ -370,6 +372,7 @@ test('concurrent metrics requests share one bounded database read', async () => 
   const queries = [];
   const service = new ObservabilityService({
     transactionStatistics,
+    readSnapshot: DatabaseService.prototype.readSnapshot,
     pool: {
       ...poolStatistics,
       query: async () => {

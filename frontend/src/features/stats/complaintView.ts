@@ -1,11 +1,11 @@
-// 통계 §4 [AI 응대 오류 | 고객 불만] 세기 (11/11 Jira 148) — React · API를 모르는 계산만 (홈 · 통계가 같이 씀, 테스트가 바로 부름)
-import type { ComplaintCalls } from '@/features/stats/api/dashboardApi'
-import { maxIndex, num, one, pctText } from '@/features/stats/format'
-import { AI_ERROR, COMPLAINT_TARGET } from '@/features/stats/labels'
+// 통계 §4 [AI 응대 오류 | 고객 불만] 세기 (Jira 148) — React · API를 모르는 계산만 (홈 · 통계가 같이 씀, 테스트가 바로 부름)
+import type { ComplaintCalls } from './api/dashboardApi'
+import { maxIndex, num, one, pctText } from './format'
+import { AI_ERROR, COMPLAINT_TARGET } from './labels'
 import { toCallRow, type CallListItemDto } from '@/shared/call/callDto'
 import { AI_ERROR_TYPES, splitComplaints, TARGETS } from '@/shared/call/complaints'
 
-/** §4 — [AI 응대 오류 | 고객 불만] 탭 (11/11 Jira 148). 분모 = 서버의 판정 완료 통화, 분자 · 도넛 = 불만 있는 통화 목록을 화면에서 셈
+/** §4 — [AI 응대 오류 | 고객 불만] 탭 (Jira 148). 분모 = 서버의 판정 완료 통화, 분자 · 도넛 = 불만 있는 통화 목록을 화면에서 셈
  *  탭 값 = 그 갈래가 하나라도 있는 통화 비율, 도넛 = 유형(대상)별 통화 수(한 통화의 여러 유형은 각각). 범례 색칠 = 가장 많은 것 */
 export function complaintView(d: ComplaintCalls, calls: CallListItemDto[]) {
   const judged = calls.map((c) => splitComplaints(toCallRow(c).complaints))

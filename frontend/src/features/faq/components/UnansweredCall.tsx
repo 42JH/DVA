@@ -1,7 +1,7 @@
 // 미답변 질문을 누르면 뜨는 통화 창 — 화면을 옮기지 않고 그 통화 대화를 보여 주고, 질문한 고객 말로 바로 스크롤해 노랗게
 // [통화 상세 열기]로 들어갔다가 뒤로 오면 미답변 문의로 돌아옴 (state.from)
 import { Link, useLocation } from 'react-router'
-import { useQuestionAt } from '@/features/faq/hooks/useQuestionAt'
+import { useQuestionAt } from '../hooks/useQuestionAt'
 import { AiToggle } from '@/shared/call/AiSteps'
 import { CallLog } from '@/shared/call/CallLog'
 import { useShowAi } from '@/shared/lib/useShowAi'

@@ -1,4 +1,4 @@
-// 수기 주문 규칙 (11/06) — 서버 문서엔 이 제한이 없어 화면이 막음. 순수 함수 (orderLimits.test.ts)
+// 수기 주문 규칙 — 서버 문서엔 이 제한이 없어 화면이 막음. 순수 함수 (orderLimits.test.ts)
 
 const MAX_PRICE = 100_000_000 // 물품 가액 1원 ~ 1억 원
 export const MAX_BOXES = 10 // 받는 곳별 묶음마다 소 · 중 · 대 합계 (이 창은 받는 분 하나 = 묶음 하나)

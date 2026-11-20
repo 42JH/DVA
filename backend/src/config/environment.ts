@@ -24,7 +24,7 @@ export interface Environment extends PaymentEnvironment {
   CORS_ORIGINS: string[];
   SWAGGER_ENABLED: boolean;
   PBX_WEBHOOK_TOKEN?: string;
-  DVER_API_URL: string;
+  DVER_API_URL?: string;
   DVER_API_KEY?: string;
   AWS_REGION: string;
   S3_RECORDINGS_BUCKET?: string;
@@ -186,25 +186,27 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
   ) {
     errors.push('PBX_WEBHOOK_TOKEN');
   }
-  const dverUrl = raw.DVER_API_URL ?? 'https://purple-wood-25a4.summer2.workers.dev';
-  try {
-    const url = new URL(String(dverUrl));
-    if (
-      typeof dverUrl !== 'string' ||
-      (url.protocol !== 'https:' &&
-        !(
-          nodeEnv === 'test' &&
-          url.protocol === 'http:' &&
-          ['127.0.0.1', 'localhost'].includes(url.hostname)
-        )) ||
-      url.username ||
-      url.password ||
-      url.search ||
-      url.hash
-    )
+  const dverUrl = raw.DVER_API_URL;
+  if (dverUrl !== undefined && dverUrl !== '') {
+    try {
+      const url = new URL(String(dverUrl));
+      if (
+        typeof dverUrl !== 'string' ||
+        (url.protocol !== 'https:' &&
+          !(
+            nodeEnv === 'test' &&
+            url.protocol === 'http:' &&
+            ['127.0.0.1', 'localhost'].includes(url.hostname)
+          )) ||
+        url.username ||
+        url.password ||
+        url.search ||
+        url.hash
+      )
+        errors.push('DVER_API_URL');
+    } catch {
       errors.push('DVER_API_URL');
-  } catch {
-    errors.push('DVER_API_URL');
+    }
   }
   const dverKey = raw.DVER_API_KEY;
   if (
@@ -213,6 +215,9 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
     (typeof dverKey !== 'string' || !/^[\x21-\x7e]+$/.test(dverKey))
   )
     errors.push('DVER_API_KEY');
+  const recordingHosts = raw.RECORDING_ALLOWED_HOSTS;
+  if (recordingHosts !== undefined && typeof recordingHosts !== 'string')
+    errors.push('RECORDING_ALLOWED_HOSTS');
   const config: Environment = {
     ...paymentEnvironment(raw, errors),
     NODE_ENV: nodeEnv as Environment['NODE_ENV'],
@@ -243,19 +248,17 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
     CORS_ORIGINS: [...new Set(origins)],
     SWAGGER_ENABLED: swagger === 'true',
     PBX_WEBHOOK_TOKEN: typeof token === 'string' && token ? token : undefined,
-    DVER_API_URL: String(dverUrl),
+    DVER_API_URL: typeof dverUrl === 'string' && dverUrl ? dverUrl : undefined,
     DVER_API_KEY: typeof dverKey === 'string' && dverKey ? dverKey : undefined,
     AWS_REGION: String(raw.AWS_REGION || 'ap-northeast-2'),
     S3_RECORDINGS_BUCKET:
       typeof raw.S3_RECORDINGS_BUCKET === 'string' && raw.S3_RECORDINGS_BUCKET
         ? raw.S3_RECORDINGS_BUCKET
         : undefined,
-    RECORDING_ALLOWED_HOSTS: String(
-      raw.RECORDING_ALLOWED_HOSTS ||
-        'dvercorp-aicc-connect-dev-recordings.s3.ap-northeast-2.amazonaws.com',
-    )
-      .split(',')
-      .map((host) => host.trim().toLowerCase()),
+    RECORDING_ALLOWED_HOSTS:
+      typeof recordingHosts === 'string' && recordingHosts
+        ? recordingHosts.split(',').map((host) => host.trim().toLowerCase())
+        : [],
     RECORDING_MATCH_WINDOW_SECONDS: Number(raw.RECORDING_MATCH_WINDOW_SECONDS || '30'),
   };
   if (!/^[a-z]{2}(?:-[a-z]+)+-\d+$/.test(config.AWS_REGION)) errors.push('AWS_REGION');

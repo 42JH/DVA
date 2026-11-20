@@ -33,7 +33,7 @@ export function Talk({
   marked?: boolean // FAQ · 미답변에서 찾아온 말 (잠깐)
   onClick?: () => void // 이 말부터 듣기
   dataKey?: number
-  flag?: string // 고객 불만인 말 — 문장을 빨갛게 칠하고 아래에 이 글 (11/11)
+  flag?: string // 고객 불만인 말 — 문장을 빨갛게 칠하고 아래에 이 글
 }) {
   const cls = `${GRID} w-full rounded-md px-3 py-2 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ops-route ${lineBg(on, marked, !!onClick)}`
   const inner = (

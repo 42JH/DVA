@@ -79,7 +79,7 @@ export function Modal({
           <Icon name="x" />
         </button>
       </div>
-      {/* 몸이 없는 창(제목만 묻는 확인 창)은 빈 칸을 두지 않음 — 제목 줄 아래 선 하나, 바로 버튼 줄 (11/12 사용자) */}
+      {/* 몸이 없는 창(제목만 묻는 확인 창)은 빈 칸을 두지 않음 — 제목 줄 아래 선 하나, 바로 버튼 줄 */}
       {children && (
         <div className="min-h-0 flex-1 [scrollbar-width:thin] overflow-y-auto px-6 py-5">
           {children}

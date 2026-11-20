@@ -11,7 +11,15 @@ mode="${4:-}"
 [[ -f "$identity_file" ]] || { echo 'Missing SSH credential file.' >&2; exit 1; }
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 release_dir="$repo_root/.deploy/$version"
-server="$ssh_user@13.209.59.180"
+ssh_host=${LIGHTSAIL_SSH_HOST:-}
+if [[ -z "$ssh_host" && "${BUILD_URL:-}" =~ ^https://([a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?)(:[0-9]+)?/jenkins/job/ ]]; then
+ ssh_host=${BASH_REMATCH[1]}
+fi
+[[ "$ssh_host" =~ ^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$ ]] || {
+ echo 'Set LIGHTSAIL_SSH_HOST to the deployment hostname or IPv4 address.' >&2
+ exit 1
+}
+server="$ssh_user@$ssh_host"
 remote_root=/home/ubuntu/dva-deploy
 for file in images.tar images.tar.sha256 release-files.sha256 deploy.sh compose.prod.yaml release.env infra/nginx/default.prod.conf infra/database/migrate.sh infra/database/verify.sql; do
  [[ -f "$release_dir/$file" ]] || { echo "Missing release file: $file" >&2; exit 1; }
@@ -21,7 +29,7 @@ done
 key_dir="$(mktemp -d)"
 trap 'rm -f -- "$key_dir/identity"; rmdir -- "$key_dir"' EXIT
 install -m 600 "$identity_file" "$key_dir/identity"
-options=(-i "$key_dir/identity" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes
+options=(-i "$key_dir/identity" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o HostKeyAlias=dva-monolith-deploy
  -o "UserKnownHostsFile=$repo_root/infra/deploy/known_hosts" -o ConnectTimeout=15)
 ssh "${options[@]}" "$server" "test -f $remote_root/shared/.env && sudo -n docker info >/dev/null" </dev/null
 if [[ "$mode" == --verify-only ]]; then

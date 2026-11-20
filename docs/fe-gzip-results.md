@@ -1,13 +1,13 @@
 # 관리자 웹 JS · CSS 압축 (nginx gzip_types) 결과
 
-2026-11-12. 배포된 관리자 웹(https://dva-d109.duckdns.org)을 Lighthouse로 재고, 압축이 빠진 것을 찾아 서버 nginx에서 고친 기록이다. 코드 변경은 없고 서버 설정 3줄이다.
+2026-11-12. 배포된 관리자 웹(https://<관리자 웹>)을 Lighthouse로 재고, 압축이 빠진 것을 찾아 서버 nginx에서 고친 기록이다. 코드 변경은 없고 서버 설정 3줄이다.
 
 ## 증상
 
 Lighthouse(데스크톱, 첫 방문) 성능 점수가 주문 목록 88, FAQ 85였다. 개선 항목 1순위가 "텍스트 압축 사용"으로, 화면마다 JS · CSS를 400~600KB 덜 받을 수 있다고 나왔다.
 
 ```
-curl -H "Accept-Encoding: gzip" -D - https://dva-d109.duckdns.org/assets/index-DQrPtYgz.js
+curl -H "Accept-Encoding: gzip" -D - https://<관리자 웹>/assets/index-DQrPtYgz.js
 → Content-Encoding 없음, 258,982B 그대로
 ```
 
@@ -54,7 +54,7 @@ TBT는 전후 모두 0~5ms, CLS는 0.05 이하. 3회 점수와 모든 수치: `f
 - Lighthouse 12, 데스크톱 프리셋(시뮬레이션 회선), 성능 항목만. 화면마다 3회 재고 점수 가운데 판을 씀
 - 대상: 배포 주소, 관리자 계정 로그인 상태. 통화 상세는 `/calls/530`
 - 측정 시각: 전 2026-11-12 09:42~09:45, 후 09:55~09:58 (KST). 사이에 바뀐 것은 nginx 3줄뿐
-- SSAFY PC 네트워크에서 잰 실험실 측정이라 실제 사용자 환경 값은 아님
+- 교육장 PC 네트워크에서 잰 실험실 측정이라 실제 사용자 환경 값은 아님
 - 스크립트: `fe-gzip-results/run.mjs` (사용법은 파일 머리)
 
 측정하면서 바로잡은 것 두 가지. 둘 다 처음엔 전 화면 100점이 나와 이상함을 알아챘다.

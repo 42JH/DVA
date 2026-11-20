@@ -47,7 +47,7 @@ Authorization: Bearer <AI_BUSINESS_TOKEN>
 
 ## 전환 순서
 
-1. 운영 BE `/home/ubuntu/dva-deploy/shared/.env`와 AI 실행 환경의 업무 토큰 값을 맞춘다. BE production은 env 파일을 직접 읽지 않고 Compose가 주입한 환경을 읽는다. 로컬 개발은 backend/.env.development 또는 실행 환경을 사용한다.
+1. 운영 BE `/path/to/deploy/shared/.env`와 AI 실행 환경의 업무 토큰 값을 맞춘다. BE production은 env 파일을 직접 읽지 않고 Compose가 주입한 환경을 읽는다. 로컬 개발은 backend/.env.development 또는 실행 환경을 사용한다.
 2. BE 환경 검증·가드와 Compose 주입을 포함한 새 이미지를 준비하고 AI가 헤더를 보내도록 준비한다. AI 컨테이너는 AI 팀의 별도 배포 경로를 따른다.
 3. 격리 환경에서 무토큰·잘못된 토큰 거절과 정상 AI·관리자 업무를 확인한 뒤 배포 시점을 맞춘다. BE만 먼저 적용하면 기존 무토큰 AI 고객 호출이 실패한다.
 4. 배포 도구로 새 환경을 가진 BE 컨테이너를 생성한다. 파일 저장이나 기존 컨테이너 restart만으로 환경 갱신을 완료했다고 판단하지 않는다. 토큰은 값 노출 없이 실행 환경의 존재 여부를 확인한다.

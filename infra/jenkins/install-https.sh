@@ -7,6 +7,10 @@ expected_hash="${2:?Expected current config SHA-256 required}"
 [[ "$expected_hash" =~ ^[a-f0-9]{64}$ ]] || exit 1
 current=/etc/nginx/sites-available/dva-ip
 [[ -f "$current" && -f "$source_file" ]] || exit 1
+if grep -Eq '^[[:space:]]*server_name (192\.0\.2\.10|webhook\.example\.test);' "$source_file"; then
+ echo 'Render the HTTPS configuration with the deployment IP before installing.' >&2
+ exit 1
+fi
 [[ "$(sha256sum "$current" | cut -d ' ' -f 1)" == "$expected_hash" ]] || {
  echo 'Nginx config changed since inspection; refusing to overwrite.' >&2; exit 1;
 }

@@ -4,7 +4,7 @@ Jira: [S15P31D109-160](https://ssafy.atlassian.net/browse/S15P31D109-160)
 
 ## 확인한 실패와 수정
 
-[Jenkins #40](https://13.209.59.180/jenkins/job/dva-msa/40/console)은 3,629.724초(60분 30초)에 실패했다.
+[Jenkins #40](https://192.0.2.10/jenkins/job/dva-msa/40/console)은 3,629.724초(60분 30초)에 실패했다.
 컴파일·DB·서비스 회귀는 통과했으며, 실제 실패는 Database Delivery의 055 전환 준비 누락이었다.
 055는 order/consultation 쓰기 중지·이벤트 처리 완료·백업을 요구하지만 기존 배포 경로가 이를 준비하지 않았다.
 앱 배포가 건너뛰어졌으므로 미배포 변경은 다음 실행에서도 계속 대상이다. 성공 이력을 임의로 기록해 범위를 줄이지 않고 실패 경로를 고쳤다.

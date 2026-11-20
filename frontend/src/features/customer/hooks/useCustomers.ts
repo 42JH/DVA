@@ -1,4 +1,4 @@
-// 고객 — 기업 · 개인 상관없이 모든 고객 (기업 피드백: 고객 관리 화면 · 개인 주소록 확인)
+// 고객 — 기업 · 개인 상관없이 모든 고객 (고객 관리 화면 · 개인 주소록 확인)
 // GET /customers (이름 부분 검색 · 전화번호 4자리 이상 부분 검색) · GET /customers/{id}/pins (개인 주소록). 고객 번호 내림차순, 한 쪽 개수는 고른 대로
 import { useEffect, useState } from 'react'
 import {
@@ -9,7 +9,7 @@ import {
   useQueryClient,
 } from '@tanstack/react-query'
 import { api, type ApiItem, type ApiList } from '@/shared/api/client'
-import { fmtPhone } from '@/shared/lib/format'
+import { fmtPhone, fmtNum } from '@/shared/lib/format'
 import { useListParams } from '@/shared/lib/useListParams'
 import { usePageSize } from '@/shared/lib/paging'
 import { useDebounced } from '@/shared/lib/useDebounced'
@@ -66,7 +66,7 @@ export function useCustomers() {
     queryKey: ['screen', 'customers', query, size, page],
     queryFn: ({ signal }) =>
       api.get<ApiList<CustomerDto>>('/customers', {
-        query: { ...query, status: 'ACTIVE', limit: size, offset: (page - 1) * size }, // 탈퇴 고객은 목록에서 뺌 (11/10)
+        query: { ...query, status: 'ACTIVE', limit: size, offset: (page - 1) * size }, // 탈퇴 고객은 목록에서 뺌
         signal,
       }),
     placeholderData: keepPreviousData,
@@ -132,7 +132,7 @@ const pinsOpts = (seq: number) => ({
 /** 이번 달 월결제 누적 한 줄 */
 const monthlyText = (billing: { error: unknown; data?: number }) => {
   if (billing.error) return '불러오지 못했습니다'
-  return billing.data === undefined ? '불러오는 중…' : `${billing.data.toLocaleString('ko-KR')}원`
+  return billing.data === undefined ? '불러오는 중…' : `${fmtNum(billing.data)}원`
 }
 
 /** 고객 한 명 + 개인 주소록 */

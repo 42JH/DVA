@@ -11,7 +11,7 @@ interface AudioSource {
 }
 
 /** 다음에 <audio>에 꽂을 소리 (순수 함수, recordingSource.test.ts)
- * 상세를 10초마다 다시 받으면 서명 URL 글자가 매번 바뀜 → 같은 녹취면 쓰던 URL을 그대로 둬야 듣던 소리가 안 끊김 (11/02 연동 명세)
+ * 상세를 10초마다 다시 받으면 서명 URL 글자가 매번 바뀜 → 같은 녹취면 쓰던 URL을 그대로 둬야 듣던 소리가 안 끊김 (연동 명세)
  * 바꾸는 때: 다른 녹취 · 쓰던 URL이 만료됐거나 재생 오류가 나서(needFresh) 새 URL이 옴. 새 URL이 없으면(발급 실패) 쓰던 걸 유지 */
 export function pickSource(
   prev: AudioSource | null,
@@ -102,7 +102,7 @@ export function useRecordingPlayer(recording: Recording | null, onExpired: () =>
     void a.play().catch(() => setFailed(true))
   }
 
-  /** 음량 막대 (11/05 새 디자인) — 0으로 끌면 음소거 아이콘, 다시 올리면 소리 */
+  /** 음량 막대 (새 디자인) — 0으로 끌면 음소거 아이콘, 다시 올리면 소리 */
   const setVolume = (v: number) => {
     const a = ref.current
     if (!a) return

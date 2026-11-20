@@ -1,15 +1,15 @@
 # 페르소나·고객·주소록 QA 검증 기록
 
-2026-11-09. `feature/persona-prompt-fields` → `develop-backend`.
+2026-11-09.
 
-## 작업별 커밋과 연동 명세
+## 변경별 연동 명세
 
-| 커밋 | 변경 | 프론트 명세 |
-|---|---|---|
-| 9f6b8108 | 고객 전화번호 부분 검색 | [고객 검색](customer-phone-search.md) |
-| 59948ac7 | 기존 페르소나 API의 6개 필드 저장·조회, 기존 데이터 이관 | [페르소나](persona-prompt-fields.md) |
-| b6926fb6 | 관리자 고객 단건·다건 soft delete | [고객 삭제](customer-bulk-deletion.md) |
-| 1efd3dfd | 관리자 개인 주소록 단건·다건 soft delete | [주소록 삭제](personal-pin-bulk-deletion.md) |
+| 변경 | 프론트 명세 |
+|---|---|
+| 고객 전화번호 부분 검색 | [고객 검색](customer-phone-search.md) |
+| 기존 페르소나 API의 6개 필드 저장·조회, 기존 데이터 이관 | [페르소나](persona-prompt-fields.md) |
+| 관리자 고객 단건·다건 soft delete | [고객 삭제](customer-bulk-deletion.md) |
+| 관리자 개인 주소록 단건·다건 soft delete | [주소록 삭제](personal-pin-bulk-deletion.md) |
 
 고객 삭제는 해당 고객의 소속·개인 PIN을 함께 soft delete한다. 주소록 삭제는 개인 PIN만 soft delete하며 고객 기본 주소와 주문 주소는 보존한다. 두 API 모두 관리자 세션·허용 Origin이 필요하며, 1~100개 ID를 배열로 받는다. 미존재·기삭제 대상 또는 감사 저장 실패가 있으면 전체 롤백한다.
 
@@ -29,13 +29,12 @@ ESLint·Prettier·TypeScript 빌드, 전체 migration, 페르소나 이관·이�
 
 ## 운영 페르소나 이관
 
-기존 공식 migration 실행기로 `060-persona-prompt-fields.sql`을 적용하고 COMMIT 및 이력 등록을 확인했다. 앱은 재배포하지 않았다.
+배포 시 migration 실행기로 `060-persona-prompt-fields.sql`을 적용하고 COMMIT 및 이력 등록을 확인한다.
 
-- 실행 전 전체 DB 백업과 복원 목록 검증: `/home/ubuntu/dva-deploy/shared/db-backups/pre-monolith-20261109T115723Z.dump-Qq50NT`
-- 적용 SQL SHA-256: `4e38b0540c16c7dd599412af6307f779b972c034fee43da046f14f586d8f20a7`
-- 페르소나 10개·버전 14개·초안 3개를 유지했다. 버전·초안 17개 모두 6개 문자열 필드로 이관했다. 원문에 없는 항목은 빈 문자열이며 분류되지 않은 본문은 역할에 보존했다.
-- 전후 스냅샷의 모든 기존 컬럼을 대조했다. 원문 prompt_text·ID·버전·작성자·시각·초안 UUID·ACTIVE/PENDING 등 기존 값이 동일하다.
-- 기존 통화 분석의 페르소나 버전 연결 175건이 동일하다. 페르소나와 관련 데이터를 삭제하지 않았다.
+- 적용 전에 DB를 백업하고 복원 목록을 검증한다. 백업 위치는 배포 환경에서 지정한다.
+- 기존 페르소나와 버전·초안을 보존하면서 본문을 6개 문자열 필드로 이관한다. 원문에 없는 항목은 빈 문자열이며 분류되지 않은 본문은 역할에 보존했다.
+- 적용 전후에 원문 prompt_text·ID·버전·작성자·시각·초안 UUID·ACTIVE/PENDING 상태가 동일한지 대조한다.
+- 기존 통화 분석과 페르소나 버전의 연결이 유지되는지 확인한다.
 
 ## 배포 시 확인할 사항
 

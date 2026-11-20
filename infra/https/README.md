@@ -1,8 +1,8 @@
 # 고정 IP HTTPS 운영
 
-관리자 로그인 IP 제한은 [S04 적용 순서](../../backend/docs/auth-request-limits.md)에 따라 새 backend 적용 후 이 폴더의 `https.conf`를 호스트 Nginx에 별도 반영한다. 평균 30회/분·burst 5이며 초과 요청의 JSON·CORS·Retry-After는 backend guard가 처리한다. backend/내부 Nginx의 기존 비공개 바인딩을 유지한다.
+관리자 로그인 IP 제한은 [S04 적용 순서](../../backend/docs/auth-request-limits.md)에 따라 새 backend 적용 후 이 폴더의 `https.conf`를 운영 IP로 렌더링해 호스트 Nginx에 반영한다. 평균 30회/분·burst 5이며 초과 요청의 JSON·CORS·Retry-After는 backend guard가 처리한다. backend/내부 Nginx의 기존 비공개 바인딩을 유지한다.
 
-대상: Lightsail `13.209.59.180`. 도메인 구매·Route 53·별도 로드밸런서 없이 기존 서버를 사용한다.
+대상은 기존 Lightsail이다. `192.0.2.10`은 예시 IP다. 도메인 구매·Route 53·별도 로드밸런서 없이 기존 서버를 사용한다.
 Let’s Encrypt IP 인증서는 무료이며 유효기간은 약 160시간이다.
 발급 사양: https://letsencrypt.org/2026/03/11/shorter-certs-certbot.html
 
@@ -25,10 +25,14 @@ Lightsail IPv4 방화벽은 TCP 80·443 접근이 가능해야 한다. 실제 �
 검증 당시 버전은 5.8.0이다. 기존 컨테이너 배포와 독립적으로 관리한다.
 
 ```bash
-sudo bash ~/dva-deploy/https/setup-ip-https.sh bootstrap
-sudo bash ~/dva-deploy/https/setup-ip-https.sh staging
-sudo bash ~/dva-deploy/https/setup-ip-https.sh issue
+export DVA_PUBLIC_IP=192.0.2.10  # 현재 환경의 공인 IPv4로 교체
+sudo --preserve-env=DVA_PUBLIC_IP bash ~/dva-deploy/https/setup-ip-https.sh bootstrap
+sudo --preserve-env=DVA_PUBLIC_IP bash ~/dva-deploy/https/setup-ip-https.sh staging
+sudo --preserve-env=DVA_PUBLIC_IP bash ~/dva-deploy/https/setup-ip-https.sh issue
 ```
+
+수동 반영 전에는 `bash ~/dva-deploy/https/setup-ip-https.sh render-https`로 후보 설정을 출력한다.
+이 명령은 운영 파일을 쓰거나 Nginx를 재시작하지 않는다. 기존 웹훅 호스트는 같은 IPv4에서 `sslip.io` 형식으로 생성한다.
 
 staging 인증서는 별도 디렉터리에 보관하고 실제 HTTPS에는 사용하지 않는다.
 실제 인증서의 IP SAN, 로컬 신뢰 검증, 갱신 모의 실행 및 hook을 검증한 뒤 타이머를 활성화한다.
@@ -54,12 +58,12 @@ staging 인증서는 별도 디렉터리에 보관하고 실제 HTTPS에는 사�
 
 ## 서버 Swagger
 
-접속 주소는 `https://13.209.59.180/api/docs`이며 OpenAPI JSON은 `/api/docs-json`이다.
+접속 주소는 `https://192.0.2.10/api/docs`이며 OpenAPI JSON은 `/api/docs-json`이다.
 호스트 Nginx는 `/api/docs`, `/api/docs/` 아래 정적 파일, `/api/docs-json`의 GET·HEAD·OPTIONS를 전달한다.
 기존 PBX 수신 경로는 유지하며 다른 업무 API와 내부 readiness 경로는 별도로 공개하지 않는다.
 
 서버 `shared/.env`에 `SWAGGER_ENABLED=true`를 설정한다. `CORS_ORIGINS`에는
-`https://13.209.59.180`을 포함하며 기존에 허용한 주소는 유지한다. 이 환경 파일은 Git에 넣지 않는다.
+공인 IP의 HTTPS 주소를 포함하며 기존에 허용한 주소는 유지한다. 이 환경 파일은 Git에 넣지 않는다.
 새 설정은 컨테이너 재생성 때 적용되므로, Jenkins에서 `DEPLOY_LIGHTSAIL=true`로 배포하거나
 현재 릴리스의 Compose·release.env·shared/.env를 사용해 backend를 재생성한다.
 단순 `docker restart`는 환경변수 변경을 반영하지 않는다.
@@ -73,7 +77,7 @@ Swagger 화면·JSON과 `swagger-ui.css`, `swagger-ui-bundle.js`, `swagger-ui-in
 systemctl list-timers dva-certbot-renew.timer
 sudo journalctl -u dva-certbot-renew.service -n 30 --no-pager
 sudo /opt/dva-certbot/bin/certbot certificates
-curl --fail https://13.209.59.180/https-health
+curl --fail https://192.0.2.10/https-health
 ```
 
 갱신 타이머는 매시간 최대 5분 지연 후 실행한다. Certbot이 갱신 필요성을 판단하고,
@@ -97,8 +101,8 @@ Nginx 설정 변경은 `/usr/sbin/nginx -t` 성공 후 reload한다. host 기본
 
 - Let's Encrypt staging 검증, 공인 IP 인증서 발급 성공
 - 인증서 유효기간: 2026-10-23 09:25:11 ~ 2026-10-30 01:25:10 KST
-- IP SAN `13.209.59.180` 확인
-- 외부 PC의 `https://13.209.59.180/https-health` HTTP 200, 신뢰 검증 통과
+- 운영 IP SAN 확인
+- 외부 PC에서 HTTPS 상태 확인 경로 HTTP 200, 신뢰 검증 통과
 - 갱신 dry-run 및 root 소유 reload hook 성공, 매시간 timer 활성화
 - 웹훅 공개 경로의 실제 인증·DB 저장 검증: [PBX 규격](../webhooks/PBX-CALL-ENDED.md)
 - DB 변경 전 서버에 custom-format dump를 만들고 pg_restore의 archive index 검사를 통과했다.

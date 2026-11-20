@@ -46,7 +46,7 @@ sequenceDiagram
   B->>B: recordings 참조 + PROCESSED 저장
 ```
 
-같은 Docker 네트워크에서는 AI가 `http://backend:3000/api/...`를 직접 호출할 수 있다. 공개 경로는 `https://13.209.59.180/api/...`이고 Nginx가 백엔드로 전달한다. PBX의 외부 `/api/webhooks/pbx/call-ended`만 내부 `/webhooks/pbx/call-ended`로 변환한다.
+같은 Docker 네트워크에서는 AI가 `http://backend:3000/api/...`를 직접 호출할 수 있다. 공개 경로는 `https://192.0.2.10/api/...`이고 Nginx가 백엔드로 전달한다. PBX의 외부 `/api/webhooks/pbx/call-ended`만 내부 `/webhooks/pbx/call-ended`로 변환한다.
 
 ## 1. 고객 확인
 
@@ -144,7 +144,7 @@ sequenceDiagram
   "startedAt": "2026-10-27T01:00:00Z",
   "endedAt": "2026-10-27T01:03:00Z",
   "durationSeconds": 180,
-  "recordingUrl": "https://dvercorp-aicc-connect-dev-recordings.s3.ap-northeast-2.amazonaws.com/example.mp3"
+  "recordingUrl": "https://recordings.example.test/example.mp3"
 }
 ```
 

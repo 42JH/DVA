@@ -1,6 +1,6 @@
 // 띠의 단계 · 확인 창 문구 — 순수 함수 (personaBand.test.ts). 상태는 usePersonaPage가 모아 넘김
 
-/** 띠의 단계 (11/13 새 안 1번) — unapplied 반영 전 · testing 시험 중 · applying 반영 중
+/** 띠의 단계 — unapplied 반영 전 · testing 시험 중 · applying 반영 중
  *  stopped = 시험을 멈춤(2번) — [통화에 반영] 대신 [다시 시험하고 반영], 입력 칸은 다시 열림
  *  review = 시험이 끝났는데 실패가 있음(4번) — 바로 반영하지 않고 담당자가 [확인하고 반영]
  *  passed = 6번 시험 통과 — 띠의 [통화에 사용하기]. null = 띠 없음 */
@@ -10,15 +10,15 @@ export type BandStep = 'unapplied' | 'testing' | 'stopped' | 'review' | 'applyin
 export type Confirming =
   | { kind: 'use'; personaSeq: number }
   | { kind: 'delete'; personaSeq: number }
-  | { kind: 'test' } // 띠의 [통화에 반영] — 시험하고 반영 (모두 통과면 저절로 반영)
+  | { kind: 'test' } // 띠의 [통화에 반영] — 시험부터 (모두 통과해도 반영은 담당자가 다시 누름)
   | { kind: 'stop' } // 띠의 [시험 중단] (2번)
   | { kind: 'review' } // 확인 필요 띠의 [확인하고 반영] (4번) — 실패를 보고도 반영
   | null
 
 /** 띠가 어느 단계인가
  *  switching = 통화에 안 쓰는 상담가(6번) · unapplied = 사용 중 상담가의 고친 내용이 아직 통화에 안 쓰임 — 둘 다 아니면 띠 없음
- *  연결 실패가 섞인 일부 시험(partial)도 실패가 있으면 확인 필요 (피그마 3 · 4번: 통과 7 · 실패 2 · 연결 실패 1)
- *  6번의 실패 · 중단은 4번 확인 필요 · 2번 시험 중단 띠를 그대로 (11/13 사용자). 6번은 시험 전이면 띠 없음 */
+ *  연결 실패가 섞인 일부 시험(partial)도 실패가 있으면 확인 필요
+ *  6번의 실패 · 중단은 4번 확인 필요 · 2번 시험 중단 띠를 그대로. 6번은 시험 전이면 띠 없음 */
 export function bandStep(
   who: { applying: boolean; switching: boolean; unapplied: boolean },
   test: { state: string; allPass: boolean; stopped: unknown; fail: number },
@@ -47,7 +47,7 @@ interface ConfirmCopy {
   note: string
   okLabel: string
   danger?: boolean // 확인 버튼을 빨간색으로
-  failed?: string[] // 실패한 시나리오 이름 — 확인하고 반영 창 (4번, 피그마 2368:5978)
+  failed?: string[] // 실패한 시나리오 이름 — 확인하고 반영 창 (4번)
 }
 
 /** '다음 통화부터 빠른 접수형 대신 친절형이 응대합니다. 지금 통화 중인 2건은 바뀌지 않습니다.' */
@@ -116,15 +116,15 @@ export function confirmCopy(
           okLabel: '시험 시작',
         }
       return {
-        title: '시험하고 통화에 반영할까요?',
-        note: `${runs} 돌립니다. 모두 통과하면 바로 반영하고, 실패가 있으면 결과를 확인한 뒤 반영할 수 있습니다.`,
-        okLabel: '시험하고 반영',
+        title: '통화에 반영하기 전에 시험할까요?',
+        note: `${runs} 돌린 뒤, 결과를 보고 통화에 반영합니다.`,
+        okLabel: '시험 시작',
       }
     }
     case 'use': {
       const p = s.find(confirming.personaSeq)
       if (!p) return null
-      // 다른 상담가로 바꾸기 — 6번 시험 통과 뒤 (피그마 6번 줄 '통화에 사용 확인') · 시나리오 시험이 꺼진 환경
+      // 다른 상담가로 바꾸기 — 6번 시험 통과 뒤 · 시나리오 시험이 꺼진 환경
       if (!p.inUse)
         return {
           title: `${nameEul(p.name)} 통화에 사용할까요?`,

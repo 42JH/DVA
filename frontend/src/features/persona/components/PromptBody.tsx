@@ -1,13 +1,13 @@
 import { useState } from 'react'
-import type { usePersonaPage } from '@/features/persona/hooks/usePersonaPage'
-import type { usePromptEditor } from '@/features/persona/hooks/usePromptEditor'
+import type { usePersonaPage } from '../hooks/usePersonaPage'
+import type { usePromptEditor } from '../hooks/usePromptEditor'
 import { TextAreaInput } from '@/shared/ui/Field'
 import { Markdown } from '@/shared/ui/Markdown'
 
 type Vm = ReturnType<typeof usePersonaPage>
 // 입력 칸에 필요한 것만 — 그 자리 수정(usePromptEditor) · 등록(useAddPersona)이 같은 모양
 type Fields = Pick<ReturnType<typeof usePromptEditor>, 'sections' | 'setField'>
-// ed가 없으면 p를 읽기 전용으로. locked = 시험 · 반영 중 — 회색 바탕 · 흐린 글 (피그마 2368:3212)
+// ed가 없으면 p를 읽기 전용으로. locked = 시험 · 반영 중 — 회색 바탕 · 흐린 글
 // plain = 늘 입력 칸 (상담가 등록 — 처음부터 쓰는 화면이라 보는 모양이 없음)
 type Props = {
   p?: NonNullable<Vm['prompt']>
@@ -16,9 +16,9 @@ type Props = {
   plain?: boolean
 }
 
-// 프롬프트 — 회색 제목 줄 + 본문을 한 테두리 안에 (11/13 새 안)
-// 보는 동안은 꾸며서(굵게 · 목록), 그 칸을 누르면 글자 그대로인 입력 칸 (11/15 사용자: '**즉시**' 같은 기호가 그대로 보임 — 피그마 2409:2521)
-// 글은 15 / 1.65, 칸 안 여백 10 · 12 (시안) — 보기와 입력 칸의 첫 줄 자리가 같아 누를 때 글이 덜 움직임
+// 프롬프트 — 회색 제목 줄 + 본문을 한 테두리 안에
+// 보는 동안은 꾸며서(굵게 · 목록), 그 칸을 누르면 글자 그대로인 입력 칸 ('**즉시**' 같은 기호가 그대로 보임 — 피그마 2409:2521)
+// 글은 15 / 1.65, 칸 안 여백 10 · 12 — 보기와 입력 칸의 첫 줄 자리가 같아 누를 때 글이 덜 움직임
 export function PromptBody({ p, ed, locked, plain }: Props) {
   const [editing, setEditing] = useState<string | null>(null) // 지금 고치는 칸
   return (

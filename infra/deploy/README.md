@@ -23,7 +23,7 @@ AI 팀은 이 네트워크에 AI 컨테이너를 연결하고 `ai` 별칭과 800
 > [Jenkins 서버 운영·검증·정식 Job 전환 안내](../jenkins/README.md)를 참고한다.
 > 아래 PowerShell 스크립트는 Windows에서 수동 패키징·전송할 때 사용할 수 있다.
 
-배포 대상: `ubuntu@13.209.59.180`, Ubuntu 24.04 / linux/amd64.
+배포 대상은 Ubuntu 24.04 / linux/amd64 서버다. 문서에서는 예시 주소 `192.0.2.10`을 사용한다.
 Jenkins Linux Agent에서 이미지를 만들고 파일로 SSH 전송한다. ECR은 사용하지 않는다.
 별도 이미지 저장소 요금은 발생하지 않으며, 기존 서버의 디스크와 전송량을 사용한다.
 S3 및 외부 AI API 비용은 이 배포 방식과 별개다.
@@ -98,10 +98,11 @@ chmod 600 ~/dva-deploy/shared/.env
 Jenkins 산출물을 내려받았다면 그 버전과 배포 폴더 경로를 지정한다.
 
 ```powershell
+$env:LIGHTSAIL_SSH_HOST = '192.0.2.10' # 현재 환경의 배포 호스트로 교체
 $keyPath = 'C:\Users\SSAFY\Desktop\기업연계\dva-monolith.pem'
-scp -i $keyPath -r ".deploy/$releaseVersion" ubuntu@13.209.59.180:./dva-deploy/releases/
+scp -i $keyPath -r ".deploy/$releaseVersion" "ubuntu@${env:LIGHTSAIL_SSH_HOST}:./dva-deploy/releases/"
 if ($LASTEXITCODE -ne 0) { throw '전송 실패: 배포를 실행하지 마세요.' }
-ssh -i $keyPath ubuntu@13.209.59.180 "bash ~/dva-deploy/releases/$releaseVersion/deploy.sh"
+ssh -i $keyPath "ubuntu@$env:LIGHTSAIL_SSH_HOST" "bash ~/dva-deploy/releases/$releaseVersion/deploy.sh"
 if ($LASTEXITCODE -ne 0) { throw '배포 실패: 서버 상태를 확인하세요.' }
 ```
 
@@ -144,7 +145,7 @@ DB 상태 확인 실패는 배포를 중단한다. 백업·SQL 실패로 전환�
 Windows의 별도 PowerShell 창에서 터널을 열고 유지한다.
 
 ```powershell
-ssh -i 'C:\Users\SSAFY\Desktop\기업연계\dva-monolith.pem' -N -L 18082:127.0.0.1:8082 ubuntu@13.209.59.180
+ssh -i 'C:\Users\SSAFY\Desktop\기업연계\dva-monolith.pem' -N -L 18082:127.0.0.1:8082 ubuntu@192.0.2.10
 ```
 
 - `http://127.0.0.1:18082/nginx-health` → `ok`
@@ -211,6 +212,8 @@ Jenkins 관리 → Credentials → System → Global credentials → Add Credent
 `known_hosts`는 서버의 공개 호스트 키이며 개인 키가 아니다. 확인한 지문은
 `SHA256:W9suR7/VFXc7he/VDB6jFvQcnJJXrlTkykWFZL/hjhU`다.
 업로드 스크립트는 이 키로 접속 대상을 검증하고 호스트 키 확인을 우회하지 않는다.
+수동 업로드는 `LIGHTSAIL_SSH_HOST`를 사용한다. 모놀리식 Jenkins에서는 이 값이 비어 있으면
+기존 `BUILD_URL`의 호스트를 사용한다. 두 경로 모두 `dva-monolith-deploy` 별칭으로 같은 공개키를 고정한다.
 Windows SSH 권한 문제를 피하도록 실행 계정만 접근할 수 있는 임시 키 사본을
 작업 폴더 밖에 만들고, 성공·실패 여부와 관계없이 정리한다. 원본 키의 권한은 변경하지 않는다.
 
@@ -231,6 +234,7 @@ Windows SSH 권한 문제를 피하도록 실행 계정만 접근할 수 있는 
 직접 접속 검증만 할 때는 아래처럼 `-VerifyOnly`를 사용한다. 이 모드는 서버 배포를 하지 않는다.
 
 ```powershell
+$env:LIGHTSAIL_SSH_HOST = '192.0.2.10' # 현재 환경의 배포 호스트로 교체
 & ./infra/deploy/upload.ps1 -Version '383f3cc5be57-first-20261022' `
     -IdentityFile 'C:\Users\SSAFY\Desktop\기업연계\dva-monolith.pem' -VerifyOnly
 ```
@@ -256,7 +260,7 @@ Jenkins가 개인 PC에 있으므로 PC 또는 Windows Agent가 꺼지면 새 �
 
 ## 2026-10-22 Lightsail 검증 결과
 
-- 서버: `13.209.59.180`, x86_64, Docker Compose v5.6.1
+- 서버: `192.0.2.10`, x86_64, Docker Compose v5.6.1
 - 로컬 패키징 파일을 SCP 전송한 뒤 서버에서 SHA-256 검증·이미지 로드·Compose 기동 성공
 - 서버 환경 파일은 `/home/ubuntu/dva-deploy/shared/.env`, 파일 권한 600으로 생성
 - 최종 실행 릴리스: `383f3cc5be57-first-20261022` (배포 스크립트 수정 커밋 `383f3cc` 기준)

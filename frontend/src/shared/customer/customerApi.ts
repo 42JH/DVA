@@ -53,7 +53,7 @@ export const customerQueries = {
       staleTime: 30_000,
     })
   },
-  /** 소속 기업 찾기 — 사원 검색(이름 · 번호 일부, 관리자 세션). 추천 줄에 기업 이름을 붙이는 데만 씀 (11/11 사용자) */
+  /** 소속 기업 찾기 — 사원 검색(이름 · 번호 일부, 관리자 세션). 추천 줄에 기업 이름을 붙이는 데만 씀 */
   members: (text: string, limit = 20) => {
     const where = customerSearch(text)
     const q = where && ('q' in where ? where.q : where.phoneNumber)
@@ -68,7 +68,7 @@ export const customerQueries = {
       staleTime: 30_000,
     })
   },
-  /** 이 고객이 실제로 보낸 받는 곳 — 최신순 (접수 완료 주문). 주소록을 '최근에 보낸 순'으로 정렬하는 데만 씀 (11/11 사용자) */
+  /** 이 고객이 실제로 보낸 받는 곳 — 최신순 (접수 완료 주문). 주소록을 '최근에 보낸 순'으로 정렬하는 데만 씀 */
   sentTo: (customerSeq: number) =>
     queryOptions({
       queryKey: [...customerQueries.all(), customerSeq, 'sentTo'],

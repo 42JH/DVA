@@ -200,10 +200,15 @@ const deptMembers = (seq: number) =>
     .length
 const addr = (a: Address | null) => (a ? `${a.roadAddress} ${a.detailAddress ?? ''}`.trim() : '')
 
-// 청구 내역 (백엔드에 요청한 GET /companies/{id}/billing/charges 계약) — 사원이 다른 기업 사원에게 보낸 월결제 건
+// 청구 내역 (GET /companies/{id}/billing/charges) — 사원이 보낸 월결제 건. 몇 건은 배송 둘 · 결제 뒤 취소
 // 번호 · 달로 정해져 새로고침해도 같음. 이번 달은 오늘까지만
 const PRICES = [4950, 6000, 8000, 10000, 12000]
-const BOXES = ['서류 1건', '소박스 1개', '중박스 1개', '대박스 1개']
+const BOXES = [
+  { document: 1, small: 0, medium: 0, big: 0, other: null },
+  { document: 0, small: 1, medium: 0, big: 0, other: null },
+  { document: 0, small: 0, medium: 1, big: 0, other: null },
+  { document: 0, small: 0, medium: 0, big: 1, other: null },
+]
 function chargesOf(id: number, month: string) {
   const mine = active(id)
   const others = members.filter(
@@ -219,14 +224,13 @@ function chargesOf(id: number, month: string) {
   const n = (id * 5 + mo) % 9
   return Array.from({ length: n }, (_, i) => {
     const s = mine[(i * 3 + id) % mine.length]
-    const r = others[(i * 7 + id * 11 + mo) % others.length]
-    const ro = orgs.find((o) => o.organizationSeq === r.membership.organizationSeq)!
     const amount = PRICES[(i + id + mo) % PRICES.length]
     const day = Math.max(1, lastDay - Math.floor((i * lastDay) / Math.max(n, 1)))
     return {
       orderSeq: 200 + id * 37 + mo * 11 + i,
       paidAt: new Date(y, mo - 1, day, 9 + ((i * 5) % 9), (i * 17) % 60).toISOString(),
       amount,
+      orderCancelled: i % 7 === 6,
       sender: {
         name: s.customer.name,
         phoneNumber: s.customer.phoneNumber,
@@ -234,13 +238,18 @@ function chargesOf(id: number, month: string) {
           depts.find((d) => d.departmentSeq === s.membership.departmentSeq)?.name ?? null,
         address: addr(s.customer.address),
       },
-      recipient: {
-        organizationName: ro.name,
-        name: r.customer.name,
-        phoneNumber: r.customer.phoneNumber,
-        address: addr(r.customer.address),
-      },
-      items: [{ label: BOXES[(i + id) % BOXES.length], amount }],
+      parcels: Array.from({ length: i % 4 === 3 ? 2 : 1 }, (_, k) => {
+        const to = others[(i * 7 + id * 11 + mo + k * 5) % others.length]
+        return {
+          cancelled: k === 1 && i % 8 === 7,
+          recipient: {
+            name: to.customer.name,
+            phoneNumber: to.customer.phoneNumber,
+            address: addr(to.customer.address),
+          },
+          items: BOXES[(i + id + k) % BOXES.length],
+        }
+      }),
     }
   })
 }
@@ -251,7 +260,7 @@ const thisMonth = () => {
 const summary = (o: Org) => ({
   ...o,
   memberCount: memberCount(o.organizationSeq),
-  // 목록용으로 백엔드에 요청한 칸 (11/11)
+  // 목록용으로 백엔드에 요청한 칸
   departmentCount: depts.filter((d) => d.organizationSeq === o.organizationSeq).length,
   managerNames: active(o.organizationSeq)
     .filter((m) => m.membership.role === 'ORG_ADMIN')
@@ -375,7 +384,7 @@ export const companyHandlers = [
     return created({ organizationSeq: id })
   }),
   // 월 사용액 (API-34, month 'YYYY-MM' · 생략 = 이번 달). 가짜 금액은 기업 번호로 고정
-  // 이 처리가 없으면 목업에서 진짜 서버로 넘어가 401 → 로그아웃돼 기업 상세를 못 봤음 (11/11 QA)
+  // 이 처리가 없으면 목업에서 진짜 서버로 넘어가 401 → 로그아웃돼 기업 상세를 못 봤음 (QA)
   http.get(`${API_BASE_URL}/companies/:id/billing`, ({ params, request }) => {
     const o = orgOf(params.id)
     if (!o) return notFound()
@@ -399,8 +408,7 @@ export const companyHandlers = [
       (c) =>
         !q ||
         c.sender.name.includes(q) ||
-        c.recipient.organizationName.includes(q) ||
-        c.recipient.name.includes(q) ||
+        c.parcels.some((p) => p.recipient.name.includes(q)) ||
         String(c.orderSeq).includes(q.replace(/^DV-0*/i, '')),
     )
     return HttpResponse.json({

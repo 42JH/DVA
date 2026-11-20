@@ -2,7 +2,7 @@
 
 - Jira: S15P31D109-111
 - 작업 브랜치: `ci/jenkins-lightsail`, 기준: `develop-backend` (`5384177`)
-- 대상: 기존 Lightsail `13.209.59.180` / Ubuntu / 2 vCPU / 약 8GB
+- 대상: 기존 Lightsail `192.0.2.10` / Ubuntu / 2 vCPU / 약 8GB
 - 새 실행 경로: `/home/ubuntu/dva-jenkins`, Compose 프로젝트: `dva-jenkins`
 - 기존 업무 서비스·DB 볼륨 및 운영 배포 릴리스는 변경하지 않았다. 승인 후 Nginx에 Jenkins HTTPS 경로만 추가했다.
 

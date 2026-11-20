@@ -4,6 +4,7 @@ import { PoolClient } from 'pg';
 import { AuditService } from '../audit/audit.service';
 import { ApiException } from '../common/errors/api.exception';
 import { ListResponse } from '../common/pagination';
+import { ConsultationsService } from '../consultations/consultations.service';
 import { DatabaseService } from '../database/database.service';
 import {
   CreateParcelDraftDto,
@@ -47,6 +48,7 @@ export class ParcelDraftsService {
     private readonly database: DatabaseService,
     private readonly repository: ParcelDraftsRepository,
     private readonly orders: OrdersRepository,
+    private readonly calls: ConsultationsService,
     private readonly audit: AuditService,
   ) {}
 
@@ -74,10 +76,7 @@ export class ParcelDraftsService {
       const customer = await this.orders.customerByPhone(client, call.callerPhoneNumber);
       call.customerSeq = customer?.customerSeq ?? null;
       if (write && call.customerSeq !== null)
-        await client.query(
-          'UPDATE call_sessions SET customer_seq=$2 WHERE call_session_seq=$1 AND customer_seq IS NULL',
-          [id, call.customerSeq],
-        );
+        await this.calls.attachCustomer(client, id, call.customerSeq);
     }
     if (
       !call.callerPhoneNumber ||
@@ -85,10 +84,7 @@ export class ParcelDraftsService {
     )
       throw new ApiException(403, 'FORBIDDEN', '통화 발신번호와 활성 고객 연결을 확인해 주세요.');
     if (write && call.customerSeq !== null)
-      await client.query(
-        'UPDATE order_parcel_drafts SET customer_seq=$2 WHERE call_session_seq=$1 AND customer_seq IS NULL',
-        [id, call.customerSeq],
-      );
+      await this.repository.attachCallCustomer(client, id, call.customerSeq);
     if (write && !allowSealed && (call.completionReceivedAt !== null || call.orderSeq !== null))
       throw new ApiException(409, 'INVALID_STATE', '주문 입력이 확정된 통화입니다.');
     return call;
@@ -263,10 +259,7 @@ export class ParcelDraftsService {
       // Transfer the reservation while holding the source lock; rollback restores both rows.
       if (source) {
         if (source.customerSeq === null && customerId !== null)
-          await client.query('UPDATE order_parcel_drafts SET customer_seq=$2 WHERE draft_seq=$1', [
-            source.draftSeq,
-            customerId,
-          ]);
+          await this.repository.attachCustomer(client, source.draftSeq, customerId);
         await this.repository.update(client, source.draftSeq, source.parcel, 'RESUMED');
         await this.record(client, adminId, source.draftSeq, 'PARCEL_DRAFT_RESUMED', requestId);
       }

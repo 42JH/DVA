@@ -3,7 +3,7 @@ OBS_DATA_DIR=/srv/dva-observability/data
 OBS_RUNTIME_DIR=/srv/dva-observability/runtime
 APP_PROJECT=dva-prod
 APP_NETWORK=dva-prod_web_net
-GRAFANA_ROOT_URL=https://13.209.59.180/grafana/
+GRAFANA_ROOT_URL=https://192.0.2.10/grafana/
 GRAFANA_ADMIN_USER=observability-admin
 GRAFANA_ADMIN_PASSWORD=REPLACE_WITH_A_LONG_RANDOM_PASSWORD
 # 비워 두면 모든 장애 알림 규칙을 일시 정지한다. 로컬 진단과 조회는 가능하다.

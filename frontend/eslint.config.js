@@ -9,7 +9,7 @@ import tseslint from 'typescript-eslint'
 import prettier from 'eslint-config-prettier/flat'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
-// 팀 컨벤션 v4 (노션) 5장 — 구조 규칙을 이 파일이 검사한다
+// 구조 규칙(frontend/README.md "구조")을 이 파일이 검사한다
 // 기능 폴더는 자동으로 읽는다. 새 기능을 만들어도 이 파일은 고치지 않는다
 const features = fs
   .readdirSync('src/features', { withFileTypes: true })

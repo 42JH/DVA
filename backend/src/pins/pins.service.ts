@@ -131,8 +131,7 @@ export class PinsService {
     adminId: number | null,
     header?: string,
   ) {
-    return this.database.transaction(async (client) => {
-      await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
+    return this.database.readSnapshot(async (client) => {
       await this.personalAccess(client, customerId, adminId, header, false);
       return new ListResponse(
         await this.repository.personal(client, customerId, query),

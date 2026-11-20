@@ -33,6 +33,7 @@ async function server(t, handler) {
 
 test('recording sources require an exact HTTPS host; private/reserved DNS answers fail closed', () => {
   assert.equal(recordingSource(source, [host]).hostname, host);
+  assert.throws(() => recordingSource(source, []));
   for (const value of [
     `http://${host}/a`,
     `https://${host}.evil.test/a`,

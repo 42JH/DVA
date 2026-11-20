@@ -102,7 +102,7 @@ sudo bash /opt/dva-observability/deploy.sh /srv/dva-observability/settings
 
 6. [호스트 HTTPS 설정](../https/https.conf)의 `/grafana/` location을 실제 설정에 반영한 뒤
    `sudo nginx -t` 성공 후 `sudo systemctl reload nginx`를 실행한다.
-7. `https://13.209.59.180/grafana/`에서 운영 담당자는 Admin, 개발·인프라 담당자는 각자 Viewer 계정으로 등록한다.
+7. `https://192.0.2.10/grafana/`에서 운영 담당자는 Admin, 개발·인프라 담당자는 각자 Viewer 계정으로 등록한다.
    DVA 앱 관리자 계정과 별개다. 공개 가입·익명 접근은 비활성화되어 있다.
    Viewer는 제공한 대시보드 필터로 로그를 조회하며, 대시보드 작성자가 필요할 때만 Editor를 부여한다.
 8. 외부에서 `/internal/metrics`, `/api/internal/metrics`, Loki/Prometheus 포트에 접근할 수 없는지 확인한다.

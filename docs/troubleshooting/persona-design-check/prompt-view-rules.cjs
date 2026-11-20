@@ -1,6 +1,6 @@
 // 꾸민 글에서 원문과 달라 보일 수 있는 마크다운 규칙을 실제로 그려 봄 (가짜 서버 5174) — 링크 정의 꼴 · 들여쓴 줄 · 3부터인 번호 · 인용 · 제목 · 구분선 · 빈 줄 · 꺾쇠와 변수
 // 실행: node prompt-view-rules.cjs
-const { chromium } = require(process.env.PW_CORE ?? 'C:/Users/SSAFY/AppData/Local/Temp/pw/node_modules/playwright-core')
+const { chromium } = require(process.env.PW_CORE ?? 'playwright-core')
 const BASE = process.env.BASE ?? 'http://localhost:5174'
 const VIEW = 'article section div[tabindex="0"]'
 const CASES = {

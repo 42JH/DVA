@@ -7,10 +7,13 @@ import jenkins.model.Jenkins
 import org.jenkinsci.plugins.workflow.cps.CpsScmFlowDefinition
 import org.jenkinsci.plugins.workflow.job.WorkflowJob
 
+// 저장소 주소는 붙여 넣기 전에 채움 (코드에 남기지 않음)
+def repoUrl = ''
+assert repoUrl : 'repoUrl(GitLab 저장소 주소)을 채운 뒤 실행하세요'
 def jenkins = Jenkins.get()
 def name = 'dva-fe'
 def scm = new GitSCM(
-    GitSCM.createRepoList('https://lab.ssafy.com/s15-final/S15P31D109.git', 'gitlab-dva-readonly'),
+    GitSCM.createRepoList(repoUrl, 'gitlab-dva-readonly'),
     [new BranchSpec('*/develop-fe')],
     null, null, [])
 def flow = new CpsScmFlowDefinition(scm, 'frontend/Jenkinsfile')

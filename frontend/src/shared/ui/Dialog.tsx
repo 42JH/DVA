@@ -111,7 +111,7 @@ export function ConfirmDialog({
       <div className="flex w-[496px] flex-col gap-2">
         <h2 className="text-card font-bold">{title}</h2>
         {target && (
-          // 질문 전문이 올 수 있음(최대 1,000자) — 세 줄까지만, 나머지는 title (11/02)
+          // 질문 전문이 올 수 있음(최대 1,000자) — 세 줄까지만, 나머지는 title
           <p className="line-clamp-3 text-body break-words text-sub" title={target}>
             {target}
           </p>

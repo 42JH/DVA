@@ -26,7 +26,7 @@ Jira는 [S15P31D109-160](https://ssafy.atlassian.net/browse/S15P31D109-160)이�
 
 ## Jenkins #39 실패와 수정
 
-[Jenkins #39](https://13.209.59.180/jenkins/job/dva-msa/39/console)는 9624b77을 checkout하고 Linux 배포 회귀 62개를 통과한 뒤 Verify Event Transport에서 실패했다. 원본 목록에 추가된 공개 API 8개와 055 SQL 해시가 기존 96개/054 기준에 없었다. DB·앱 빌드·배포에는 도달하지 않았다. 로컬에서 같은 deep equality 실패를 재현했으며 해시·전체 목록·경로 중복 검사를 유지한 채 최신 104개 선언·54개 SQL 파일(마지막 055)·6개 워커로 갱신했다. 단순 목록 갱신과 별개로 기존 목록/취소/통화 삭제의 055 의미 변화와 실제 데이터 이관을 함께 연결한다.
+[Jenkins #39](https://192.0.2.10/jenkins/job/dva-msa/39/console)는 9624b77을 checkout하고 Linux 배포 회귀 62개를 통과한 뒤 Verify Event Transport에서 실패했다. 원본 목록에 추가된 공개 API 8개와 055 SQL 해시가 기존 96개/054 기준에 없었다. DB·앱 빌드·배포에는 도달하지 않았다. 로컬에서 같은 deep equality 실패를 재현했으며 해시·전체 목록·경로 중복 검사를 유지한 채 최신 104개 선언·54개 SQL 파일(마지막 055)·6개 워커로 갱신했다. 단순 목록 갱신과 별개로 기존 목록/취소/통화 삭제의 055 의미 변화와 실제 데이터 이관을 함께 연결한다.
 
 ## 최초 전환과 복구 조건
 

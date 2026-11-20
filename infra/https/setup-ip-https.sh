@@ -1,31 +1,49 @@
 #!/usr/bin/env bash
-# Run on the Lightsail host as root. Source files are never executed from a writable /tmp hook.
+# Installation runs as root on the Lightsail host. Rendering writes only to stdout.
 set -euo pipefail
-[[ "$EUID" -eq 0 ]] || { echo 'Run with sudo.' >&2; exit 1; }
 source_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-ip=13.209.59.180
+mode=${1:-}
+case "$mode" in
+    bootstrap|staging|issue|render-http|render-https) ;;
+    *) echo 'Usage: setup-ip-https.sh bootstrap|staging|issue|render-http|render-https' >&2; exit 1 ;;
+esac
+ip=${DVA_PUBLIC_IP:?Set DVA_PUBLIC_IP to the public IPv4 address}
+octet='(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])'
+[[ "$ip" =~ ^$octet(\.$octet){3}$ ]] || { echo 'Invalid DVA_PUBLIC_IP.' >&2; exit 1; }
+
+render_config() {
+    local webhook_host="${ip//./-}.sslip.io"
+    sed -e "s/server_name 192\.0\.2\.10;/server_name $ip;/" \
+        -e "s/server_name webhook\.example\.test;/server_name $webhook_host;/" \
+        "$source_dir/$1.conf"
+}
+
+case "$mode" in
+    render-http|render-https) render_config "${mode#render-}"; exit ;;
+esac
+[[ "$EUID" -eq 0 ]] || { echo 'Run with sudo.' >&2; exit 1; }
 config=/etc/nginx/sites-available/dva-ip
 certbot=/opt/dva-certbot/bin/certbot
 assets=/opt/dva-ip-https
 
-apply_config() {
-    local template="$1" backup
-    backup="$(mktemp)"
-    if [[ -f "$config" ]]; then cp -- "$config" "$backup"; fi
-    install -m 644 "$template" "$config"
+apply_config() (
+    local template="$1" work_dir
+    work_dir="$(mktemp -d)"
+    trap 'rm -f -- "$work_dir/previous" "$work_dir/candidate"; rmdir -- "$work_dir"' EXIT
+    render_config "$template" > "$work_dir/candidate"
+    if [[ -f "$config" ]]; then cp -- "$config" "$work_dir/previous"; fi
+    install -m 644 "$work_dir/candidate" "$config"
     ln -sfn "$config" /etc/nginx/sites-enabled/dva-ip
     if ! /usr/sbin/nginx -t; then
-        if [[ -s "$backup" ]]; then cp -- "$backup" "$config"; fi
-        rm -f -- "$backup"
+        if [[ -s "$work_dir/previous" ]]; then cp -- "$work_dir/previous" "$config"; fi
         echo 'Nginx validation failed; existing running configuration was not reloaded.' >&2
         exit 1
     fi
-    rm -f -- "$backup"
     systemctl enable --now nginx
     systemctl reload nginx
-}
+)
 
-case "${1:-}" in
+case "$mode" in
     bootstrap)
         apt-get update
         DEBIAN_FRONTEND=noninteractive apt-get install -y nginx python3-venv
@@ -41,9 +59,9 @@ case "${1:-}" in
             mv -- /etc/nginx/sites-enabled/default /etc/nginx/default-site.disabled
         fi
         if [[ -f /etc/letsencrypt/live/dva-ip/fullchain.pem ]]; then
-            apply_config "$source_dir/https.conf"
+            apply_config https
         else
-            apply_config "$source_dir/http.conf"
+            apply_config http
         fi
         echo 'HTTP ACME challenge listener ready. Verify public TCP 80 before issuing.'
         ;;
@@ -54,7 +72,7 @@ case "${1:-}" in
         args=(certonly --non-interactive --agree-tos "${account_args[@]}"
             --preferred-profile shortlived --webroot --webroot-path /var/www/dva-acme
             --ip-address "$ip" --cert-name dva-ip)
-        if [[ "$1" == staging ]]; then
+        if [[ "$mode" == staging ]]; then
             "$certbot" "${args[@]}" --staging --config-dir /etc/letsencrypt-staging \
                 --work-dir /var/lib/letsencrypt-staging --logs-dir /var/log/letsencrypt-staging
             echo 'Staging validation passed. This certificate is not installed for clients.'
@@ -74,7 +92,7 @@ case "${1:-}" in
                 exit 1
             fi
             "$certbot" "${args[@]}" --deploy-hook "$assets/reload-nginx.sh"
-            apply_config "$source_dir/https.conf"
+            apply_config https
             install -m 644 "$source_dir/dva-certbot-renew.service" /etc/systemd/system/dva-certbot-renew.service
             install -m 644 "$source_dir/dva-certbot-renew.timer" /etc/systemd/system/dva-certbot-renew.timer
             systemctl daemon-reload
@@ -87,5 +105,4 @@ case "${1:-}" in
             echo "HTTPS and renewal verified: https://$ip"
         fi
         ;;
-    *) echo 'Usage: sudo bash setup-ip-https.sh bootstrap|staging|issue' >&2; exit 1 ;;
 esac

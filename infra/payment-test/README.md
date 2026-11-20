@@ -14,14 +14,16 @@
 | --- | --- |
 | `MATTERMOST_WEBHOOK_URL` | 기존 결제 전용 채널 웹훅 |
 | `PAYMENT_TEST_ENABLED=true` | 시연 서비스 명시적 활성화 |
-| `PAYMENT_TEST_PUBLIC_URL` | `https://13.209.59.180/payment-test` |
+| `PAYMENT_TEST_PUBLIC_URL` | 공개 결제 페이지 주소, 예시 `https://192.0.2.10/payment-test` |
 | `TOSS_TEST_CLIENT_KEY`, `TOSS_TEST_SECRET_KEY` | 동일한 문서용 **결제위젯** 테스트 키 쌍 (`test_gck_`, `test_gsk_`) |
 | `PAYMENT_TEST_OPERATOR_TOKEN` | 서버에서 생성한 무작위 내부 실행 토큰 |
 
 공식 샘플의 문서용 키를 사용하려면, 서버의 검토된 저장소 루트에서 다음 명령을 실행한다. **기존 settings에 웹훅이 있어야 한다.** 이미 설정한 값은 유지하며 빠진 항목만 추가한다. 설정을 출력하지 않는다. 샘플 Git 커밋을 고정했고, 파일 형식이 바뀌거나 다운로드가 실패하면 설정을 덮어쓰지 않는다.
+기존 settings에 공개 주소가 없으면 현재 환경의 `PAYMENT_TEST_PUBLIC_URL`을 컨테이너에 주입한다.
 
 ```bash
-sudo docker run --rm --user 0 \
+sudo --preserve-env=PAYMENT_TEST_PUBLIC_URL docker run --rm --user 0 \
+  --env PAYMENT_TEST_PUBLIC_URL \
   --mount "type=bind,src=$(pwd)/infra/payment-test,dst=/setup,readonly" \
   --mount type=bind,src=/srv/dva-payment-test,dst=/settings \
   node:24-bookworm-slim node /setup/configure.mjs
@@ -45,7 +47,7 @@ Compose는 `127.0.0.1:3002`에만 게시한다. 컨테이너는 UID 1000, 읽기
 ```bash
 sudo nginx -t
 sudo systemctl reload nginx
-curl --fail https://13.209.59.180/api/health
+curl --fail https://192.0.2.10/api/health
 ```
 
 HTTP 포트는 기존 HTTPS 리다이렉트를 유지한다. 결제 경로는 접근 로그를 끄며 요청 본문은 8KiB로 제한한다. 이 경로에 쿼리나 본문을 수집하는 디버그 로깅을 추가하지 않는다. 외부에서 `/internal/payment-test/requests`와 `/api/internal/payment-test/requests`가 기존 차단대로 404인지도 확인한다.

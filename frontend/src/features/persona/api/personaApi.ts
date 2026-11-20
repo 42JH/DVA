@@ -1,7 +1,7 @@
 // 07 페르소나 관리 Model — 페르소나(AI 상담사 말투 · 목소리 묶음)와 버전(프롬프트 + 음성 설정 기록). React를 모르는 데이터 층
 // 실서버 /api/personas (develop-backend 11/02 초안 계약): 초안(PATCH) · 확정(POST versions → 새 HEAD) · 적용 요청(activate → PENDING → ACTIVE, 서비스 전체에 하나)
 // 11/11: [저장] = 초안 + 바로 확정(saveVersion), [통화에 사용하기] = 적용 요청(requestApply). [적용] 버튼 없음
-// 서버 모양 → 화면 모양은 personaMap.ts(순수 함수, 테스트). 초안 삭제는 하지 않음. 지난 버전 [이 버전 다시 쓰기] = 그 내용을 saveVersion으로 (11/11)
+// 서버 모양 → 화면 모양은 personaMap.ts(순수 함수, 테스트). 초안 삭제는 하지 않음. 지난 버전 [이 버전 다시 쓰기] = 그 내용을 saveVersion으로
 import { queryOptions } from '@tanstack/react-query'
 import { api, type ApiItem } from '@/shared/api/client'
 import { fetchAll } from '@/shared/api/paging'
@@ -83,7 +83,7 @@ async function fetchAiOptions(signal?: AbortSignal): Promise<AiOptions> {
 /** 초안 저장은 됐는데 새 버전 확정만 실패 — 내용은 초안에 남아 있음. 다시 받은 뒤 [저장]하면 확정만 다시 감 (usePromptEditor) */
 export class ConfirmError extends Error {}
 
-/** 수정 저장 (11/11 — 저장 = 바로 새 버전, [적용] 없음): 초안 덮어쓰기(PATCH /personas/{id}) → 그 초안을 확정(POST versions → 새 HEAD)
+/** 수정 저장 (저장 = 바로 새 버전, [적용] 없음): 초안 덮어쓰기(PATCH /personas/{id}) → 그 초안을 확정(POST versions → 새 HEAD)
  * 통화엔 안 씀 — 통화는 [통화에 사용하기](activate)로만. 바뀐 칸만 보냄(생략 = 유지 → 서버의 정확한 숫자 속도를 안 건드림)
  * expectedDraftRevision: 초안이 없으면 null(생략 불가). 그새 누가 저장 · 확정했으면 409 */
 export async function saveVersion(

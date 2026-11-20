@@ -27,11 +27,21 @@ MR !326 병합 기준 `3d8bf7b9`로 착수한 뒤 최신 `bae5074`(원본 054·�
 
 [통화 최종 분석·이탈 단계·응답 대기시간 3개 API](../docs/msa-call-analysis-plan.md)를 consultation에 연결했다. 실제 페르소나 버전은 operations 조회 이벤트와 감사 확정에 연결한 FK 참조로 보호한다. 공개 Ingress는 기존 `/api/ai/calls`를 그대로 사용하고 새 토큰을 만들지 않으며 기존 AI_INSIGHTS_TOKEN을 consultation-runtime에 주입한다. 전체 상담 조회/발화·주문·FAQ·보관 워커는 후속 MR이다.
 
-Jenkins의 Linux 빌드 노드에서 검증하고, MSA 서버 `k15d109.p.ssafy.io`의 k3s에 배포한다. 모놀리식 `backend/`와 루트 `Jenkinsfile`은 별개다.
+Jenkins의 Linux 빌드 노드에서 검증하고, `MSA_SSH_HOST`로 지정한 서버의 k3s에 배포한다. 모놀리식 `backend/`와 루트 `Jenkinsfile`은 별개다.
 
 현재 5개 서비스 DB의 Liquibase CI/CD와 customer·order·delivery·consultation·operations NestJS 서비스의 테스트·이미지 빌드·k3s 배포를 지원한다. **develop-backend Push Webhook은 변경된 앱의 CI부터 CD까지 자동 실행한다.** 앱 배포용 체크박스를 매번 켤 필요가 없다. DB changeset도 같은 실행에서 자동 적용한 뒤 앱을 배포한다. 별도 배포 체크박스나 승인 입력은 없다.
 
 ## 실행 흐름
+
+앱·DB 전달 전에 Jenkins 환경에 다음 주소를 지정한다. 기존 배포를 이어갈 때는 현재 호스트와 허용 출처를 그대로 주입한다.
+
+| 환경변수 | 값 |
+|---|---|
+| `MSA_SSH_HOST` | 배포 서버 호스트명. SSH 사용자는 기존 `ubuntu`이며 등록된 공개키로 서버를 검증한다. |
+| `MSA_INGRESS_HOST` | 앱 패키징에 사용할 공개 Ingress 호스트명. |
+| `MSA_CORS_ORIGINS` | 쉼표로 구분한 공통 HTTPS 출처 목록. consultation의 기존 로컬 개발 출처는 매니페스트에 포함한다. |
+
+디버 접수를 사용하는 환경은 `order-runtime`에 `DVER_API_URL`과 `DVER_API_KEY`를 주입한다. 녹취 다운로드를 사용하는 환경은 `consultation-runtime`에 `RECORDING_ALLOWED_HOSTS`와 `S3_RECORDINGS_BUCKET`을 주입한다. 설정하지 않은 연동은 비활성 상태를 유지한다.
 
 [CI 비용·#40 전환 실패 보완](../docs/msa-ci-runtime-plan.md)은 앱 배포와 회귀 선택을 분리하고,
 전체 선택 시 11개 checks/production/Liquibase 이미지를 공유한다. 기존 회귀의 원본은
@@ -78,7 +88,7 @@ Webhook → develop-backend checkout → 스크립트 검사 → 고정 원본 �
 
 Webhook 경로 필터를 통과한 실행에서 클러스터 배포 이력을 조회하고 검사 대상을 결정한다. 서비스 빌드·배포와 DB 검사는 실제 변경 및 배포 이력에 따라 생략한다. 선택 결과는 `Select Build Scope` 로그에서 확인한다.
 
-자동 실행은 Generic Webhook Trigger를 사용한다. 기존 GitLab 직접 트리거와 Poll SCM은 끈다. GitLab MSA Webhook 주소는 `https://13.209.59.180/jenkins/generic-webhook-trigger/invoke`이며, `develop-backend` Push events와 기존 Secret token·SSL 검증을 유지한다. Secret은 Jenkins의 Generic Webhook Trigger Token과 일치시킨다.
+자동 실행은 Generic Webhook Trigger를 사용한다. 기존 GitLab 직접 트리거와 Poll SCM은 끈다. GitLab MSA Webhook 주소는 `<JENKINS_BASE_URL>/generic-webhook-trigger/invoke`이며, `develop-backend` Push events와 기존 Secret token·SSL 검증을 유지한다. Secret은 Jenkins의 Generic Webhook Trigger Token과 일치시킨다.
 
 Jenkins는 `object_kind=push`, `project.id=1462697`, `ref=refs/heads/develop-backend`, 삭제가 아닌 after SHA를 확인하고 `$.commits[*]['added','modified','removed'][*]`에 `msa/` 경로가 있을 때만 작업을 생성한다. `backend/`만 바뀐 일반 push는 빌드 기록이나 노드를 할당하지 않는다. GitLab이 commit 목록을 최대 20개로 제한하므로 20커밋 초과 push는 누락 방지를 위해 작업을 실행하고 내부에서 비교한다. 테스트용 Custom webhook template과 `gwt-dry-run` 헤더는 실제 운영 설정에서 비워둔다.
 
@@ -160,9 +170,9 @@ Jenkins에서 `verification.json`, `verification-logs/`, `msa-release/<커밋>-<
 
 customer 주소:
 
-- https://k15d109.p.ssafy.io/customer/health
-- https://k15d109.p.ssafy.io/customer/docs
-- https://k15d109.p.ssafy.io/customer/docs-json
+- `https://<MSA_INGRESS_HOST>/customer/health`
+- `https://<MSA_INGRESS_HOST>/customer/docs`
+- `https://<MSA_INGRESS_HOST>/customer/docs-json`
 
 Traefik의 `websecure`와 `letsencrypt`를 사용한다. 앱은 `/<서비스>` 접두어와 `/health`, `/docs`, `/docs-json`을 제공한다. 배포 성공 전에 내부 Service와 외부 HTTPS 응답을 검사한다.
 
@@ -237,7 +247,7 @@ DB와 앱은 별도 수동 실행으로 나누지 않는다. `Release Delivery` 
 | Consultation | 3004 | /consultation/docs |
 | Operations | 3005 | /operations/docs |
 
-공통 호스트는 https://k15d109.p.ssafy.io 이며 각 서비스는 같은 접두어 아래 health와 docs-json을 제공한다. Consultation·Operations의 운영 주소는 병합 후 배포 완료 확인이 필요하다.
+공통 Ingress 호스트는 `MSA_INGRESS_HOST`로 지정하며 각 서비스는 같은 접두어 아래 health와 docs-json을 제공한다. Consultation·Operations의 운영 주소는 병합 후 배포 완료 확인이 필요하다.
 
 남은 두 서비스는 하나의 MR에서 추가하되 Jenkinsfile·DB changeset은 변경하지 않는다. 자동 검색·선택 빌드·패키징·HTTPS 배포·실패 복구를 재사용한다. 정상 Customer·Order·Delivery 및 변경 없는 DB는 생략한다. 다중 앱 배포는 서비스별 성공을 기록하며 전체 원자적 롤백은 하지 않는다. 재실행 시 아직 배포하지 못한 서비스만 선택한다.
 

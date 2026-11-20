@@ -1,4 +1,8 @@
 import {
+  AVAILABLE_CALL_SQL,
+  AVAILABLE_JOINED_CALL_SQL,
+} from '../consultations/call-session-availability';
+import {
   AdminOrderListItemDto,
   AdminOrderListQueryDto,
   AdminOrderStatusCountsDto,
@@ -22,6 +26,7 @@ import {
   PreviousOrderAddressDto,
 } from './dto/order-address-history.dto';
 
+const ADMIN_PAID_STATUS = "o.status IN ('PAID','SUBMITTING','SUBMITTING_FAILED')";
 const ADMIN_ORDER_SORT = '"createdAt" DESC,"orderSeq" DESC';
 const ADMIN_ORDER_DETAILS = `o.order_seq AS "orderSeq",o.status,o.created_at AS "createdAt",
   o.pickup_requested_at AS "pickupRequestedAt",customer.customer_seq AS "customerSeq",
@@ -245,8 +250,7 @@ export class OrdersRepository {
         `SELECT u.customer_seq AS "customerSeq", c.ended_at AS "endedAt", c.order_seq AS "orderSeq"
          FROM call_sessions c LEFT JOIN customers u
            ON u.phone_number=c.caller_phone_number AND u.status='ACTIVE' AND u.deleted_at IS NULL
-         WHERE c.call_session_seq=$1 AND c.deleted_at IS NULL
-           AND (c.incoming_at IS NULL OR c.incoming_at>clock_timestamp()-interval '5 years')`,
+         WHERE c.call_session_seq=$1 AND ${AVAILABLE_JOINED_CALL_SQL}`,
         [callId],
       )
     ).rows[0];
@@ -267,7 +271,7 @@ export class OrdersRepository {
          OR ($5::text IS NOT NULL AND (strpos(p.origin_phone_number,$5)>0 OR strpos(p.destination_phone_number,$5)>0)))))
         AND ($2::timestamptz IS NULL OR o.created_at >= $2)
         AND ($3::timestamptz IS NULL OR o.created_at < $3)
-        AND ($4::text IS NULL OR o.status=$4 OR ($4='PAID' AND o.status IN ('SUBMITTING','SUBMITTING_FAILED')))
+        AND ($4::text IS NULL OR o.status=$4 OR ($4='PAID' AND ${ADMIN_PAID_STATUS}))
          AND ${organizationSeq === null ? '$6::int IS NULL' : 'company.organization_seq=$6::int'}`,
       values: [
         query.q || null,
@@ -287,7 +291,7 @@ export class OrdersRepository {
     return (
       await client.query<{ data: Omit<AdminOrderStatusCountsDto, 'incomplete'> }>(
         `SELECT jsonb_build_object('all',count(*),'notPaid',count(*) FILTER(WHERE o.status='notPaid'),
-       'paid',count(*) FILTER(WHERE o.status IN ('PAID','SUBMITTING','SUBMITTING_FAILED')),
+       'paid',count(*) FILTER(WHERE ${ADMIN_PAID_STATUS}),
        'accepted',count(*) FILTER(WHERE o.status='ACCEPTED'),
        'submissionFailed',count(*) FILTER(WHERE o.status='SUBMISSION_FAILED'),
        'cancelled',count(*) FILTER(WHERE o.status='CANCELLED')) AS data FROM orders o ${joins} ${filter.sql}`,
@@ -459,7 +463,7 @@ export class OrdersRepository {
         phone: string | null;
         orderIntakeEnabled: boolean;
       }>(
-        'SELECT order_seq AS "orderSeq", ended_at AS "endedAt", caller_phone_number AS phone,order_intake_enabled AS "orderIntakeEnabled" FROM call_sessions WHERE call_session_seq=$1 AND deleted_at IS NULL AND (incoming_at IS NULL OR incoming_at>clock_timestamp()-interval \'5 years\') FOR UPDATE',
+        `SELECT order_seq AS "orderSeq", ended_at AS "endedAt", caller_phone_number AS phone,order_intake_enabled AS "orderIntakeEnabled" FROM call_sessions WHERE call_session_seq=$1 AND ${AVAILABLE_CALL_SQL} FOR UPDATE`,
         [id],
       )
     ).rows[0];

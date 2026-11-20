@@ -5,7 +5,7 @@ import {
   type Persona,
   type PersonaVersion,
   type PromptFields,
-} from '@/features/persona/api/personaMap'
+} from '../api/personaMap'
 import { callStateOf, editTargetOf, reuseDiff } from './personaVersions'
 
 const fields = (over: Partial<PromptFields> = {}): PromptFields => ({

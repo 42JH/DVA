@@ -75,6 +75,13 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  readSnapshot<T>(work: (client: PoolClient) => Promise<T>): Promise<T> {
+    return this.transaction(async (client) => {
+      await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
+      return work(client);
+    });
+  }
+
   async onModuleDestroy(): Promise<void> {
     await this.pool.end();
   }

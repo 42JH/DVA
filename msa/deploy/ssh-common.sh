@@ -4,8 +4,13 @@ identity_file=$(realpath -- "${identity_file:?Specify SSH private key}")
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 known_hosts="$script_dir/known_hosts"
 [[ -f "$identity_file" && -f "$known_hosts" ]] || { echo 'SSH files missing.' >&2; exit 1; }
-server='ubuntu@k15d109.p.ssafy.io'
+ssh_host=${MSA_SSH_HOST:?Set MSA_SSH_HOST to the deployment hostname}
+[[ "$ssh_host" =~ ^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$ ]] || {
+  echo 'Invalid MSA_SSH_HOST.' >&2
+  exit 2
+}
+server="ubuntu@$ssh_host"
 remote_root='/home/ubuntu/msa-deploy/releases'
 ssh_options=(-i "$identity_file" -o BatchMode=yes -o IdentitiesOnly=yes
-  -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$known_hosts"
+  -o StrictHostKeyChecking=yes -o HostKeyAlias=dva-msa-deploy -o "UserKnownHostsFile=$known_hosts"
   -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3)

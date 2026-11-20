@@ -32,7 +32,7 @@ export function PendingPage() {
         tall
         className="w-full"
         onClick={() => {
-          clearSession() // 승인 전 계정의 로그인 표시가 남으면 로그인 화면 → 홈 → 다시 여기로 돌아옴 (11/09 검수)
+          clearSession() // 승인 전 계정의 로그인 표시가 남으면 로그인 화면 → 홈 → 다시 여기로 돌아옴
           navigate('/login')
         }}
       >

@@ -26,7 +26,8 @@ test('a slow finalization does not serialize the recovery batch ahead of existin
 
 test('finalization batches distinct mappings and preserves duplicate version increments', async () => {
   const { OrderIntakeRepository } = require('../dist/orders/order-intake.repository');
-  const repository = new OrderIntakeRepository(null);
+  const { ParcelDraftsRepository } = require('../dist/orders/parcel-drafts.repository');
+  const repository = new OrderIntakeRepository(null, new ParcelDraftsRepository());
   for (const mappings of [
     [],
     [{ draftSeq: 1, orderParcelSeq: 11 }],

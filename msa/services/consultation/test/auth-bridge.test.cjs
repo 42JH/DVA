@@ -40,6 +40,11 @@ test('validates service authentication and PBX/S3 settings without exposing cred
   const valid = { DB_HOST: 'db', DB_USER: 'consultation_app', DB_PASSWORD: 'private-password', DB_NAME: 'consultation_db',
     CUSTOMER_AUTH_TOKEN: 'customer-test-service-token-'.padEnd(48,'c'), CUSTOMER_URL: 'http://customer:3001', OPERATIONS_URL: 'http://operations:3005', CONSULTATION_AUTH_TOKEN: serviceToken };
   assert.equal(validateEnvironment(valid).PORT, 3004);
+  assert.deepEqual(validateEnvironment(valid).RECORDING_ALLOWED_HOSTS, []);
+  assert.deepEqual(
+    validateEnvironment({...valid, RECORDING_ALLOWED_HOSTS:'Records.example.test, backup.example.test'}).RECORDING_ALLOWED_HOSTS,
+    ['records.example.test', 'backup.example.test'],
+  );
   for (const extra of [{ OPERATIONS_URL: '' }, { OPERATIONS_URL: 'http://user:password@operations:3005' },
     { OPERATIONS_URL: 'http://operations:3005/path' }, { OPERATIONS_URL: 'file:///tmp/auth' },
     { CONSULTATION_AUTH_TOKEN: '' }, { CONSULTATION_AUTH_TOKEN: 'x'.repeat(257) }, { CONSULTATION_AUTH_TOKEN: serviceToken+'\n' },

@@ -8,7 +8,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { Environment } from '../../config/environment';
-import { MAX_INPUT_CHARS, describe, fromEvents, run } from './complaint-judge';
+import { fromEvents, prepareJudgeInput, runPrepared } from './complaint-judge';
 import { backendComplaints } from './complaint-extract';
 import { MAX_TRIES, ComplaintJudgeRepository } from './complaint-judge.repository';
 import { ComplaintModelClient } from './complaint-model.client';
@@ -118,12 +118,17 @@ export class ComplaintJudgeWorker
       await this.repository.retryLater(id, 5, false);
       return;
     }
-    if ([...describe(rec)].length > MAX_INPUT_CHARS) {
+    const prepared = prepareJudgeInput(rec);
+    if (prepared.tooLong) {
       await this.repository.giveUp(id);
       this.logger.warn({ event: 'call_complaint_input_too_long', callSessionSeq: id });
       return;
     }
-    const result = await run(rec, this.model.ask, inputs.faqs.length ? inputs.faqs : null);
+    const result = await runPrepared(
+      prepared,
+      this.model.ask,
+      inputs.faqs.length ? inputs.faqs : null,
+    );
     if (!result) {
       await this.repository.retryLater(id, 10 * attempt, true);
       this.logger.warn({ event: 'call_complaint_model_unavailable', callSessionSeq: id, attempt });

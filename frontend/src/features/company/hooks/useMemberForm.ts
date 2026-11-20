@@ -11,9 +11,9 @@ import {
   setMemberRole,
   type CustomerAddress,
   type Member,
-} from '@/features/company/api/companyApi'
-import { phoneInput } from '@/features/company/csvMembers'
-import { errorText } from '@/features/company/labels'
+} from '../api/companyApi'
+import { phoneInput } from '../csvMembers'
+import { errorText } from '../labels'
 import {
   memberChecks,
   memberErrors,

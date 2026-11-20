@@ -117,7 +117,7 @@ test('Nginx preserves a new empty AI call with completion replay and no actual o
   assert.deepEqual(result.parcelMappings, []);
   const login = await fetch('http://proxy/api/auth/login', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Origin: 'https://13.209.59.180' },
+    headers: { 'Content-Type': 'application/json', Origin: 'https://frontend.example.test' },
     body: JSON.stringify({ loginId: 'runtimeAdmin83', password: 'runtime-only-password' }),
   });
   assert.equal(login.status, 200);
@@ -220,7 +220,7 @@ test('Nginx preserves a new empty AI call with completion replay and no actual o
   assert.ok(summary.aiPerformance.stageDropoffs);
   const headers = {
     Cookie: cookie,
-    Origin: 'https://13.209.59.180',
+    Origin: 'https://frontend.example.test',
     'Content-Type': 'application/json',
   };
   const ids = [];
@@ -326,20 +326,20 @@ test('production customer service authentication through Nginx preserves AI and 
   assert.equal((await fetch('http://proxy/api/customers')).status, 401);
   const aiStatus = await fetch('http://proxy/api/customers/' + id, {
     method: 'PATCH',
-    headers: { ...headers, Origin: 'https://13.209.59.180' },
+    headers: { ...headers, Origin: 'https://frontend.example.test' },
     body: '{"status":"WITHDRAWN"}',
   });
   assert.equal(aiStatus.status, 403);
   const login = await fetch('http://proxy/api/auth/login', {
     method: 'POST',
-    headers: { ...headers, Origin: 'https://13.209.59.180' },
+    headers: { ...headers, Origin: 'https://frontend.example.test' },
     body: JSON.stringify({ loginId: 'runtimeAdmin83', password: 'runtime-only-password' }),
   });
   assert.equal(login.status, 200);
   const adminHeaders = {
     ...headers,
     Cookie: login.headers.get('set-cookie').split(';')[0],
-    Origin: 'https://13.209.59.180',
+    Origin: 'https://frontend.example.test',
   };
   const list = await fetch('http://proxy/api/customers?phoneNumber=' + input.phoneNumber, {
     headers: adminHeaders,
@@ -392,7 +392,7 @@ test('production image receives the existing PBX contract through real Nginx wit
     headers: {
       'Content-Type': 'application/json',
       Authorization: 'Bearer ' + process.env.TEST_WEBHOOK_TOKEN,
-      Origin: 'https://13.209.59.180',
+      Origin: 'https://frontend.example.test',
     },
     body: JSON.stringify({
       recordingId,
@@ -405,14 +405,17 @@ test('production image receives the existing PBX contract through real Nginx wit
     }),
   });
   assert.equal(response.status, 200);
-  assert.equal(response.headers.get('access-control-allow-origin'), 'https://13.209.59.180');
+  assert.equal(
+    response.headers.get('access-control-allow-origin'),
+    'https://frontend.example.test',
+  );
   assert.deepEqual(await response.json(), { status: 'received', recordingId, duplicate: false });
 });
 
 test('production login through Nginx authorizes company operations and logout revokes access', async () => {
   const headers = {
     'Content-Type': 'application/json',
-    Origin: 'https://13.209.59.180',
+    Origin: 'https://frontend.example.test',
   };
   const login = await fetch('http://proxy/api/auth/login', {
     method: 'POST',
@@ -535,7 +538,7 @@ test('Nginx forwards the call_session_seq header without losing its underscores'
   const preflight = await fetch('http://proxy/api/orders', {
     method: 'OPTIONS',
     headers: {
-      Origin: 'https://13.209.59.180',
+      Origin: 'https://frontend.example.test',
       'Access-Control-Request-Method': 'POST',
       'Access-Control-Request-Headers': 'content-type,idempotency-key,call_session_seq',
     },
@@ -547,7 +550,7 @@ test('Nginx forwards the call_session_seq header without losing its underscores'
 test('production active count SSE crosses HTTPS and both Nginx proxies, keeps heartbeats and closes after logout', async () => {
   const root = process.env.TEST_HTTPS_API_ROOT;
   assert.match(root, /^https:\/\//);
-  const origin = 'https://13.209.59.180';
+  const origin = 'https://frontend.example.test';
   const login = await fetch(root + '/auth/login', {
     method: 'POST',
     headers: { Origin: origin, 'Content-Type': 'application/json' },
@@ -657,7 +660,7 @@ test('HTTPS and development login IP buckets reject bursts with the established 
       fetch(root + (index % 2 ? '/AUTH/LOGIN/' : '/auth/login'), {
         method: 'POST',
         headers: {
-          Origin: 'https://13.209.59.180',
+          Origin: 'https://frontend.example.test',
           'Content-Type': 'application/json',
           'X-Forwarded-For': '192.0.2.' + index,
           'X-Real-IP': '198.51.100.' + index,
@@ -672,7 +675,10 @@ test('HTTPS and development login IP buckets reject bursts with the established 
     assert.equal(rejected.status, 429, await rejected.clone().text());
     assert.equal(rejected.headers.get('retry-after'), '2');
     assert.equal(rejected.headers.get('cache-control'), 'no-store');
-    assert.equal(rejected.headers.get('access-control-allow-origin'), 'https://13.209.59.180');
+    assert.equal(
+      rejected.headers.get('access-control-allow-origin'),
+      'https://frontend.example.test',
+    );
     assert.ok(
       rejected.headers.get('access-control-expose-headers').toLowerCase().includes('retry-after'),
     );
@@ -682,7 +688,7 @@ test('HTTPS and development login IP buckets reject bursts with the established 
     assert.equal(rejected.headers.get('x-request-id'), body.meta.requestId);
     const preflight = await fetch(root + '/auth/login', {
       method: 'OPTIONS',
-      headers: { Origin: 'https://13.209.59.180', 'Access-Control-Request-Method': 'POST' },
+      headers: { Origin: 'https://frontend.example.test', 'Access-Control-Request-Method': 'POST' },
     });
     assert.equal(preflight.status, 204);
     assert.equal((await fetch(root + '/ai/faqs', { headers: businessHeaders() })).status, 200);
@@ -695,7 +701,7 @@ test('signup limits survive HTTPS proxy forwarding and development proxy header 
       fetch(root + '/auth/signup', {
         method: 'POST',
         headers: {
-          Origin: 'https://13.209.59.180',
+          Origin: 'https://frontend.example.test',
           'Content-Type': 'application/json',
           'X-Forwarded-For': `192.0.2.${index}, 198.51.100.${index}`,
           'X-Real-IP': '203.0.113.' + index,

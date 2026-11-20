@@ -702,7 +702,7 @@ function generatedScene(id: number): CallDetail | undefined {
 }
 
 // ---------- 명세 모양으로 (DTO) ----------
-/** 가짜 불만 장면 → 판정 (11/11 Jira 148): AI 응대 오류 + 고객 불만(대상 · 강도, 근거 = 고객 말). '말이 빠름'은 옛 유형 그대로,
+/** 가짜 불만 장면 → 판정 (Jira 148): AI 응대 오류 + 고객 불만(대상 · 강도, 근거 = 고객 말). '말이 빠름'은 옛 유형 그대로,
  *  'AI라서 거부'는 대상 없는 옛 판정(화면 '불만'), 9101엔 화면에서 빼는 근거 없는 답변도 하나 */
 type Judge = { type: string; target?: string | null; level?: string | null }
 type Judged = Judge & {
@@ -740,7 +740,7 @@ const sceneOf = (id: number): CallDetail | undefined =>
   CALLS.find((c) => c.callSessionSeq === id) ?? generatedScene(id)
 const rowOf = (id: number) => rowsNow().find((r) => r.callSessionSeq === id) // 20초 뒤 생기는 새 통화도
 
-// ---------- 늦게 도착하는 데이터 (11/02 '통화 내역 자동 갱신 프론트 연동 명세'의 완료 조건을 가짜 서버로 재현) ----------
+// ---------- 늦게 도착하는 데이터 ('통화 내역 자동 갱신 프론트 연동 명세'의 완료 조건을 가짜 서버로 재현) ----------
 // 시계는 페이지를 새로 열 때(가짜 서버가 뜰 때) 0초. 화면은 5초마다 다시 받음. 줄 번호는 목록(최신순) 위에서부터
 //  1번 줄: 15초 분석 → 25초 녹취(서명 URL 20초 유효, 조회마다 새 URL). 50~60초엔 상세 기본 조회가 503
 //  2번 줄: 녹취 발급 실패(DEPENDENCY_UNAVAILABLE)
@@ -1095,7 +1095,7 @@ export const callHandlers = [
     const orderSeq = p('orderSeq')
     const from = p('from')
     const to = p('to')
-    const complained = p('hasComplaint') === 'true' // 통계 카드가 불만 있는 통화만 받음 (11/11)
+    const complained = p('hasComplaint') === 'true' // 통계 카드가 불만 있는 통화만 받음
     if (elapsed() >= 75 && elapsed() < 90) return unavailable()
     const hit = rowsNow().filter((r) => {
       const t = Date.parse(r.startedAt)

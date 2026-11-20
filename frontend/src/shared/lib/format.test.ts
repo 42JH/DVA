@@ -17,7 +17,7 @@ assert.equal(fmtDateTime(t), '10-20 14:33')
 assert.equal(fmtDate(t), '2026-10-20')
 assert.equal(fmtDuration(220), '3분 40초')
 assert.equal(fmtDuration(52), '0분 52초')
-assert.equal(fmtDuration(3903), '1시간 5분 03초') // 한 시간 넘는 통화 (11/02)
+assert.equal(fmtDuration(3903), '1시간 5분 03초') // 한 시간 넘는 통화
 assert.equal(fmtClock(220), '03:40')
 assert.equal(fmtClock(3903), '1:05:03')
 assert.equal(fmtPhone('01066382047'), '010-6638-2047')

@@ -108,7 +108,7 @@ DB는 테이블의 물리 배치보다 업무 필드·연결·스냅샷·상태�
 
 ### Jenkins #23 실패 원인과 재현
 
-[dva-msa #23](https://13.209.59.180/jenkins/job/dva-msa/23/console)은 `1ec031e`를 검사하며 스크립트 회귀 50개를 통과한 뒤 `Verify Event Transport`에서 실패했다. 앱 빌드·DB 적용·배포는 도달하지 않았다. 수신 업무는 커밋됐지만 `delivered_at`은 NULL이었다.
+[dva-msa #23](https://192.0.2.10/jenkins/job/dva-msa/23/console)은 `1ec031e`를 검사하며 스크립트 회귀 50개를 통과한 뒤 `Verify Event Transport`에서 실패했다. 앱 빌드·DB 적용·배포는 도달하지 않았다. 수신 업무는 커밋됐지만 `delivered_at`은 NULL이었다.
 
 정상 전송 fixture도 timeout 검사용 100ms를 공유했다. 실제 정상 전송 테스트가 약 150ms 걸리면서 ACK를 받기 전에 중단됐고, 릴레이는 설계대로 미확정 메시지를 재시도 대상으로 보존했다. 운영 기본값은 5초다.
 

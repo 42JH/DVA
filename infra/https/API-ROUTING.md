@@ -23,7 +23,8 @@ NestJS로 전달하고, 관리자 인증·권한·CSRF 검사는 기존 전역 A
 
 대상 파일은 `/etc/nginx/sites-available/dva-ip`다. 2026-11-01에 서버 파일(AI 웹훅·PBX mirror·
 결제 테스트·sslip.io 도메인)과 저장소의 `https.conf`를 같은 내용으로 맞췄다. 이후 경로 변경은
-저장소 `https.conf`에 먼저 반영하고, 서버 파일과 `diff`로 저장소 밖 변경이 없는지 확인한 뒤 교체한다.
+저장소 `https.conf`에 먼저 반영한다. `DVA_PUBLIC_IP`를 설정한 뒤 `bash infra/https/setup-ip-https.sh render-https`로
+후보 파일을 만들어 기존 서버 파일과 비교한다.
 서버 파일을 백업하고 후보 설정을 검사한 뒤 실제 설정에서도 `sudo nginx -t`가 성공한 경우에만
 `sudo systemctl reload nginx`를 실행한다. 검사 실패 시 백업을 복원한다.
 다른 팀의 설정 변경과 겹치면 현재 서버 파일을 다시 읽어 차이를 확인한다.
@@ -35,7 +36,7 @@ Jenkins의 컨테이너 배포는 이 호스트 설정을 자동으로 적용하
 ## 검증
 
 ```bash
-bash infra/https/check-api-routing.sh https://13.209.59.180
+bash infra/https/check-api-routing.sh  # DVA_PUBLIC_IP 사용
 ```
 
 이 검사는 GET 요청만 사용하며 로그인 없는 관리자 API의 401, readiness의 404와

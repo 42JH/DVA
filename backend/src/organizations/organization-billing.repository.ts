@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Pool, PoolClient } from 'pg';
 import { DatabaseService } from '../database/database.service';
 import { BillingMonthDto } from './dto/billing-month.dto';
+import { BillingChargeDto, BillingChargesQueryDto } from './dto/billing-charges.dto';
 
 @Injectable()
 export class OrganizationBillingRepository {
@@ -20,6 +21,67 @@ export class OrganizationBillingRepository {
       )
     ).rows[0];
   }
+
+  async readCharges(id: number, query: BillingChargesQueryDto) {
+    return (
+      await this.database.pool.query<{
+        rows: BillingChargeDto[];
+        total_count: number;
+        total_amount: number;
+      }>(
+        `WITH company AS (
+          SELECT organization_seq FROM organizations WHERE organization_seq=$1 AND deleted_at IS NULL
+        ), matched AS (
+          SELECT c.order_seq,c.occurred_at,c.amount,o.status='CANCELLED' AS cancelled,o.billing_department_name
+          FROM company JOIN order_billing_charges c USING(organization_seq)
+          JOIN orders o ON o.order_seq=c.order_seq
+          WHERE c.billing_month=($2 || '-01')::date AND c.payment_method_type='credit'
+            AND ($3::text IS NULL
+              OR strpos(c.order_seq::text,$3)>0
+              OR strpos('DV-' || lpad(c.order_seq::text,greatest(5,length(c.order_seq::text)),'0'),upper($3))>0
+              OR EXISTS (
+                SELECT 1 FROM order_parcels p WHERE p.order_seq=c.order_seq
+                  AND (strpos(lower(normalize(p.origin_name,NFC)),lower($3))>0
+                    OR strpos(lower(normalize(p.destination_name,NFC)),lower($3))>0)
+              ))
+        ), totals AS (
+          SELECT count(*)::float8 AS total_count,coalesce(sum(amount),0)::float8 AS total_amount FROM matched
+        ), page AS (
+          SELECT * FROM matched ORDER BY occurred_at DESC,order_seq DESC LIMIT $4 OFFSET $5
+        )
+        SELECT totals.*,coalesce((
+          SELECT jsonb_agg(jsonb_build_object(
+            'orderSeq',page.order_seq,
+            'paidAt',to_char(page.occurred_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+            'amount',page.amount,'orderCancelled',page.cancelled,
+            'sender',jsonb_build_object('name',first_parcel.origin_name,'phoneNumber',first_parcel.origin_phone_number,
+              'departmentName',page.billing_department_name,
+              'address',nullif(concat_ws(' ',nullif(btrim(first_parcel.origin_road_address),''),
+                nullif(btrim(first_parcel.origin_detail_address),'')),'')),
+            'parcels',coalesce(delivery.parcels,'[]'::jsonb))
+            ORDER BY page.occurred_at DESC,page.order_seq DESC)
+          FROM page
+          LEFT JOIN LATERAL (
+            SELECT origin_name,origin_phone_number,origin_road_address,origin_detail_address
+            FROM order_parcels WHERE order_seq=page.order_seq ORDER BY parcel_position LIMIT 1
+          ) first_parcel ON true
+          LEFT JOIN LATERAL (
+            SELECT jsonb_agg(jsonb_build_object(
+              'cancelled',p.status='CANCELLED',
+              'recipient',jsonb_build_object('name',p.destination_name,'phoneNumber',p.destination_phone_number,
+                'address',nullif(concat_ws(' ',nullif(btrim(p.destination_road_address),''),
+                  nullif(btrim(p.destination_detail_address),'')),'')),
+              'items',jsonb_build_object('document',p.document_count,'small',p.small_box_count,
+                'medium',p.medium_box_count,'big',p.big_box_count,'other',nullif(p.other_item_description,'')))
+              ORDER BY p.parcel_position) AS parcels
+            FROM order_parcels p WHERE p.order_seq=page.order_seq
+          ) delivery ON true
+        ),'[]'::jsonb) AS rows FROM company CROSS JOIN totals`,
+        [id, query.month, query.q?.trim().normalize('NFC') || null, query.limit + 1, query.offset],
+      )
+    ).rows[0];
+  }
+
   async ensureMonth(client: PoolClient, id: number, month: string) {
     const created = await client.query(
       `INSERT INTO organization_billing_months(organization_seq,billing_month,organization_name)

@@ -1,8 +1,8 @@
 // 10 관리자 권한 관리 — 코드 → 화면 문구
 import type { AdminRole } from '@/shared/auth/sessionApi'
-import type { AdminStatus } from '@/features/admin/api/adminApi'
+import type { AdminStatus } from './api/adminApi'
 
-// 디자인의 '슈퍼바이저' = SYSTEM_ADMIN = 최고 관리자 (11/01 결정)
+// 디자인의 '슈퍼바이저' = SYSTEM_ADMIN = 최고 관리자
 export const ROLE_LABEL: Record<AdminRole, string> = {
   OPERATOR: '일반 관리자',
   SYSTEM_ADMIN: '최고 관리자',
