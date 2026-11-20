@@ -1,7 +1,7 @@
 // 프롬프트 보는 모양 ↔ 입력 칸 — 자동 점검(flow.cjs)에 없는 경우를 한 번씩 밟아 봄 (가짜 서버 5174)
 //  a) 고치던 칸에서 다른 칸을 바로 누름   b) Shift+Tab   c) 긴 칸을 눌렀을 때 화면이 튀는지   d) 꾸민 글 안의 링크
 // 실행: node prompt-view-probe.cjs
-const { chromium } = require(process.env.PW_CORE ?? 'C:/Users/SSAFY/AppData/Local/Temp/pw/node_modules/playwright-core')
+const { chromium } = require(process.env.PW_CORE ?? 'playwright-core')
 const BASE = process.env.BASE ?? 'http://localhost:5174'
 const VIEW = 'article section div[tabindex="0"]'
 const out = (k, v) => console.log(k.padEnd(34), typeof v === 'string' ? v : JSON.stringify(v))

@@ -73,3 +73,18 @@ src/
 ## 브랜치
 
 `develop-fe`에서 `feat/<이슈 키>-<내용>`으로 따고, `develop-fe`로 MR. 머지 전 `npm run lint` · `npm run build` 통과.
+
+## 출처 · 오픈소스
+
+코드는 팀이 직접 작성했습니다. 아래는 화면에 들어가는 외부 리소스와 쓰는 오픈소스입니다. 라이선스 원문은 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)에 있습니다.
+
+| 구분 | 이름 | 라이선스 | 쓰는 곳 |
+| --- | --- | --- | --- |
+| 그림 · 로고 | 로그인 그림 3개 · DVA 로고 · 탭 아이콘 | 팀 제작 (생성형 AI 활용) | `src/features/auth/assets`, `src/shared/assets`, `public/favicon.png` |
+| 아이콘 | [Lucide](https://lucide.dev) (Feather에서 갈라져 나옴) | ISC (Feather 부분 MIT) | `src/shared/ui/controls.tsx`의 선 아이콘 모양을 바탕으로 그림 |
+| 글꼴 | [Pretendard](https://github.com/orioncactus/pretendard) v1.3.9 | SIL OFL 1.1 | `index.html` — jsDelivr CDN에서 받음 (파일을 저장소에 넣지 않음) |
+| 외부 서비스 | 카카오 우편번호 서비스 | 서비스 이용 약관 | 주소 검색 창 (`react-daum-postcode`로 띄움) |
+| 라이브러리 | React · React DOM · React Router · TanStack Query · Tailwind CSS · react-markdown · remark-gfm · remark-breaks · read-excel-file · react-daum-postcode | MIT | `package.json` dependencies |
+| 개발 도구 | Vite · MSW · ESLint · Prettier · tsx | MIT | 빌드 · 가짜 API · 검사 |
+| 개발 도구 | TypeScript | Apache-2.0 | 타입 검사 |
+

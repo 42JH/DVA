@@ -6,7 +6,7 @@ import desktop from 'lighthouse/core/config/desktop-config.js'
 const require = createRequire(import.meta.url)
 const { chromium } = require(process.env.PW_CORE ?? 'playwright-core')
 
-const BASE = 'https://dva-d109.duckdns.org'
+const BASE = process.env.LH_BASE ?? (() => { throw new Error('LH_BASE(관리자 웹 주소)가 필요합니다') })()
 const OUT = new URL('./audit/', import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1')
 if (process.env.EXTRA !== '1') fs.rmSync(OUT, { recursive: true, force: true })
 fs.mkdirSync(OUT, { recursive: true })

@@ -129,6 +129,7 @@ export function Segments<T extends string>({
   )
 }
 
+// 선 아이콘 경로 (24×24, 선 굵기 2) — Lucide(ISC, https://lucide.dev) 아이콘을 바탕으로 그림. 라이선스: THIRD_PARTY_NOTICES.md
 const PATHS = {
   search: 'm21 21-4.3-4.3M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14Z',
   x: 'M18 6 6 18M6 6l12 12',

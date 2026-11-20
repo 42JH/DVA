@@ -1,6 +1,6 @@
 // 한 화면에 들어오는지 — 화면마다 다섯 크기에서 쪽 전체가 세로 · 가로로 밀리는지(스크롤이 생기는지) 잼. 긴 내용은 안쪽 상자가 스크롤해야 함
 // 가짜 서버(mock 5174). 실행: node fit.cjs
-const { chromium } = require(process.env.PW_CORE ?? 'C:/Users/SSAFY/AppData/Local/Temp/pw/node_modules/playwright-core')
+const { chromium } = require(process.env.PW_CORE ?? 'playwright-core')
 const BASE = process.env.BASE ?? 'http://localhost:5174'
 const SIZES = [[1440, 900], [1440, 780], [1920, 950], [1280, 650], [1024, 600]]
 const ROUTES = (process.env.ROUTES ?? '/,/orders,/orders?g=COLLECTING&r=all,/calls,/calls/9101,/unanswered,/faqs,/customers,/companies,/companies/18,/personas,/personas/1/tests/7,/stats,/stats/graph,/admins,/me').split(',')
