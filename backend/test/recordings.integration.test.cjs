@@ -14,6 +14,7 @@ assert.equal(process.env.DB_NAME, 'dva_webhook_test');
 assert.ok(['db', '127.0.0.1'].includes(process.env.DB_HOST));
 process.env.SWAGGER_ENABLED = 'false';
 process.env.S3_RECORDINGS_BUCKET = '';
+process.env.RECORDING_ALLOWED_HOSTS = 'recordings.example.test';
 process.env.PBX_WEBHOOK_TOKEN = randomUUID();
 const pool = createTestPool();
 const apps = [],
@@ -398,20 +399,26 @@ test('expired claims recover and stale completion, failure and release cannot re
   );
 });
 
-test('disabled S3 and recent receipts remain durable; retry cooldown does not starve later events', async () => {
+test('disabled recording downloads preserve receipts and retry cooldown does not starve later events', async () => {
   const first = payload();
   await receipt(first);
   // A call appearing after receipt still exercises the worker's fallback matching and cooldown.
   await call();
-  apps[0].get(ConfigService).set('S3_RECORDINGS_BUCKET', '');
+  const config = apps[0].get(ConfigService);
+  const hosts = config.get('RECORDING_ALLOWED_HOSTS');
+  config.set('S3_RECORDINGS_BUCKET', '');
+  config.set('RECORDING_ALLOWED_HOSTS', []);
   try {
     await workers[0].processPending();
     assert.ok((await state(first.recordingId)).last_attempt_at);
     assert.ok((await state(first.recordingId)).call_session_seq);
     assert.equal((await state(first.recordingId)).recordings, 0);
+    config.set('S3_RECORDINGS_BUCKET', 'test-recordings');
+    assert.equal(stores[0].configured, false);
     assert.equal(uploads, 0);
   } finally {
-    apps[0].get(ConfigService).set('S3_RECORDINGS_BUCKET', 'test-recordings');
+    config.set('S3_RECORDINGS_BUCKET', 'test-recordings');
+    config.set('RECORDING_ALLOWED_HOSTS', hosts);
   }
   await pool.query(
     'UPDATE pbx_webhooks.call_ended_events SET received_at=clock_timestamp() WHERE recording_id=$1',

@@ -147,7 +147,7 @@
 
 ## 최종 검증
 
-- [Jenkins #66](https://13.209.59.180/jenkins/job/dva-ci-linux-validation/66/) 성공, 9분 57초. 실행 코드는 `7f446876740eff4ae893bbe0dabc19dc1515c89c`로 고정했다. 이후 커밋은 이 검증 결과를 적은 문서만 변경한다.
+- Jenkins #66 성공, 9분 57초. 실행 코드는 `7f446876740eff4ae893bbe0dabc19dc1515c89c`로 고정했다. 이후 커밋은 이 검증 결과를 적은 문서만 변경한다.
 - Linux/Node.js 24/PostgreSQL 17: 기본 123개 + DB 508개 + 운영 이미지/실제 Nginx 17개 = 백엔드 648개 통과. CI 경로 판정 4개와 Linux 배포 fixture·관측 수집/경보·결제 데모 인프라 검사도 통과했다.
 - 배포 패키징·SSH 접근·실제 배포 단계는 모두 건너뛰었다. 서비스 DB·AI·프론트 소스는 변경하지 않았다.
 - 로컬 PostgreSQL 18.4에서 030 상태의 고객·주문·통화·녹취·PBX 수신 데이터를 만들고 031·032를 적용했다. 기존 행의 값이 그대로이며, 기존 수신의 lease 두 컬럼은 null인 것을 확인했다. 체크섬 ledger 31개 버전 재실행도 변경 없이 통과했다. 실제 `infra/database/verify.sql`의 27 public 테이블·25 FK·10 trigger·새 스키마/인덱스/ledger 검사도 통과했다.

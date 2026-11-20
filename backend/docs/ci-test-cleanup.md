@@ -1,7 +1,7 @@
 # Jenkins 백엔드 테스트 정리
 
 기준은 MR !388의 `9dec7f85`, 정리 브랜치는 `ci/backend-test-prune`이다.
-Jira는 [S15P31D109-174](https://ssafy.atlassian.net/browse/S15P31D109-174)이며 기존 홈 화면·연동 문서·빌드별 체크아웃 수정도 함께 유지한다.
+기존 홈 화면·연동 문서·빌드별 체크아웃 수정도 함께 유지한다.
 이번 정리는 업무 src, API 응답, migration, 실제 배포 설정을 바꾸지 않는다.
 
 ## 실행 건수

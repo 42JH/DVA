@@ -1,4 +1,4 @@
-# 최종 화면 후속 작업 — S15P31D109-174
+# 최종 화면 후속 작업
 
 기준: develop-backend `5d3bd189`. 브랜치: `fix/final-wireframe-api`. 사용자 확정 범위는 아래 3개 화면 항목과 Jenkins #115 체크아웃 실패 개선이다. 기존 MR !374의 후속이며 Task 전체 완료를 뜻하지 않는다.
 

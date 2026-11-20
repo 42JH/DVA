@@ -1,6 +1,5 @@
 # 실시간 통화 수 CI 테스트 안정화
 
-Jira: [S15P31D109-158](https://ssafy.atlassian.net/browse/S15P31D109-158)의 후속 수정이다.
 기준은 `develop-backend`의 `d94ae0f`, 작업 브랜치는 `fix/active-count-tests`다.
 
 ## 원인과 계획

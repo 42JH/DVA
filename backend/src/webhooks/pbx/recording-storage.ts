@@ -78,7 +78,10 @@ export class RecordingStorage implements OnApplicationShutdown {
   }
 
   get configured(): boolean {
-    return !!this.config.get('S3_RECORDINGS_BUCKET', { infer: true });
+    return (
+      !!this.config.get('S3_RECORDINGS_BUCKET', { infer: true }) &&
+      this.config.get('RECORDING_ALLOWED_HOSTS', { infer: true }).length > 0
+    );
   }
 
   async erase(key: string): Promise<void> {

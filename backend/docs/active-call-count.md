@@ -1,6 +1,6 @@
 # 진행 통화 수 조회와 SSE 연동
 
-Jira: [S15P31D109-155](https://ssafy.atlassian.net/browse/S15P31D109-155). 백엔드 API와 양쪽 nginx 설정을 포함한다. AI·프론트 코드 수정과 실제 서버 배포·nginx reload는 별도다.
+백엔드 API와 양쪽 nginx 설정을 포함한다. AI·프론트 코드 수정과 실제 서버 배포·nginx reload는 별도다.
 
 ## 집계 기준과 DB 전환
 

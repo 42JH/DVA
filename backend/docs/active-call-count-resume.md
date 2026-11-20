@@ -2,7 +2,7 @@
 
 ## 2026-11-03 Jenkins 인증서 전달 오류 수정
 
-- MR !205는 `c1811a8`로 develop-backend에 병합됐다. 이후 [Jenkins #90](https://13.209.59.180/jenkins/job/dva-ci-linux-validation/90/console)은 컴파일·단위·결제·DB 통합 검증 후 HTTPS 테스트 실행 준비에서 실패했고, 배포 단계는 실행되지 않았다.
+- MR !205는 `c1811a8`로 develop-backend에 병합됐다. 이후 Jenkins #90은 컴파일·단위·결제·DB 통합 검증 후 HTTPS 테스트 실행 준비에서 실패했고, 배포 단계는 실행되지 않았다.
 - 원인은 Jenkins agent의 임시 인증서를 별도 Docker daemon에 bind mount한 것이다. `/tmp/dva-backend-check-…/letsencrypt/live/dva-ip/fullchain.pem`은 agent에만 존재해 daemon에서 `bind source path does not exist`가 발생했다. 이전 Windows 로컬 검증은 이 파일시스템 분리 조건을 확인하지 못했다.
 - 최신 `origin/develop-backend`를 기준으로 `fix/backend-ci-certificate`에서 수정한다. `backend/scripts/check.cjs`의 운영 이미지 테스트 컨테이너를 create → 인증서 docker cp → start --attach 순서로 실행하고, 성공·실패 후 finally에서 제거한다. `NODE_EXTRA_CA_CERTS`를 통한 TLS 검증과 기존 HTTPS/SSE 테스트를 유지한다.
 - 일회용 Linux 클라이언트와 별도 Docker daemon의 파일시스템으로 같은 mount 오류를 재현했다. 인증서 파일 복사 후 내용 일치와 정상 종료, 실패 프로세스의 종료 코드 23 전달을 확인했다.
@@ -25,7 +25,6 @@
 사용자의 “이어서 작업 하자” 요청으로 재개했다. 아래 2026-11-02 원문은 중단 당시의 기록이며 현재 구현 상태와 구분한다.
 
 - 작업 폴더·브랜치·원격을 다시 확인했다. `feature/active-call-count`, 기준 `4638593`이며 fetch한 origin/develop-backend와 같은 커밋이다. 기존에 있던 이 메모를 보존했다.
-- Jira 155의 담당자 한태원·SP 3·스프린트 59296·진행 중 상태를 확인했다. 새 Task를 중복 생성하거나 상태를 변경하지 않았다.
 - `GET /api/calls/active-count`와 관리자 쿠키 인증의 `GET /api/calls/active-count/stream`을 구현했다. 최초 현재값, 변경 알림, 5초 heartbeat·인증 재검증, 오류·로그아웃·앱 종료 시 연결 정리를 포함한다.
 - 새 044 migration은 call_sessions.registered_at과 부분 인덱스 두 개를 추가한다. 기존 통화의 등록 시각은 NULL이며 집계에서 제외한다. 기존 시각·주문·주소·분석·녹취는 보존한다.
 - 등록·PBX 수신·워커의 매칭 잠금 규칙을 맞추고 PBX 수신 즉시 종료, 웹훅 선도착 시 등록 트랜잭션 내 매칭을 구현했다. 녹취 업로드 대기, 처리권·재시도·30분 정리·NO_ORDER 계약을 유지한다.
@@ -43,11 +42,6 @@
 
 ## 현재 상태
 
-- Jira: [S15P31D109-155 — 실시간 진행 통화 수 조회 및 변경 알림 API](https://ssafy.atlassian.net/browse/S15P31D109-155)
-- 스프린트: 기업 피드백 반영 및 상담 흐름 고도화, ID 59296, 보드 16693.
-- 담당자: 한태원. Story Points: 3. 상태: 진행 중. 사용자 요청대로 생성·스프린트 배정·진행 중 전환까지 수행했다.
-- 관련 Story: [S15P31D109-72 — 서비스 운영 대시보드](https://ssafy.atlassian.net/browse/S15P31D109-72). 상위 Epic: S15P31D109-4.
-- 작업 폴더: `C:\Users\SSAFY\Desktop\SSAFY project\자율\active-call-count`
 - 작업 브랜치: `feature/active-call-count`. 이전 작업과 분리한 새 worktree이며 upstream은 지정하지 않았다.
 - 기준 커밋: `4638593b64ca700c22f1762e24efe3365aea77bd`, 당시 최신 `origin/develop-backend`.
 - 이전 Task 154의 세 커밋·69개 파일은 MR !203으로 이미 develop-backend에 병합되었다. 이 작업에서 다시 구현하거나 별도 MR에 중복 포함하지 않는다.
