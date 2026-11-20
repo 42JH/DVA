@@ -41,11 +41,6 @@ export class OrderAddressesController {
     @Req() request: AuthRequest,
     @Headers('call_session_seq') header?: string,
   ) {
-    return this.reads.addressHistory(
-      request.admin?.adminUserSeq ?? null,
-      params.id,
-      query,
-      header,
-    );
+    return this.reads.addressHistory(request.admin?.adminUserSeq ?? null, params.id, query, header);
   }
 }

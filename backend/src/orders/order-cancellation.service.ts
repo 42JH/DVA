@@ -27,7 +27,14 @@ export class OrderCancellationService {
     const callId = orderCallId(adminId, callSessionHeader);
     await this.database.transaction(async (client) => {
       const unpaidOnly = adminId === null && (await this.repository.isDraftCall(client, callId!));
-      const customerId = await readOrderCustomer(this.repository, client, adminId, callId, id, unpaidOnly);
+      const customerId = await readOrderCustomer(
+        this.repository,
+        client,
+        adminId,
+        callId,
+        id,
+        unpaidOnly,
+      );
       const order = await this.repository.lockOrder(client, id);
       const ownsOrder = customerId === null || order?.customerSeq === customerId;
       if (ownsOrder && (await this.repository.hasMigratedDrafts(client, id)))
