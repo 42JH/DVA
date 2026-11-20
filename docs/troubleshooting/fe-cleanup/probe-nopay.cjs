@@ -1,5 +1,5 @@
 // 주문 추가: 월결제 추가 질문을 [취소]한 뒤(결제 방식 미정) [접수]를 누르면 요청이 나가는가. 가짜 서버(mock 5174)
-const { chromium } = require('C:/Users/SSAFY/AppData/Local/Temp/pw/node_modules/playwright-core')
+const { chromium } = require(process.env.PW_CORE ?? 'playwright-core')
 ;(async () => {
   const browser = await chromium.launch({ executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe' })
   const page = await (await browser.newContext({ viewport: { width: 1440, height: 900 } })).newPage()

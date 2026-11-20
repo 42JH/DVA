@@ -45,7 +45,7 @@ pem 키는 서버 담당에게 따로 받습니다. git에 올리지 않습니�
 
 ## 도메인 (DuckDNS)
 
-- `dva-d109.duckdns.org` → 13.209.59.180. DuckDNS 계정(h202407)에서 관리합니다. 서버 IP가 고정이라 토큰 갱신은 쓰지 않습니다.
+- `dva-d109.duckdns.org` → 13.209.59.180. 팀 DuckDNS 계정에서 관리합니다. 서버 IP가 고정이라 토큰 갱신은 쓰지 않습니다.
 - 인증서: 서버 certbot의 `dva-duckdns`. 다른 인증서와 같은 갱신 타이머(`dva-certbot-renew`)가 자동으로 갱신합니다.
 - nginx: `/etc/nginx/sites-available/dva-ip`에 도메인용 80(https로 넘김) · 443 서버 블록이 있고, 경로는 IP 서버 블록과 함께 `/etc/nginx/snippets/dva-routes.conf` 한 파일을 씁니다. 경로를 바꿀 땐 그 파일만 고칩니다.
 - 백엔드 `CORS_ORIGINS`에 `https://dva-d109.duckdns.org`가 들어 있어야 로그인됩니다.

@@ -23,7 +23,7 @@ if (process.argv[2] === '--diff') {
   console.log(`단계 ${a.steps.length} / ${b.steps.length}개 · 요청 ${a.reqs.length} / ${b.reqs.length}개 · 다른 곳 ${bad}`)
   process.exit(bad ? 1 : 0)
 }
-const { chromium } = require(process.env.PW_CORE ?? 'C:/Users/SSAFY/AppData/Local/Temp/pw/node_modules/playwright-core')
+const { chromium } = require(process.env.PW_CORE ?? 'playwright-core')
 const BASE = process.env.BASE ?? 'http://localhost:5174'
 const OUT = process.argv[2]
 ;(async () => {
