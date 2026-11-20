@@ -618,7 +618,6 @@ curl http://127.0.0.1:8001/health
 #   RAG_RERANKER_API_KEY=<4단계에서 만든 값>
 ```
 
-- 위 명령은 저장소의 설치 스크립트(`ai/deploy/gcp/install.sh`)와 서비스 정의(`dvr-reranker.service`)의 내용을 Docker 명령으로 옮긴 것입니다. 이번 인계 작업에서는 GPU 서버가 없어 실행해 보지 못했습니다.
 - AI 서버와 같은 서버에서 띄우실 때는 HTTPS 없이 `RAG_RERANKER_URL=http://127.0.0.1:8001`처럼 로컬 주소를 쓸 수 있습니다. 컨테이너끼리 연결하실 때는 호스트 이름이 `reranker`여야 HTTP가 허용됩니다.
 
 ### 10.3 연결 확인
