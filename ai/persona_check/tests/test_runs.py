@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import os
 import sqlite3
 
 import httpx
@@ -299,3 +300,28 @@ def test_a_scenario_shows_its_script_and_the_answers_the_judge_will_use(tmp_path
 def source_cancel() -> str:
     """F1이 취소하기로 한 받는 분."""
     return judge.load_scenario("F1")["expect"]["receiver"]
+
+
+def test_old_recordings_are_pruned_but_verdicts_and_running_runs_stay(tmp_path):
+    runs, _ = fake_runs(tmp_path)
+    now = 1_000_000_000.0
+    old, fresh, live = "1101_090000_aaaaaa", "1119_090000_bbbbbb", "1101_100000_cccccc"
+    for run_id in (old, fresh, live):
+        folder = tmp_path / run_id / "A1"
+        folder.mkdir(parents=True)
+        for name in ("call.wav", "verdict.json", "backend.json"):
+            (folder / name).write_bytes(b"x")
+    age = {old: 31, fresh: 5, live: 40}
+    for run_id, days in age.items():
+        for f in (tmp_path / run_id / "A1").iterdir():
+            os.utime(f, (now - days * 86400, now - days * 86400))
+    runs.live[live] = {"runId": live}
+
+    assert runs.prune_audio(30, now=now) == 1
+    assert not (tmp_path / old / "A1" / "call.wav").exists()          # 30일 넘은 녹음만 지움
+    assert (tmp_path / old / "A1" / "verdict.json").exists()           # 판정 · 기록은 남김
+    assert (tmp_path / old / "A1" / "backend.json").exists()
+    assert (tmp_path / fresh / "A1" / "call.wav").exists()             # 최근 녹음은 그대로
+    assert (tmp_path / live / "A1" / "call.wav").exists()              # 돌고 있는 묶음은 건드리지 않음
+    assert runs.prune_audio(0, now=now) == 0                           # 0 = 지우지 않음
+
