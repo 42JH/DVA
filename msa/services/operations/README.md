@@ -81,9 +81,9 @@ consultation은 별도 `dva/msa-consultation-auth` Secret의 `consultation-token
 
 k8s.yaml은 dva 네임스페이스의 기존 `operations-db` Secret(PGHOST/PGPORT/PGUSER/PGPASSWORD/PGDATABASE)을 사용한다. Traefik websecure/letsencrypt에서 `/operations`와 `/api/auth`, `/api/admins`, `/api/audit-logs`, `/api/personas`, `/api/ai/options`, `/api/ai/config`를 이 서비스로 라우팅한다. 현재 문서에 있는 프론트 주소와 MSA 주소를 CORS_ORIGINS로 허용한다. 프론트의 API base host 전환은 별도이며 이 MR에서 프론트/AI를 수정하지 않는다. 병합 후 운영 확인 주소:
 
-- https://k15d109.p.ssafy.io/operations/health
-- https://k15d109.p.ssafy.io/operations/docs
-- https://k15d109.p.ssafy.io/operations/docs-json
+- `https://<MSA_INGRESS_HOST>/operations/health`
+- `https://<MSA_INGRESS_HOST>/operations/docs`
+- `https://<MSA_INGRESS_HOST>/operations/docs-json`
 
 새 Pod 준비 전 기존 Pod를 유지한다(maxUnavailable=0, maxSurge=1). readiness·종료 유예와 기존 공통 실패 복구를 사용한다. 최초 배포에는 이전 버전이 없으며, 단일 노드 장애까지 무중단을 보장하지 않는다. 두 서비스 배포는 하나의 트랜잭션이 아니므로 뒤 서비스가 실패해도 먼저 성공한 서비스는 유지하고 재실행 시 미배포 서비스만 선택한다.
 

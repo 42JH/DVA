@@ -75,7 +75,7 @@ spec:
               valueFrom:
                 secretKeyRef: { name: msa-consultation-auth, key: consultation-token }
             - name: CORS_ORIGINS
-              value: https://13.209.59.180,https://k15d109.p.ssafy.io,http://localhost:5173
+              value: __MSA_CORS_ORIGINS__,http://localhost:5173
           envFrom:
             - secretRef:
                 name: consultation-runtime
@@ -139,7 +139,7 @@ metadata:
 spec:
   ingressClassName: traefik
   rules:
-    - host: k15d109.p.ssafy.io
+    - host: __MSA_INGRESS_HOST__
       http:
         paths:
           - path: /api/dashboard

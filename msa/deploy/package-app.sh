@@ -16,6 +16,25 @@ manifest="msa/services/$service/k8s.yaml"
   exit 1
 }
 
+ingress_host=${MSA_INGRESS_HOST:-}
+cors_origins=${MSA_CORS_ORIGINS:-}
+filters=(-e "s/:RELEASE_TAG/:$release/g")
+if grep -Fq '__MSA_INGRESS_HOST__' "$manifest"; then
+  [[ "$ingress_host" =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ ]] || {
+    echo 'Set MSA_INGRESS_HOST to the public Ingress hostname.' >&2
+    exit 2
+  }
+  filters+=(-e "s|__MSA_INGRESS_HOST__|$ingress_host|g")
+fi
+if grep -Fq '__MSA_CORS_ORIGINS__' "$manifest"; then
+  origin='https://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]+)?'
+  [[ "$cors_origins" =~ ^$origin(,$origin)*$ ]] || {
+    echo 'Set MSA_CORS_ORIGINS to a comma-separated list of HTTPS origins.' >&2
+    exit 2
+  }
+  filters+=(-e "s|__MSA_CORS_ORIGINS__|$cors_origins|g")
+fi
+
 image="docker.io/library/dva-$service:$release"
 image_id=$(docker image inspect "$image" --format '{{.Id}}')
 
@@ -35,10 +54,10 @@ docker save --output "$dest/image.tar" "$image"
 printf '%s\n' "$image" > "$dest/image-name.txt"
 printf '%s\n' "$image_id" > "$dest/image-id.txt"
 
-sed "s/:RELEASE_TAG/:$release/g" "$manifest" > "$dest/k8s.yaml"
+sed "${filters[@]}" "$manifest" > "$dest/k8s.yaml"
 
-if grep -q RELEASE_TAG "$dest/k8s.yaml"; then
-  echo 'Unresolved image tag in manifest.' >&2
+if grep -Eq 'RELEASE_TAG|__MSA_(INGRESS_HOST|CORS_ORIGINS)__' "$dest/k8s.yaml"; then
+  echo 'Unresolved deployment value in manifest.' >&2
   exit 1
 fi
 grep -Fq "image: $image" "$dest/k8s.yaml" || {

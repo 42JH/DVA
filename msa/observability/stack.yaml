@@ -213,6 +213,8 @@ spec:
           env:
             - name: MSA_OBSERVABILITY_ENVIRONMENT
               value: k3s
+            - name: MSA_LOKI_PUSH_URL
+              value: http://loki:3100/loki/api/v1/push
           ports:
             - name: http
               containerPort: 12345
@@ -287,6 +289,10 @@ spec:
         - name: grafana
           image: grafana/grafana:13.3.0
           env:
+            - name: MSA_PROMETHEUS_URL
+              value: http://prometheus:9090
+            - name: MSA_LOKI_URL
+              value: http://loki:3100
             - name: GF_SECURITY_ADMIN_PASSWORD
               valueFrom:
                 secretKeyRef:

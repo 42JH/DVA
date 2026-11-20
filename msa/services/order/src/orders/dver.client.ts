@@ -46,14 +46,16 @@ export class DverClient {
   private readonly logger = new Logger(DverClient.name);
   constructor(private readonly config: ConfigService<Environment, true>) {}
 
-  ensureConfigured(): string {
+  ensureConfigured(): { url: string; key: string } {
+    const url = this.config.get('DVER_API_URL', { infer: true });
     const key = this.config.get('DVER_API_KEY', { infer: true });
-    if (!key) throw new ApiException(503, 'DEPENDENCY_UNAVAILABLE', '디버 접수 설정이 필요합니다.');
-    return key;
+    if (!url || !key)
+      throw new ApiException(503, 'DEPENDENCY_UNAVAILABLE', '디버 접수 설정이 필요합니다.');
+    return { url, key };
   }
 
   async submit(payload: ReturnType<typeof dverPayload>, timeoutMs = 10_000): Promise<DverResult> {
-    const key = this.ensureConfigured();
+    const { url, key } = this.ensureConfigured();
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     const started = performance.now();
@@ -67,7 +69,7 @@ export class DverClient {
       return result;
     };
     try {
-      const response = await fetch(this.config.get('DVER_API_URL', { infer: true }), {
+      const response = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

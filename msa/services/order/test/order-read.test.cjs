@@ -5,6 +5,7 @@ const { createServer } = require('node:http');
 const { randomUUID } = require('node:crypto');
 const { validateOrderRead, requestOrderRead, OrderReadError } = require('@dva/events/order-read.cjs');
 const { validateEnvironment } = require('../dist/config/environment');
+const { DverClient } = require('../dist/orders/dver.client');
 const { OrdersService } = require('../dist/orders/orders.service');
 const token = 'order-read-test-only-'.padEnd(48, 't');
 
@@ -575,6 +576,14 @@ test('rejects unexpected origins, credentials and absent production security key
   const valid={DB_HOST:'db',DB_USER:'order_app',DB_PASSWORD:'secret',DB_NAME:'order',OPERATIONS_URL:'http://operations:3005',
     DELIVERY_URL:'http://delivery:3003',CUSTOMER_URL:'http://customer:3001',CONSULTATION_URL:'http://consultation:3004',CUSTOMER_AUTH_TOKEN:token};
   assert.equal(validateEnvironment(valid).PORT,3002);
+  assert.equal(validateEnvironment(valid).DVER_API_URL, undefined);
+  const endpoint = 'https://delivery-provider.example.test/parcel';
+  assert.equal(validateEnvironment({...valid,DVER_API_URL:endpoint}).DVER_API_URL, endpoint);
+  for (const settings of [{ DVER_API_URL: endpoint }, { DVER_API_KEY: 'fixture-key' }]) {
+    const client = new DverClient({get: key => settings[key]});
+    assert.throws(() => client.ensureConfigured(), error => error.getStatus() === 503);
+  }
+  assert.throws(()=>validateEnvironment({...valid,DVER_API_URL:'http://delivery-provider.example.test'}),error=>error.fields.includes('DVER_API_URL'));
   for (const field of ['OPERATIONS_URL','CUSTOMER_URL','CONSULTATION_URL','DELIVERY_URL']) for (const value of ['', 'http://user:password@service:3000','file:///private','http://service/path'])
     assert.throws(()=>validateEnvironment({...valid,[field]:value}),error=>error.fields.includes(field)&&!error.message.includes('secret'));
   assert.throws(()=>validateEnvironment({...valid,NODE_ENV:'production'}),error=>error.fields.includes('SECURITY_LOG_HMAC_KEY'));

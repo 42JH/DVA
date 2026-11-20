@@ -70,6 +70,7 @@ class DeploymentTests(unittest.TestCase):
         self.key.write_text('test placeholder, not a credential')
         self.env = dict(os.environ, PATH=str(self.bin) + os.pathsep + os.environ['PATH'],
                         SOURCE_COMMIT='a'*40, BUILD_NUMBER='17', DB_IMAGE=IMAGE,
+                        MSA_SSH_HOST='ssh.example.test',
                         FAKE_IMAGE_ID=IMAGE_ID, CALL_LOG=str(self.log), MANIFEST=str(self.root/'job.yaml'))
         self.report = self.root / 'msa/liquibase/verification.json'
         self.report.write_text(json.dumps({'passed': True, 'image': IMAGE, 'imageId': IMAGE_ID}))
