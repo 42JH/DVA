@@ -62,7 +62,7 @@ export function usePersonaConfirm(s: {
           return
         case 'stop':
           if (!applyTarget) return
-          // 실패해도 목록을 다시 받음(일부 묶음만 멈췄을 수 있음). 멈추면 띠가 시험 중단으로 바뀜 (저절로 반영 약속은 useApplyTest가 지움)
+          // 실패해도 목록을 다시 받음(일부 묶음만 멈췄을 수 있음). 멈추면 띠가 시험 중단으로 바뀜
           try {
             await stopTest({
               personaSeq: applyTarget.personaSeq,

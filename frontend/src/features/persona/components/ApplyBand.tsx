@@ -11,13 +11,13 @@ const DIM = 'text-[14px] text-ops-faint'
 
 // 띠 — 반영 전 · 시험 중 · 반영 중 — 저장했지만 아직 통화에 안 쓰이는 버전이 있을 때
 // 6번 — 다른 상담가로 바꾸기(switchNote): 시험 중 '통화에 쓰기 전 시험' · 반영 중 '통화에 들어가는 중'. 시험 통과 띠는 PassBand
-// 2번 — 시험 중 [시험 중단] → 시험 중단: [지금까지 결과 보기] [다시 시험하고 반영]
+// 2번 — 시험 중 [시험 중단] → 시험 중단: [지금까지 결과 보기] [다시 시험]
 // [반영 전] 고친 내용 · 저장 시각 · 수정한 사람 | [통화에 반영]  /  아래 줄 토글: 고친 내용 ↔ 통화에 쓰는 내용
-// 6번(다른 상담가로 바꾸기)은 반영 대신 사용 · 다시 시험만 (통과해도 저절로 안 바꿈)
+// 6번(다른 상담가로 바꾸기)은 반영 대신 사용 · 다시 시험만. 두 경우 모두 통과해도 저절로 반영하지 않음
 const applyLabel = (band: Band) => {
   const switching = !!band.switchNote
   if (band.review) return switching ? '확인하고 사용하기' : '확인하고 반영'
-  if (band.stopped) return switching ? '다시 시험' : '다시 시험하고 반영'
+  if (band.stopped) return '다시 시험'
   return '통화에 반영'
 }
 const waitTitle = (band: Band) => {

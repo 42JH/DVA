@@ -10,7 +10,7 @@ export type BandStep = 'unapplied' | 'testing' | 'stopped' | 'review' | 'applyin
 export type Confirming =
   | { kind: 'use'; personaSeq: number }
   | { kind: 'delete'; personaSeq: number }
-  | { kind: 'test' } // 띠의 [통화에 반영] — 시험하고 반영 (모두 통과면 저절로 반영)
+  | { kind: 'test' } // 띠의 [통화에 반영] — 시험부터 (모두 통과해도 반영은 담당자가 다시 누름)
   | { kind: 'stop' } // 띠의 [시험 중단] (2번)
   | { kind: 'review' } // 확인 필요 띠의 [확인하고 반영] (4번) — 실패를 보고도 반영
   | null
@@ -116,9 +116,9 @@ export function confirmCopy(
           okLabel: '시험 시작',
         }
       return {
-        title: '시험하고 통화에 반영할까요?',
-        note: `${runs} 돌립니다. 모두 통과하면 바로 반영하고, 실패가 있으면 결과를 확인한 뒤 반영할 수 있습니다.`,
-        okLabel: '시험하고 반영',
+        title: '통화에 반영하기 전에 시험할까요?',
+        note: `${runs} 돌린 뒤, 결과를 보고 통화에 반영합니다.`,
+        okLabel: '시험 시작',
       }
     }
     case 'use': {
