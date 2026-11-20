@@ -255,6 +255,25 @@ export class ParcelDraftsRepository {
     );
   }
 
+  async markConverted(
+    client: PoolClient,
+    draftSeq: number,
+    orderSeq: number | null,
+    orderParcelSeq: number,
+  ): Promise<void> {
+    await client.query(
+      "UPDATE order_parcel_drafts SET status='CONVERTED',order_seq=$2,order_parcel_seq=$3,version=version+1,updated_at=clock_timestamp() WHERE draft_seq=$1",
+      [draftSeq, orderSeq, orderParcelSeq],
+    );
+  }
+
+  async softDelete(client: PoolClient, id: number): Promise<void> {
+    await client.query(
+      'UPDATE order_parcel_drafts SET deleted_at=clock_timestamp(),version=version+1,updated_at=clock_timestamp() WHERE draft_seq=$1',
+      [id],
+    );
+  }
+
   async bumpCall(client: PoolClient, id: number): Promise<number> {
     return (
       await client.query<{ version: number }>(
