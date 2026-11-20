@@ -77,7 +77,11 @@ export function AdminsPage() {
           <Segments
             label="상태"
             value={vm.tab}
-            items={vm.tabs.map((t) => ({ value: t.key, label: t.label, count: t.count ?? null }))}
+            items={vm.tabs.map((tab) => ({
+              value: tab.key,
+              label: tab.label,
+              count: tab.count ?? null,
+            }))}
             onPick={vm.setTab}
           />
           {vm.jobError && <span className="text-[13px] text-ops-stop">{vm.jobError}</span>}
@@ -113,51 +117,9 @@ export function AdminsPage() {
               </tr>
             </thead>
             <tbody>
-              {vm.rows.map((r) => {
-                const busy = vm.busyId === r.id
-                return (
-                  <tr key={r.id} className="h-11">
-                    <td className="truncate font-medium">{r.name}</td>
-                    <td className="truncate text-center text-[13px] text-ops-sub">{r.loginId}</td>
-                    <td className="text-[13px]">{r.role}</td>
-                    <td className="text-[13px] whitespace-nowrap text-ops-sub tabular-nums">
-                      {r.date}
-                    </td>
-                    {!pendingTab && (
-                      <td className="text-[13px] whitespace-nowrap text-ops-sub tabular-nums">
-                        {r.lastLogin ?? <span className="text-ops-faint">접속 기록 없음</span>}
-                      </td>
-                    )}
-                    <td>
-                      <span className="flex items-center justify-center gap-1">
-                        {r.pending ? (
-                          <>
-                            <Btn kind="lineBadge" disabled={busy} onClick={() => vm.approve(r.id)}>
-                              승인
-                            </Btn>
-                            <Btn kind="dangerBadge" onClick={() => vm.ask('reject', r.id)}>
-                              거절
-                            </Btn>
-                          </>
-                        ) : (
-                          r.actions.map((a) => (
-                            <Btn
-                              key={a}
-                              kind={ACTION_KIND[a]}
-                              disabled={busy}
-                              onClick={() =>
-                                a === 'activate' ? vm.activate(r.id) : vm.ask(a, r.id)
-                              }
-                            >
-                              {ACTION_LABEL[a]}
-                            </Btn>
-                          ))
-                        )}
-                      </span>
-                    </td>
-                  </tr>
-                )
-              })}
+              {vm.rows.map((row) => (
+                <AdminRow key={row.id} row={row} vm={vm} showLastLogin={!pendingTab} />
+              ))}
             </tbody>
           </table>
           {vm.rows.length === 0 &&
@@ -165,8 +127,7 @@ export function AdminsPage() {
               <SkeletonRows rows={6} />
             ) : (
               <p className="flex flex-1 items-center justify-center py-16 text-center text-[14px] text-ops-sub">
-                {vm.loadError ??
-                  (vm.q ? '검색어에 맞는 관리자가 없습니다.' : '이 상태의 관리자가 없습니다.')}
+                {emptyText(vm)}
               </p>
             ))}
         </div>
@@ -195,4 +156,69 @@ export function AdminsPage() {
       )}
     </>
   )
+}
+
+type AdminsVm = ReturnType<typeof useAdminList>
+type AdminRowView = AdminsVm['rows'][number]
+
+/** 목록이 비었을 때 — 못 받음 · 검색 결과 없음 · 이 상태에 없음 */
+function emptyText(vm: AdminsVm) {
+  if (vm.loadError) return vm.loadError
+  return vm.q ? '검색어에 맞는 관리자가 없습니다.' : '이 상태의 관리자가 없습니다.'
+}
+
+/** 관리자 한 줄 — 이름 · 아이디 · 권한 · 신청일(생성일) · 마지막 접속 · 관리 버튼 */
+function AdminRow({
+  row,
+  vm,
+  showLastLogin,
+}: {
+  row: AdminRowView
+  vm: AdminsVm
+  showLastLogin: boolean
+}) {
+  return (
+    <tr className="h-11">
+      <td className="truncate font-medium">{row.name}</td>
+      <td className="truncate text-center text-[13px] text-ops-sub">{row.loginId}</td>
+      <td className="text-[13px]">{row.role}</td>
+      <td className="text-[13px] whitespace-nowrap text-ops-sub tabular-nums">{row.date}</td>
+      {showLastLogin && (
+        <td className="text-[13px] whitespace-nowrap text-ops-sub tabular-nums">
+          {row.lastLogin ?? <span className="text-ops-faint">접속 기록 없음</span>}
+        </td>
+      )}
+      <td>
+        <span className="flex items-center justify-center gap-1">
+          <RowActions row={row} vm={vm} />
+        </span>
+      </td>
+    </tr>
+  )
+}
+
+/** 관리 칸 — 승인 대기면 [승인] [거절], 아니면 그 계정에 할 수 있는 일(활성화는 바로, 나머지는 확인 창) */
+function RowActions({ row, vm }: { row: AdminRowView; vm: AdminsVm }) {
+  const busy = vm.busyId === row.id
+  if (row.pending)
+    return (
+      <>
+        <Btn kind="lineBadge" disabled={busy} onClick={() => vm.approve(row.id)}>
+          승인
+        </Btn>
+        <Btn kind="dangerBadge" onClick={() => vm.ask('reject', row.id)}>
+          거절
+        </Btn>
+      </>
+    )
+  return row.actions.map((action) => (
+    <Btn
+      key={action}
+      kind={ACTION_KIND[action]}
+      disabled={busy}
+      onClick={() => (action === 'activate' ? vm.activate(row.id) : vm.ask(action, row.id))}
+    >
+      {ACTION_LABEL[action]}
+    </Btn>
+  ))
 }
