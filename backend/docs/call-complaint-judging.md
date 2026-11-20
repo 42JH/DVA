@@ -1,4 +1,4 @@
-# 통화 불만 판정 (Jira 148, 후처리)
+# 통화 불만 판정 (후처리)
 
 끝난 통화의 저장된 기록(대본 · AI 동작 · 업무 결과) · 녹음 · FAQ 원문으로 화면의 불만 6유형을 판정해 `call_analyses`의 `has_complaint` · `complaints`를 채운다.
 
@@ -71,7 +71,7 @@
 2. 같은 변경을 `src/call-insights/complaints/`에 옮긴다. 지시문은 `prompt.md` · `verify.md`에서 `complaint-prompts.ts`를 다시 만든다.
 3. 파이썬 테스트를 돌리며 기록한 정답 파일(`test/fixtures/complaint-parity.json.gz`)을 다시 만들고 `test/complaint-judge.test.cjs`가 통과하는지 확인한다.
 
-## MR !476 반영
+## 불만 및 근거 부족 판정 기준
 
 고객 불만은 해당 차례 고객의 실제 인용과 유효한 책임 대상이 있어야 남긴다. target은 ai_service·price_policy·delivery_other이며 level은 explicit·mild다. 인용을 대조한 다음 번호를 가리고 jsonb에 대상·강도를 함께 저장한다. 다른 유형은 target·level이 null이다.
 

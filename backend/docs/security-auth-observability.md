@@ -16,7 +16,7 @@ Node.js에서도 생성할 수 있다.
 node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
 ```
 
-생성한 값을 운영 서버 `~/dva-deploy/shared/.env`에 추가한다. 실제 배포 루트가 다르면 해당 루트의 `shared/.env`를 사용한다. 개발에서 Node를 직접 실행하면 `backend/.env.development`, 개발 Compose는 저장소 루트의 `.env`를 사용한다. 실제 파일이나 생성한 값은 Git·채팅·빌드 산출물에 넣지 않는다.
+생성한 값을 백엔드 배포 환경에 주입한다. 환경 파일 경로 예시는 `/path/to/deploy/shared/.env`다. 개발에서 Node를 직접 실행하면 `backend/.env.development`, 개발 Compose는 저장소 루트의 `.env`를 사용한다. 실제 파일이나 생성한 값은 Git·채팅·빌드 산출물에 넣지 않는다.
 
 ```dotenv
 SECURITY_LOG_HMAC_KEY=<생성한 64자리 16진수>

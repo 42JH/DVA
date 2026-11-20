@@ -126,7 +126,7 @@ API 계약 비교와 Git 변경 범위 검사를 수행한다. PR 생성·운영
 전체 실행 근거는 로컬 임시 로그 `dva-internals-final-check.log`,
 `dva-internals-final-database.log`이며 단계별 로그와 Swagger 비교 결과도 별도로 보관했다.
 검증은 격리된 로컬 Linux Docker 기준이다. 운영 DB/S3·배포·Jenkins 및 실제 AI/프론트 환경의
-수동 연동 실행은 하지 않았다. Jira는 진행 중으로 유지하며 PR 생성/병합은 수행하지 않는다.
+수동 연동은 이번 검증 범위에서 제외했다.
 
 ## 추가 작업: 남은 테스트 준비 코드 중복 정리
 

@@ -119,7 +119,7 @@ source.onerror = () => setConnectionStatus('reconnecting');
 - 양쪽 모두 `proxy_buffering off`, `proxy_cache off`, `Connection ''`, `proxy_read_timeout 30s`를 사용한다. 30초는 수신 데이터 사이의 대기시간이며 통화나 SSE의 총 유지시간 제한이 아니다. 5초 heartbeat로 연결을 유지한다.
 - 변경은 해당 스트림 경로에 한정한다. 기존 PBX 웹훅·AI 미러·인증·CORS·나머지 API 경로는 유지한다.
 
-사용자가 요청한 순서에 따라 백엔드 기능을 먼저 커밋하고 nginx 설정·검증을 후속 커밋으로 분리한다. 두 커밋을 같은 Jira 155의 MR로 올릴 수 있다. 실제 서버 적용 순서는 다음과 같다.
+백엔드 기능과 nginx 설정을 함께 검증한 뒤 다음 순서로 적용한다.
 
 1. develop-backend 대상 MR의 리뷰·병합 후 기존 배포 파이프라인을 사용한다. 새 backend 시작 전에 migration runner가 044를 적용하는지 확인한다. 컨테이너 nginx 설정은 기존 배포 패키지·Compose에 포함된다.
 2. 호스트 HTTPS nginx 설정은 앱 배포로 자동 교체되지 않는다. 현재 서버 설정과 저장소 설정을 비교해 기존 도메인·인증서·추가 경로를 보존하면서 SSE location을 반영한다. `nginx -t` 성공 후 `systemctl reload nginx`로 반영한다. 호스트 반영은 [HTTPS 운영 절차](../../infra/https/README.md)를 따른다.
