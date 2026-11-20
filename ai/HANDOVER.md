@@ -1,6 +1,6 @@
 # AI 전화 접수 서비스 인계 문서
 
-이 문서는 전화로 택배 접수·조회·취소·문의를 받는 AI 상담 서비스를 새 서버에 올리는 방법을 설명합니다. 저장소를 처음 보시는 개발자분이 이 문서만 따라가도 AI 서버를 백엔드·관리자 웹과 함께 동작시킬 수 있도록 작성했습니다. 모든 서비스는 Docker로 띄우는 것을 전제로 합니다.
+이 문서는 전화로 택배 접수·조회·취소·문의를 받는 AI 상담 서비스를 새 서버에 올리는 방법을 설명합니다. 저장소를 처음 보시는 개발자분이 이 문서만 따라가도 AI 서버를 백엔드와 연결해 동작시킬 수 있도록 작성했습니다. 관리자 웹과 호스트 Nginx의 설정 방법은 각각 프론트엔드 문서와 백엔드 문서를 참고하시기 바랍니다. 모든 서비스는 Docker로 띄우는 것을 전제로 합니다.
 
 - 대상 저장소 폴더는 `ai/`(AI 서버), `backend/`(백엔드), `frontend/`(관리자 웹), `infra/`(Nginx·DB·배포 스크립트)입니다.
 - 본문은 `docker compose`를 직접 실행하는 수동 절차입니다. Jenkins 자동 배포는 9장에 따로 적었습니다.
@@ -188,7 +188,7 @@ flowchart TB
 
 ### 3.1 서버
 
-- Linux 서버 1대(x86-64)가 필요합니다. Docker Engine과 Docker Compose 플러그인, Nginx, certbot을 설치합니다.
+- Linux 서버 1대(x86-64)가 필요합니다. Docker Engine과 Docker Compose 플러그인을 설치합니다.
 - 외부에 여는 포트는 80과 443뿐입니다.
 - 도메인 이름이 필요합니다. OpenAI는 IP 주소로 된 URL로 웹훅을 보내지 않습니다.
 
@@ -212,10 +212,8 @@ flowchart TB
 flowchart LR
   a[1. 공통 준비<br/>네트워크 · 환경 파일] --> b[2. AI 서버]
   b --> c[3. 백엔드<br/>DB · 마이그레이션]
-  c --> d[4. 관리자 웹]
-  d --> e[5. 호스트 Nginx · TLS]
-  e --> f[6. 외부 연동<br/>OpenAI · PBX]
-  f --> g[7. 초기 데이터]
+  c --> d[4. 외부 연동<br/>OpenAI · PBX]
+  d --> e[5. 초기 데이터]
 ```
 
 **AI 서버를 백엔드보다 먼저 띄웁니다.** 백엔드의 준비 상태 확인(`/health/ready`)이 AI 서버의 `/health`를 호출하므로, AI 서버가 없으면 백엔드가 준비되지 않은 것으로 판정됩니다.
@@ -249,7 +247,7 @@ cp .env.example .env     # 값 채우기(5.1절)
 | 변수 | 값 |
 |---|---|
 | `OPENAI_API_KEY` | OpenAI API 키 |
-| `OPENAI_WEBHOOK_SECRET` | OpenAI 웹훅 비밀값(`whsec_...`). 4.7절에서 웹훅을 등록하면 받습니다 |
+| `OPENAI_WEBHOOK_SECRET` | OpenAI 웹훅 비밀값(`whsec_...`). 4.5절에서 웹훅을 등록하면 받습니다 |
 | `PBX_WEBHOOK_SECRET` | PBX 공유 토큰. 백엔드의 `PBX_WEBHOOK_TOKEN`과 같은 값 |
 | `BACKEND_API_URL` | `http://backend:3000` |
 | `QDRANT_API_KEY` | 새로 만든 무작위 값 |
@@ -329,49 +327,15 @@ curl http://127.0.0.1:8082/api/health
 - `migrate.sh`는 적용한 파일의 체크섬을 DB에 기록합니다. 이미 적용된 파일을 고치면 다음 실행이 실패합니다.
 - `--no-backup`은 처음 설치할 때만 씁니다. 이후 재배포에서는 옵션 없이 실행해 적용 전에 DB를 백업하시기 바랍니다(백업 폴더는 두 번째 인수이며 기본값은 `~/dva-deploy/shared/db-backups`입니다).
 
-### 4.5 관리자 웹
+### 4.5 외부 연동
 
-관리자 웹은 컨테이너로 띄우지 않습니다. 빌드한 정적 파일을 호스트 Nginx가 제공합니다. 빌드에만 Node 컨테이너를 사용합니다.
+관리자 웹의 빌드·배포와 호스트 Nginx·TLS 설정은 각각 프론트엔드 문서와 백엔드 문서에서 다룹니다. 이 문서에서는 AI 서버가 동작하는 데 필요한 조건만 적습니다.
 
-```bash
-docker run --rm -v "$PWD/frontend":/app -w /app node:24 sh -c "npm ci && npm run build"
-rm -f frontend/dist/mockServiceWorker.js     # 개발용 목 서버 파일
-
-sudo mkdir -p /var/www/dva
-sudo cp -r frontend/dist/. /var/www/dva/
-```
-
-- 운영 빌드에는 환경 파일이 필요하지 않습니다. API는 화면과 같은 주소의 `/api`로 호출합니다.
-- 로그인하려면 화면 주소가 백엔드의 `CORS_ORIGINS`에 들어 있어야 합니다.
-- 운영 빌드의 통계 화면은 목데이터를 보여 줍니다(`frontend/src/features/stats/api/dashboardApi.ts`의 `STATS_DEMO`).
-
-### 4.6 호스트 Nginx와 TLS
-
-호스트 Nginx가 TLS를 종단하고 경로에 따라 요청을 나눕니다. 저장소의 `infra/https/https.conf`가 기준 설정입니다. 이 파일의 `server_name`과 인증서 경로를 새 도메인에 맞게 바꿔 사용하시면 됩니다.
-
-꼭 있어야 하는 경로는 다음과 같습니다.
-
-| 경로 | 보낼 곳 | 설명 |
-|---|---|---|
-| `POST /api/webhooks/openai/call-incoming` | `127.0.0.1:8000` | OpenAI 전화 수신 웹훅 → AI 서버 |
-| `POST /api/webhooks/pbx/call-ended` | `127.0.0.1:8082` + AI 복사 | PBX 종료 웹훅 → 백엔드. `mirror`로 `127.0.0.1:8000/pbx/webhook/call-ended`에도 보냅니다 |
-| `/api/` | `127.0.0.1:8082` | 백엔드 API |
-| `/` | `/var/www/dva` | 관리자 웹. 없는 경로는 `index.html`로 돌립니다 |
-
-주의하실 점은 다음과 같습니다.
-
-- 호스트 Nginx 설정에 `/monitor` 블록이 있으면 지워 주시기 바랍니다. 관제 화면은 정리했기 때문에 AI 서버에 그 경로가 없습니다.
-- 관리자 웹 블록은 `infra/https/https.conf`에 없습니다. `frontend/deploy/nginx-admin-web.conf`에 참고용 사본이 있습니다.
-- `/api/health/ready`와 `/internal`로 시작하는 경로는 외부에 열지 않습니다. AI 서버의 `/internal/*`은 백엔드만 내부망으로 호출합니다.
-- 컨테이너 Nginx 설정(`infra/nginx/default.prod.conf`)의 `underscores_in_headers on`은 지우지 마시기 바랍니다. AI 서버가 보내는 `call_session_seq` 헤더에 필요합니다.
-
-인증서는 도메인이 있으면 certbot으로 받습니다.
-
-```bash
-sudo certbot --nginx -d <도메인>
-```
-
-### 4.7 외부 연동
+- 외부에서 `POST /api/webhooks/openai/call-incoming`으로 들어온 요청이 AI 서버(`127.0.0.1:8000`)에 그대로 전달되어야 합니다.
+- PBX의 통화 종료 웹훅이 AI 서버의 `POST /pbx/webhook/call-ended`에도 전달되어야 합니다. 기존 구성에서는 호스트 Nginx가 백엔드로 가는 요청을 복사해 보냅니다.
+- AI 서버의 `/internal/*` 경로는 외부에 열지 않습니다. 백엔드만 내부망으로 호출합니다.
+- AI 서버가 백엔드로 보내는 `call_session_seq` 헤더가 전달되도록, 백엔드 앞단 Nginx의 `underscores_in_headers on` 설정이 유지되어야 합니다.
+- 관제 화면을 정리했으므로 AI 서버에는 `/monitor` 경로가 없습니다. 프록시 설정에 이 경로가 남아 있으면 지워 주시기 바랍니다.
 
 **OpenAI**
 
@@ -386,7 +350,7 @@ sudo certbot --nginx -d <도메인>
 
 웹훅 본문 형식과 응답 코드는 `ai/docs/contracts/pbx-webhooks.md`와 `infra/webhooks/PBX-CALL-ENDED.md`에 있습니다.
 
-### 4.8 초기 데이터
+### 4.6 초기 데이터
 
 **최초 관리자 계정**
 
@@ -532,13 +496,12 @@ QDRANT_URL=http://127.0.0.1:6333 uv run --env-file .env python -m scripts.index_
 | 백엔드 | `curl http://127.0.0.1:8082/api/health` | 200 |
 | 백엔드 → AI 연결 | `docker exec dva-prod-backend-1 node -e "fetch('http://127.0.0.1:3000/health/ready').then(r=>console.log(r.status))"` | 200 |
 | AI → 백엔드 연결 | `docker logs dva-ai-ai-1`에서 백엔드 호출 오류가 없는지 확인 | 오류 없음 |
-| 외부 공개 경로 | `curl -X POST https://<도메인>/api/webhooks/openai/call-incoming` | 400(서명 없음). 404나 502면 Nginx 경로 문제입니다 |
-| 관리자 웹 | 브라우저에서 `https://<도메인>/` 로그인 | 화면 진입 |
+| 외부 공개 경로 | `curl -X POST https://<도메인>/api/webhooks/openai/call-incoming` | 400(서명 없음). 404나 502면 앞단 프록시의 경로 문제입니다 |
 | 실제 통화 | 대표번호로 전화 | 인사말이 들리고, 끝난 뒤 관리자 웹에 통화 기록이 보입니다 |
 
 전화가 연결되지 않을 때는 다음 순서로 확인하시기 바랍니다.
 
-1. `docker logs dva-ai-ai-1`에 수신 웹훅 기록이 있는지 봅니다. 없으면 OpenAI 웹훅 등록, 도메인, Nginx 경로를 확인합니다.
+1. `docker logs dva-ai-ai-1`에 수신 웹훅 기록이 있는지 봅니다. 없으면 OpenAI 웹훅 등록, 도메인, 앞단 프록시의 경로를 확인합니다.
 2. "웹훅 서명 검증 실패"가 있으면 `OPENAI_WEBHOOK_SECRET`이 등록한 웹훅의 값과 같은지 확인합니다.
 3. 수락 후 바로 끊기면 `OPENAI_API_KEY`와 `BACKEND_MODEL` 값을 확인합니다.
 4. 인사는 나오는데 접수가 되지 않으면 `AI_BUSINESS_TOKEN`이 양쪽에서 같은지 확인합니다.
@@ -590,7 +553,7 @@ docker logs -f dva-prod-backend-1   # 백엔드
 - **AI 서버는 워커 1개, 인스턴스 1개로만 동작합니다.** 여러 대로 늘리려면 통화를 소유한 인스턴스로 요청을 보내는 구조가 따로 필요합니다.
 - **통계 화면은 운영 빌드에서 목데이터입니다.**
 - **서버 주소는 플레이스홀더입니다.** `ai/Jenkinsfile`, `ai/deploy/known_hosts`, `ai/deploy/gcp/`, 계약 문서의 서버 주소를 `<...>`로 바꿔 두었습니다. `ai/` 밖의 `infra/`, `frontend/` 배포 스크립트에는 이전 운영 서버 주소가 그대로 남아 있으니 사용하시기 전에 바꿔 주시기 바랍니다.
-- **이 문서의 절차 중 실제로 실행해 확인한 범위**는 AI 서버 이미지 빌드, 컨테이너 기동과 `/healthz` 응답, compose 파일 문법, 주소DB 전체분 변환과 컨테이너에서의 주소 조회입니다. 백엔드·관리자 웹·Nginx 절차는 저장소의 스크립트와 설정을 읽고 정리했습니다.
+- **이 문서의 절차 중 실제로 실행해 확인한 범위**는 AI 서버 이미지 빌드, 컨테이너 기동과 `/healthz` 응답, compose 파일 문법, 주소DB 전체분 변환과 컨테이너에서의 주소 조회입니다. 백엔드 절차는 저장소의 스크립트와 설정을 읽고 정리했습니다.
 
 ## 9. 선택 항목
 
