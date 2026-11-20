@@ -52,8 +52,7 @@ export class OrderReadService {
   }
 
   private readAdminList(query: AdminOrderListQueryDto) {
-    return this.database.transaction(async (client) => {
-      await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
+    return this.database.readSnapshot(async (client) => {
       const filteredPage =
         query.statusGroup === undefined
           ? undefined
@@ -95,9 +94,8 @@ export class OrderReadService {
   }
 
   private readList(adminId: number | null, query: OrderQueryDto, callId: number | null) {
-    return this.database.transaction(async (client) => {
+    return this.database.readSnapshot(async (client) => {
       // 통화의 고객 범위와 주문 목록을 같은 시점의 데이터로 읽는다.
-      await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
       const customerId = await readOrderCustomer(this.repository, client, adminId, callId);
       if (
         customerId !== null &&
@@ -134,8 +132,7 @@ export class OrderReadService {
     query: OrderAddressHistoryQueryDto,
     callId: number | null,
   ) {
-    return this.database.transaction(async (client) => {
-      await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
+    return this.database.readSnapshot(async (client) => {
       const callerCustomer = await readOrderCustomer(this.repository, client, adminId, callId);
       if (callerCustomer !== null && callerCustomer !== customerId)
         throw new ApiException(
@@ -154,8 +151,7 @@ export class OrderReadService {
 
   async detail(adminId: number | null, id: number, callSessionHeader?: string) {
     const callId = orderCallId(adminId, callSessionHeader);
-    return this.database.transaction(async (client) => {
-      await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
+    return this.database.readSnapshot(async (client) => {
       const customerId = await readOrderCustomer(this.repository, client, adminId, callId, id);
       const order = await this.repository.detail(client, id, customerId);
       if (!order) throw new ApiException(404, 'NOT_FOUND', '주문을 찾을 수 없습니다.');
