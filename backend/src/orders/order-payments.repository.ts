@@ -228,6 +228,21 @@ export class OrderPaymentsRepository {
       [id, company, department],
     );
   }
+  async lockExpiredOrders(client: PoolClient, now: Date) {
+    const lock = await client.query<{ locked: boolean }>(
+      'SELECT pg_try_advisory_xact_lock(20261030,140) AS locked',
+    );
+    if (!lock.rows[0].locked) return [];
+    return (
+      await client.query<{ orderSeq: number; totalAmount: number }>(
+        `SELECT o.order_seq AS "orderSeq",o.total_amount AS "totalAmount" FROM orders o
+       WHERE status='notPaid' AND o.deleted_at IS NULL AND payment_due_at<=$1 AND NOT EXISTS(SELECT 1 FROM order_payment_requests r WHERE r.order_seq=o.order_seq AND r.invalidated_at IS NULL AND r.completed_at IS NULL AND r.approval_started_at IS NOT NULL)
+       ORDER BY payment_due_at,order_seq LIMIT 10 FOR UPDATE OF o SKIP LOCKED`,
+        [now],
+      )
+    ).rows;
+  }
+
   async replaceRequest(client: PoolClient, id: number) {
     await client.query(
       'UPDATE order_payment_requests SET invalidated_at=clock_timestamp() WHERE order_seq=$1 AND invalidated_at IS NULL AND completed_at IS NULL',

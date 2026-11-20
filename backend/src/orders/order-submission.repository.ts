@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { PoolClient } from 'pg';
+import { Pool, PoolClient } from 'pg';
 import { DverResult } from './dver.client';
 import { DeliveriesService } from '../deliveries/deliveries.service';
 import { OrderStatus } from './orders.types';
@@ -43,6 +43,23 @@ export class OrderSubmissionRepository {
        ORDER BY submission_last_attempt_at NULLS FIRST,order_seq LIMIT 100 FOR UPDATE SKIP LOCKED`,
     );
     return result.rows.map((row) => row.id);
+  }
+
+  async retryCandidates(pool: Pool) {
+    return (
+      await pool.query<{
+        id: number;
+        status: 'PAID' | 'SUBMITTING_FAILED';
+        updatedAt: string;
+      }>(
+        `SELECT order_seq AS id,status,updated_at::text AS "updatedAt" FROM orders
+       WHERE deleted_at IS NULL AND COALESCE(closed_at,created_at)>statement_timestamp()-interval '5 years'
+        AND (submission_first_attempt_at IS NULL OR submission_first_attempt_at>statement_timestamp()-interval '10 minutes')
+        AND (submission_last_attempt_at IS NULL OR submission_last_attempt_at<=statement_timestamp()-interval '1 minute')
+        AND status IN ('PAID','SUBMITTING_FAILED')
+       ORDER BY submission_last_attempt_at NULLS FIRST,order_seq LIMIT 20`,
+      )
+    ).rows;
   }
 
   async markStale(client: PoolClient, id: number): Promise<OrderStatus | undefined> {
