@@ -255,6 +255,20 @@ export class ParcelDraftsRepository {
     );
   }
 
+  async attachCallCustomer(client: PoolClient, callId: number, customerId: number): Promise<void> {
+    await client.query(
+      'UPDATE order_parcel_drafts SET customer_seq=$2 WHERE call_session_seq=$1 AND customer_seq IS NULL',
+      [callId, customerId],
+    );
+  }
+
+  async attachCustomer(client: PoolClient, id: number, customerId: number): Promise<void> {
+    await client.query('UPDATE order_parcel_drafts SET customer_seq=$2 WHERE draft_seq=$1', [
+      id,
+      customerId,
+    ]);
+  }
+
   async markConverted(
     client: PoolClient,
     draftSeq: number,
