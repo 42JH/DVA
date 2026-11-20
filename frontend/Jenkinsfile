@@ -75,6 +75,6 @@ pipeline {
     }
     post {
         success { echo "관리자 웹 배포 성공: ${env.RELEASE}" }
-        failure { echo '관리자 웹 파이프라인 실패 — 서버는 이전 판 그대로입니다' }
+        failure { echo '관리자 웹 파이프라인 실패 — Smoke 전 단계면 서버는 이전 판 그대로, Smoke에서 실패했으면 새 판이 이미 나감(되돌리기: deploy/README.md)' }
     }
 }
