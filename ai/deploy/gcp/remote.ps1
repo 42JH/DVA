@@ -1,7 +1,7 @@
 param(
     [string]$ScriptPath,
     [string]$ScriptText,
-    [string]$Project = 'dvr-rerank',
+    [string]$Project = '<GCP_PROJECT>',
     [string]$Zone = 'asia-northeast3-a',
     [string]$Name = 'dvr-reranker-l4'
 )

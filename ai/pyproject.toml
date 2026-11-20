@@ -29,5 +29,4 @@ dev = ["pytest", "httpx"]
 package = false
 
 [tool.pytest.ini_options]
-testpaths = ["pbx_webhook/tests", "backend_client/tests", "monitor/tests", "app/tests", "call_analysis/tests", "tests"]
 pythonpath = ["."]

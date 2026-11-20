@@ -13,7 +13,6 @@
 인증: Authorization: Bearer <PERSONA_CHECK_TOKEN>. 토큰이 없으면 창구를 닫는다(503).
 동시 실행: 요청의 concurrency와 PERSONA_CHECK_MAX_CONCURRENCY(기본 1) 중 작은 값. 운영과 OpenAI 계정 한도를 나눠 쓰면 1로 둔다.
 묶음마다 logs/persona_check/runs/<runId>/ 에 run.json과 시나리오별 폴더(판정 · 녹음 · 기록)가 남고, 다시 띄워도 조회된다.
-MONITOR_USER · MONITOR_PASSWORD를 주면 운영 관제 화면(/monitor)도 띄운다 — 개발 중 눈으로 확인하는 용도.
 
     # ai/ 폴더에서
     PYTHONPATH=.pydeps PERSONA_CHECK_TOKEN=... PERSONA_CHECK_OPENAI_API_KEY=... python -m persona_check.server
@@ -70,10 +69,10 @@ def available(scenario: dict) -> bool:
 class Runs:
     """시험 묶음들. run_one(시나리오ID, persona, 폴더) → 판정. 테스트는 가짜 run_one을 넣는다."""
 
-    def __init__(self, run_one=None, root: Path | None = None, max_concurrency: int | None = None, bus=None):
+    def __init__(self, run_one=None, root: Path | None = None, max_concurrency: int | None = None):
         self.root = root or try_call.SAVED / "runs"
         self.max_concurrency = max_concurrency or int(os.environ.get("PERSONA_CHECK_MAX_CONCURRENCY", "1"))
-        self.run_one = run_one or (lambda sid, persona, folder: try_call.run_call(sid, persona, bus, folder))
+        self.run_one = run_one or (lambda sid, persona, folder: try_call.run_call(sid, persona, out_dir=folder))
         self.live: dict[str, dict] = {}       # 돌고 있는 묶음(끝나면 내리고 run.json에서 읽는다)
         self.tasks: set[asyncio.Task] = set()
         self.task_of: dict[str, asyncio.Task] = {}  # 돌고 있는 묶음의 실행 태스크(멈춤 요청이 찾는다)
@@ -203,8 +202,8 @@ class Runs:
         await asyncio.gather(*self.tasks, return_exceptions=True)
 
 
-def create_app(runs: Runs, monitor: APIRouter | None = None) -> FastAPI:
-    """창구 앱. monitor = 개발 확인용 관제 라우터(자체 HTTP Basic 인증이라 토큰 인증 밖에 붙인다)."""
+def create_app(runs: Runs) -> FastAPI:
+    """창구 앱."""
     def auth(authorization: str = Header(default="")) -> None:
         token = os.environ.get("PERSONA_CHECK_TOKEN", "")
         if not token:
@@ -289,20 +288,13 @@ def create_app(runs: Runs, monitor: APIRouter | None = None) -> FastAPI:
 
     app = FastAPI(title="persona check", lifespan=lifespan)
     app.include_router(api)
-    if monitor is not None:
-        app.include_router(monitor)
     return app
 
 
 def main() -> None:
     import uvicorn
 
-    bus = monitor = None
-    if os.environ.get("MONITOR_USER"):  # 개발 확인용 관제 화면
-        from monitor import Bus, create_monitor_router
-        bus = Bus()
-        monitor = create_monitor_router(try_call.all_calls, bus)
-    uvicorn.run(create_app(Runs(bus=bus), monitor), host=os.environ.get("PERSONA_CHECK_HOST", "127.0.0.1"), port=PORT,
+    uvicorn.run(create_app(Runs()), host=os.environ.get("PERSONA_CHECK_HOST", "127.0.0.1"), port=PORT,
                 log_level="warning")
 
 

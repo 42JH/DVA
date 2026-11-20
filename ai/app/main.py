@@ -30,7 +30,6 @@ from app.observability.trace import TraceFilter
 from app.policy.model import load_policy
 from app.webhooks.faqs import router as faq_router
 from app.webhooks.persona import router as persona_router
-from monitor import Bus, create_monitor_router
 from pbx_webhook import create_call_ended_router, create_incoming_router
 from backend_client.api import BackendAPI
 from backend_client.mock import MockBackend
@@ -200,12 +199,9 @@ async def lifespan(app: FastAPI):
         recovery = asyncio.create_task(svc.calls.results.recover())
         if cfg.backend.result_resend_sec:  # SENT_UNCERTAIN 결과를 실행 중에도 같은 키로 재확인(0이면 재시작 때만)
             resend_worker = asyncio.create_task(svc.calls.results.resend_loop(cfg.backend.result_resend_sec))
-        bus = Bus()
-        svc.calls.on_change = lambda s: bus.publish({"type": "call", "call": s.snapshot()})  # 전사·사건·단계마다
         svc.calls.on_finalize.append(write_call_log)
         app.include_router(create_incoming_router(client, svc.calls.on_incoming))
         app.include_router(create_call_ended_router(svc.calls.on_call_ended))
-        app.include_router(create_monitor_router(svc.calls.registry.snapshots, bus))
     else:
         log.warning("OPENAI_API_KEY가 없어 통화 수신을 켜지 않습니다")
     try:

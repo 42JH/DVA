@@ -34,7 +34,6 @@
 | `GET /api/ai/config`, `POST /api/ai/config/apply-result` | ai-persona-next-call, persona-head-management | `persona_config`, `persona_result` |
 | `GET /api/ai/faqs` + BE→AI `POST /internal/faqs/refresh` | ai-faq-integration, faqs, `ai/faq-sync.md` | `faq_entries`·`initial_faq_entries`, `app/webhooks/faqs.py`(원본 RAG) |
 | `POST /api/ai/unanswered-questions` | unanswered-questions, unanswered-question-reasons | `BackendAPI.send_unanswered`, `ResultService`. 종료 후 실제 발화 검토 경로는 S15P31D109-159에서 준비하며 운영 활성화는 별도 |
-| `PATCH` 주문 수정(COLLECTING만) | order-update | 없음(원래 AI에서도 수정 보류) |
 | PBX 종료 웹훅(BE와 같은 본문을 AI도 받음) | ai-pbx-recordings, active-call-count, `ai/pbx-sip.md` | `pbx_webhook.create_call_ended_router` |
 
 ## rebuild에서 BE 최신 계약에 맞춘 것 (2026-11-03)
