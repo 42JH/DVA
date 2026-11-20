@@ -7,7 +7,7 @@
 | 파일 | 내용 |
 |---|---|
 | `Dockerfile` | python:3.14-slim + uv, `uv sync --frozen --no-dev`, 비루트 사용자(uid 10001), tiktoken 캐시 사전 준비(원본과 같음), 워커 1개. CMD는 새 서버 `app.main:app`(관제 포함) |
-| `.dockerignore` | 원본 규칙 기준: `.env`, 테스트, 문서, `evaluation/`, `gpu/`, `scripts/*`(bootstrap_faq만 포함), `app/rag/gpu.py`·`text_agent.py` 제외 |
+| `.dockerignore` | 원본 규칙 기준: `.env`, 문서, `gpu/`, `scripts/*`(bootstrap_faq만 포함), `app/rag/gpu.py` 제외 |
 | `compose.yaml` | `qdrant`(v1.13.4, API 키 필수, 내부망 `rag_net`만 — 원본 서비스 정의 그대로) + `ai`(127.0.0.1:`AI_PORT`, `/healthz` 헬스체크) |
 | `compose.qdrant-dashboard.yaml` | 원본 그대로의 개발 PC 전용 오버레이: Qdrant를 127.0.0.1:6333으로 연다 |
 | `gpu/` | 원본 그대로: 리랭커 서버 이미지(`app/rag/gpu.py`, Qwen3-Reranker). GPU 머신에서 `docker build -f gpu/Dockerfile .` |

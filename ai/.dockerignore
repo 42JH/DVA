@@ -14,9 +14,8 @@ logs
 gpu
 scripts/*
 !scripts/bootstrap_faq.py
-# 원본 .dockerignore와 같게: GPU 리랭커 서버와 텍스트 실험 루프는 AI 서버 이미지에 넣지 않는다
+# GPU 리랭커 서버는 AI 서버 이미지에 넣지 않는다
 app/rag/gpu.py
-app/rag/text_agent.py
 compose*.yaml
 Dockerfile
 # 배포 스크립트·CI는 이미지에 넣지 않는다

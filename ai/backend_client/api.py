@@ -458,7 +458,7 @@ class BackendAPI:
         return result
 
     async def update_collecting_order(self, call_session_seq: int, order_seq: int, body: dict) -> int:
-        """COLLECTING 주문 수정(PATCH /api/orders/{id}, order-update.md). body에 expectedVersion 필수. 새 version.
+        """COLLECTING 주문 수정(PATCH /api/orders/{id}). body에 expectedVersion 필수. 새 version.
         지금 통화 흐름은 부르지 않는다(계약만 맞춰 둠)."""
         resp = await self.http.patch(f"/api/orders/{int(order_seq)}", json=body,
                                      headers=_call(call_session_seq) | self._business_headers())

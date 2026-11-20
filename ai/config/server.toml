@@ -15,7 +15,6 @@ timeout_sec = 12.0
 http_timeout_sec = 5.0
 retry_cooldown_sec = 30.0
 # RAG Yes/No: 1등 근거의 리랭커 점수(yes/no 로짓 차이)가 이보다 낮으면 답할 자료 없음. 주석이면 근거 유무만 본다
-# TODO(flow): 평가셋으로 임계값을 정한다(scripts/calibrate_relevancy.py)
 # min_score = 0.0
 
 [faq_sync]
