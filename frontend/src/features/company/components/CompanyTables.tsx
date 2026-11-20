@@ -2,13 +2,13 @@
 import { useRef } from 'react'
 import { Link } from 'react-router'
 import type { useCompanyDetail } from '../hooks/useCompanyDetail'
-import type { Charge } from '../api/companyApi'
+import type { Charge, ChargeParty } from '../api/companyApi'
 import { Badge, Btn, Icon } from '@/shared/ui'
 import { SkeletonRows } from '@/shared/ui/ListFrame'
 import { useScrollable } from '@/shared/lib/useScrollable'
 import { useKeepScroll } from '@/shared/lib/keepScroll'
 import { fmtDate, fmtDateTime, fmtPhone } from '@/shared/lib/format'
-import { won } from '@/shared/order/look'
+import { itemsText, won } from '@/shared/order/look'
 
 type VM = ReturnType<typeof useCompanyDetail>
 
@@ -123,7 +123,7 @@ export function ChargeTable({ vm }: { vm: VM }) {
                   보낸 사원
                 </th>
                 <th scope="col" className="pl-[15px]! text-left!">
-                  받는 기업
+                  받는 분
                 </th>
                 <th scope="col" className="w-[120px]">
                   금액
@@ -147,18 +147,25 @@ export function ChargeTable({ vm }: { vm: VM }) {
                     </span>
                   </td>
                   <td className="text-center leading-tight">
-                    <b className="block truncate text-[13px] font-semibold">{c.sender.name}</b>
+                    <b className="block truncate text-[13px] font-semibold">
+                      {c.sender.name ?? '이름 없음'}
+                    </b>
                     <span className="text-[12px] text-ops-sub">
                       {c.sender.departmentName ?? '부서 없음'}
                     </span>
                   </td>
                   <td className="text-left leading-tight">
-                    <b className="block truncate text-[13px] font-semibold">
-                      {c.recipient.organizationName}
-                    </b>
-                    <span className="text-[12px] text-ops-sub">{c.recipient.name}</span>
+                    <b className="block truncate text-[13px] font-semibold">{recipientsOf(c)}</b>
+                    <span className="block truncate text-[12px] text-ops-sub">
+                      {c.parcels[0] ? itemsText(c.parcels[0].items) : ''}
+                    </span>
                   </td>
-                  <td className="text-center font-bold tabular-nums">{won(c.amount)}</td>
+                  <td className="text-center leading-tight tabular-nums">
+                    <b className="block font-bold">{won(c.amount)}</b>
+                    {c.orderCancelled && (
+                      <span className="text-[12px] text-ops-stop">주문 취소</span>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -179,7 +186,13 @@ export function ChargeTable({ vm }: { vm: VM }) {
   )
 }
 
-/** 고른 청구 건 — 결제 일시 · 보낸 사원 · 받는 기업 · 품목 · 합계 · [주문 상세](주문 화면의 송장 상세로) */
+/** 받는 분 칸 — 첫 배송의 받는 분, 배송이 더 있으면 '외 n건' */
+function recipientsOf(c: Charge) {
+  const first = c.parcels[0]?.recipient.name ?? '이름 없음'
+  return c.parcels.length > 1 ? `${first} 외 ${c.parcels.length - 1}건` : first
+}
+
+/** 고른 청구 건 — 결제 일시 · 보낸 사원 · 배송별 받는 분과 물품 · 청구 금액 · [주문 상세](주문 화면의 송장 상세로) */
 function ChargePanel({ c, onClose }: { c: Charge; onClose: () => void }) {
   const dash = 'border-t border-dashed border-[#c3c9d3]'
   return (
@@ -189,6 +202,7 @@ function ChargePanel({ c, onClose }: { c: Charge; onClose: () => void }) {
     >
       <div className="flex items-center gap-2">
         <h3 className="text-[15px] font-bold">청구 건</h3>
+        {c.orderCancelled && <Badge tone="stop">주문 취소</Badge>}
         <span className="ml-auto text-[12px] text-ops-sub tabular-nums">
           DV-{String(c.orderSeq).padStart(5, '0')}
         </span>
@@ -208,32 +222,20 @@ function ChargePanel({ c, onClose }: { c: Charge; onClose: () => void }) {
         </span>
       </p>
       <hr className={dash} />
-      <Party
-        title="보낸 사원"
-        name={c.sender.name}
-        sub={c.sender.departmentName}
-        phone={c.sender.phoneNumber}
-        address={c.sender.address}
-      />
-      <Party
-        title="받는 기업"
-        org={c.recipient.organizationName}
-        name={c.recipient.name}
-        phone={c.recipient.phoneNumber}
-        address={c.recipient.address}
-      />
-      <hr className={dash} />
-      <ul className="flex flex-col gap-1.5">
-        {c.items.map((it) => (
-          <li key={it.label} className="flex justify-between">
-            <span className="text-ops-sub">{it.label}</span>
-            <span className="tabular-nums">{won(it.amount)}</span>
-          </li>
-        ))}
-      </ul>
+      <Party title="보낸 사원" party={c.sender} sub={c.sender.departmentName} />
+      {c.parcels.map((parcel, i) => (
+        <div key={i} className="flex flex-col gap-1">
+          <Party
+            title={c.parcels.length > 1 ? `받는 분 ${i + 1}` : '받는 분'}
+            party={parcel.recipient}
+            tag={parcel.cancelled ? '배송 취소' : undefined}
+          />
+          <span className="text-ops-sub">{itemsText(parcel.items) || '물품 없음'}</span>
+        </div>
+      ))}
       <hr className="border-t border-ops-line" />
       <p className="flex items-center justify-between">
-        <span className="font-semibold">합계</span>
+        <span className="font-semibold">청구 금액</span>
         <b className="text-[20px] font-bold tabular-nums">{won(c.amount)}</b>
       </p>
       <Link
@@ -246,24 +248,23 @@ function ChargePanel({ c, onClose }: { c: Charge; onClose: () => void }) {
   )
 }
 
-function Party(p: {
-  title: string
-  org?: string
-  name: string
-  sub?: string | null
-  phone: string
-  address: string
-}) {
+/** 사람 한 명 — 이름 · 부서 · 전화 · 주소. 주문에 없는 값은 비워 둠 */
+function Party(p: { title: string; party: ChargeParty; sub?: string | null; tag?: string }) {
+  const { name, phoneNumber, address } = p.party
   return (
     <div className="flex flex-col gap-0.5">
-      <span className="text-[11px] font-semibold text-ops-faint">{p.title}</span>
-      {p.org && <b className="text-[14px] font-bold">{p.org}</b>}
-      <span className="flex items-center gap-2">
-        <b className="font-semibold">{p.name}</b>
-        {p.sub && <span className="text-[12px] text-ops-sub">{p.sub}</span>}
-        <span className="text-[12px] text-ops-sub tabular-nums">{fmtPhone(p.phone)}</span>
+      <span className="flex items-center gap-1.5 text-[11px] font-semibold text-ops-faint">
+        {p.title}
+        {p.tag && <span className="text-ops-stop">{p.tag}</span>}
       </span>
-      <span>{p.address}</span>
+      <span className="flex items-center gap-2">
+        <b className="font-semibold">{name ?? '이름 없음'}</b>
+        {p.sub && <span className="text-[12px] text-ops-sub">{p.sub}</span>}
+        {phoneNumber && (
+          <span className="text-[12px] text-ops-sub tabular-nums">{fmtPhone(phoneNumber)}</span>
+        )}
+      </span>
+      {address && <span>{address}</span>}
     </div>
   )
 }
