@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { personaQueries, requestApply } from '../api/personaApi'
 import { SCENARIO_TEST, scenarioTestQueries, startTest } from '../api/scenarioTestApi'
 import { pledges } from './pledgeStore'
-import { restOf, rowsOf, testOf } from './scenarioTest'
+import { restOf, rowsOf, testOf, withCarriedTests } from './scenarioTest'
 
 /** 통화에 반영할 버전 — 사용 중 상담가의 고친 내용(현재 버전) */
 type ApplyTarget = {
@@ -19,7 +19,15 @@ type ApplyTarget = {
 // expected = 띠가 뜰 상담가 — 대상(버전 기록)을 알기 전부터 시험 결과를 받기 시작해 버전 기록과 같이 도착하게
 export function useApplyTest(
   target: ApplyTarget | null,
-  { auto = true, expected = target !== null }: { auto?: boolean; expected?: boolean } = {},
+  {
+    auto = true,
+    expected = target !== null,
+    talks = [],
+  }: {
+    auto?: boolean
+    expected?: boolean
+    talks?: { version: number; talk: string }[] // 이 상담가의 버전들 — 이름만 바꾼 버전은 앞 버전 결과를 이어 씀
+  } = {},
 ) {
   const on = SCENARIO_TEST && target !== null
   const qc = useQueryClient()
@@ -31,7 +39,7 @@ export function useApplyTest(
   const list = scenarios.data ?? []
   const me = target && { personaSeq: target.personaSeq, version: target.head.version, isHead: true }
   const { state, shown } = me
-    ? testOf(tests.data ?? [], list, me, null)
+    ? testOf(withCarriedTests(tests.data ?? [], talks, me), list, me, null)
     : { state: 'none' as const, shown: null }
   // 고치기 전 글의 결과(stale)는 이 버전 것이 아님 → 시험 전과 같음
   const mine = state === 'stale' ? null : shown
