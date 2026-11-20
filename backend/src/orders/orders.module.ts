@@ -8,6 +8,7 @@ import { ConsultationsModule } from '../consultations/consultations.module';
 import { OrdersController } from './orders.controller';
 import { OrdersRepository } from './orders.repository';
 import { OrdersService } from './orders.service';
+import { OrderReadService } from './order-read.service';
 import { OrderSubmissionRepository } from './order-submission.repository';
 import { DverClient } from './dver.client';
 import { OrderAddressesController } from './order-addresses.controller';
@@ -49,6 +50,7 @@ import { AdminParcelDraftsService } from './admin-parcel-drafts.service';
     OrderCardPaymentsService,
     OrdersRepository,
     OrdersService,
+    OrderReadService,
     OrderSubmissionRepository,
     OrderSubmissionService,
     DverClient,

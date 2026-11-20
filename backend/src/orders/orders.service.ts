@@ -1,50 +1,28 @@
-import { AdminOrderListQueryDto } from './dto/admin-order-list.dto';
 import { Injectable } from '@nestjs/common';
 import { OrderCardPaymentsService } from './order-card-payments.service';
 import { OrderSubmissionService } from './order-submission.service';
 import { writeOrder } from './order-write';
-import { PoolClient } from 'pg';
 import { AuditService } from '../audit/audit.service';
 import { ApiException } from '../common/errors/api.exception';
 import { DatabaseService } from '../database/database.service';
 import { CustomersService } from '../customers/customers.service';
 import { CreateOrderDto } from './dto/create-order.dto';
-import { CreatedOrderDto, OrderResultDto, OrderSummaryDto } from './dto/order-response.dto';
+import { CreatedOrderDto, OrderResultDto } from './dto/order-response.dto';
 import { NoOrderResultDto } from './dto/no-order-result.dto';
-import { OrderQueryDto } from './dto/order-query.dto';
-import { ListResponse } from '../common/pagination';
-import { hasOrderData, isZonedDate, orderDraft, ORDER_ADDRESS_FIELDS } from './order-draft';
+import { hasOrderData, orderDraft, ORDER_ADDRESS_FIELDS } from './order-draft';
 import { OrdersRepository } from './orders.repository';
+import { orderCallId, readOrderCustomer } from './order-access';
 import { UpdateOrderDto, UpdatedOrderDto } from './dto/update-order.dto';
 import { assertOrderUpdate } from './order-update.validation';
 import { SubmitOrderDto, SubmittedOrderDto } from './dto/submit-order.dto';
 import { callerPhone } from '../common/caller-phone';
-import {
-  OrderAddressHistoryQueryDto,
-  PreviousOrderAddressDto,
-} from './dto/order-address-history.dto';
 import { CreateManualOrderDto, ManualOrderResultDto } from './dto/manual-order.dto';
 import { ConsultationsService } from '../consultations/consultations.service';
 import { OrderPaymentsRepository } from './order-payments.repository';
 import { DeliveriesService } from '../deliveries/deliveries.service';
-import { ParcelDraftsRepository } from './parcel-drafts.repository';
-import { ParcelDraftQueryDto } from './dto/parcel-draft.dto';
-import { CoalescedReads } from '../common/coalesced-reads';
-import { CoalescedPages } from '../common/coalesced-pages';
 
 @Injectable()
 export class OrdersService {
-  private readonly adminReads = new CoalescedPages<
-    AdminOrderListQueryDto,
-    Awaited<ReturnType<OrdersService['readAdminList']>>
-  >();
-  private readonly orderReads = new CoalescedReads<ListResponse<OrderSummaryDto>>();
-  private readonly orderPages = new CoalescedPages<OrderQueryDto, ListResponse<OrderSummaryDto>>();
-  private readonly addressPages = new CoalescedPages<
-    OrderAddressHistoryQueryDto,
-    ListResponse<PreviousOrderAddressDto>
-  >();
-
   constructor(
     private readonly database: DatabaseService,
     private readonly repository: OrdersRepository,
@@ -54,7 +32,6 @@ export class OrdersService {
     private readonly payments: OrderPaymentsRepository,
     private readonly deliveries: DeliveriesService,
     private readonly submission: OrderSubmissionService,
-    private readonly drafts: ParcelDraftsRepository,
     private readonly cardPayments: OrderCardPaymentsService,
   ) {}
 
@@ -85,166 +62,6 @@ export class OrdersService {
           client,
         );
       }
-    });
-  }
-
-  private callId(adminId: number | null, header?: string): number | null {
-    if (
-      (adminId === null && header === undefined) ||
-      (header !== undefined &&
-        (!/^[0-9]+$/.test(header) || Number(header) < 1 || Number(header) > 2147483647))
-    )
-      throw new ApiException(
-        400,
-        'INVALID_REQUEST',
-        'AI 주문 API에는 유효한 call_session_seq가 필요합니다.',
-      );
-    return header === undefined ? null : Number(header);
-  }
-
-  private async readCustomer(
-    client: PoolClient,
-    adminId: number | null,
-    callId: number | null,
-    orderId?: number,
-    draftCancellation = false,
-  ) {
-    if (adminId !== null) return null;
-    const call = await this.repository.readCustomer(client, callId!);
-    if (!call && draftCancellation)
-      throw new ApiException(
-        409,
-        'INVALID_STATE',
-        '신규 통화의 수정·취소는 배송 초안 API를 사용해 주세요.',
-      );
-    if (!call) throw new ApiException(404, 'NOT_FOUND', '통화를 찾을 수 없습니다.');
-    if (call.endedAt !== null && call.orderSeq !== orderId)
-      throw new ApiException(
-        409,
-        'INVALID_STATE',
-        '종료된 통화는 기존 연결 주문만 사용할 수 있습니다.',
-      );
-    if (call.customerSeq === null)
-      throw new ApiException(403, 'FORBIDDEN', '통화 발신번호에 연결된 활성 고객이 필요합니다.');
-    return call.customerSeq;
-  }
-
-  private assertDateRange(query: { from?: string; to?: string }): void {
-    if (
-      (query.from !== undefined && !isZonedDate(query.from)) ||
-      (query.to !== undefined && !isZonedDate(query.to)) ||
-      (query.from && query.to && Date.parse(query.from) >= Date.parse(query.to))
-    )
-      throw new ApiException(
-        400,
-        'INVALID_REQUEST',
-        '조회 기간을 확인해 주세요. from은 to보다 빨라야 합니다.',
-      );
-  }
-
-  async adminList(query: AdminOrderListQueryDto) {
-    this.assertDateRange(query);
-    return this.adminReads.read([], query, (page) => this.readAdminList(page));
-  }
-
-  private readAdminList(query: AdminOrderListQueryDto) {
-    return this.database.transaction(async (client) => {
-      await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
-      const filteredPage =
-        query.statusGroup === undefined
-          ? undefined
-          : new ListResponse(await this.repository.adminList(client, query), query.limit);
-      const statusCounts = await this.repository.adminStatusCounts(client, query);
-      const incomplete = await this.drafts.countIncomplete(
-        client,
-        Object.assign(new ParcelDraftQueryDto(), {
-          q: query.q,
-          from: query.from,
-          to: query.to,
-          organizationSeq: query.organizationSeq,
-        }),
-      );
-      const all = statusCounts.all + incomplete;
-      const page =
-        filteredPage ??
-        new ListResponse(await this.repository.adminList(client, query, all), query.limit);
-      return Object.assign(page, {
-        statusCounts: { ...statusCounts, all, incomplete },
-      });
-    });
-  }
-
-  async list(adminId: number | null, query: OrderQueryDto, callSessionHeader?: string) {
-    const callId = this.callId(adminId, callSessionHeader);
-    this.assertDateRange(query);
-    if (adminId !== null) {
-      if (callSessionHeader === undefined) {
-        return this.orderPages.read([adminId], query, (page) =>
-          this.readList(adminId, page, callId),
-        );
-      }
-      return this.orderReads.read(JSON.stringify([adminId, query]), () =>
-        this.readList(adminId, query, callId),
-      );
-    }
-    return this.readList(adminId, query, callId);
-  }
-
-  private readList(adminId: number | null, query: OrderQueryDto, callId: number | null) {
-    return this.database.transaction(async (client) => {
-      // 통화의 고객 범위와 주문 목록을 같은 시점의 데이터로 읽는다.
-      await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
-      const customerId = await this.readCustomer(client, adminId, callId);
-      if (
-        customerId !== null &&
-        query.customerSeq !== undefined &&
-        query.customerSeq !== customerId
-      )
-        throw new ApiException(403, 'FORBIDDEN', '다른 고객의 주문은 조회할 수 없습니다.');
-      return new ListResponse(
-        await this.repository.list(client, query, customerId ?? query.customerSeq ?? null),
-        query.limit,
-      );
-    });
-  }
-
-  async addressHistory(
-    adminId: number | null,
-    customerId: number,
-    query: OrderAddressHistoryQueryDto,
-    header?: string,
-  ) {
-    const callId = this.callId(adminId, header);
-    this.assertDateRange(query);
-    if (adminId !== null && header === undefined) {
-      return this.addressPages.read([adminId, customerId], query, (page) =>
-        this.readAddressHistory(adminId, customerId, page, callId),
-      );
-    }
-    return this.readAddressHistory(adminId, customerId, query, callId);
-  }
-
-  private readAddressHistory(
-    adminId: number | null,
-    customerId: number,
-    query: OrderAddressHistoryQueryDto,
-    callId: number | null,
-  ) {
-    return this.database.transaction(async (client) => {
-      await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
-      const callerCustomer = await this.readCustomer(client, adminId, callId);
-      if (callerCustomer !== null && callerCustomer !== customerId)
-        throw new ApiException(
-          403,
-          'FORBIDDEN',
-          '다른 고객의 이전 주문 주소는 조회할 수 없습니다.',
-        );
-      if (callerCustomer === null && !(await this.repository.customerExists(client, customerId)))
-        throw new ApiException(404, 'NOT_FOUND', '고객을 찾을 수 없습니다.');
-      return new ListResponse(
-        await this.repository.addressHistory(client, customerId, query),
-        query.limit,
-      );
     });
   }
 
@@ -309,7 +126,7 @@ export class OrdersService {
         'customerSeq와 customer 중 하나만 전달해 주세요.',
         [{ field: 'customer', reason: 'exactlyOneCustomerReference' }],
       );
-    const headerId = this.callId(input.call ? 0 : adminId, callSessionHeader);
+    const headerId = orderCallId(input.call ? 0 : adminId, callSessionHeader);
     const draft = orderDraft(input);
     const prepared = await writeOrder(this.database, async (client) => {
       if (!(await this.repository.lockCreation(client, key)))
@@ -484,7 +301,7 @@ export class OrdersService {
     assertOrderUpdate(input);
     if (adminId === null && input.removeParcelSeqs !== undefined)
       throw new ApiException(403, 'FORBIDDEN', '배송상세 제거는 관리자만 할 수 있습니다.');
-    const callId = this.callId(adminId, callSessionHeader);
+    const callId = orderCallId(adminId, callSessionHeader);
     return writeOrder(this.database, async (client) => {
       if (adminId === null && (await this.repository.isDraftCall(client, callId!)))
         throw new ApiException(
@@ -680,17 +497,6 @@ export class OrdersService {
     });
   }
 
-  async detail(adminId: number | null, id: number, callSessionHeader?: string) {
-    const callId = this.callId(adminId, callSessionHeader);
-    return this.database.transaction(async (client) => {
-      await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
-      const customerId = await this.readCustomer(client, adminId, callId, id);
-      const order = await this.repository.detail(client, id, customerId);
-      if (!order) throw new ApiException(404, 'NOT_FOUND', '주문을 찾을 수 없습니다.');
-      return order;
-    });
-  }
-
   async cancel(
     adminId: number | null,
     id: number,
@@ -698,10 +504,10 @@ export class OrdersService {
     callSessionHeader?: string,
     orderParcelSeqs?: number[],
   ): Promise<void> {
-    const callId = this.callId(adminId, callSessionHeader);
+    const callId = orderCallId(adminId, callSessionHeader);
     await this.database.transaction(async (client) => {
       const unpaidOnly = adminId === null && (await this.repository.isDraftCall(client, callId!));
-      const customerId = await this.readCustomer(client, adminId, callId, id, unpaidOnly);
+      const customerId = await readOrderCustomer(this.repository, client, adminId, callId, id, unpaidOnly);
       const order = await this.repository.lockOrder(client, id);
       const ownsOrder = customerId === null || order?.customerSeq === customerId;
       if (ownsOrder && (await this.repository.hasMigratedDrafts(client, id)))
@@ -809,7 +615,7 @@ export class OrdersService {
     requestId: string,
     callSessionHeader?: string,
   ): Promise<SubmittedOrderDto> {
-    const callId = this.callId(adminId, callSessionHeader);
+    const callId = orderCallId(adminId, callSessionHeader);
     const prepared = await writeOrder(this.database, async (client) => {
       if (adminId === null && (await this.repository.isDraftCall(client, callId!)))
         throw new ApiException(
@@ -817,7 +623,7 @@ export class OrdersService {
           'INVALID_STATE',
           '신규 통화의 최종 확정은 order-intake/complete API를 사용해 주세요.',
         );
-      const customerId = await this.readCustomer(client, adminId, callId, id);
+      const customerId = await readOrderCustomer(this.repository, client, adminId, callId, id);
       const order = await this.repository.lockOrder(client, id);
       if (await this.repository.hasMigratedDrafts(client, id))
         throw new ApiException(
