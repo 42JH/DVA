@@ -62,7 +62,6 @@ export function usePersonaPage() {
   const call = callStateOf(persona, all, head)
   const { unapplied, callVersion, switching } = call
   const applyTest = useApplyTest(call.applyTarget, {
-    auto: !switching,
     expected: call.banded,
     talks: talksOf(all),
   })

@@ -51,14 +51,14 @@ test('이름 끝 글자의 받침으로 조사를 고름', () => {
   assert.equal(nameI('Fast'), 'Fast가') // 한글이 아니면 받침 없음으로
 })
 
-test('띠의 [통화에 반영] — 시험하고 반영 · 남은 것만', () => {
+test('띠의 [통화에 반영] — 시험부터(통과해도 반영은 따로) · 남은 것만', () => {
   assert.deepEqual(copy({ kind: 'test' }), {
-    title: '시험하고 통화에 반영할까요?',
-    note: '시나리오 10개를 모두 돌립니다. 모두 통과하면 바로 반영하고, 실패가 있으면 결과를 확인한 뒤 반영할 수 있습니다.',
-    okLabel: '시험하고 반영',
+    title: '통화에 반영하기 전에 시험할까요?',
+    note: '시나리오 10개를 모두 돌린 뒤, 결과를 보고 통화에 반영합니다.',
+    okLabel: '시험 시작',
   })
   const rest = { ...base.test, toRun: 3, resume: true }
-  assert.match(copy({ kind: 'test' }, { test: rest })!.note, /^남은 시나리오 3개를 돌립니다\./)
+  assert.match(copy({ kind: 'test' }, { test: rest })!.note, /^남은 시나리오 3개를 돌린 뒤,/)
   // 6번 — 다른 상담가는 시험만 (통과해도 저절로 바꾸지 않음)
   assert.deepEqual(copy({ kind: 'test' }, { current: kind }), {
     title: '통화에 쓰기 전에 친절형을 시험할까요?',

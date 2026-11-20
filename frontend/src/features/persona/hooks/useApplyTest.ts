@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { personaQueries, requestApply } from '../api/personaApi'
 import { SCENARIO_TEST, scenarioTestQueries, startTest } from '../api/scenarioTestApi'
-import { pledges } from './pledgeStore'
 import { restOf, rowsOf, testOf, withCarriedTests } from './scenarioTest'
 
 /** 통화에 반영할 버전 — 사용 중 상담가의 고친 내용(현재 버전) */
@@ -13,18 +12,15 @@ type ApplyTarget = {
 }
 
 /** 띠의 시험 → 반영
- *  [통화에 반영] → 그 버전 시험 상태에 따라: 모두 통과 = 바로 반영 / 아니면 시험하고 반영(못 한 것만 — 일부 시험이면 남은 것)
- *  모두 통과하면 저절로 반영 — 약속을 남기고(pledgeStore) 앱 틀이 지켜봄. 실패가 있으면 확인 필요 띠(담당자가 정함) */
-// auto false = 모두 통과해도 저절로 반영하지 않음 (6번 다른 상담가를 통화에 쓰기 — 담당자가 [통화에 사용하기])
+ *  [통화에 반영] → 그 버전 시험 상태에 따라: 모두 통과 = 바로 반영 확인 / 아니면 시험부터(못 한 것만 — 일부 시험이면 남은 것)
+ *  시험이 모두 통과해도 저절로 반영하지 않음 — 담당자가 띠의 [통화에 반영]을 다시 누름. 실패가 있으면 확인 필요 띠 */
 // expected = 띠가 뜰 상담가 — 대상(버전 기록)을 알기 전부터 시험 결과를 받기 시작해 버전 기록과 같이 도착하게
 export function useApplyTest(
   target: ApplyTarget | null,
   {
-    auto = true,
     expected = target !== null,
     talks = [],
   }: {
-    auto?: boolean
     expected?: boolean
     talks?: { version: number; talk: string }[] // 이 상담가의 버전들 — 이름만 바꾼 버전은 앞 버전 결과를 이어 씀
   } = {},
@@ -57,7 +53,6 @@ export function useApplyTest(
   })
   const start = useMutation({
     mutationFn: async (t: ApplyTarget) => {
-      const before = mine?.startedAt ?? null
       await startTest({
         personaSeq: t.personaSeq,
         version: t.head.version,
@@ -65,12 +60,8 @@ export function useApplyTest(
         voiceId: t.voiceId,
         scenarios: rest.length ? rest : undefined, // 일부만 시험했으면 남은 것만(요금)
       })
-      return before
     },
-    onSuccess: async (before, t) => {
-      await qc.invalidateQueries({ queryKey: scenarioTestQueries.tests().queryKey })
-      if (auto) pledges.add({ personaSeq: t.personaSeq, version: t.head.version, before })
-    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: scenarioTestQueries.tests().queryKey }),
     // 응답을 못 받아도 창구는 걸기 시작했을 수 있음 → 다시 보내지 않고 목록만 다시 받음 (시험 중이면 띠가 시험 중으로 바뀜)
     onError: () => qc.invalidateQueries({ queryKey: scenarioTestQueries.tests().queryKey }),
   })
