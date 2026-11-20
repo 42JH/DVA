@@ -17,7 +17,6 @@ app/rag/ 등        RAG — 원본 그대로, 수정 금지 (아래 'RAG' 절)
 
 ```
 uv sync
-uv run pytest -q        # 369개. 실제 OpenAI·PBX·백엔드·카카오·Qdrant를 부르지 않는다
 docker compose up -d --build   # Qdrant + AI 서버. docs/ops/docker.md
 ```
 
@@ -54,8 +53,6 @@ docker compose up -d --build   # Qdrant + AI 서버. docs/ops/docker.md
 - `app/integrations/address.py` `AddressService`: 전용 스레드풀·예산 3초·카카오. `app/integrations/kakao.py` `geocode()`는 지번·동명·우편번호(`app.domain.state.Geo`), 키가 없거나 못 찾으면 None.
 - BE 모양 `Geo`(pydantic)는 `backend_client/order.py`에 있다.
 - 주소DB 만들기: `uv run python -X utf8 -m app.address.gazetteer <주소DB 텍스트 폴더> data/address.db`
-- 회귀 시험지: `uv run python -X utf8 -m scripts.evaluate_address` (`evaluation/datasets/address_v1.json`, 실제 주소DB 필요)
-- 테스트용 작은 주소DB는 `app/tests/address_sample_db.py`의 `build_sample_db`로 만든다.
 
 ## tools: 도구와 RAG
 
@@ -109,8 +106,7 @@ RAG는 다른 담당자의 구현이다. 원본 `S15P31D109/ai`(`exp/no-speech-i
 | `manuals/`, `config/rag-search-descriptions.json`, `config/faq-bm25-descriptions.json`, `prompts/rag_context.md` | 매뉴얼 원문·검색 설명·RAG 템플릿 |
 | `config/server.toml`의 `[rag]`·`[faq_sync]` | RAG 설정(원본 섹션 그대로) |
 | `gpu/` | 리랭커 서버 이미지(`docker build -f gpu/Dockerfile .`) |
-| `scripts/`(라이브 랩 전용 3개 제외), `evaluation/`, `spec/rag.md`, `spec/faq-sync.md`, `docs/rag-handoff.md` | 색인·진단·평가 스크립트와 문서 |
-| `tests/`(13개 파일) | 원본 RAG 테스트. 원본 서버 앱·통화 객체·라이브 랩이 필요한 4개(`test_faq_events`, `test_faq_processor`, `test_call_rag_integration`, `test_live_rag_eval`)는 제외 |
+| `scripts/`(라이브 랩 전용 3개 제외), `spec/rag.md`, `spec/faq-sync.md`, `docs/rag-handoff.md` | 색인·진단·평가 스크립트와 문서 |
 
 원본 RAG가 import하는 원본 서버 공용 모듈은 **우리 쪽 호환판**으로 둔다(RAG 파일은 건드리지 않음):
 

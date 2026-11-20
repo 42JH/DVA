@@ -26,7 +26,6 @@
 | `server.py` | 시험 묶음 창구. 시작, 진행 조회, 판정 · 녹음 내려받기 |
 | `scenarios.toml` | 공통 테스트 데이터와 시나리오(대본, 정답, 확인 항목) |
 | `lint.py`, `lint.md`, `samples/` | 통화 없이 페르소나 글만 검사(업무 지시 섞임, 업무 규칙과 반대, 칸끼리 모순) |
-| `tests/` | 통화와 모델 호출 없이 도는 테스트. 실행기가 운영 코드와 맞물리는지도 여기서 본다 |
 
 ## 실행
 
@@ -40,9 +39,6 @@ PYTHONPATH=.pydeps PERSONA_CHECK_OPENAI_API_KEY=... python -m persona_check.try_
 
 # 창구
 PYTHONPATH=.pydeps PERSONA_CHECK_OPENAI_API_KEY=... PERSONA_CHECK_TOKEN=... python -m persona_check.server
-
-# 테스트(통화 없음)
-python -m pytest persona_check -q
 ```
 
 | 환경변수 | 뜻 | 기본 |

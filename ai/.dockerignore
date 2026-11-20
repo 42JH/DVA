@@ -6,14 +6,11 @@ __pycache__
 !.env.example
 .git
 .pytest_cache
-tests
-**/tests
 docs
 spec
 data
 rag_state
 logs
-evaluation
 gpu
 scripts/*
 !scripts/bootstrap_faq.py
