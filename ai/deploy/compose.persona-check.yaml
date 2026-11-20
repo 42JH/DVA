@@ -12,6 +12,8 @@ services:
       PERSONA_CHECK_OPENAI_API_KEY: ${PERSONA_CHECK_OPENAI_API_KEY:?Set PERSONA_CHECK_OPENAI_API_KEY in persona-check.env}
       PERSONA_CHECK_HOST: 0.0.0.0
       PERSONA_CHECK_MAX_CONCURRENCY: ${PERSONA_CHECK_MAX_CONCURRENCY:-2}
+      # 녹음(call.wav)을 남기는 날수. 판정 · 기록은 남김 (0 = 지우지 않음)
+      PERSONA_CHECK_AUDIO_KEEP_DAYS: ${PERSONA_CHECK_AUDIO_KEEP_DAYS:-30}
       # 운영 통화와 같은 판단 모델로 시험한다(ai 서비스와 같은 값)
       BACKEND_MODEL: ${BACKEND_MODEL:-gpt-6-luna}
       BACKEND_EFFORT: ${BACKEND_EFFORT:-low}
