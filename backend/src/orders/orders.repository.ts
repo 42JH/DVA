@@ -1,4 +1,7 @@
-import { AVAILABLE_CALL_SQL, AVAILABLE_JOINED_CALL_SQL } from '../consultations/call-session-availability';
+import {
+  AVAILABLE_CALL_SQL,
+  AVAILABLE_JOINED_CALL_SQL,
+} from '../consultations/call-session-availability';
 import {
   AdminOrderListItemDto,
   AdminOrderListQueryDto,

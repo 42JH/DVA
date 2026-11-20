@@ -124,7 +124,11 @@ export class ComplaintJudgeWorker
       this.logger.warn({ event: 'call_complaint_input_too_long', callSessionSeq: id });
       return;
     }
-    const result = await runPrepared(prepared, this.model.ask, inputs.faqs.length ? inputs.faqs : null);
+    const result = await runPrepared(
+      prepared,
+      this.model.ask,
+      inputs.faqs.length ? inputs.faqs : null,
+    );
     if (!result) {
       await this.repository.retryLater(id, 10 * attempt, true);
       this.logger.warn({ event: 'call_complaint_model_unavailable', callSessionSeq: id, attempt });

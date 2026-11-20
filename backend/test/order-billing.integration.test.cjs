@@ -898,12 +898,14 @@ test('company credit charges keep ledger scope, parcel order and filtered totals
   };
   const customer = await makeCustomer('청구 내역 회사 고객', '01000138988');
   assert.equal(
-    (await request(`/companies/${company}/members`, {
-      customerSeq: customer,
-      employeeNo: 'CHARGE-DETAILS',
-      role: 'MEMBER',
-      departmentSeq: department,
-    })).status,
+    (
+      await request(`/companies/${company}/members`, {
+        customerSeq: customer,
+        employeeNo: 'CHARGE-DETAILS',
+        role: 'MEMBER',
+        departmentSeq: department,
+      })
+    ).status,
     204,
   );
   await groupPolicy(company, customer, true);
@@ -923,23 +925,36 @@ test('company credit charges keep ledger scope, parcel order and filtered totals
   };
   credit.parcels[1].otherItemDescription = '별도 물품';
   const first = (await createFinal(credit)).body.data;
-  const second = (await createFinal(finalBody({
-    customerSeq: customer,
-    paymentMethodType: 'credit',
-  }))).body.data;
-  const group = (await createFinal(finalBody({
-    customerSeq: customer,
-    paymentMethodType: 'groupBilling',
-  }))).body.data;
+  const second = (
+    await createFinal(
+      finalBody({
+        customerSeq: customer,
+        paymentMethodType: 'credit',
+      }),
+    )
+  ).body.data;
+  const group = (
+    await createFinal(
+      finalBody({
+        customerSeq: customer,
+        paymentMethodType: 'groupBilling',
+      }),
+    )
+  ).body.data;
   const individual = await makeCustomer('청구 내역 개인 고객', '01000138989');
   assert.equal(
-    (await request(`/customers/${individual}`, { monthlyBillingEnabled: true }, false, 'PATCH')).status,
+    (await request(`/customers/${individual}`, { monthlyBillingEnabled: true }, false, 'PATCH'))
+      .status,
     204,
   );
-  const personal = (await createFinal(finalBody({
-    customerSeq: individual,
-    paymentMethodType: 'credit',
-  }))).body.data;
+  const personal = (
+    await createFinal(
+      finalBody({
+        customerSeq: individual,
+        paymentMethodType: 'credit',
+      }),
+    )
+  ).body.data;
   for (const order of [first, second, group, personal]) assert.equal(order.status, 'ACCEPTED');
 
   const ledger = (
@@ -969,13 +984,19 @@ test('company credit charges keep ledger scope, parcel order and filtered totals
     await request(`/companies/${company}/billing?month=${ledger.month}`, undefined, false, 'GET')
   ).body.data;
   const all = await readCharges({ q: '' });
-  assert.deepEqual(all.data.map((row) => row.orderSeq), [second.orderSeq, first.orderSeq]);
+  assert.deepEqual(
+    all.data.map((row) => row.orderSeq),
+    [second.orderSeq, first.orderSeq],
+  );
   assert.equal(all.total_count, 2);
   assert.equal(all.total_amount, summary.monthlyAmount);
   assert.equal(all.total_amount, 24000);
   assert.equal(all.hasNext, false);
   const page = await readCharges({ limit: '1' });
-  assert.deepEqual(page.data.map((row) => row.orderSeq), [second.orderSeq]);
+  assert.deepEqual(
+    page.data.map((row) => row.orderSeq),
+    [second.orderSeq],
+  );
   assert.equal(page.hasNext, true);
   assert.equal(page.total_count, 2);
   assert.equal(page.total_amount, all.total_amount);
@@ -992,9 +1013,10 @@ test('company credit charges keep ledger scope, parcel order and filtered totals
     departmentName: '청구 내역 발송팀',
     address: '발송로 12 3층',
   });
-  assert.deepEqual(line.parcels.map((parcel) => parcel.recipient.name), [
-    '결제 고객', '두번째 수령인', '결제 고객',
-  ]);
+  assert.deepEqual(
+    line.parcels.map((parcel) => parcel.recipient.name),
+    ['결제 고객', '두번째 수령인', '결제 고객'],
+  );
   assert.equal(line.parcels[0].items.other, null);
   assert.deepEqual(line.parcels[1], {
     cancelled: false,
@@ -1006,10 +1028,17 @@ test('company credit charges keep ledger scope, parcel order and filtered totals
   assert.equal(beyond.total_count, 2);
   assert.equal(beyond.total_amount, 24000);
   for (const q of [
-    '발송인', '두번째', String(first.orderSeq), 'dv-' + String(first.orderSeq).padStart(5, '0'),
+    '발송인',
+    '두번째',
+    String(first.orderSeq),
+    'dv-' + String(first.orderSeq).padStart(5, '0'),
   ]) {
     const filtered = await readCharges({ q });
-    assert.deepEqual(filtered.data.map((row) => row.orderSeq), [first.orderSeq], q);
+    assert.deepEqual(
+      filtered.data.map((row) => row.orderSeq),
+      [first.orderSeq],
+      q,
+    );
     assert.equal(filtered.total_count, 1, q);
     assert.equal(filtered.total_amount, 12000, q);
   }
@@ -1029,16 +1058,23 @@ test('company credit charges keep ledger scope, parcel order and filtered totals
     [company, customer],
   );
   assert.equal(
-    (await request(`/companies/${transferred}/members`, {
-      customerSeq: customer,
-      employeeNo: 'CHARGE-TRANSFER',
-      role: 'MEMBER',
-    })).status,
+    (
+      await request(`/companies/${transferred}/members`, {
+        customerSeq: customer,
+        employeeNo: 'CHARGE-TRANSFER',
+        role: 'MEMBER',
+      })
+    ).status,
     204,
   );
   assert.deepEqual((await readCharges()).data, all.data);
   const destination = (
-    await request(`/companies/${transferred}/billing/charges?month=${ledger.month}`, undefined, false, 'GET')
+    await request(
+      `/companies/${transferred}/billing/charges?month=${ledger.month}`,
+      undefined,
+      false,
+      'GET',
+    )
   ).body;
   assert.deepEqual(destination.data, []);
   assert.equal(destination.total_count, 0);
@@ -1050,18 +1086,31 @@ test('company credit charges keep ledger scope, parcel order and filtered totals
 });
 
 test('company charges require a session, a valid month and supported pagination filters', async () => {
-  const company = (await request('/companies', { name: '청구 요청 검증 기업' })).body.data.organizationSeq;
+  const company = (await request('/companies', { name: '청구 요청 검증 기업' })).body.data
+    .organizationSeq;
   const path = `/companies/${company}/billing/charges`;
   const month = '?month=2026-11';
   assert.equal((await fetch(base + path + month)).status, 401);
   assert.equal((await request(path + month, undefined, true, 'GET')).status, 401);
-  const missing = await request('/companies/2147483647/billing/charges' + month, undefined, false, 'GET');
+  const missing = await request(
+    '/companies/2147483647/billing/charges' + month,
+    undefined,
+    false,
+    'GET',
+  );
   assert.equal(missing.status, 404);
   assert.equal(missing.body.error.code, 'NOT_FOUND');
   assert.equal(missing.body.error.message, '기업을 찾을 수 없습니다.');
   for (const suffix of [
-    '', '?month=2026-13', '?month=0000-11', month + '&limit=0', month + '&limit=101',
-    month + '&offset=-1', month + '&unknown=1', month + '&q=%00', month + '&q=' + 'x'.repeat(201),
+    '',
+    '?month=2026-13',
+    '?month=0000-11',
+    month + '&limit=0',
+    month + '&limit=101',
+    month + '&offset=-1',
+    month + '&unknown=1',
+    month + '&q=%00',
+    month + '&q=' + 'x'.repeat(201),
   ]) {
     const invalid = await request(path + suffix, undefined, false, 'GET');
     assert.equal(invalid.status, 400, suffix);

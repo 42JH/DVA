@@ -23,7 +23,9 @@ export class OrganizationBillingService {
   async readCharges(id: number, query: BillingChargesQueryDto) {
     const result = await this.repository.readCharges(id, query);
     if (!result) throw new ApiException(404, 'NOT_FOUND', '기업을 찾을 수 없습니다.');
-    return Object.assign(new ListResponse(result, query.limit), { total_amount: result.total_amount });
+    return Object.assign(new ListResponse(result, query.limit), {
+      total_amount: result.total_amount,
+    });
   }
 
   private async ensureMonth(client: PoolClient, id: number, month: string, requestId: string) {
