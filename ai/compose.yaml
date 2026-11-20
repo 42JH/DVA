@@ -1,6 +1,6 @@
 # AI 서버 + RAG용 Qdrant(원본 ai/compose.yaml 기준). 저장소 루트에서 `docker compose up -d --build`.
 # 비밀값은 .env(커밋 금지, 항목은 .env.example)에서 읽는다.
-# ai 서비스는 새 서버 app/main.py(관제 /monitor 포함)를 띄운다(Dockerfile CMD).
+# ai 서비스는 새 서버 app/main.py를 띄운다(Dockerfile CMD).
 name: dva-ai-rebuild
 
 services:
@@ -24,8 +24,6 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY in .env}
       OPENAI_WEBHOOK_SECRET: ${OPENAI_WEBHOOK_SECRET:?Set OPENAI_WEBHOOK_SECRET in .env}
       PBX_WEBHOOK_SECRET: ${PBX_WEBHOOK_SECRET:?Set PBX_WEBHOOK_SECRET in .env}
-      MONITOR_USER: ${MONITOR_USER:?Set MONITOR_USER in .env}
-      MONITOR_PASSWORD: ${MONITOR_PASSWORD:?Set MONITOR_PASSWORD in .env}
       # Responses 위임 Backend 모델
       BACKEND_MODEL: ${BACKEND_MODEL:-gpt-6-luna}
       BACKEND_EFFORT: ${BACKEND_EFFORT:-low}

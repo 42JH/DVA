@@ -1,123 +1,144 @@
-# 재구성용 모듈
+# AI 전화 접수 서버
 
-디바콜 전화 접수 서버(`S15P31D109/ai`, 2026-11-03 `exp/no-speech-injection` 기준)에서 통화 흐름과 상관없는 기능만 떼어 낸 모듈 네 개다. 통화 흐름(단계, 진행 상태, 판별기, sideband, Live 세션 설정, 관제, 페르소나 관리)은 가져오지 않았다. 그 부분은 새로 만들 서버가 이 모듈들을 조합해 구현한다.
+전화로 들어온 택배 접수·조회·취소·문의를 음성으로 응대하는 서버다. PBX가 전화를 OpenAI SIP로 넘기면 이 서버가 통화를 받아 고객과 대화하고, 업무 처리는 백엔드(BE) API로 한다.
 
-BE 통신 규약은 `docs/be-contract/`에 있다(BE 원문 + AI 쪽 사용 문서). **BE 구조는 바꾸지 않는다.** 어긋나면 AI 모듈이 맞춘다.
-지켜야 할 통화 흐름(받는 순서, 확인 관문, 문구, 다이어그램)은 `docs/call-flow/`에 있다(README에 우선순위와 BE와 부딪히는 곳).
+- Python 3.14 / FastAPI, 의존성 관리는 `uv`
+- 음성 대화: OpenAI 실시간 음성 세션(SIP 수신)
+- 업무 판단·도구 호출: Responses API 위임(`BACKEND_MODEL`)
+- FAQ 검색(RAG): Qdrant + 외부 리랭커 서버
+- 주문·고객·주소록: 백엔드 API (`backend_client/`)
 
-```
-monitor/           관제 화면(/monitor, SSE)    (의존: 없음, docs/ops/monitor.md)
-pbx_webhook/       PBX·OpenAI 웹훅 수신        (의존: 없음)
-app/address/       주소 보정(주소DB)            (의존: 없음)
-backend_client/    BE 서버 API 클라이언트·가짜  (의존: app.address의 자모 비교)
-tools/             도구 5개·실행기            (의존: backend_client, app.integrations.address, app.rag.schemas)
-app/rag/ 등        RAG — 원본 그대로, 수정 금지 (아래 'RAG' 절)
-```
+처음 배포하는 경우 `HANDOVER.md`(같은 내용의 `HANDOVER.pdf`)를 먼저 읽는다. 백엔드·관리자 웹과 함께 서버에 올리는 전체 절차와 아키텍처 설명이 있다.
 
-## 사용법
+## 빠른 실행
 
-```
-uv sync
-uv run pytest -q        # 369개. 실제 OpenAI·PBX·백엔드·카카오·Qdrant를 부르지 않는다
-docker compose up -d --build   # Qdrant + AI 서버(현재 S0 스파이크 + 관제). docs/ops/docker.md
+```bash
+cp .env.example .env          # 값 채우기. 변수 설명은 파일 안에 있다
+docker compose up -d --build  # Qdrant + AI 서버
+curl http://127.0.0.1:8000/healthz
 ```
 
-## pbx_webhook: 전화 수신
+- 최소로 필요한 값: `OPENAI_API_KEY`, `OPENAI_WEBHOOK_SECRET`, `PBX_WEBHOOK_SECRET`, `BACKEND_API_URL`, `QDRANT_API_KEY`
+- 백엔드 없이 띄우려면 `BACKEND_MOCK=true`(메모리 가짜 백엔드, 재시작하면 사라짐)
+- 통화 상태가 프로세스 메모리에 있으므로 **워커는 1개**로 띄운다
+- 컨테이너 없이 실행: `uv sync` 후 `uv run --env-file .env python -m uvicorn app.main:app --port 8000 --workers 1`
 
-- `create_incoming_router(client, on_incoming)`: OpenAI SIP 수신 웹훅(`/api/webhooks/openai/call-incoming`)을 받는다.
-  - 서명을 검증하고, 같은 webhook-id는 무시하고, 바로 200을 돌려준다.
-  - `IncomingCall(session_id, caller, incoming_at, data)`를 백그라운드로 콜백에 넘긴다.
-  - accept·reject는 콜백이 직접 한다(`client.live.sessions.accept/reject`).
-- `create_call_ended_router(on_call_ended)`: PBX 통화 종료 웹훅(`/pbx/webhook/call-ended`)을 받는다.
-  - `PBX_WEBHOOK_SECRET` Bearer 토큰이 맞아야 하고, 본문을 `CallEnded`로 검증한다.
-  - 같은 번호로 다시 건 통화를 끊지 않게, 콜백은 `ended_at` 전에 시작한 통화만 끝내야 한다.
-- `hangup_quietly`: 세션이 이미 끝났으면(404) 오류로 보지 않는다.
-- 발신번호 처리: `caller_from_headers`, `normalize_caller`, `mask_phone`. 발신번호는 미신뢰 값이다.
-- 원본 `app/webhooks/openai.py`에 있던 통화 등록, 동시 통화 상한, 페르소나, 세션 설정, sideband 시작은 빠졌다.
+자세한 절차는 `docs/ops/docker.md`(로컬·compose), `docs/ops/deploy.md`(Jenkins 배포), `docs/ops/live-test.md`(실통화 시험)에 있다.
 
-## backend_client: BE 서버 통신
+## 폴더 구성
 
-- `api.BackendAPI`: 원본 `app/backend_api.py` 그대로다.
-  - 고객 확인, 주소 이력, 주소록 저장, 고객 등록, 기업 배송지 검색, 조회·취소, 통화 결과 접수(Idempotency-Key), 통화 기록·분석, 페르소나, FAQ 원문.
-- `order.py`: 임시 주문 `Order`, 배송지 `Place`, 기업 후보 `CompanyPlace`, 배송지 매칭 `match_places`, 후보 이름표 `pin_labels`.
-- `mock.MockBackend`: 메모리 가짜 백엔드. `BackendAPI`의 공개 메서드를 모두 갖는지 테스트가 검사한다.
-- 원본과 다른 점:
-  - **FAQ 조회**: 원본과 같은 `faq_entries(ids)`·`initial_faq_entries()`(원본 RAG가 부른다, 파싱은 `app.rag.faq_source`).
-  - **가짜 백엔드 지시문**: `MockBackend.use_voice_prompt()`는 `use_prompt(prompt)`로 바꿨다. 원본 설정 파일을 읽지 않는다.
-  - **위도·경도 제거**: BE 최신 계약(develop-backend a629c60, `address-coordinates-removal.md`)에 맞춰 주소 요청·응답에서 뺐다. 보내면 400이다. 가짜 백엔드도 좌표가 오면 400으로 거절한다.
-  - **고객 확인 2단계**: 전화 수신 직후에는 `caller_context(phone)`로 조회만 하고, 업무 의도를 확인한 뒤 `caller_context(phone, call)`로 통화를 등록한다(`meaningful-call-registration-handoff.md`). 이 순서는 새 서버가 지킨다. `call`의 `providerCallId`·`incomingAt`은 최초 수신 이벤트 값으로 고정한다.
+```
+app/
+  main.py            서버 조립(공유 클라이언트, 라우터, 백그라운드 작업)
+  calls/             통화 생명주기, 통화 중 흐름, 결과 전송, 페르소나 적용, 통화 후 검토
+  domain/            업무 상태와 규칙(접수 항목, 확인 관문, 운임, 수거 시각)
+  tools/             모델이 부르는 도구와 실행기
+  policy/            정책 파일 로더와 지시문 렌더링
+  integrations/      백엔드 게이트웨이, 카카오 주소 검색, 주소 보정 서비스
+  address/           행안부 주소DB 기반 주소 보정
+  rag/               FAQ 검색, FAQ 동기화, 리랭커 서버
+  webhooks/          백엔드 → AI 알림(FAQ 변경, 페르소나)
+  persistence/       결과 전송 아웃박스(SQLite)
+  observability/     통화 trace와 구간 측정
+backend_client/      백엔드 API 클라이언트와 메모리 가짜 백엔드
+pbx_webhook/         OpenAI 수신 웹훅, PBX 통화 종료 웹훅
+policy/              업무 규칙, 기본 페르소나, 정책 정의(workflow.toml)
+config/              서버 설정(server.toml), RAG 검색 설명
+prompts/             통화 후 검토 프롬프트
+manuals/             FAQ 원문
+persona_check/       페르소나 시험 창구(별도 컨테이너)
+call_analysis/       통화 불만 판정 기준 구현(별도 서비스, 백엔드 이식본의 기준)
+gpu/                 리랭커 서버 이미지
+deploy/              배포 스크립트와 compose 오버레이, GPU 서버 구축 스크립트
+scripts/             운영 점검 스크립트
+docs/, spec/         설계·계약·운영 문서
+```
 
-## app/address: 주소 보정
+## 외부에서 들어오는 요청
 
-- `gazetteer.open_db(path)`로 행안부 주소DB(SQLite, 읽기 전용)를 연다. 파일이 없으면 None → `AddressService(None)`은 보정 없이 들은 그대로(`off`).
-- `matcher.resolve(db, text)` → `Resolution(status, address, candidates)`: `confirmed`(확정)·`ambiguous`(애매함)·`not_found`(없음). 들은 그대로 못 찾았을 때만 `parse.readings`(말끝·붙인 길 번호·건물명·붙인 '다시'·"N가")의 표기로 적게 고친 것부터 다시 본다(묶음 8개·1초 상한).
-- 나눔: `numbers`(한글 숫자) · `phonetic`(소리 비교, `backend_client.place_score`도 씀) · `parse`(말 다듬기) · `matcher`(찾기·판정) · `gazetteer`(조회·빌드). 스레드마다 SQLite 연결 — 전역 락 없음.
-- `app/integrations/address.py` `AddressService`: 전용 스레드풀·예산 3초·카카오. `app/integrations/kakao.py` `geocode()`는 지번·동명·우편번호(`app.domain.state.Geo`), 키가 없거나 못 찾으면 None.
-- BE 모양 `Geo`(pydantic)는 `backend_client/order.py`에 있다.
-- 주소DB 만들기: `uv run python -X utf8 -m app.address.gazetteer <주소DB 텍스트 폴더> data/address.db`
-- 회귀 시험지: `uv run python -X utf8 -m scripts.evaluate_address` (`evaluation/datasets/address_v1.json`, 실제 주소DB 필요)
-- 테스트용 작은 주소DB는 `app/tests/address_sample_db.py`의 `build_sample_db`로 만든다.
-
-## tools: 도구와 RAG
-
-- 실행: `run_tool(ctx, name, arguments_json, call_id, allowed=None)` 한 곳에서 한다(원본 `app/dispatcher.py`).
-  - 인수를 strict 스키마로 검증하고, 허용 목록을 확인하고, 시간 제한을 건다.
-  - 오류는 모두 `{"ok": false, "error", "retry"}`로 돌려준다.
-- 함수 도구 정의: `tools.registry.TOOLS[name].spec()`
-- 컨텍스트 `ToolContext`: 원본 통화 객체(`Call`)에서 도구가 쓰던 값만 남겼다.
-  - 통화 값: 주문, 발신번호, 통화 번호, 받는 곳 후보, RAG 함수.
-  - 설정: 시간 제한, 후보 수 등.
-
-| 도구 | 하는 일 | 원본에서 뺀 것 (새 서버의 몫) |
+| 경로 | 보내는 쪽 | 인증 |
 |---|---|---|
-| `record_order` | 값을 기록한다. 전화번호와 수거 시각을 검증하고, 주소는 보정하고 좌표를 붙인다. 결과에 정정된 항목(`changed`), 확인할 번호(`phones_to_confirm`), 주소 결과(`addresses`)를 담는다. | 주소록에 비슷한 받는 곳이 있으면 먼저 확인하기, 정정·번호 확인 문구, 신규 고객 자동 등록 |
-| `match_pins` | 받는 곳을 찾는다. 개인 주소록(최근 N개 먼저)에서 찾고, 없으면 기업 배송지를 검색한다. 결과는 `status`(one, many, more, none, ask_place, ask_name)와 후보 이름표다. | 여러 턴에 들은 조건 합치기, 아니라고 한 후보 빼기, `restart` 인수 |
-| `lookup_orders` | 이 통화 고객의 최근 택배를 받는 분 성함으로 찾는다. | 흐름 사건 |
-| `cancel_order` | 서버만 부르는 취소. `customer_confirmed`와 작업 번호가 필요하고, 재시도 전에 이미 취소됐는지 조회로 확인한다. 결과는 `outcome`(done, already, locked, failed)이다. | 흐름 사건 |
-| `search_manual` | 매뉴얼을 검색한다. 결과는 근거와 `answerable`(임계값)이다. | 흐름 사건 |
+| `POST /api/webhooks/openai/call-incoming` | OpenAI(전화 수신) | 웹훅 서명(`OPENAI_WEBHOOK_SECRET`) |
+| `POST /pbx/webhook/call-ended` | PBX(통화 종료) | `Authorization: Bearer <PBX_WEBHOOK_SECRET>` |
+| `GET /internal/persona/options`, `POST /internal/persona/refresh` | 백엔드 | `Authorization: Bearer <AI_PERSONA_TOKEN>` |
+| `POST /internal/faqs/refresh` | 백엔드 | `AI_FAQ_TOKEN` |
+| `GET /healthz`, `GET /health` | 점검용 | 없음 |
 
-- 원본의 `answer`, `switch_task`, `get_state`는 흐름 엔진 전용이라 가져오지 않았다. `modify_order`는 원본에서 사용을 보류한 도구라 가져오지 않았다.
-- RAG는 아래 'RAG' 절.
-  - **FAQ 변경 알림 웹훅**: `faq_webhook.create_faq_router(cfg, get_store, get_processor)`
-  - **FAQ 소비자**: `FaqProcessor(events, BackendFaqSource(backend_api), index, ...)`
-  - **`faq_sync.db_path`**: 상대 경로다. 원래는 서버 루트 기준이었으므로 새 서버가 기준을 정한다.
+계약은 `docs/contracts/pbx-webhooks.md`와 `docs/be-contract/`에 있다.
 
-## 가져오지 않은 테스트
+## 통화 한 통의 흐름
 
-- 운영 스크립트·배포 파일을 시험하던 것: `test_faq_crud_validation`, `test_validation_embeddings`, `test_faq_deploy_runtime`, 그리고 점검 CLI 시험 2개.
-- 원본 `app/main.py`의 기동 연결을 시험하던 것: FAQ 앱 팩토리 3개.
-- 통화 객체·흐름 엔진에 묶인 도구 시험: 새 인터페이스로 다시 썼다(`tools/tests/test_tools.py`, `pbx_webhook/tests/test_webhooks.py`).
+1. OpenAI가 수신 웹훅을 보낸다. 서버는 서명을 검증하고 발신번호로 고객을 조회한 뒤 통화를 수락한다.
+2. 음성 모델이 고객과 대화한다. 지시문은 페르소나(백엔드에서 받음, 없으면 `policy/persona_default.md`)와 업무 규칙(`policy/business_rules.md`)을 이어 붙여 만든다.
+3. 고객이 값을 말하면 위임 모델이 도구를 호출하고, 서버가 인수를 검증한 뒤 실행한다.
+4. 접수·취소처럼 되돌릴 수 없는 일은 서버가 확인 관문을 거친 뒤에만 실행한다.
+5. 통화가 끝나면 결과·통화 기록·분석을 백엔드로 보낸다. 전송 전에 아웃박스에 저장해 재시작에도 같은 키로 다시 보낸다.
 
-## 환경변수
+설계는 `docs/architecture/overview.md`에서 시작한다.
 
-| 변수 | 쓰는 곳 |
+## 모델이 부르는 도구
+
+| 도구 | 하는 일 |
 |---|---|
-| `OPENAI_WEBHOOK_SECRET` | 웹훅 서명 검증. `AsyncOpenAI(webhook_secret=...)`에 넣는다 |
-| `PBX_WEBHOOK_SECRET` | PBX 종료 웹훅 |
-| `BACKEND_API_URL`, `AI_PERSONA_TOKEN`, `AI_INSIGHTS_TOKEN` | `BackendAPI`를 만들 때 |
-| `KAKAO_REST_API_KEY` | 주소 좌표 |
-| `QDRANT_URL`, `QDRANT_API_KEY`, `RAG_RERANKER_URL`, `RAG_RERANKER_API_KEY`, `AI_FAQ_TOKEN` | RAG와 FAQ 동기화 |
-| `CONFIG_DIR`, `PROMPTS_DIR` | RAG 설정(`config/`)·템플릿(`prompts/`) 위치 바꾸기(원본과 같음) |
+| `record_fields` | 고객이 말한 택배 값을 기록하거나 정정한다. 전화번호·수거 시각을 검증하고 주소를 보정한다 |
+| `find_destination` | 주소록, 이전 도착지, 기업 배송지에서 받는 곳을 찾는다 |
+| `lookup_orders` | 지금 전화한 번호의 주문과 이번 통화에서 담은 택배를 찾는다 |
+| `search_manual` | FAQ·이용 정책을 검색한다 |
+| `get_state` | 기록된 항목과 빠진 항목을 본다(변경 없음) |
 
-## RAG (원본 그대로, 수정 금지)
+접수 확정과 취소는 모델 도구가 아니라 서버가 확인 관문 뒤에 실행한다. 도구 계약은 `docs/contracts/tool-contracts.md`.
 
-RAG는 다른 담당자의 구현이다. 원본 `S15P31D109/ai`(`exp/no-speech-injection` 59d1def)에서 **경로·내용 그대로** 복사했고 이 저장소에서 고치지 않는다(`docs/architecture/decisions.md` RAG).
+## 설정 파일
 
-| 원본 그대로 | 내용 |
+| 파일 | 내용 |
 |---|---|
-| `app/rag/` | 하이브리드 검색(Kiwi BM25 + Qdrant), 리랭커 호출(`remote.py`), GPU 리랭커 서버(`gpu.py`·`qwen.py`), FAQ 동기화 큐·색인·소비자 |
-| `app/webhooks/faqs.py` | BE → AI FAQ 변경 알림 `POST /internal/faqs/refresh` |
-| `manuals/`, `config/rag-search-descriptions.json`, `config/faq-bm25-descriptions.json`, `prompts/rag_context.md` | 매뉴얼 원문·검색 설명·RAG 템플릿 |
-| `config/server.toml`의 `[rag]`·`[faq_sync]` | RAG 설정(원본 섹션 그대로) |
-| `gpu/` | 리랭커 서버 이미지(`docker build -f gpu/Dockerfile .`) |
-| `scripts/`(라이브 랩 전용 3개 제외), `evaluation/`, `spec/rag.md`, `spec/faq-sync.md`, `docs/rag-handoff.md` | 색인·진단·평가 스크립트와 문서 |
-| `tests/`(13개 파일) | 원본 RAG 테스트. 원본 서버 앱·통화 객체·라이브 랩이 필요한 4개(`test_faq_events`, `test_faq_processor`, `test_call_rag_integration`, `test_live_rag_eval`)는 제외 |
+| `.env` | 비밀값과 연결 주소. 항목은 `.env.example` |
+| `config/server.toml` | RAG, FAQ 동기화, 백엔드 호출, 운임, 통화, 통화 후 검토 설정 |
+| `policy/workflow.toml` | 접수 단계, 항목, 확인 질문, 입력 한도 |
+| `policy/business_rules.md`, `policy/backend_rules.md` | 음성 모델과 위임 모델에 주는 업무 규칙 |
+| `policy/persona_default.md` | 백엔드 페르소나를 못 받았을 때의 기본 말투 |
 
-원본 RAG가 import하는 원본 서버 공용 모듈은 **우리 쪽 호환판**으로 둔다(RAG 파일은 건드리지 않음):
+compose에서는 `config/`와 `prompts/`를 읽기 전용 볼륨으로 붙이므로, 이미지를 다시 빌드하지 않고 고칠 수 있다. `policy/`는 이미지에 들어간다.
 
-| 호환판 | 원본에서 RAG가 쓰는 것 |
+## 주소 보정
+
+- `data/address.db`(행안부 주소DB를 가공한 SQLite)가 있으면 들은 주소를 실제 주소로 보정한다. 없으면 보정 없이 들은 그대로 쓴다.
+- 만들기: `uv run python -X utf8 -m app.address.gazetteer <주소DB 텍스트 폴더> data/address.db`
+- `KAKAO_REST_API_KEY`가 있으면 지번·법정동·우편번호를 카카오 주소 검색으로 채운다.
+
+## FAQ 검색(RAG)
+
+- 벡터 DB는 compose의 `qdrant` 서비스다. 내부망으로만 열려 있고, 개발 PC에서 대시보드를 보려면 `compose.qdrant-dashboard.yaml`을 덧붙인다.
+- 리랭커는 별도 GPU 서버다(`gpu/`, 구축은 `deploy/gcp/README.md`). 주소와 키는 `RAG_RERANKER_URL`, `RAG_RERANKER_API_KEY`.
+- 백엔드의 FAQ 관리 화면에서 FAQ를 바꾸면 백엔드가 `/internal/faqs/refresh`로 알리고, 서버가 원문을 다시 받아 색인한다. `config/server.toml`의 `[faq_sync]`에서 켠다.
+- Qdrant나 리랭커가 죽어도 서버는 뜨고, 검색만 "자료 없음"으로 답한다.
+- 계약과 인계 문서: `spec/rag.md`, `spec/faq-sync.md`, `docs/rag-handoff.md`
+
+## 함께 배포되는 보조 서비스
+
+| 서비스 | 용도 | 실행 |
+|---|---|---|
+| `persona_check/` | 관리자가 페르소나를 적용하기 전에 시나리오 통화로 시험한다. 백엔드가 호출한다 | AI 서버 이미지 위에 얹은 별도 컨테이너. `persona_check/README.md` |
+| `call_analysis/` | 끝난 통화의 불만·응대 오류 판정. 실서비스 구현은 백엔드에 있고 이 폴더는 그 기준 구현이다 | `call_analysis/README.md` |
+
+## 운영 점검 스크립트
+
+| 스크립트 | 용도 |
 |---|---|
-| `app/config.py` | `ROOT`, `config_dir()`, `prompts_dir()`, `RagConfig`·`FaqSyncConfig`(원본 정의 그대로), `load_server_config().rag/.faq_sync/.backend.timeout_sec` |
-| `app/backend_api.py` | `BackendAPI`, `BackendError` → `backend_client.api` (FAQ 메서드 `faq_entries`·`initial_faq_entries`는 원본 그대로 옮김) |
-| `app/webhooks/pbx.py` | `token_ok` → `pbx_webhook.sip.token_ok` |
-| `app.state.svc` | `faqs.py`가 읽는 `cfg.faq_sync`·`faq_events`·`faq_processor` — 라우터를 붙이는 쪽이 만든다(`app/tests/test_rag_compat.py`) |
+| `scripts/bootstrap_faq.py` | 백엔드의 FAQ 전체를 처음 한 번 색인 대기열에 넣는다 |
+| `scripts/index_markdown.py` | `manuals/`의 원문을 새 Qdrant 컬렉션에 색인한다 |
+| `scripts/search_manual.py` | 운영과 같은 검색을 질문 하나로 점검한다 |
+| `scripts/check_remote_reranker.py` | 리랭커 서버 호출을 점검한다 |
+| `scripts/inspect_faq_json.py` | 저장해 둔 FAQ 원문을 오프라인으로 나눠 본다 |
+| `scripts/validate_faq_crud.py` | FAQ 변경 알림부터 색인까지를 검증용 컬렉션으로 점검한다 |
+
+## 테스트
+
+이 저장소에는 자동 테스트를 넣지 않았다(`call_analysis/tests/test_call_analysis.py`만 백엔드 스크립트가 쓰는 기준 테스트로 남겼다). 필요하면 pytest로 작성한다. `pyproject.toml`의 dev 의존성에 `pytest`와 `httpx`가 있고, `backend_client/mock.py`의 메모리 가짜 백엔드를 그대로 쓸 수 있다.
+
+Jenkins는 이미지 빌드 뒤 배포 스크립트 문법과 `import app.main`만 확인한다.
+
+## 개인정보
+
+- 통화 기록(`logs/calls/<trace_id>.json`)에는 전사와 업무 값이 그대로 들어간다. `.gitignore` 대상이며 커밋하지 않는다.
+- 아웃박스(`state/`)와 FAQ 대기열(`rag_state/`)도 런타임 데이터다.
