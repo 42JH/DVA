@@ -48,6 +48,7 @@ import {
 import { OrderIdParamsDto, OrderQueryDto } from './dto/order-query.dto';
 import { OrdersService } from './orders.service';
 import { OrderReadService } from './order-read.service';
+import { OrderCancellationService } from './order-cancellation.service';
 import { UpdateOrderDto, UpdatedOrderDto } from './dto/update-order.dto';
 import { SubmitOrderDto, SubmittedOrderDto } from './dto/submit-order.dto';
 import { CancelOrderParcelsDto } from './dto/cancel-order-parcels.dto';
@@ -87,6 +88,7 @@ export class OrdersController {
   constructor(
     private readonly orders: OrdersService,
     private readonly reads: OrderReadService,
+    private readonly cancellations: OrderCancellationService,
   ) {}
 
   @Delete()
@@ -459,7 +461,7 @@ export class OrdersController {
     @Param() params: OrderIdParamsDto,
     @Headers('call_session_seq') callSessionSeq?: string,
   ) {
-    return this.orders.cancel(
+    return this.cancellations.cancel(
       request.admin?.adminUserSeq ?? null,
       params.id,
       request.requestId,
@@ -504,7 +506,7 @@ export class OrdersController {
     @Body() input: CancelOrderParcelsDto,
     @Headers('call_session_seq') callSessionSeq?: string,
   ) {
-    return this.orders.cancel(
+    return this.cancellations.cancel(
       request.admin?.adminUserSeq ?? null,
       params.id,
       request.requestId,
