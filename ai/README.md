@@ -8,6 +8,8 @@
 - FAQ 검색(RAG): Qdrant + 외부 리랭커 서버
 - 주문·고객·주소록: 백엔드 API (`backend_client/`)
 
+처음 배포하는 경우 `HANDOVER.md`(같은 내용의 `HANDOVER.pdf`)를 먼저 읽는다. 백엔드·관리자 웹과 함께 서버에 올리는 전체 절차와 아키텍처 설명이 있다.
+
 ## 빠른 실행
 
 ```bash
