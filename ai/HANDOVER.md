@@ -4,7 +4,7 @@
 
 - 이 문서는 AI 파트(`ai/` 폴더)만 다룹니다. 백엔드, 관리자 웹, 프록시와 인증서 설정은 각 파트의 문서를 참고하시기 바랍니다.
 - 다른 파트에 대해서는 AI 서버가 연결되기 위해 필요한 조건(주소, 토큰, 전달 경로)만 적었습니다.
-- 본문은 `docker compose`를 직접 실행하는 수동 절차입니다. Jenkins 자동 배포는 11장에 따로 적었습니다.
+- 본문은 `docker compose`를 직접 실행하는 수동 절차입니다.
 - `<...>` 모양의 값은 직접 채우셔야 하는 자리입니다.
 
 ## 1. 프로젝트 구조
@@ -53,7 +53,7 @@ AI 파트가 띄우는 것은 다음과 같습니다.
 | AI 서버 | 전화를 받아 음성으로 응대하고 백엔드 API로 업무를 처리합니다 | compose 프로젝트 `dva-ai` | `127.0.0.1:8000` |
 | Qdrant | FAQ 검색용 벡터 DB | `dva-ai` 안의 서비스 | 호스트에 열지 않음 |
 | 시험 창구(선택) | 페르소나 적용 전 시나리오 통화 시험 | compose 프로젝트 `dva-persona-check` | 호스트에 열지 않음 |
-| 리랭커(선택) | FAQ 검색 결과 재순위 | 별도 GPU 서버 | HTTPS |
+| 리랭커 | FAQ 검색 결과 재순위. FAQ 검색에 필요합니다(10장) | 별도 GPU 서버 | HTTPS |
 
 AI 서버가 연결되는 외부 시스템은 다음과 같습니다. 이들의 설치와 설정은 이 문서의 범위가 아닙니다.
 
@@ -137,7 +137,7 @@ sequenceDiagram
 | `AI_PERSONA_TOKEN` | 선택 | 페르소나 연동. 없으면 서버 기본 말투로 응대합니다 |
 | `AI_FAQ_TOKEN` | FAQ 동기화 시 필수 | 백엔드의 FAQ 변경 알림 인증 |
 | `KAKAO_REST_API_KEY` | 선택 | 지번·우편번호 조회 |
-| `RAG_RERANKER_URL`, `RAG_RERANKER_API_KEY` | 선택 | 리랭커 서버 |
+| `RAG_RERANKER_URL`, `RAG_RERANKER_API_KEY` | FAQ 검색 시 필수 | 리랭커 서버 주소와 키(10장) |
 | `AI_PORT`, `ADDRESS_DATA_DIR`, `LOG_LEVEL` | 선택 | 호스트 포트(기본 8000), 주소DB 폴더(기본 `./data`), 로그 수준 |
 
 ### 3.2 양쪽에 같은 값을 넣는 토큰
@@ -190,6 +190,7 @@ vi .env                       # 아래 값을 채웁니다(전체 목록은 3.1�
 #   BACKEND_API_URL=http://backend:3000
 #   QDRANT_API_KEY=<새로 만든 무작위 값>
 #   AI_BUSINESS_TOKEN, AI_INSIGHTS_TOKEN, AI_PERSONA_TOKEN=<백엔드와 같은 값>
+#   RAG_RERANKER_URL, RAG_RERANKER_API_KEY=<리랭커 서버 주소와 키>   # FAQ 검색에 필요합니다(10장)
 
 # ── 4. 이미지 빌드 ────────────────────────────────────────────
 docker build --platform linux/amd64 --tag dva-ai-server:1 .
@@ -303,7 +304,7 @@ flowchart TB
 
 | 서비스 | 용도 |
 |---|---|
-| 시험 창구(`persona_check/`) | 관리자가 페르소나를 적용하기 전에 가짜 고객과의 시나리오 통화로 시험합니다. 백엔드가 호출합니다 |
+| 시험 창구(`persona_check/`) | 관리자가 페르소나를 적용하기 전에 가짜 고객과의 시나리오 통화로 시험합니다. 백엔드가 호출합니다. 띄우는 방법은 `ai/persona_check/README.md`에 있습니다 |
 | 통화 불만 판정(`call_analysis/`) | 끝난 통화의 불만·응대 오류를 판정합니다. 실서비스 구현은 백엔드 안에 있고, 이 폴더는 그 기준 구현입니다. 따로 띄우실 필요는 없습니다 |
 
 더 자세한 설계는 `ai/docs/architecture/overview.md`에서 시작하시면 됩니다.
@@ -323,7 +324,7 @@ flowchart TB
 | OpenAI | 음성 세션, 위임, 임베딩 | API 키, 프로젝트 ID, 웹훅 비밀값. 프로젝트에서 실시간 음성 SIP가 켜져 있어야 합니다 |
 | PBX(SIP 사업자) | 전화 수신, 통화 종료 웹훅 | SIP 트렁크 설정 권한, 웹훅에 넣을 공유 토큰 |
 | 카카오 로컬 API | 지번·우편번호 조회 | REST API 키(선택) |
-| GPU 서버 | 리랭커(선택) | 11.3절을 참고하시기 바랍니다 |
+| GPU 서버 | 리랭커 | 10장을 참고하시기 바랍니다 |
 
 백엔드 담당자와는 연동 토큰 값(3.2절)을 맞춰 두셔야 합니다.
 
@@ -551,47 +552,103 @@ docker logs -f dva-ai-ai-1     # 통화마다 trace_id가 붙습니다
 
 통화 한 통을 자세히 보시려면 `dva-ai_ai_logs` 볼륨의 `calls/<trace_id>.json`을 엽니다. 단계, 도구 호출 결과, 전사가 들어 있습니다.
 
-## 10. 알려진 한계와 주의
+## 10. 리랭커 서버 배포
 
-- **자동 테스트가 없습니다.** 코드를 고친 뒤 회귀를 확인할 수단은 직접 통화해 보는 것뿐입니다. 13장을 참고해 필요한 테스트를 작성하시기를 권합니다.
-- **AI 서버는 워커 1개, 인스턴스 1개로만 동작합니다.** 여러 대로 늘리려면 통화를 소유한 인스턴스로 요청을 보내는 구조가 따로 필요합니다.
-- **서버 주소는 플레이스홀더입니다.** `ai/Jenkinsfile`, `ai/deploy/known_hosts`, `ai/deploy/gcp/`, 계약 문서의 서버 주소를 `<...>`로 바꿔 두었습니다. Jenkins 배포나 리랭커 서버 스크립트를 쓰시려면 실제 값으로 채워야 합니다.
-- **이 문서의 절차 중 실제로 실행해 확인한 범위**는 AI 서버 이미지 빌드, 컨테이너 기동과 `/healthz` 응답, compose 파일 문법, 주소DB 전체분 변환과 컨테이너에서의 주소 조회입니다. 실제 백엔드·OpenAI·PBX와 연결한 통화는 이번 인계 작업에서 다시 확인하지 않았습니다.
+리랭커는 FAQ 검색 후보를 질문과의 관련도로 다시 순위 매기는 서버입니다. AI 서버와 다른, GPU가 있는 서버에 따로 띄웁니다.
 
-## 11. 선택 항목
+- **FAQ 검색을 쓰려면 반드시 필요합니다.** AI 서버는 `RAG_RERANKER_URL`과 `RAG_RERANKER_API_KEY`가 없으면 FAQ 검색을 켜지 않습니다. 이때도 접수·조회·취소 통화는 정상적으로 받고, FAQ 질문에만 자료가 없다고 답합니다.
+- 모델은 `Qwen/Qwen3-Reranker-0.6B`이며 버전(revision)이 코드에 고정돼 있습니다. AI 서버는 응답의 모델과 버전이 다르면 결과를 쓰지 않습니다.
+- 코드는 `ai/app/rag/gpu.py`와 `ai/app/rag/qwen.py`, 이미지는 `ai/gpu/Dockerfile`입니다. AI 서버 이미지에는 들어가지 않습니다.
 
-### 11.1 시험 창구
+### 10.1 제공하는 API
 
-관리자가 페르소나를 적용하기 전에 시험하는 기능을 쓰시려면 띄웁니다. AI 서버 이미지 위에 얹은 별도 이미지입니다.
+| 경로 | 용도 | 인증 |
+|---|---|---|
+| `GET /health` | 상태 확인. 준비되면 `status`가 `ok`이고 모델 이름과 버전을 함께 돌려줍니다 | 없음 |
+| `POST /rerank` | 질문 1개와 후보 최대 5개를 받아 점수를 돌려줍니다 | `Authorization: Bearer <RAG_RERANKER_API_KEY>` |
+| `POST /validate-documents` | FAQ를 색인하기 전에 문서 길이가 모델 한도 안인지 확인합니다 | 위와 같음 |
+
+### 10.2 배포 명령
+
+GPU 서버에는 NVIDIA 드라이버, Docker, NVIDIA Container Toolkit이 설치돼 있어야 합니다.
 
 ```bash
-cd ai
-docker build --build-arg AI_IMAGE=dva-ai-server:1 \
-  --file persona_check/Dockerfile --tag dva-persona-check:1 .
+# ── 1. 저장소 받기 ────────────────────────────────────────────
+git clone <저장소 주소> dva
+cd dva/ai
 
-cat > persona-check.env <<'EOF'
-PERSONA_CHECK_TOKEN=<64자리 hex. 백엔드와 같은 값>
-PERSONA_CHECK_OPENAI_API_KEY=<시험 전용 OpenAI 키>
-EOF
+# ── 2. 이미지 빌드 ────────────────────────────────────────────
+docker build -f gpu/Dockerfile -t dvr-reranker:local .
 
-PERSONA_CHECK_IMAGE=dva-persona-check:1 docker compose --project-name dva-persona-check \
-  --project-directory . --env-file .env --env-file persona-check.env \
-  -f deploy/compose.persona-check.yaml up -d
+# ── 3. 모델 내려받기(한 번만) ─────────────────────────────────
+# 컨테이너는 실행 중에 인터넷에서 모델을 받지 않습니다. 고정된 버전을 미리 받아 둡니다.
+sudo mkdir -p /opt/dvr-reranker/models
+sudo chown 10001:10001 /opt/dvr-reranker/models
+docker run --rm --user 10001:10001 --env HF_HUB_OFFLINE=0 \
+  --volume /opt/dvr-reranker/models:/models \
+  --entrypoint python dvr-reranker:local -c \
+  "from huggingface_hub import snapshot_download; snapshot_download('Qwen/Qwen3-Reranker-0.6B',revision='e61197ed45024b0ed8a2d74b80b4d909f1255473',cache_dir='/models')"
+
+# ── 4. API 키 만들기 ──────────────────────────────────────────
+# 이 값을 AI 서버의 RAG_RERANKER_API_KEY 에도 그대로 넣습니다.
+sudo mkdir -p /etc/dvr-reranker
+printf 'RAG_RERANKER_API_KEY=%s\n' "$(openssl rand -hex 32)" | sudo tee /etc/dvr-reranker/runtime.conf >/dev/null
+sudo chmod 600 /etc/dvr-reranker/runtime.conf
+
+# ── 5. 띄우기 ─────────────────────────────────────────────────
+# 서버의 127.0.0.1:8001 에만 엽니다. 외부 공개는 6단계의 HTTPS 프록시가 맡습니다.
+docker run -d --name dvr-reranker --restart unless-stopped \
+  --gpus all --init --shm-size=1g \
+  --publish 127.0.0.1:8001:8001 \
+  --env-file /etc/dvr-reranker/runtime.conf \
+  --volume /opt/dvr-reranker/models:/models:ro \
+  dvr-reranker:local
+
+# ── 6. 확인 ───────────────────────────────────────────────────
+# 모델을 올리는 1~2분 동안은 연결이 거부될 수 있습니다. 준비되면 "status":"ok" 가 나옵니다.
+curl http://127.0.0.1:8001/health
+
+# ── 7. HTTPS 로 공개 ──────────────────────────────────────────
+# AI 서버는 다른 서버의 리랭커를 HTTPS 로만 호출합니다.
+# 도메인을 연결하고 리버스 프록시(Caddy, Nginx 등)로 443 → 127.0.0.1:8001 을 전달합니다.
+
+# ── 8. AI 서버에 연결 ─────────────────────────────────────────
+# AI 서버의 .env 에 아래 두 값을 넣고 AI 서버를 다시 띄웁니다.
+#   RAG_RERANKER_URL=https://<리랭커 도메인>
+#   RAG_RERANKER_API_KEY=<4단계에서 만든 값>
 ```
 
-백엔드는 내부망에서 `http://persona-check:8765`로 시험 창구를 호출하며, 같은 `PERSONA_CHECK_TOKEN` 값을 써야 합니다. 시험 통화에는 실제 OpenAI 요금이 발생합니다. 자세한 내용은 `ai/persona_check/README.md`에 있습니다.
+- 위 명령은 저장소의 설치 스크립트(`ai/deploy/gcp/install.sh`)와 서비스 정의(`dvr-reranker.service`)의 내용을 Docker 명령으로 옮긴 것입니다. 이번 인계 작업에서는 GPU 서버가 없어 실행해 보지 못했습니다.
+- AI 서버와 같은 서버에서 띄우실 때는 HTTPS 없이 `RAG_RERANKER_URL=http://127.0.0.1:8001`처럼 로컬 주소를 쓸 수 있습니다. 컨테이너끼리 연결하실 때는 호스트 이름이 `reranker`여야 HTTP가 허용됩니다.
 
-### 11.2 Jenkins 자동 배포
+### 10.3 연결 확인
 
-- AI 서버는 `ai/Jenkinsfile`로 배포합니다. 이미지 빌드 → 배포 스크립트 문법과 `import app.main` 확인 → `ai/deploy/upload.sh`가 소스를 대상 서버로 보내 빌드하고 `deploy.sh`가 띄우는 순서입니다. 실패하면 직전 릴리스로 되돌립니다.
-- 사용하시려면 Jenkins 전역 환경변수 `AI_DEPLOY_HOST`에 서버 주소를 넣고, `ai/deploy/known_hosts`에 그 서버의 호스트 키를 적습니다. 운영 `.env`는 Jenkins Secret file 자격증명 `dva-ai`로 등록합니다.
-- 자세한 내용은 `ai/docs/ops/deploy.md`에 있습니다.
+AI 서버를 다시 띄운 뒤 로그에서 검색 준비 상태를 확인합니다.
 
-### 11.3 리랭커 서버
+```bash
+docker logs dva-ai-ai-1 | grep -i rag
+```
 
-FAQ 검색 품질을 높이는 재순위 서버입니다. 없어도 서비스는 동작합니다. GPU가 있는 서버에 `ai/gpu/Dockerfile`로 이미지를 빌드해 띄우고, 주소와 키를 AI 서버의 `RAG_RERANKER_URL`, `RAG_RERANKER_API_KEY`에 넣습니다. GCP에 구축하는 스크립트와 절차는 `ai/deploy/gcp/README.md`에 있습니다.
+"RAG 준비 미완료"라는 경고가 계속 보이면 리랭커 주소와 키, Qdrant 색인 상태를 확인해 주시기 바랍니다. 실제 검색은 통화 중 FAQ 질문으로 확인합니다.
 
-## 12. 문서 지도
+### 10.4 GCP에 구축하는 스크립트
+
+기존 리랭커 서버는 GCP의 GPU VM에 구축했습니다. 그때 쓴 스크립트와 절차가 `ai/deploy/gcp/`에 있습니다.
+
+| 파일 | 하는 일 |
+|---|---|
+| `provision.ps1` | 전용 네트워크, 고정 IP, GPU VM 생성 |
+| `bootstrap.sh` | GPU 드라이버, Docker, NVIDIA Container Toolkit 설치와 API 키 생성 |
+| `bundle.py` | 리랭커에 필요한 소스만 묶음 |
+| `install.sh` | 이미지 빌드, 모델 내려받기, systemd 서비스 등록 |
+| `proxy.sh` | Caddy로 HTTPS 공개 |
+| `control.ps1`, `remote.ps1`, `with-gpu.ps1` | VM 시작·중지와 원격 실행 |
+
+- 스크립트 안의 프로젝트 이름과 주소는 `<GCP_PROJECT>`, `<RERANKER_IP>`로 바꿔 두었습니다. 사용하시려면 실제 값으로 채워야 합니다.
+- 이 구성은 비용을 줄이기 위해 VM을 켤 때마다 30분 뒤 자동으로 중지되도록 설정돼 있습니다. 상시 운영하시려면 이 설정을 빼야 합니다.
+- 자세한 절차는 `ai/deploy/gcp/README.md`에 있습니다.
+
+## 11. 문서 지도
 
 | 알고 싶은 것 | 문서 |
 |---|---|
@@ -606,19 +663,19 @@ FAQ 검색 품질을 높이는 재순위 서버입니다. 없어도 서비스는
 | 업무 규칙과 통화 시나리오 | `ai/policy/`, `ai/docs/call-flow/` |
 | FAQ 검색과 동기화 | `ai/spec/rag.md`, `ai/spec/faq-sync.md`, `ai/docs/rag-handoff.md` |
 
-## 13. 테스트를 새로 작성하실 때
+## 12. 테스트를 새로 작성하실 때
 
 - `ai/pyproject.toml`의 dev 의존성에 `pytest`와 `httpx`가 있습니다. `uv sync` 후 `uv run pytest`로 실행합니다.
 - `backend_client/mock.py`의 메모리 가짜 백엔드를 쓰면 실제 백엔드 없이 통화 흐름을 시험하실 수 있습니다. 서버에서 `BACKEND_MOCK=true`로 쓰는 것과 같은 구현입니다.
 - 순수 로직인 `app/domain/`, `app/policy/`, `app/address/`부터 작성하시면 외부 의존 없이 시작할 수 있습니다.
 - 테스트를 추가하시면 `ai/Jenkinsfile`의 `Check` 단계에 `pytest` 실행을 넣어 주시기 바랍니다.
-## 14. 인계 전 정리한 것
+## 13. 인계 전 정리한 것
 
 깔끔한 인계를 위해 개발 과정에서 쌓인 산출물을 `ai/` 폴더에서 정리했습니다. 운영에 쓰이는 코드와 계약 문서는 그대로입니다.
 
 | 정리한 것 | 내용 |
 |---|---|
-| 테스트 파일 | 단위·계약 테스트와 픽스처 전부입니다. 필요하시면 pytest로 새로 작성하실 수 있습니다(13장) |
+| 테스트 파일 | 단위·계약 테스트와 픽스처 전부입니다. 필요하시면 pytest로 새로 작성하실 수 있습니다(12장) |
 | 작업 내역 문서 | 작업 기록(worklog), 실험 결과 기록 |
 | 아키텍처 설계 계획안 | 구현이 끝난 계획·감사·조사 문서, 재구성 전 분석 문서, 옛 흐름 엔진 문서 |
 | 이전 버전 코드 | 재작성 전 서버 폴더 |
