@@ -1799,7 +1799,7 @@ def test_tool_call_on_answer_to_candidates_waits_for_pick(with_tool):
 
     # 가짜 Decision이 늦게(0.3초) 답하는 시나리오다. 느린 CI에서 실제 판단 예산(1초)을 넘겨 판단이 버려지지 않게 넉넉히 둔다
     svc, client = flow(decision_budget_sec=3.0)
-    label = "현수민 서구 서대신동3가"
+    label = "정유빈 서구 서대신동3가"
 
     async def slow_pick(model, input, questions):
         await asyncio.sleep(0.3)  # Backend 도구 호출이 먼저 도착한다
@@ -1818,9 +1818,9 @@ def test_tool_call_on_answer_to_candidates_waits_for_pick(with_tool):
             s.state.intent = "order"
             s.state.record("sender_address", "서울특별시 강남구 테헤란로 211")
             s.state.record("sender_address_detail", "")
-            s.state.record("receiver_name", "현수민")
+            s.state.record("receiver_name", "정유빈")
             s.state.record("sender_name", "김철수")
-            pin = Place("현수민", "01055556666", "부산광역시 서구 대신공원로 1", "201호",
+            pin = Place("정유빈", "01055556666", "부산광역시 서구 대신공원로 1", "201호",
                         Geo("x", "서대신동3가", "00000"), Source.PIN)
             offer(s.state, "destination", (label,), (pin,))
         await ai(conn, f"{label}로 보내시나요?", 0)
@@ -1849,7 +1849,7 @@ def test_tool_call_on_answer_to_candidates_waits_for_pick(with_tool):
     selection = next(e["content"] for e in conn.sent
                      if e["type"] == "session.thinking.append" and '"destination_selected"' in e["content"])
     facts = json.loads(selection.removeprefix("[서버 결과] "))
-    assert facts["destination_selected"] == {"receiver_name": "현수민", "receiver_area": "서대신동3가"}
+    assert facts["destination_selected"] == {"receiver_name": "정유빈", "receiver_area": "서대신동3가"}
     assert "picked" not in facts
     if with_tool:
         out = json.loads(next(e for e in conn.sent if e["type"] == "response.item.create")["item"]["output"])

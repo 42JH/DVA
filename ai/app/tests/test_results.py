@@ -288,7 +288,7 @@ def test_order_intent_without_parcel_info_is_no_order_not_empty_collecting(tmp_p
     (이전: paymentMethodType=billing이 들어가 BE가 빈 COLLECTING 주문 orderSeq 59를 만듦)"""
     from app.domain.state import Source
     rs, db = service(tmp_path)
-    st = ConversationState(customer=Customer(customer_seq=db.add_customer(CALLER, "현승준"), name="현승준",
+    st = ConversationState(customer=Customer(customer_seq=db.add_customer(CALLER, "정하준"), name="정하준",
                                              caller_phone=CALLER, payment_methods=("billing",)), intent="order")
     st.record("sender_phone", CALLER, Source.CALLER_ID)  # 발신번호만 자동으로 채워진 받던 택배
     before = len(db.orders) if hasattr(db, "orders") else None

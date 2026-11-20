@@ -14,10 +14,9 @@
 
 ## 실행
 ```bash
-# .env에 최소: OPENAI_API_KEY, OPENAI_WEBHOOK_SECRET, BACKEND_API_URL, PBX_WEBHOOK_SECRET, MONITOR_USER, MONITOR_PASSWORD, QDRANT_API_KEY
+# .env에 최소: OPENAI_API_KEY, OPENAI_WEBHOOK_SECRET, BACKEND_API_URL, PBX_WEBHOOK_SECRET, QDRANT_API_KEY
 docker compose up -d --build
 curl http://127.0.0.1:8000/healthz
-# 관제: http://127.0.0.1:8000/monitor (MONITOR_USER/MONITOR_PASSWORD)
 ```
 
 ### Qdrant 대시보드·매뉴얼 색인(개발 PC, 원본 스크립트)
@@ -32,7 +31,7 @@ uv run python -m scripts.bootstrap_faq [--enqueue]        # 관리 FAQ 최초 �
 - 관리 FAQ 처리기(`app/rag/faq_processor.py`)와 웹훅(`app/webhooks/faqs.py`)을 띄우는 조립 코드는 아직 없다(새 서버 S1 범위, `app/tests/test_rag_compat.py`가 웹훅 연결 방식을 보여 줌).
 
 ## 확인한 것 (2026-11-03)
-- `docker build` 성공, compose 기동 시 `ai` healthy, `/healthz` 200, `/monitor` 무인증 401·인증 200.
+- `docker build` 성공, compose 기동 시 `ai` healthy, `/healthz` 200.
 - 컨테이너 안에서 원본 RAG 로드(`app.rag.service.RagService`, `app.webhooks.faqs`, `load_server_config`), `http://qdrant:6333` 접속·API 키 인증 성공, 틀린 키 거부, 호스트에 6333 미노출(오버레이 없이), 이미지에서 `app/rag/gpu.py` 제외.
 - `scripts.index_markdown --dry-run` 성공(32개 FAQ, 3072차원).
 - `gpu/` 이미지는 빌드하지 않았다(CUDA 베이스 이미지, GPU 머신용).

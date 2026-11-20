@@ -167,7 +167,7 @@ class CallSession:
         self.changed()
 
     def snapshot(self) -> dict:
-        """관제 화면(monitor) 모양. 관제는 인증 뒤에서만 보이므로(docs/ops/monitor.md) 업무 값·전사를 그대로 보여 준다."""
+        """통화 기록(logs/calls)에 남기는 통화 상태. 업무 값·전사가 그대로 들어간다(개인정보)."""
         s, policy = self.state, self.tools.policy
         a = assess(s, policy)
         label = lambda n: policy.fields[n].label if n in policy.fields else n  # noqa: E731

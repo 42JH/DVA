@@ -2,7 +2,7 @@
 
 Live 지시문 = [페르소나: BE promptText, 없으면 policy/persona_default.md] + [위임 정책] + [업무 규칙: policy/business_rules.md
 + 정책 렌더링(절차·금지·서버 결과 읽는 법)] + [통화 정보]. 업무 규칙이 페르소나보다 우선(business_rules.md 첫머리).
-Backend 지시문 = policy/backend_rules.md. 문장은 파일에 두고 코드는 이어 붙이기만 한다(docs/architecture/prompt-layout-plan.md).
+Backend 지시문 = policy/backend_rules.md. 문장은 파일에 두고 코드는 이어 붙이기만 한다.
 """
 
 from app.config import ROOT

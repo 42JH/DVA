@@ -84,7 +84,6 @@ SAVED = ROOT / "logs" / "persona_check"
 TTS_DIR = SAVED / "tts"              # 문장별 고객 음성. 한 번 만들어 계속 쓴다 → 통화마다 같은 소리
 CONFIG_ID = "persona-check-config"   # 세션 설정만 가로채는 가짜 통화의 이름
 FAQ_SNAPSHOT = "faq-events.sqlite3"  # 시험 묶음 폴더에 두는 운영 FAQ 저장 파일의 복사본(묶음이 끝나면 지운다)
-LIVE: list = []                      # 지금 통화 중인 CallService(개발용 관제 목록)
 
 
 def seed(mock: MockBackend, scenario: dict) -> None:
@@ -317,22 +316,6 @@ def build(client, mock: MockBackend, workdir: Path, faq: Path | None = None):
     return calls, address
 
 
-def all_calls() -> list[dict]:
-    """개발용 관제 목록 = 지난 시험 통화(call.json의 스냅샷) + 진행 중 통화."""
-    found: dict[str, dict] = {}
-    for path in sorted(SAVED.rglob("call.json")):
-        try:
-            snap = json.loads(path.read_text("utf-8"))["snapshot"]
-            found[snap["session_id"]] = snap
-        except (OSError, ValueError, KeyError, TypeError):
-            continue
-    for calls in LIVE:
-        for snap in calls.registry.snapshots():
-            if snap["session_id"] != CONFIG_ID:
-                found[snap["session_id"]] = snap
-    return list(found.values())
-
-
 def save_wav(path: Path, mic: CustomerTrack, ai: list) -> None:
     """통화 녹음: 고객과 AI를 한 소리로 섞은 모노(24kHz). ai = [(받은 시각, 소리)] — 받은 시각 자리에 놓는다.
     좌우로 나눠 저장했더니 한쪽 귀에서만 들려 헷갈렸다(11/11 사용자)."""
@@ -413,7 +396,7 @@ async def voice_of(client, text: str, meant: str = "") -> bytes:
     return path.read_bytes()
 
 
-async def run_call(scenario_id: str = "A1", persona: dict | None = None, bus=None, out_dir: Path | None = None) -> dict:
+async def run_call(scenario_id: str = "A1", persona: dict | None = None, out_dir: Path | None = None) -> dict:
     """시험 통화 한 통을 걸고 판정(judge.judge의 결과 + liveSeconds)을 돌려준다. 통화가 연결되지 않았으면 예외.
     persona = {"promptText": 후보 페르소나 글, "voiceId": 목소리} — 없으면 서버 기본 페르소나. 목소리는 글과 함께 줄 때만 쓰인다."""
     if RTCPeerConnection is None:
@@ -461,9 +444,6 @@ async def run_call(scenario_id: str = "A1", persona: dict | None = None, bus=Non
     config, _ = await asyncio.gather(capture(calls, captured, caller, now),
                                      asyncio.gather(*(voice_of(real, say, text) for say, text in {*zip(says, script),
                                      *((customer.spoken(v), v) for v in customer.SHORT.values())} if say != SILENT)))  # 대본 · 짧은 답 음성 준비
-    if bus is not None:  # 개발용 관제 화면에 이 통화를 실시간으로
-        calls.on_change = lambda s: bus.publish({"type": "call", "call": s.snapshot()})
-        LIVE.append(calls)
 
     # --- WebRTC로 세션을 만들고 운영 로직을 붙인다 ---
     state = {"ai_text": "", "ai_voice_at": 0.0, "ai_text_at": 0.0, "closed": False, "live_seconds": None}
@@ -683,8 +663,6 @@ async def run_call(scenario_id: str = "A1", persona: dict | None = None, bus=Non
         if calls.d.rag.faq_index is not None and calls.d.rag.reranker is not None:
             calls.d.rag.reranker.close()  # 관리 색인 경로에서는 RagService.close가 리랭커를 닫지 않는다
     shutil.rmtree(workdir, ignore_errors=True)
-    if calls in LIVE:
-        LIVE.remove(calls)
 
     # --- 기록과 판정 ---
     # 판정기 입력: 이 통화에서 백엔드가 받은 것(계약 모양 그대로) + 고객 쪽 기록. 판정기는 이 파일과 시나리오만 본다

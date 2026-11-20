@@ -1,4 +1,4 @@
-# AI 서버 이미지(원본 ai/Dockerfile 기준). 새 서버 app/main.py(관제 /monitor 포함)를 띄운다.
+# AI 서버 이미지(원본 ai/Dockerfile 기준). 새 서버 app/main.py를 띄운다.
 # RAG(app/rag/, manuals/, config/rag-*.json, prompts/rag_context.md)는 원본 그대로다(다른 담당자 구현, 수정 금지).
 FROM python:3.14-slim
 COPY --from=ghcr.io/astral-sh/uv:0.11.28 /uv /bin/uv
@@ -23,7 +23,6 @@ COPY --chown=appuser:appuser scripts/bootstrap_faq.py ./scripts/bootstrap_faq.py
 COPY --chown=appuser:appuser pbx_webhook ./pbx_webhook
 COPY --chown=appuser:appuser backend_client ./backend_client
 COPY --chown=appuser:appuser policy ./policy
-COPY --chown=appuser:appuser monitor ./monitor
 # 첫 전화에서 토크나이저 파일을 받지 않도록 빌드 때 준비한다(원본과 같음).
 ENV TIKTOKEN_CACHE_DIR=/app/tokenizer_cache
 RUN /app/.venv/bin/python -c "import tiktoken; tiktoken.get_encoding('o200k_base'); tiktoken.get_encoding('cl100k_base')" \

@@ -6,7 +6,6 @@ BE 통신 규약은 `docs/be-contract/`에 있다(BE 원문 + AI 쪽 사용 문�
 지켜야 할 통화 흐름(받는 순서, 확인 관문, 문구, 다이어그램)은 `docs/call-flow/`에 있다(README에 우선순위와 BE와 부딪히는 곳).
 
 ```
-monitor/           관제 화면(/monitor, SSE)    (의존: 없음, docs/ops/monitor.md)
 pbx_webhook/       PBX·OpenAI 웹훅 수신        (의존: 없음)
 app/address/       주소 보정(주소DB)            (의존: 없음)
 backend_client/    BE 서버 API 클라이언트·가짜  (의존: app.address의 자모 비교)
@@ -19,7 +18,7 @@ app/rag/ 등        RAG — 원본 그대로, 수정 금지 (아래 'RAG' 절)
 ```
 uv sync
 uv run pytest -q        # 369개. 실제 OpenAI·PBX·백엔드·카카오·Qdrant를 부르지 않는다
-docker compose up -d --build   # Qdrant + AI 서버(현재 S0 스파이크 + 관제). docs/ops/docker.md
+docker compose up -d --build   # Qdrant + AI 서버. docs/ops/docker.md
 ```
 
 ## pbx_webhook: 전화 수신

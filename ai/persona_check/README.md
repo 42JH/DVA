@@ -54,7 +54,6 @@ python -m pytest persona_check -q
 | `BACKEND_MODEL`, `BACKEND_EFFORT` | 위임 Backend 모델. 운영과 같은 값으로 둔다 | `gpt-6-luna`, `low` |
 | `QDRANT_URL`, `QDRANT_API_KEY`, `RAG_RERANKER_URL`, `RAG_RERANKER_API_KEY` | FAQ 검색 서버. 운영 AI 서버와 같은 값을 넣으면 FAQ 시나리오(G1)가 돈다. `QDRANT_URL`이 없으면 G1은 빠진다. 질문 임베딩은 `OPENAI_API_KEY`를 읽으므로 배포에서는 그 이름으로 시험 전용 키를 넘긴다 | 없음 |
 | `ADDRESS_DB`, `KAKAO_REST_API_KEY` | 주소DB와 카카오 키. 둘 다 없으면 주소 정보를 고정값으로 채운다(아래 한계) | 없음 |
-| `MONITOR_USER`, `MONITOR_PASSWORD` | 주면 운영 관제 화면(`/monitor`)에 시험 통화를 띄운다. 개발 확인용 | 없음 |
 
 ## 창구
 
