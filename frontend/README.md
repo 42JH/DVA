@@ -40,28 +40,31 @@ PowerShell에서 `npm`이 실행 정책 때문에 막히면 `npm.cmd`로 실행�
 
 회원가입으로 만든 계정은 승인 대기라 로그인되지 않고, 새로고침하면 사라집니다.
 
-## 구조 — 기능 기준 폴더 (팀 컨벤션 v4, 노션)
+## 구조 — 기능 기준 폴더
 
 ```
 src/
-  app/              Provider · 라우트 표(router.tsx) · 틀(AppLayout) · 가드(guards/) · 기능 밖 화면(routes/) · 에러 경계
+  app/              Provider · 라우트 표(router.tsx) · 틀(AppLayout) · 가드(guards/) · 홈(home/) · 기능 밖 화면(routes/)
+                    · 에러 경계(RouteError) · 백엔드 계약 검사(contract/)
   shared/
     api/            client.ts(공통 HTTP · ApiError) · queryClient.ts · paging.ts
-    auth/           token.ts · sessionApi.ts · useSession.ts   — 세션은 여러 기능이 써서 여기
-    lib/            useListParams · format · dateRange · search(띄어쓰기 · 초성) · recentSearches
-    order/          orderApi.ts · useOrderDetail.ts · OrderDetailModal.tsx   — 주문 상세 팝업, 03 · 06이 같이 써서 여기
+    auth/           session.ts(로그인 표시) · sessionApi.ts · useSession.ts   — 세션은 여러 기능이 써서 여기
+    call/           통화 API · 녹취 재생(Player · useRecordingPlayer) · 대화 기록 — 통화 · 주문 · AI 상담가가 같이 씀
+    customer/       고객 검색 API
+    order/          주문 API · 주문 상세(useOrderDetail) · 상태 표시(look) — 주문 · 통화가 같이 씀
+    lib/            useListParams · useSnapshotList · format · dateRange · search(띄어쓰기 · 초성) 등
     styles/         global.css (Tailwind 진입점 + 디자인 토큰 @theme)
-    ui/             공통 부품 (index.ts로만 import)
+    ui/             공통 부품 (index.ts에 모아 둠)
   features/<기능>/
     api/            타입 · API 호출 · xxxQueries(queryOptions)   — React를 모름
-    hooks/          use<기능>… 훅                                — 상태 · 판단 · 서버 데이터(React Query)
+    hooks/          use<기능>… 훅 · 순수 계산                     — 상태 · 판단 · 서버 데이터(React Query)
     components/     화면 컴포넌트                                — 훅 값만 그림
-    labels.ts       상태 코드 → 화면 문구
-  mocks/            MSW 가짜 API: handlers/<기능>.ts → handlers/index.ts, browser.ts(개발) · node.ts(테스트)
+    labels.ts       상태 코드 → 화면 문구 (문구가 있는 기능만)
+  mocks/            개발용 가짜 API(MSW): handlers/<기능>.ts → handlers/index.ts, browser.ts
 ```
 
 의존 방향은 `shared → features → app`, 기능 안에서는 `components → hooks → api`. 기능 폴더끼리는 import하지 않는다.
-`@/`는 `src/`. 규칙은 `eslint.config.js`가 검사한다. 자세한 규칙은 노션 '프론트엔드 컨벤션 v4'.
+`@/`는 `src/`. 같은 기능 안은 상대 경로로 가져온다. 구조 규칙(기능 폴더끼리 import 금지 등)은 `eslint.config.js`가 검사한다.
 
 ## 스타일 — Tailwind v4
 
