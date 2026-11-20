@@ -103,7 +103,7 @@ RAG는 다른 담당자의 구현이다. 원본 `S15P31D109/ai`(`exp/no-speech-i
 |---|---|
 | `app/rag/` | 하이브리드 검색(Kiwi BM25 + Qdrant), 리랭커 호출(`remote.py`), GPU 리랭커 서버(`gpu.py`·`qwen.py`), FAQ 동기화 큐·색인·소비자 |
 | `app/webhooks/faqs.py` | BE → AI FAQ 변경 알림 `POST /internal/faqs/refresh` |
-| `manuals/`, `config/rag-search-descriptions.json`, `config/faq-bm25-descriptions.json`, `prompts/rag_context.md` | 매뉴얼 원문·검색 설명·RAG 템플릿 |
+| `manuals/`, `config/rag-search-descriptions.json`, `config/faq-bm25-descriptions.json` | 매뉴얼 원문·검색 설명 |
 | `config/server.toml`의 `[rag]`·`[faq_sync]` | RAG 설정(원본 섹션 그대로) |
 | `gpu/` | 리랭커 서버 이미지(`docker build -f gpu/Dockerfile .`) |
 | `scripts/`(라이브 랩 전용 3개 제외), `spec/rag.md`, `spec/faq-sync.md`, `docs/rag-handoff.md` | 색인·진단·평가 스크립트와 문서 |

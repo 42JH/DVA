@@ -1,5 +1,5 @@
 # AI 서버 이미지(원본 ai/Dockerfile 기준). 새 서버 app/main.py를 띄운다.
-# RAG(app/rag/, manuals/, config/rag-*.json, prompts/rag_context.md)는 원본 그대로다(다른 담당자 구현, 수정 금지).
+# RAG(app/rag/, manuals/, config/rag-*.json)는 원본 그대로다(다른 담당자 구현, 수정 금지).
 FROM python:3.14-slim
 COPY --from=ghcr.io/astral-sh/uv:0.11.28 /uv /bin/uv
 WORKDIR /app
