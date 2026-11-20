@@ -84,15 +84,26 @@ interface BillingMonth {
   groupBillingAmount: number // 부서 그룹결제 사용액 — 그룹결제가 없어지기 전까지 청구액에 더함
 }
 
-/** 청구 내역 한 건 — GET /companies/{id}/billing/charges (백엔드에 요청한 계약)
- * 기업 간 배송의 월결제 원장 한 줄. 금액은 결제 확정 때 값(뒤에 주문 금액이 바뀌어도 그대로) */
+/** 청구 건의 사람 — 주문에 저장된 값이라 비어 있을 수 있음 */
+export interface ChargeParty {
+  name: string | null
+  phoneNumber: string | null
+  address: string | null // 도로명 + 상세주소
+}
+
+/** 청구 내역 한 건 — GET /companies/{id}/billing/charges. 월결제 원장 한 줄 = 주문 하나
+ *  금액 · 기업 · 부서는 결제 확정 때 값(뒤에 주문이 바뀌거나 사원이 옮겨도 그대로). 결제 뒤 취소돼도 원장에 남음 */
 export interface Charge {
   orderSeq: number
   paidAt: string // 결제 확정 시각 ISO
   amount: number
-  sender: { name: string; phoneNumber: string; departmentName: string | null; address: string }
-  recipient: { organizationName: string; name: string; phoneNumber: string; address: string }
-  items: { label: string; amount: number }[] // '중박스 1개' · 6000
+  orderCancelled: boolean
+  sender: ChargeParty & { departmentName: string | null } // 첫 배송의 보내는 분 · 결제 당시 부서
+  parcels: {
+    cancelled: boolean
+    recipient: ChargeParty
+    items: { document: number; small: number; medium: number; big: number; other: string | null }
+  }[] // 배송 순서대로
 }
 
 const MAX_LIMIT = 100 // 목록 limit 최대
@@ -146,7 +157,7 @@ export const companyQueries = {
           })
         ).data,
     }),
-  // 청구 내역 — 그 달 · 검색(보낸 사원 · 받는 기업 · 받는 분 · 주문 번호) · 쪽
+  // 청구 내역 — 그 달 · 검색(보낸 사람 · 받는 분 이름, 주문번호) · 쪽
   charges: (id: number, q: { month: string; q?: string; limit: number; offset: number }) =>
     queryOptions({
       queryKey: [...companyQueries.all(), id, 'charges', q],
