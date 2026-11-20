@@ -1,6 +1,6 @@
 # 배포 (develop-ai → Jenkins → Lightsail)
 
-원본 S15P31D109 `ai/Jenkinsfile`·`ai/deploy/`를 그대로 쓴다(서버·경로·자격증명 같음). 리빌드는 develop-ai의 `ai/`에 들어가고, 이전 서버 파일은 `ai/old/`에 둔다(이미지·테스트에서 제외).
+`ai/Jenkinsfile`과 `ai/deploy/`로 배포한다. 배포 대상 서버 주소는 Jenkins 전역 환경변수 `AI_DEPLOY_HOST`로 주고, 그 서버의 SSH 호스트 키를 `ai/deploy/known_hosts`에 적는다.
 
 ## 흐름
 1. develop-ai에 머지 → Jenkins(`ai/Jenkinsfile`): `docker build ai` → 이미지에서 `import app.main` 확인 → `ai/deploy/upload.sh`
@@ -12,7 +12,7 @@
 - compose: `BACKEND_MOCK` 기본 false(운영 = 실제 BE), `BACKEND_API_URL`·`PBX_WEBHOOK_SECRET` 필수, `BACKEND_MODEL` 기본 `gpt-6-luna`(운영 `.env`에 없어도 뜸), `./config`·`./prompts` 읽기 전용 마운트(apply-faq-runtime.py의 FAQ 운영 선택이 반영되게)
 - `deploy/compose.deploy.yaml`: 통화 로그 `/app/logs`를 볼륨 `ai_logs`로(릴리스 폴더에 흩어지지 않게)
 - `/health`(원본 경로)와 `/healthz` 둘 다
-- `.dockerignore`: `old`·`deploy`·`Jenkinsfile` 제외
+- `.dockerignore`: `deploy`·`Jenkinsfile` 제외
 - 볼륨 `qdrant_data`·`rag_state`는 원본과 같은 이름(project dva-ai) — 운영 색인을 그대로 쓴다. 새 볼륨 `ai_state`(결과 아웃박스)·`ai_logs`
 
 ## 운영 `.env`(Jenkins `dva-ai`)에 필요한 값
