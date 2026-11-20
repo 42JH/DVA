@@ -29,6 +29,15 @@ try {
   const add = (key, value) => {
     if (!values.has(key)) additions.push(`${key}=${value}`);
   };
+  if (!values.has("PAYMENT_TEST_PUBLIC_URL")) {
+    const url = new URL(process.env.PAYMENT_TEST_PUBLIC_URL || "");
+    if (
+      url.protocol !== "https:" || url.pathname !== "/payment-test" ||
+      url.username || url.password || url.search || url.hash
+    )
+      throw new Error();
+    add("PAYMENT_TEST_PUBLIC_URL", url.href);
+  }
   if (!values.has("TOSS_TEST_CLIENT_KEY")) {
     const fetchSource = async (path) => {
       const response = await fetch(
@@ -51,7 +60,6 @@ try {
     add("TOSS_TEST_SECRET_KEY", secrets[0][0]);
   }
   add("PAYMENT_TEST_ENABLED", "true");
-  add("PAYMENT_TEST_PUBLIC_URL", "https://13.209.59.180/payment-test");
   add("PAYMENT_TEST_OPERATOR_TOKEN", randomBytes(32).toString("hex"));
   if (additions.length) {
     const temporary = `/settings/.configure-${randomBytes(8).toString("hex")}`;
@@ -78,7 +86,7 @@ try {
   );
 } catch {
   console.error(
-    "Payment test settings setup failed. Check the file, network, and pinned official sample; no values were printed.",
+    "Payment test settings setup failed. Check the settings, public URL and pinned official sample; no values were printed.",
   );
   process.exitCode = 1;
 }

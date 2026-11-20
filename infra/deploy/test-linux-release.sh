@@ -11,6 +11,7 @@ cp "$repo_root/infra/database/"{migrate.sh,verify.sql} "$test_root/repo/infra/da
 cp "$repo_root/backend/migrations/"[0-9][0-9][0-9]-*.sql "$test_root/repo/backend/migrations/"
 export TEST_COMMAND_LOG="$test_root/commands.log"
 export PATH="$test_root/bin:$PATH"
+export LIGHTSAIL_SSH_HOST=deploy.example.test
 cat > "$test_root/bin/docker" <<'MOCK'
 #!/usr/bin/env bash
 set -eu
@@ -30,6 +31,7 @@ cat > "$test_root/bin/ssh" <<'MOCK'
 set -eu
 [[ "$*" == *StrictHostKeyChecking=yes* ]]
 [[ "$*" == *UserKnownHostsFile=* ]]
+[[ "$*" == *HostKeyAlias=dva-monolith-deploy* && "$*" == *ubuntu@deploy.example.test* ]]
 [[ "$1" == -i && "$(stat -c '%a' "$2")" == 600 ]]
 printf 'ssh %s\n' "${!#}" >> "$TEST_COMMAND_LOG"
 cat >/dev/null
@@ -38,6 +40,7 @@ cat > "$test_root/bin/scp" <<'MOCK'
 #!/usr/bin/env bash
 set -eu
 [[ "$*" == *StrictHostKeyChecking=yes* ]]
+[[ "$*" == *HostKeyAlias=dva-monolith-deploy* && "$*" == *ubuntu@deploy.example.test* ]]
 printf 'scp invoked\n' >> "$TEST_COMMAND_LOG"
 MOCK
 chmod +x "$test_root/bin/"*
@@ -78,7 +81,12 @@ for failed in test-wrong test-missing test-arm; do
  if grep -F "docker build --platform linux/amd64 -t dva-backend:$failed " "$TEST_COMMAND_LOG"; then echo 'Invalid verified image fell back to a build' >&2; exit 1; fi
 done
 before_verify="$(wc -l < "$TEST_COMMAND_LOG")"
-bash "$test_root/repo/infra/deploy/upload.sh" test-one "$test_root/identity" ubuntu --verify-only
+if env -u LIGHTSAIL_SSH_HOST -u BUILD_URL bash "$test_root/repo/infra/deploy/upload.sh" test-one "$test_root/identity"; then
+ echo 'Missing deployment address accepted' >&2; exit 1
+fi
+test "$(wc -l < "$TEST_COMMAND_LOG")" = "$before_verify"
+env -u LIGHTSAIL_SSH_HOST BUILD_URL=https://deploy.example.test/jenkins/job/dva-ci-linux-validation/42/ \
+ bash "$test_root/repo/infra/deploy/upload.sh" test-one "$test_root/identity" ubuntu --verify-only
 test "$(($(wc -l < "$TEST_COMMAND_LOG") - before_verify))" = 1
 test "$(grep -c 'scp invoked' "$TEST_COMMAND_LOG" || true)" = 0
 bash "$test_root/repo/infra/deploy/upload.sh" test-one "$test_root/identity"

@@ -4,9 +4,9 @@
 
 ## AWS에서 할 설정
 
-1. 기존 서울 리전 버킷 `dva-d109-storage`의 `recordings/` 경로를 사용한다. 버킷이나 폴더를 새로 만들 필요는 없다. 공개 읽기나 ACL 권한은 앱에 주지 않는다.
+1. 기존 서울 리전 버킷의 `recordings/` 경로를 사용한다. 아래 예시의 `example-recordings-bucket`은 배포 환경의 버킷 이름으로 바꾼다. 공개 읽기나 ACL 권한은 앱에 주지 않는다.
 2. 기존 버킷의 암호화 설정을 확인한다. 아래 권한 예시는 SSE-S3 기준이며, KMS 키를 사용 중이면 그 키에 대한 권한도 필요하다.
-3. 기존 IAM 사용자 `dvercall-recording-app`을 재사용한다. 사용자가 확인한 기존 정책은 `dva-monolith-recordings-984402139349-seoul` 버킷용이므로, 현재 대상 권한이 없다면 아래 정책을 별도로 추가한다. 기존 정책은 다른 사용처를 확인하기 전에 제거하지 않는다. HEAD로 저장된 객체를 재사용하므로 읽기 권한이 필요하고, 없는 객체를 404로 구분하기 위해 대상 버킷의 ListBucket도 부여한다.
+3. 기존 IAM 사용자 `dvercall-recording-app`을 재사용한다. 확인한 기존 정책은 별도 녹취 버킷용이므로, 현재 대상 권한이 없다면 아래 정책을 별도로 추가한다. 기존 정책은 다른 사용처를 확인하기 전에 제거하지 않는다. HEAD로 저장된 객체를 재사용하므로 읽기 권한이 필요하고, 없는 객체를 404로 구분하기 위해 대상 버킷의 ListBucket도 부여한다.
 
 ```json
 {
@@ -15,12 +15,12 @@
     {
       "Effect": "Allow",
       "Action": ["s3:ListBucket"],
-      "Resource": "arn:aws:s3:::dva-d109-storage"
+      "Resource": "arn:aws:s3:::example-recordings-bucket"
     },
     {
       "Effect": "Allow",
       "Action": ["s3:GetObject", "s3:PutObject"],
-      "Resource": "arn:aws:s3:::dva-d109-storage/recordings/*"
+      "Resource": "arn:aws:s3:::example-recordings-bucket/recordings/*"
     }
   ]
 }
@@ -36,7 +36,7 @@ EC2 역할 등 실행 환경의 임시 자격 증명을 우선 사용한다. 현
 
 ```dotenv
 AWS_REGION=ap-northeast-2
-S3_RECORDINGS_BUCKET=dva-d109-storage
+S3_RECORDINGS_BUCKET=example-recordings-bucket
 ```
 
 역할을 사용할 수 없는 경우에만 `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`를 배포 비밀에 등록한다. 임시 자격 증명이면 `AWS_SESSION_TOKEN`도 필요하다. 값은 채팅·Git·MR에 붙이지 않는다.
@@ -45,7 +45,7 @@ S3_RECORDINGS_BUCKET=dva-d109-storage
 
 | 설정 | 기본값·의미 |
 | --- | --- |
-| `RECORDING_ALLOWED_HOSTS` | `dvercorp-aicc-connect-dev-recordings.s3.ap-northeast-2.amazonaws.com`. 실제 PBX 수신 URL에서 확인한 다운로드 호스트. 변경 시 정확한 호스트를 쉼표로 지정 |
+| `RECORDING_ALLOWED_HOSTS` | 다운로드 호스트 예시 `recordings.example.test`. 실제 PBX 수신 URL에서 확인한 호스트를 쉼표로 지정 |
 | `RECORDING_MATCH_WINDOW_SECONDS` | 30. 발신번호가 같은 OpenAI/PBX 시작 시각의 허용 차이(±초). 1~300 허용 |
 | `PBX_WEBHOOK_TOKEN` | 기존 서버 전용 Bearer 토큰 유지 |
 | `DVER_API_KEY` | 완성 주문 접수에 필요한 기존 디버 키 |

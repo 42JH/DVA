@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 # Read-only checks; no credentials, account creation or webhook events.
 set -euo pipefail
-base="${1:-https://13.209.59.180}"
+base="${1:-}"
+if [[ -z "$base" ]]; then
+    base="https://${DVA_PUBLIC_IP:?Set DVA_PUBLIC_IP or pass a base URL}"
+fi
 base="${base%/}"
 check() {
     local path="$1" expected="$2" actual
     actual=$(curl --silent --show-error --max-time 15 --output /dev/null \
-        --write-out '%{http_code}' "$base$path")
+        --write-out '%{http_code}' -- "$base$path")
     [[ "$actual" == "$expected" ]] || {
         echo "FAIL: $path expected $expected, got $actual" >&2
         return 1

@@ -24,7 +24,7 @@ AI `POST /api/orders`의 `outcome=COMPLETE`, 관리자 `POST /api/admin/orders`,
 
 ## 고객 결제 경로
 
-기본 URL 예시는 `https://13.209.59.180/api/payments`다. 모두 기존 `/api/` 프록시로 정식 백엔드에 전달되므로 `/payment-test/`용 Nginx 경로를 재사용하지 않는다.
+기본 URL 예시는 `https://192.0.2.10/api/payments`다. 모두 기존 `/api/` 프록시로 정식 백엔드에 전달되므로 `/payment-test/`용 Nginx 경로를 재사용하지 않는다.
 
 | 메서드·경로 | 용도 |
 | --- | --- |
@@ -103,13 +103,13 @@ DB에서 `PENDING`을 한 워커만 `SENDING`으로 바꾼 뒤 발송한다. Mat
 
 ```dotenv
 ORDER_PAYMENTS_ENABLED=true
-PAYMENT_PUBLIC_URL=https://13.209.59.180/api/payments
+PAYMENT_PUBLIC_URL=https://192.0.2.10/api/payments
 TOSS_TEST_CLIENT_KEY=<기존 문서용 test_gck 키>
 TOSS_TEST_SECRET_KEY=<짝이 맞는 기존 문서용 test_gsk 키>
 PAYMENT_MATTERMOST_WEBHOOK_URL=<기존 결제 전용 웹훅>
 ```
 
-`CORS_ORIGINS`에 `https://13.209.59.180`을 포함한다. 토스 주소는 운영 설정에서 변경할 수 없고 라이브 키도 거절한다. 모형 주소는 `NODE_ENV=test`의 loopback에서만 허용한다. 현재 `/srv/dva-payment-test/settings`에 있는 키·웹훅은 배포 때 서버 내부에서 정식 BE 환경 설정으로 이관해야 한다. 이번 코드 작업에서 서버 설정을 변경하거나 메시지·디버 요청을 발송하지 않는다.
+`CORS_ORIGINS`에 `https://192.0.2.10`을 포함한다. 토스 주소는 운영 설정에서 변경할 수 없고 라이브 키도 거절한다. 모형 주소는 `NODE_ENV=test`의 loopback에서만 허용한다. 현재 `/srv/dva-payment-test/settings`에 있는 키·웹훅은 배포 때 서버 내부에서 정식 BE 환경 설정으로 이관해야 한다. 이번 코드 작업에서 서버 설정을 변경하거나 메시지·디버 요청을 발송하지 않는다.
 
 기본 활성화는 false이며 비활성 상태에서도 주문·결제 요청을 보존한다. 활성화하면 아직 유효한 기존 `PENDING` 요청도 발송 대상으로 처리한다. 기존 3002 포트의 샘플 서비스는 실제 주문과 무관하며, 새 흐름 확인 후 운영자가 중지할 수 있다. 기존 샘플 JSON 파일을 업무 주문으로 이관하지 않는다. 카카오 알림톡은 후속 발송 채널 연동 범위다.
 

@@ -4,7 +4,7 @@
 
 ## 확인한 실패
 
-[Jenkins #29](https://13.209.59.180/jenkins/job/dva-msa/29/console)는 `ce8de447bea0a0976be9d710708d614c53e91d99`를 checkout했다. Linux 배포 회귀 59개와 실제 PostgreSQL 이벤트 통합 15개를 통과하고 `Verify Event Transport` 안의 원본 기준 목록 비교에서 실패했다. 새 `GET /api/companies/members/search`와 migration `053-drop-company-pins.sql`이 이전 MSA 기준 목록에 없다. 앱 빌드·DB 검증·배포 단계는 도달하지 않았다. 동일 실패를 최신 원격 기준의 로컬 검사에서도 재현했다.
+[Jenkins #29](https://192.0.2.10/jenkins/job/dva-msa/29/console)는 `ce8de447bea0a0976be9d710708d614c53e91d99`를 checkout했다. Linux 배포 회귀 59개와 실제 PostgreSQL 이벤트 통합 15개를 통과하고 `Verify Event Transport` 안의 원본 기준 목록 비교에서 실패했다. 새 `GET /api/companies/members/search`와 migration `053-drop-company-pins.sql`이 이전 MSA 기준 목록에 없다. 앱 빌드·DB 검증·배포 단계는 도달하지 않았다. 동일 실패를 최신 원격 기준의 로컬 검사에서도 재현했다.
 
 MR !311은 아직 Open이며 이 빌드의 checkout에 포함되지 않았다. 사용자 요청에 따라 해당 페르소나 작업 5개 커밋을 보존해 새 수정 MR에 함께 포함한다. 원본 `backend/`, 프론트·AI는 수정하지 않는다. 추적 수정은 `msa/`, `infra/`, `docs/`로 제한한다.
 

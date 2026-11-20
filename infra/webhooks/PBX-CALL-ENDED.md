@@ -3,14 +3,14 @@
 ## 디버 측에 전달할 규격
 
 ```text
-POST https://13.209.59.180/api/webhooks/pbx/call-ended
+POST https://192.0.2.10/api/webhooks/pbx/call-ended
 Content-Type: application/json
 Authorization: Bearer <별도 전달하는 공유 토큰>
 ```
 
 이 주소는 IP용 공인 인증서를 사용한다. TLS 인증서 검증을 끄지 않는다.
 브라우저 주소창에서 열면 GET 요청이므로 405가 정상이다.
-접속 확인용 주소는 `https://13.209.59.180/https-health`이며 `ok`를 반환한다.
+접속 확인용 주소는 `https://192.0.2.10/https-health`이며 `ok`를 반환한다.
 
 공유 토큰 인증은 우리 측 제안이며 디버 PBX의 헤더 지원 여부를 확인해야 한다.
 지원하지 않는다면 서명 등 합의한 인증 방식을 구현한 뒤 실제 통화를 연결한다.
@@ -93,7 +93,7 @@ DB 접근 권한과 백업에 동일한 개인정보 보호 기준을 적용한�
 ssh -i 'C:\Users\SSAFY\Desktop\기업연계\dva-monolith.pem' `
   -o StrictHostKeyChecking=yes `
   -o 'UserKnownHostsFile=C:/Users/SSAFY/dva/infra/deploy/known_hosts' `
-  ubuntu@13.209.59.180 'sed -n "s/^PBX_WEBHOOK_TOKEN=//p" ~/dva-deploy/shared/.env' | Set-Clipboard
+  ubuntu@192.0.2.10 'sed -n "s/^PBX_WEBHOOK_TOKEN=//p" ~/dva-deploy/shared/.env' | Set-Clipboard
 ```
 
 토큰 교체 시 서버 환경 파일 변경 후 현재 릴리스의 `deploy.sh`를 재실행하여 컨테이너에 반영하고

@@ -2,13 +2,21 @@
 import json
 from pathlib import Path
 import urllib.error
+from urllib.parse import urlsplit
 import urllib.request
 import xml.etree.ElementTree as ET
 
 HOME = Path('/home/ubuntu/dva-jenkins/home')
 JOB = HOME / 'jobs/dva-ci-linux-validation'
 MSA = HOME / 'jobs/dva-msa'
-URL = 'https://13.209.59.180/jenkins/project/dva-ci-linux-validation'
+public_url = ET.parse(
+    HOME / 'jenkins.model.JenkinsLocationConfiguration.xml'
+).findtext('jenkinsUrl') or ''
+address = urlsplit(public_url)
+if (address.scheme != 'https' or not address.hostname or address.path != '/jenkins/'
+        or address.username is not None or address.query or address.fragment):
+    raise SystemExit('Set a valid Jenkins public HTTPS URL first.')
+URL = public_url + 'project/dva-ci-linux-validation'
 tree = ET.parse(JOB / 'config.xml').getroot()
 token = tree.findtext('.//org.jenkinsci.plugins.gwt.GenericTrigger/token')
 assert token, 'Configure the monolith GenericTrigger first.'
