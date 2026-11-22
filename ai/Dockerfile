@@ -9,7 +9,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     UV_LINK_MODE=copy \
     UV_PROJECT_ENVIRONMENT=/app/.venv
 COPY pyproject.toml uv.lock .python-version ./
-RUN uv sync --frozen --no-dev \
+# 패키지 설치 캐시는 컨테이너 실행에 필요 없으므로 이미지에 남기지 않는다.
+RUN uv sync --frozen --no-dev --no-cache \
     && useradd --create-home --uid 10001 appuser \
     && mkdir -p /app/rag_state /app/state /app/logs/calls \
     && chown -R appuser:appuser /app/rag_state /app/state /app/logs \
