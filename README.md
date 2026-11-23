@@ -1,45 +1,48 @@
 # Dver·Dva
 
-**SSAFY 15기 구미 D109 · 디버(Dver) 기업연계 프로젝트** · 2026년 10–11월
+**SSAFY 15기 구미 D109 · 디버(Dver) 기업연계 프로젝트**
 
 ![Dver·Dva 프로젝트 표지](assets/d109-ppt-cover.png)
 
-[DVA](#dva) · [아키텍처](#아키텍처) · [VOMI](#vomi) · [기술 스택](#기술-스택) · [저장소 구조](#저장소-구조) · [팀원](#팀원)
+## 📌 목차
 
-## DVA
+- [📦 DVA](#-dva)
+  - [서비스 흐름](#-dva-서비스-흐름) · [시연 영상](#-시연-영상) · [관리자 웹](#-관리자-웹) · [AI 상담 기술](#-ai-상담-기술) · [아키텍처](#-아키텍처)
+- [🎙 VOMI](#-vomi)
+  - [통화 화면과 시연](#-통화-화면과-시연) · [서비스 흐름](#-vomi-서비스-흐름) · [음성 합성](#-음성-합성)
+- [🛠 기술 스택](#-기술-스택) · [📁 저장소 구조](#-저장소-구조) · [👥 팀원](#-팀원)
+
+## 📦 DVA
 
 **전화로 택배를 접수하는 AI 상담원과 관리자 웹**
 
 고객이 전화로 배송 정보를 말하면 AI가 주소와 물품을 확인합니다. 주문은 결제 조건에 맞춰 디버에 접수되며, 운영자는 웹에서 통화와 주문 내역을 확인합니다.
 
-### 서비스 흐름
+### 🔄 DVA 서비스 흐름
 
-전화 연결 → 배송 정보 확인 → 결제·디버 접수 → 관리자 웹에서 확인
+![DVA 서비스 흐름. 디버 PBX가 전화를 연결하면 AI가 발신번호, 주소, 배송 정보를 확인하고 주문을 백엔드로 전달합니다. 개인 카드 결제 또는 기업 월결제·부서 그룹결제를 확인한 뒤 디버에 접수합니다. 통화 중단 시 수집한 정보를 미완료 주문으로 남기고 S3 녹취는 상담 기록에 연결합니다.](assets/dva-service-flow.png)
 
-- 기존 고객의 주소록을 활용하고, 빠지거나 정정된 정보는 통화 중 다시 확인합니다.
-- 통화가 중간에 끝나면 미완료 주문으로 남기고, 통화 녹취는 상담 기록에 연결합니다.
-
-### 시연 영상
+### 🎬 시연 영상
 
 [![DVA 전화 택배 접수 영상 재생](assets/dva-intro-poster.jpg)](assets/dva-intro.mp4)
 
 [서비스 소개 · 54초](assets/dva-intro.mp4) · [AI 전화 상담 PoC · 39초](assets/dva-call-demo.mp4)
 
-### 관리자 웹
+### 🖥 관리자 웹
 
-[DVA 관리자 웹 열기](https://dva-d109.duckdns.org/) · 관리자 계정 로그인 필요
+관리자 웹을 모의 데이터로 실행해 캡처한 화면입니다.
 
-| [홈](https://dva-d109.duckdns.org/) | [주문](https://dva-d109.duckdns.org/orders) |
+| 홈 | 주문 |
 | :---: | :---: |
 | <img src="assets/dva-admin-home.jpg" width="390" alt="미완료 주문과 미답변 문의를 보여주는 관리자 홈"> | <img src="assets/dva-admin-orders.jpg" width="390" alt="검색과 상태 필터가 있는 주문 화면"> |
 | 처리할 일과 최근 활동 | 주문 검색과 접수 상태 |
 
-| [통화](https://dva-d109.duckdns.org/calls) | [AI 상담가](https://dva-d109.duckdns.org/personas) | [통계](https://dva-d109.duckdns.org/stats) |
+| 통화 | AI 상담가 | 통계 |
 | :---: | :---: | :---: |
-| <img src="assets/dva-admin-calls.jpg" width="260" alt="통화 이력과 분석 상태 필터"> | <img src="assets/dva-admin-personas.jpg" width="260" alt="AI 상담가 목소리 선택과 시나리오 시험"> | <img src="assets/dva-admin-stats.jpg" width="260" alt="접수 소요 시간과 응답 대기 통계"> |
-| 통화 이력과 녹취 | 목소리·버전·시나리오 | 접수 시간과 응답 대기 |
+| <img src="assets/dva-admin-calls.jpg" width="260" alt="통화 이력과 분석 상태 필터"> | <img src="assets/dva-admin-personas.jpg" width="260" alt="AI 상담가의 목소리 선택, 수정 기록, 프롬프트"> | <img src="assets/dva-admin-stats.jpg" width="260" alt="접수 소요 시간과 응답 대기 통계"> |
+| 통화 이력과 녹취 | 목소리·버전·프롬프트 | 접수 시간과 응답 대기 |
 
-### AI 상담 기술
+### 🤖 AI 상담 기술
 
 ![GPT-Live-1 음성 대화, Decisions API 판단, Responses Delegation 정보 추출 흐름](assets/dva-ai-flow.png)
 
@@ -54,7 +57,7 @@
 - **판단 응답** · Decisions API 웜 호출 중앙값 **251ms**, P95 **284ms** (53회)
 - **FAQ 검색** · Qwen3 재정렬 적용 후 Top 1 **71% → 96%**, Top 3 **86% → 100%**
 
-### 아키텍처
+### 🏗 아키텍처
 
 아래에서 구조를 선택하면 한 번에 한 장씩 볼 수 있습니다.
 
@@ -78,7 +81,7 @@ Docker Compose에서 NestJS 모듈과 PostgreSQL을 함께 운영합니다. 관�
 
 [모놀리스 ERD · DBML](docs/database/monolith.dbml)
 
-## VOMI
+## 🎙 VOMI
 
 ![VOMI 프로젝트 표지](assets/vomi-ppt-cover.png)
 
@@ -86,7 +89,7 @@ Docker Compose에서 NestJS 모듈과 PostgreSQL을 함께 운영합니다. 관�
 
 조용한 곳에서 전화를 받으면 추천 답변을 고르거나 직접 입력할 수 있습니다. 상대방은 텍스트를 바로 받고, 등록한 목소리로 합성한 답변도 듣습니다.
 
-### 통화 화면과 시연
+### 📱 통화 화면과 시연
 
 | 앱 통화 화면 | 음성 합성 비교 |
 | :---: | :---: |
@@ -95,20 +98,18 @@ Docker Compose에서 NestJS 모듈과 PostgreSQL을 함께 운영합니다. 관�
 
 **같은 문장 듣기** · [원본 녹음](assets/vomi-original.wav) · [ElevenLabs](assets/vomi-elevenlabs.wav) · [OmniVoice + LoRA](assets/vomi-omnivoice.wav)
 
-### 서비스 흐름
+### 🔄 VOMI 서비스 흐름
 
-목소리 등록 → LiveKit 통화 연결 → 답변 선택·입력 → 상대방에게 텍스트와 음성 전달
+![VOMI 서비스 흐름. 목소리를 등록하고 통화 상대가 수락하면 두 앱이 같은 LiveKit 방에 접속합니다. 답변을 고르거나 입력하면 텍스트는 즉시 표시되고, NestJS가 등록 목소리로 합성한 PCM 청크는 LiveKit 바이트 스트림을 통해 상대 앱에서 순서대로 재생됩니다.](assets/vomi-service-flow.png)
 
-- **텍스트**는 LiveKit 텍스트 스트림으로 즉시 표시합니다.
-- **음성**은 NestJS 백엔드가 합성한 PCM 청크를 LiveKit 바이트 스트림으로 보내, 상대 앱에서 도착 순서대로 재생합니다.
+### 🔊 음성 합성
 
-### 음성 합성
+처음에는 **ElevenLabs**로 통화 중 음성 합성을 구현했습니다. 실시간 통화에서 기대한 성능을 얻기 어려워 로컬에서 실행하는 **OmniVoice**를 **LoRA**로 미세조정했습니다.
 
-- **ElevenLabs**로 통화 중 합성 음성 전송을 구현했습니다.
-- **OmniVoice + LoRA**로 부산 말투를 학습했습니다. 한국어 녹음 2분 33초를 53개 클립으로 나눠 사용했습니다.
-- **FlashInfer** 적용 후 RTX 4070에서 50자 문장 합성 시간 중앙값이 **784ms → 412ms**로 줄었습니다.
+- **학습 데이터** · 부산 말투로 녹음한 2분 33초 분량을 53개 클립으로 나눠 사용했습니다.
+- **합성 속도** · FlashInfer 적용 후 RTX 4070에서 50자 문장 합성 시간 중앙값이 **784ms → 412ms**로 줄었습니다.
 
-## 기술 스택
+## 🛠 기술 스택
 
 | 영역 | DVA | VOMI |
 | --- | --- | --- |
@@ -117,19 +118,33 @@ Docker Compose에서 NestJS 모듈과 PostgreSQL을 함께 운영합니다. 관�
 | 음성·AI | GPT-Live-1 · Decisions API · Qdrant · Qwen3 | LiveKit · ElevenLabs · Gemini Nano · OmniVoice |
 | 배포·연동 | AWS Lightsail · S3 · Docker Compose · Jenkins · k3s | LiveKit Cloud · Firebase Cloud Messaging · Docker Compose |
 
-## 저장소 구조
+## 📁 저장소 구조
 
-| 영역 | 경로 |
-| --- | --- |
-| DVA | [관리자 웹](frontend/) · [AI 에이전트](ai/) · [모놀리스](backend/) · [MSA](msa/) |
-| VOMI | [Android 앱](kick/vomi/) · [통화 백엔드](kick/backend/) · [온디바이스 AI PoC](kick/ai/) |
-| 공통 | [인프라](infra/) · [문서](docs/) · [Postman](postman/) · [README 미디어](assets/) |
+```text
+.
+├── frontend/            # DVA 관리자 웹
+├── ai/                  # DVA 실시간 음성 상담 · FAQ 검색
+├── backend/             # DVA NestJS 모듈러 모놀리스
+├── msa/                 # DVA MSA 검증 환경
+│   ├── services/        # 운영 · 고객 · 상담 · 주문 · 배송 서비스
+│   ├── liquibase/       # 서비스별 DB 마이그레이션
+│   └── deploy/          # k3s 배포 설정
+├── kick/                # VOMI
+│   ├── vomi/            # Android 앱
+│   ├── backend/         # 통화 · 친구 · 음성 합성 API
+│   └── ai/              # 온디바이스 AI PoC
+├── infra/               # AWS · Nginx · 배포 · 관측 설정
+├── postman/             # 외부 API 시뮬레이션
+├── docs/                # 설계 · API 문서
+├── exec/                # 프로젝트 포팅 매뉴얼
+├── assets/              # README 이미지 · 영상 · 음성
+├── compose.yaml         # 로컬 실행 환경
+└── compose.prod.yaml    # 운영 실행 환경
+```
 
-## 팀원
+## 👥 팀원
 
 | [<img src="https://github.com/jlkim909.png?size=160" width="80" alt="유민국">](https://github.com/jlkim909) | [<img src="https://github.com/Jiwoo-Kim0.png?size=160" width="80" alt="김지우">](https://github.com/Jiwoo-Kim0) | [<img src="https://github.com/jihwan4155.png?size=160" width="80" alt="신지환">](https://github.com/jihwan4155) | [<img src="https://github.com/hantawon123.png?size=160" width="80" alt="한태원">](https://github.com/hantawon123) | [<img src="https://github.com/sejhyun13.png?size=160" width="80" alt="현승준">](https://github.com/sejhyun13) | [<img src="https://github.com/42JH.png?size=160" width="80" alt="이재훈">](https://github.com/42JH) |
 | :---: | :---: | :---: | :---: | :---: | :---: |
 | [유민국](https://github.com/jlkim909) | [김지우](https://github.com/Jiwoo-Kim0) | [신지환](https://github.com/jihwan4155) | [한태원](https://github.com/hantawon123) | [현승준](https://github.com/sejhyun13) | [이재훈](https://github.com/42JH) |
 | 팀장 · 백엔드<br>주문·결제 | 관리자 웹<br>상담가 설정 | DVA 전화 상담<br>VOMI 온디바이스 | 백엔드·MSA·CI<br>VOMI 통화·음성 | AI 대화 제어<br>주소·모델 위임 | 관리자 웹<br>주문·FAQ·시나리오 |
-
-[이전 DVA README](docs/archive/README-dva-original.md)
