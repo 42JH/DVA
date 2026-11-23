@@ -50,6 +50,9 @@
 | <img src="assets/dva-admin-calls.jpg" width="260" alt="통화 이력과 분석 상태 필터"> | <img src="assets/dva-admin-personas.jpg" width="260" alt="AI 상담가의 목소리 선택, 수정 기록, 프롬프트"> | <img src="assets/dva-admin-stats.jpg" width="260" alt="접수 소요 시간과 응답 대기 통계"> |
 | 통화 이력과 녹취 | 목소리·버전·프롬프트 | 접수 시간과 응답 대기 |
 
+- **시나리오 시험** · AI 상담가 프롬프트를 통화에 반영하기 전, 가상 고객과 시나리오 10개를 음성으로 통화해 자동 판정합니다.
+- **통화 불만 판정** · 통화가 끝나면 고객 불만과 AI 응대 오류 5유형을 판정해 통화 상세와 통계에 보여 줍니다(고객 불만 정밀도 96%).
+
 ### 🤖 AI 상담 기술
 
 ![GPT-Live-1 음성 대화, Decisions API 판단, Responses Delegation 정보 추출 흐름](assets/dva-ai-flow.png)
@@ -183,4 +186,4 @@ Docker Compose에서 NestJS 모듈과 PostgreSQL을 함께 운영합니다. 관�
 | [<img src="https://github.com/jlkim909.png?size=160" width="80" alt="유민국">](https://github.com/jlkim909) | [<img src="https://github.com/Jiwoo-Kim0.png?size=160" width="80" alt="김지우">](https://github.com/Jiwoo-Kim0) | [<img src="https://github.com/jihwan4155.png?size=160" width="80" alt="신지환">](https://github.com/jihwan4155) | [<img src="https://github.com/hantawon123.png?size=160" width="80" alt="한태원">](https://github.com/hantawon123) | [<img src="https://github.com/sejhyun13.png?size=160" width="80" alt="현승준">](https://github.com/sejhyun13) | [<img src="https://github.com/42JH.png?size=160" width="80" alt="이재훈">](https://github.com/42JH) |
 | :---: | :---: | :---: | :---: | :---: | :---: |
 | [유민국](https://github.com/jlkim909) | [김지우](https://github.com/Jiwoo-Kim0) | [신지환](https://github.com/jihwan4155) | [한태원](https://github.com/hantawon123) | [현승준](https://github.com/sejhyun13) | [이재훈](https://github.com/42JH) |
-| 팀장 · 백엔드<br>주문·결제 | 관리자 웹<br>상담가 설정 | DVA 전화 상담<br>RAG 설계/평가<br>VOMI 온디바이스 AI| 백엔드·MSA·CI<br>VOMI 통화·음성 | DVA 대화 제어·Decision API<br>주소·모델 위임 | 관리자 웹<br>주문·FAQ·시나리오 |
+| 팀장 · 백엔드<br>주문·결제 | 관리자 웹<br>상담가 설정 | DVA 전화 상담<br>RAG 설계/평가<br>VOMI 온디바이스 AI| 백엔드·MSA·CI<br>VOMI 통화·음성 | DVA 대화 제어·Decision API<br>주소·모델 위임 | 프론트엔드 리드·UI 디자인·배포<br>시나리오 시험·불만 판정 |
