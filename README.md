@@ -65,6 +65,34 @@
 - **판단 응답** · Decisions API 웜 호출 중앙값 **251ms**, P95 **284ms** (53회)
 - **FAQ 검색** · Qwen3 재정렬 적용 후 Top 1 **71% → 96%**, Top 3 **86% → 100%**
 
+### 📊 RAG 성능 및 응답 품질 평가
+
+직접 구축·검수한 **95문항 골든 데이터셋**을 기반으로 검색 정확도와 실제 AI 상담 응답 품질을 평가했습니다.
+
+#### 검색 성능
+
+| 평가 지표 | 초기 | 최종 |
+| --- | ---: | ---: |
+| Hit@1 | 70.5% (67/95) | **95.8% (91/95)** |
+| Hit@3 | 86.3% (82/95) | **100% (95/95)** |
+
+- **평균 검색 지연** · 270ms
+- **P95 검색 지연** · 328ms
+- **검색 파이프라인** · Dense + Kiwi/BM25 → RRF → Qwen3 Reranker → Top3
+
+#### Ragas 기반 응답 품질 평가
+
+검색 결과뿐 아니라 **실제 Live 음성 답변의 품질**을 검증하기 위해 Ragas 평가를 진행했습니다.
+
+| 평가 지표 | 텍스트 LLM | Live 음성 답변 |
+| --- | ---: | ---: |
+| Faithfulness | 0.9612 | 0.8579 |
+| Answer Relevancy | 0.5934 | 0.4825 |
+| Context Precision | 0.9807 | 0.9895 |
+| Context Recall | 0.9789 | 0.9895 |
+| Factual Correctness F1 | - | 0.7214 |
+
+
 ### 🏗 아키텍처
 
 아래에서 구조를 선택하면 한 번에 한 장씩 볼 수 있습니다.
@@ -155,4 +183,4 @@ Docker Compose에서 NestJS 모듈과 PostgreSQL을 함께 운영합니다. 관�
 | [<img src="https://github.com/jlkim909.png?size=160" width="80" alt="유민국">](https://github.com/jlkim909) | [<img src="https://github.com/Jiwoo-Kim0.png?size=160" width="80" alt="김지우">](https://github.com/Jiwoo-Kim0) | [<img src="https://github.com/jihwan4155.png?size=160" width="80" alt="신지환">](https://github.com/jihwan4155) | [<img src="https://github.com/hantawon123.png?size=160" width="80" alt="한태원">](https://github.com/hantawon123) | [<img src="https://github.com/sejhyun13.png?size=160" width="80" alt="현승준">](https://github.com/sejhyun13) | [<img src="https://github.com/42JH.png?size=160" width="80" alt="이재훈">](https://github.com/42JH) |
 | :---: | :---: | :---: | :---: | :---: | :---: |
 | [유민국](https://github.com/jlkim909) | [김지우](https://github.com/Jiwoo-Kim0) | [신지환](https://github.com/jihwan4155) | [한태원](https://github.com/hantawon123) | [현승준](https://github.com/sejhyun13) | [이재훈](https://github.com/42JH) |
-| 팀장 · 백엔드<br>주문·결제 | 관리자 웹<br>상담가 설정 | DVA 전화 상담<br>VOMI 온디바이스 | 백엔드·MSA·CI<br>VOMI 통화·음성 | AI 대화 제어<br>주소·모델 위임 | 관리자 웹<br>주문·FAQ·시나리오 |
+| 팀장 · 백엔드<br>주문·결제 | 관리자 웹<br>상담가 설정 | DVA 전화 상담<br>RAG 설계/평가<br>VOMI 온디바이스 AI| 백엔드·MSA·CI<br>VOMI 통화·음성 | DVA 대화 제어·Decision API<br>주소·모델 위임 | 관리자 웹<br>주문·FAQ·시나리오 |
