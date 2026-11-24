@@ -1,0 +1,38 @@
+# 관리자 웹(frontend) 검증 — frontend/Jenkinsfile의 Install · Lint · Test · Build와 같은 명령. 배포는 Jenkins에서만 함
+name: frontend-ci
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/frontend-ci.yml'
+  pull_request:
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/frontend-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run lint
+      # 시각 표시 시험이 한국 시간을 기대함 (Jenkinsfile Test 단계 참고)
+      - run: npm test
+        env:
+          TZ: Asia/Seoul
+      - run: npm run build
